@@ -1,0 +1,25 @@
+{
+  "scripture": "Bhagavad Gita",
+  "language": "Sanskrit",
+  "chapters": [
+    {
+      "chapter": 1,
+      "chapter_number": 1,
+      "name": "Arjuna Vishada Yoga",
+      "transliterated_name": "Arjuna Viṣhāda Yoga",
+      "name_sanskrit": "अर्जुनविषादयोग",
+      "meaning": "Arjuna's Dilemma",
+      "summary": "The first chapter of the Bhagavad Gita - Arjuna Vishada Yoga introduces the setup, the setting, the characters and the circumstances that led to the epic battle of Mahabharata.",
+      "verses": [
+        {
+          "verse": 1,
+          "verse_number": 1,
+          "slok": "धृतराष्ट्र उवाच |\nधर्मक्षेत्रे कुरुक्षेत्रे समवेता युयुत्सवः |\nमामकाः पाण्डवाश्चैव किमकुर्वत सञ्जय ||१||",
+          "transliteration": "dhṛitarāśhtra uvācha\ndharma-kṣhetre kuru-kṣhetre samavetā yuyutsavaḥ\nmāmakāḥ pāṇḍavāśhchaiva kimakurvata sañjaya",
+          "word_meanings": "dhṛitarāśhtraḥ uvācha—Dhritarashtra said; dharma-kṣhetre—the land of dharma; kuru-kṣhetre—at Kurukshetra; samavetāḥ—having gathered; yuyutsavaḥ—desiring to fight; māmakāḥ—my sons; pāṇḍavāḥ—the sons of Pandu; cha—and; eva—certainly; kim—what; akurvata—did they do; sañjaya—Sanjay",
+          "translation": "Dhritarashtra said: O Sanjay, after gathering on the holy field of Kurukshetra, and desiring to fight, what did my sons and the sons of Pandu do?"
+        }
+      ]
+    }
+  ]
+}

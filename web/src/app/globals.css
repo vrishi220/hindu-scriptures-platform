@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f7f4ef;
+  --foreground: #171412;
+  --ink: #1a1716;
+  --paper: #f7f4ef;
+  --sand: #efe8dc;
+  --clay: #c55e45;
+  --deep: #2b1f1a;
+  --accent: #b33a2f;
+  --accent-2: #1f5f74;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+.grainy-bg {
+  background-image:
+    radial-gradient(1200px 500px at 10% -20%, #f7efe2 0%, transparent 60%),
+    radial-gradient(900px 400px at 90% 10%, #f2e6d7 0%, transparent 60%),
+    linear-gradient(180deg, #f7f4ef 0%, #efe7da 100%);
+}
+
+.floating-orb {
+  background: radial-gradient(circle at 30% 30%, #f9e7d3, #e9cdb2 55%, transparent 70%);
+  filter: blur(0.5px);
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease both;
+}
+
+.float-slow {
+  animation: floatSlow 7s ease-in-out infinite;
+}
+
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+
+.stagger-2 {
+  animation-delay: 0.15s;
+}
+
+.stagger-3 {
+  animation-delay: 0.25s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes floatSlow {
+  0% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(12px);
+  }
+  100% {
+    transform: translateY(0px);
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "book": "Bala Kanda",
+  "book_number": 1,
+  "book_english": "Bala Kanda (Book of Youth)",
+  "description": "The first book of the Ramayana, narrating the birth of Rama and events of his childhood",
+  "total_chapters": 3,
+  "total_verses": 7,
+  "chapters": [
+    {
+      "adhyaya": 1,
+      "adhyaya_name": "Canto 1",
+      "adhyaya_english": "Bala Kanda, Canto 1: The Enquiry",
+      "total_verses": 3,
+      "verses": [
+        {
+          "sequence": "1.1.1",
+          "title": "Shloka 1",
+          "basic": {
+            "sanskrit": "नारदो भगवान् व्रジते नारदकम् चरणं प्राप्य ।",
+            "transliteration": "Narado bhagavan vrajate naradakam charanam prapya."
+          },
+          "translations": {
+            "english": "The blessed Narada, having attained the sacred place of Narada, wanders forth."
+          }
+        },
+        {
+          "sequence": "1.1.2",
+          "title": "Shloka 2",
+          "basic": {
+            "sanskrit": "ब्रह्मर्षये समागत्य तस्य पुत्रकः आविर्भूत: ।",
+            "transliteration": "Brahmarshaye samagatya tasya putrakah avirbhutah."
+          },
+          "translations": {
+            "english": "Having come to the Brahmarshi, his son appeared."
+          }
+        },
+        {
+          "sequence": "1.1.3",
+          "title": "Shloka 3",
+          "basic": {
+            "sanskrit": "तमुवाच भगवान् ब्रह्मा वीरवर प्रणतः प्रकाश्य ।",
+            "transliteration": "Tamuvacha bhagavan brahma viravara pranath prakashy."
+          },
+          "translations": {
+            "english": "The Lord Brahma spoke to him, the honored hero, revealing all."
+          }
+        }
+      ]
+    },
+    {
+      "adhyaya": 2,
+      "adhyaya_name": "Canto 2",
+      "adhyaya_english": "Bala Kanda, Canto 2: The Preparation",
+      "total_verses": 2,
+      "verses": [
+        {
+          "sequence": "1.2.1",
+          "title": "Shloka 1",
+          "basic": {
+            "sanskrit": "धर्मज्ञः सर्वशास्त्रज्ञः सत्यसंधः विशेषणः ।",
+            "transliteration": "Dharmajnah sarvaashastrajnah satyasandhah visheshanah."
+          },
+          "translations": {
+            "english": "He was a knower of dharma, versed in all scriptures, true to his word."
+          }
+        },
+        {
+          "sequence": "1.2.2",
+          "title": "Shloka 2",
+          "basic": {
+            "sanskrit": "दशरथः नृपः श्रीमान् वसुमान् धर्मवत्सलः ।",
+            "transliteration": "Dasharathah nripah shriman vasuman dharmavatsalah."
+          },
+          "translations": {
+            "english": "King Dasharatha, illustrious and wealthy, devoted to dharma."
+          }
+        }
+      ]
+    },
+    {
+      "adhyaya": 3,
+      "adhyaya_name": "Canto 3",
+      "adhyaya_english": "Bala Kanda, Canto 3: The Quest",
+      "total_verses": 2,
+      "verses": [
+        {
+          "sequence": "1.3.1",
+          "title": "Shloka 1",
+          "basic": {
+            "sanskrit": "तदा कौशल्या देवी तं सुतं गर्भे धारयति ।",
+            "transliteration": "Tada kaushallya devi tam sutam garbhe dharayati."
+          },
+          "translations": {
+            "english": "Then the goddess Kausalya bore that son in her womb."
+          }
+        },
+        {
+          "sequence": "1.3.2",
+          "title": "Shloka 2",
+          "basic": {
+            "sanskrit": "नवमे मासे संपूर्णे रामः चन्द्रो इव प्रभुः ।",
+            "transliteration": "Navame mase sampurne Ramah chandro iva prabhuh."
+          },
+          "translations": {
+            "english": "In the ninth month completed, Rama was born, radiant as the moon."
+          }
+        }
+      ]
+    }
+  ]
+}
