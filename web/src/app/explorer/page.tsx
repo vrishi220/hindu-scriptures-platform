@@ -148,7 +148,7 @@ export default function ExplorerPage() {
 
   const loadAllBooks = async (): Promise<Book[]> => {
     try {
-      const response = await fetch("/api/content/books", { credentials: "include" });
+      const response = await fetch("/api/books", { credentials: "include" });
       if (response.ok) {
         const all = (await response.json()) as Book[];
         setAllBooks(all);
@@ -173,7 +173,7 @@ export default function ExplorerPage() {
   const loadBookTree = async (bookId: number) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/content/books/${bookId}/tree/nested`, {
+      const response = await fetch(`/api/books/${bookId}/tree`, {
         credentials: "include",
       });
       if (response.ok) {
@@ -332,7 +332,7 @@ export default function ExplorerPage() {
     setInsertMessage(null);
     
     try {
-      const response = await fetch(`/api/content/books/${targetBookId}/insert-references`, {
+      const response = await fetch(`/api/books/${targetBookId}/insert-references`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

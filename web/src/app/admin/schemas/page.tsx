@@ -129,7 +129,7 @@ export default function SchemaBuilderPage() {
 
   const loadBooks = async () => {
     try {
-      const response = await fetch("/api/content/books", { credentials: "include" });
+      const response = await fetch("/api/books", { credentials: "include" });
       const raw = await response.text();
       if (!response.ok) {
         return;
@@ -339,7 +339,7 @@ export default function SchemaBuilderPage() {
     setToast(null);
     setSaving(true);
     try {
-      const response = await fetch(`/api/content/books/${bookId}`, {
+      const response = await fetch(`/api/books/${bookId}`, {
         method: "DELETE",
         credentials: "include",
       });

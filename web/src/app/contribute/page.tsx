@@ -82,7 +82,7 @@ export default function ContributePage() {
   useEffect(() => {
     const loadBooks = async () => {
       try {
-        const response = await fetch("/api/content/books", { credentials: "include" });
+        const response = await fetch("/api/books", { credentials: "include" });
         if (response.ok) {
           const data = (await response.json()) as BookOption[];
           setBooks(data);
@@ -111,7 +111,7 @@ export default function ContributePage() {
       return;
     }
     try {
-      const response = await fetch(`/api/content/books/${selectedId}/tree/nested`, {
+      const response = await fetch(`/api/books/${selectedId}/tree`, {
         credentials: "include",
       });
       if (response.ok) {

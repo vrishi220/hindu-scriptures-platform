@@ -263,7 +263,7 @@ function ScripturesContent() {
   useEffect(() => {
     const loadBooks = async () => {
       try {
-        const response = await fetch("/api/content/books", {
+        const response = await fetch("/api/books", {
           credentials: "include",
         });
         if (!response.ok) {
@@ -284,7 +284,7 @@ function ScripturesContent() {
       return;
     }
     try {
-      const response = await fetch(`/api/content/books/${selectedId}`, {
+      const response = await fetch(`/api/books/${selectedId}`, {
         credentials: "include",
       });
       if (response.ok) {
@@ -313,7 +313,7 @@ function ScripturesContent() {
     setTreeLoading(true);
     setTreeError(null);
     try {
-      const response = await fetch(`/api/content/books/${selectedId}/tree/nested`, {
+      const response = await fetch(`/api/books/${selectedId}/tree`, {
         credentials: "include",
       });
       if (!response.ok) {
@@ -451,7 +451,7 @@ function ScripturesContent() {
 
   const loadBooksRefresh = async () => {
     try {
-      const response = await fetch("/api/content/books", {
+      const response = await fetch("/api/books", {
         credentials: "include",
       });
       if (response.ok) {
@@ -477,7 +477,7 @@ function ScripturesContent() {
         metadata: {},
       };
 
-      const response = await fetch("/api/content/books", {
+      const response = await fetch("/api/books", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -684,7 +684,7 @@ function ScripturesContent() {
         if (bookId) {
           setTreeLoading(true);
           try {
-            const response = await fetch(`/api/content/books/${bookId}/tree/nested`, {
+            const response = await fetch(`/api/books/${bookId}/tree`, {
               credentials: "include",
             });
             if (response.ok) {

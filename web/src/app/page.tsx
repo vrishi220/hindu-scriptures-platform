@@ -95,7 +95,7 @@ function HomeContent() {
 
   const loadBooks = async () => {
     try {
-      const response = await fetch("/api/content/books", { credentials: "include" });
+      const response = await fetch("/api/books", { credentials: "include" });
       if (!response.ok) {
         return;
       }
@@ -108,7 +108,7 @@ function HomeContent() {
 
   const loadStats = async () => {
     try {
-      const response = await fetch("/api/content/stats", { credentials: "include" });
+      const response = await fetch("/api/stats", { credentials: "include" });
       if (!response.ok) {
         return;
       }
@@ -125,7 +125,7 @@ function HomeContent() {
 
   const loadDailyVerse = async (mode: "daily" | "random" = "daily") => {
     try {
-      const response = await fetch(`/api/content/daily-verse?mode=${mode}`, { credentials: "include" });
+      const response = await fetch(`/api/daily-verse?mode=${mode}`, { credentials: "include" });
       if (!response.ok) {
         console.error("Failed to load verse:", response.status);
         // Set a sentinel value to indicate no content
@@ -335,7 +335,7 @@ function HomeContent() {
     setTreeLoading(true);
     setTreeError(null);
     try {
-      const response = await fetch(`/api/content/books/${selectedId}/tree/nested`, {
+      const response = await fetch(`/api/books/${selectedId}/tree`, {
         credentials: "include",
       });
       if (!response.ok) {
