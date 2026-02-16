@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type BookOption = {
@@ -91,7 +91,7 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
   return parsed.toString();
 };
 
-export default function ScripturesPage() {
+function ScripturesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
@@ -1822,5 +1822,13 @@ export default function ScripturesPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function ScripturesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}>
+      <ScripturesContent />
+    </Suspense>
   );
 }

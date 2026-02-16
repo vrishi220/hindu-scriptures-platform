@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type SearchNode = {
@@ -54,7 +54,7 @@ type TreeNode = {
   children?: TreeNode[];
 };
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
@@ -878,5 +878,13 @@ export default function Home() {
         </footer>
       </main>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" />}> 
+      <HomeContent />
+    </Suspense>
   );
 }

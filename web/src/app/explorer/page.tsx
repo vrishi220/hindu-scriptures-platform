@@ -384,16 +384,18 @@ export default function ExplorerPage() {
     if (typeof data === "object" && !Array.isArray(data)) {
       // Check nested structures first
       if (data.basic && typeof data.basic === "object") {
+        const basic = data.basic as Record<string, unknown>;
         return (
-          (data.basic.transliteration as string) ||
-          (data.basic.sanskrit as string) ||
-          (data.basic.text as string) ||
-          (data.basic.english as string) ||
+          (basic.transliteration as string) ||
+          (basic.sanskrit as string) ||
+          (basic.text as string) ||
+          (basic.english as string) ||
           ""
         );
       }
       if (data.translations && typeof data.translations === "object") {
-        return (data.translations.english as string) || "";
+        const translations = data.translations as Record<string, unknown>;
+        return (translations.english as string) || "";
       }
 
       // Direct text fields
