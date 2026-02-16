@@ -5,7 +5,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 
-const buildAuthHeader = (token?: string) =>
+const buildAuthHeader = (token?: string): Record<string, string> =>
   token ? { Authorization: `Bearer ${token}` } : {};
 
 const refreshAccessToken = async (refreshToken: string) => {
