@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 
-const buildAuthHeader = async () => {
+const buildAuthHeader = async (): Promise<Record<string, string>> => {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};

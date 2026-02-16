@@ -9,7 +9,9 @@ export async function GET() {
   const target = new URL("/api/content/books", API_BASE_URL);
 
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
 
   const response = await fetch(target.toString(), {
     headers: {
@@ -35,7 +37,9 @@ export async function POST(request: Request) {
   const target = new URL("/api/content/books", API_BASE_URL);
 
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
 
   const body = await request.json();
 

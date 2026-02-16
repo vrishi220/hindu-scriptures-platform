@@ -10,7 +10,9 @@ export async function PATCH(
 ) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
   const body = await request.json().catch(() => null);
   const resolvedParams = await params;
 

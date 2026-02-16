@@ -16,7 +16,9 @@ export async function POST(
   );
 
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
 
   const body = await request.json();
 
