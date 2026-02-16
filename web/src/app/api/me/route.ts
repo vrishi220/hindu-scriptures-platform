@@ -10,7 +10,7 @@ export async function GET() {
   if (!accessToken) {
     return NextResponse.json({ detail: "Missing access token cookie" }, { status: 401 });
   }
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = { Authorization: `Bearer ${accessToken}` };
 
   const response = await fetch(`${API_BASE_URL}/api/users/me`, {
     headers: {

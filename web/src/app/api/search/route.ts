@@ -24,7 +24,9 @@ export async function GET(request: Request) {
   }
 
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
 
   const response = await fetch(target.toString(), {
     headers: {

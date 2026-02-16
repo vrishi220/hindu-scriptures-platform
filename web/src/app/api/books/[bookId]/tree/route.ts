@@ -11,7 +11,9 @@ export async function GET(
   const resolvedParams = await params;
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+  const authHeader: Record<string, string> = accessToken
+    ? { Authorization: `Bearer ${accessToken}` }
+    : {};
 
   const target = new URL(
     `/api/content/books/${resolvedParams.bookId}/tree/nested`,
