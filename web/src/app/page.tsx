@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { contentPath } from "../lib/apiPaths";
 
 type SearchNode = {
   id: number;
@@ -428,7 +429,7 @@ function HomeContent() {
               onClick={async () => {
                 if (window.confirm("Delete this node? This cannot be undone.")) {
                   try {
-                    await fetch(`/api/content/nodes/${node.id}`, {
+                    await fetch(contentPath(`/nodes/${node.id}`), {
                       method: "DELETE",
                       credentials: "include",
                     });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { contentPath } from "../../lib/apiPaths";
 
 type BookOption = {
   id: number;
@@ -170,7 +171,7 @@ export default function ContributePage() {
     };
 
     try {
-      const response = await fetch("/api/content/nodes", {
+      const response = await fetch(contentPath("/nodes"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

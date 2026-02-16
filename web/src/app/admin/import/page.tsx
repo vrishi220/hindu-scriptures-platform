@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { contentPath } from "../../../lib/apiPaths";
 
 interface Schema {
   id: number;
@@ -164,7 +165,7 @@ export default function AdminImportPage() {
   useEffect(() => {
     const loadSchemas = async () => {
       try {
-        const response = await fetch("/api/content/schemas");
+        const response = await fetch(contentPath("/schemas"));
         if (!response.ok) throw new Error("Failed to load schemas");
         const data = await response.json();
         setSchemas(data);
@@ -237,7 +238,7 @@ export default function AdminImportPage() {
         }
       }
 
-      const response = await fetch("/api/content/import", {
+      const response = await fetch(contentPath("/import"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),

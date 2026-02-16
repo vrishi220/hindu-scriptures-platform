@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { contentPath } from "../../lib/apiPaths";
 
 type Schema = {
   id: number;
@@ -133,7 +134,7 @@ export default function ExplorerPage() {
 
   const loadSchemas = async () => {
     try {
-      const response = await fetch("/api/content/schemas", {
+      const response = await fetch(contentPath("/schemas"), {
         credentials: "include",
         cache: "no-store",
       });

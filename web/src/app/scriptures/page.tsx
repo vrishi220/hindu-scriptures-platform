@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { contentPath } from "../../lib/apiPaths";
 
 type BookOption = {
   id: number;
@@ -377,7 +378,7 @@ function ScripturesContent() {
   const loadNodeContent = async (nodeId: number) => {
     setContentLoading(true);
     try {
-      const response = await fetch(`/api/content/nodes/${nodeId}`, {
+      const response = await fetch(contentPath(`/nodes/${nodeId}`), {
         credentials: "include",
       });
       if (response.ok) {
@@ -436,7 +437,7 @@ function ScripturesContent() {
 
   const loadSchemas = async () => {
     try {
-      const response = await fetch("/api/content/schemas", {
+      const response = await fetch(contentPath("/schemas"), {
         credentials: "include",
         cache: "no-store",
       });
@@ -653,12 +654,12 @@ function ScripturesContent() {
           : basePayload;
 
       const response = await fetch(
-        action === "add" ? "/api/content/nodes" : `/api/content/nodes/${actionNode.id}`,
+        action === "add" ? contentPath("/nodes") : contentPath(`/nodes/${actionNode.id}`),
         {
           method: action === "add" ? "POST" : "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
         }
       );
 
@@ -1332,7 +1333,7 @@ function ScripturesContent() {
                           onClick={async () => {
                             if (window.confirm("Delete this node? This cannot be undone.")) {
                               try {
-                                await fetch(`/api/content/nodes/${selectedId}`, {
+                                await fetch(contentPath(`/nodes/${selectedId}`), {
                                   method: "DELETE",
                                   credentials: "include",
                                 });

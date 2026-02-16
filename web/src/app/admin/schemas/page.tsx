@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { contentPath } from "../../../lib/apiPaths";
 
 type Schema = {
   id: number;
@@ -101,7 +102,7 @@ export default function SchemaBuilderPage() {
     setLoading(true);
     setToast(null);
     try {
-      const response = await fetch("/api/content/schemas", {
+      const response = await fetch(contentPath("/schemas"), {
         credentials: "include",
       });
       const raw = await response.text();
@@ -208,7 +209,7 @@ export default function SchemaBuilderPage() {
         description: createDescription.trim() || null,
         levels: createLevels.map((level) => level.trim()).filter(Boolean),
       };
-      const response = await fetch("/api/content/schemas", {
+      const response = await fetch(contentPath("/schemas"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -254,7 +255,7 @@ export default function SchemaBuilderPage() {
         description: editDescription.trim() || null,
         levels: editLevels.map((level) => level.trim()).filter(Boolean),
       };
-      const response = await fetch(`/api/content/schemas/${selectedId}`,
+      const response = await fetch(contentPath(`/schemas/${selectedId}`),
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -304,7 +305,7 @@ export default function SchemaBuilderPage() {
     setToast(null);
     setSaving(true);
     try {
-      const response = await fetch(`/api/content/schemas/${selectedId}`, {
+      const response = await fetch(contentPath(`/schemas/${selectedId}`), {
         method: "DELETE",
         credentials: "include",
       });
