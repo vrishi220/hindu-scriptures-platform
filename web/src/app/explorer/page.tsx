@@ -73,7 +73,7 @@ export default function ExplorerPage() {
 
   const loadAuthStatus = async () => {
     try {
-      const response = await fetch("/api/users/me", { credentials: "include" });
+      const response = await fetch("/api/me", { credentials: "include" });
       if (!response.ok) {
         setAuthEmail(null);
         setAuthStatus("Not authenticated");

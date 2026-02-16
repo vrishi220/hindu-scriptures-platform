@@ -46,7 +46,7 @@ export default function ContributePage() {
   useEffect(() => {
     const loadAuth = async () => {
       try {
-        const response = await fetch("/api/users/me", { credentials: "include" });
+        const response = await fetch("/api/me", { credentials: "include" });
 
         if (response.ok) {
           const data = (await response.json()) as {

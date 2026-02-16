@@ -70,7 +70,7 @@ export default function SchemaBuilderPage() {
 
   const loadAuth = async () => {
     try {
-      const response = await fetch("/api/users/me", { credentials: "include" });
+      const response = await fetch("/api/me", { credentials: "include" });
       const raw = await response.text();
       if (!response.ok) {
         setCanEdit(false);

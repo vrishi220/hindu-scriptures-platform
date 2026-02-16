@@ -156,7 +156,7 @@ function HomeContent() {
 
   const loadAuthStatus = async () => {
     try {
-      const response = await fetch("/api/users/me", { credentials: "include" });
+      const response = await fetch("/api/me", { credentials: "include" });
       if (!response.ok) {
         const detail = (await response.json().catch(() => null)) as {
           detail?: string;
