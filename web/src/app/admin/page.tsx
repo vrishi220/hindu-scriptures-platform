@@ -108,7 +108,7 @@ export default function AdminPage() {
     setToast(null);
     setAccessDenied(false);
     try {
-      const response = await fetch("/api/users", {
+          const response = await fetch("/api/admin/users", {
         credentials: "include",
       });
       const raw = await response.text();
@@ -171,7 +171,7 @@ export default function AdminPage() {
     event.preventDefault();
     setToast(null);
     try {
-      const response = await fetch("/api/users", {
+          const response = await fetch("/api/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -216,7 +216,7 @@ export default function AdminPage() {
   ) => {
     setToast(null);
     try {
-      const response = await fetch(`/api/users/${userId}/permissions`, {
+          const response = await fetch(`/api/admin/users/${userId}/permissions`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...permissions, role }),
@@ -249,7 +249,7 @@ export default function AdminPage() {
   const toggleUserActive = async (userId: number, isActive: boolean) => {
     setToast(null);
     try {
-      const response = await fetch(`/api/users/${userId}/status`, {
+          const response = await fetch(`/api/admin/users/${userId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_active: isActive }),
@@ -288,7 +288,7 @@ export default function AdminPage() {
     }
     setToast(null);
     try {
-      const response = await fetch(`/api/users/${userId}`, {
+          const response = await fetch(`/api/admin/users/${userId}`, {
         method: "DELETE",
         credentials: "include",
       });
