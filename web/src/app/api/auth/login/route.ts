@@ -16,9 +16,30 @@ export async function POST(request: Request) {
     body: JSON.stringify(body),
   });
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload) {
-    return NextResponse.json(payload || { detail: "Login failed" }, { status: response.status });
+  const rawText = await response.text().catch(() => "");
+  const payload = (() => {
+    if (!rawText) return null;
+    try {
+      return JSON.parse(rawText) as { access_token?: string; refresh_token?: string; detail?: string };
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!response.ok) {
+    const fallbackDetail = rawText || response.statusText || "Login failed";
+    return NextResponse.json(
+      payload || { detail: `Login failed (${response.status}): ${fallbackDetail}` },
+      { status: response.status }
+    );
+  }
+
+  if (!payload?.access_token || !payload?.refresh_token) {
+    const fallbackDetail = rawText || "Invalid auth response";
+    return NextResponse.json(
+      { detail: `Login failed (${response.status}): ${fallbackDetail}` },
+      { status: 502 }
+    );
   }
 
   const res = NextResponse.json({ message: "Logged in" });
