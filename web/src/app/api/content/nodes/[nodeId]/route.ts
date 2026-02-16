@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
@@ -25,13 +25,13 @@ const refreshAccessToken = async (refreshToken: string) => {
 };
 
 export async function GET(
-  request: Request,
-  { params }: { params: { nodeId: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
 ) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
 
   const response = await fetch(
     `${API_BASE_URL}/api/content/nodes/${resolvedParams.nodeId}`,
@@ -56,13 +56,13 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: Request,
-  { params }: { params: { nodeId: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
 ) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const authHeader = buildAuthHeader(accessToken);
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
   const body = await request.json().catch(() => null);
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
 
@@ -117,13 +117,13 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  request: Request,
-  { params }: { params: { nodeId: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ nodeId: string }> }
 ) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const authHeader = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
 
   const response = await fetch(
     `${API_BASE_URL}/api/content/nodes/${resolvedParams.nodeId}`,
