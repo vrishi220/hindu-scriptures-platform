@@ -864,10 +864,12 @@ function ScripturesContent() {
         credentials: "include",
       });
       if (!response.ok) {
-        const detail = (await response.json().catch(() => null)) as {
-          detail?: string;
-        } | null;
-        throw new Error(detail?.detail || "Login failed");
+        const payload = (await response.json().catch(async () => {
+          const text = await response.text().catch(() => "");
+          return text ? { detail: text } : null;
+        })) as { detail?: string; message?: string } | null;
+        const detail = payload?.detail || payload?.message || "Login failed";
+        throw new Error(`Login failed (${response.status}): ${detail}`);
       }
       setAuthMessage("Logged in.");
       setEmail("");

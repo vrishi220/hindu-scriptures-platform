@@ -314,7 +314,12 @@ function HomeContent() {
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Login failed");
+        const payload = (await response.json().catch(async () => {
+          const text = await response.text().catch(() => "");
+          return text ? { detail: text } : null;
+        })) as { detail?: string; message?: string } | null;
+        const detail = payload?.detail || payload?.message || "Login failed";
+        throw new Error(`Login failed (${response.status}): ${detail}`);
       }
       setAuthMessage("Logged in. Refreshing book list...");
       setEmail("");
