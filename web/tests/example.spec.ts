@@ -7,6 +7,40 @@ import { test, expect } from '@playwright/test';
  * Run with: npx playwright test --headed
  */
 
+const mockAuthenticatedSession = async (page: import('@playwright/test').Page) => {
+  let signedIn = true;
+
+  await page.route('**/api/me', async route => {
+    if (signedIn) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          email: 'tester@example.com',
+          role: 'viewer',
+          permissions: { can_admin: false },
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ detail: 'Unauthorized' }),
+    });
+  });
+
+  await page.route('**/api/logout', async route => {
+    signedIn = false;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+};
+
 test.describe('Home Page', () => {
   test('should load successfully', async ({ page }) => {
     await page.goto('http://localhost:3000');
@@ -94,6 +128,46 @@ test.describe('Authentication', () => {
     
     // Should have at least some input fields
     expect(count).toBeGreaterThan(0);
+  });
+});
+
+test.describe('Logout Regression', () => {
+  const openMobileMenu = async (page: import('@playwright/test').Page) => {
+    const menuButton = page.getByTitle('Menu');
+    await expect(menuButton).toBeVisible();
+    await menuButton.click();
+  };
+
+  test('desktop sign out returns to signed-out state', async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+
+    await page.goto('http://localhost:3000');
+    await page.waitForLoadState('networkidle');
+
+    const signOutDesktop = page.getByRole('button', { name: 'Sign out' }).first();
+    await expect(signOutDesktop).toBeVisible();
+    await signOutDesktop.click();
+
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
+  });
+
+  test('mobile menu sign out returns to signed-out state', async ({ page }) => {
+    await mockAuthenticatedSession(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto('http://localhost:3000');
+    await page.waitForLoadState('networkidle');
+
+    await openMobileMenu(page);
+    const mobileSignOut = page.getByRole('button', { name: 'Sign out' }).last();
+    await expect(mobileSignOut).toBeVisible();
+    await mobileSignOut.click();
+
+    await page.waitForLoadState('networkidle');
+    await openMobileMenu(page);
+    await expect(page.getByRole('link', { name: 'Sign in' }).last()).toBeVisible();
   });
 });
 
