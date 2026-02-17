@@ -617,6 +617,31 @@ function ScripturesContent() {
     return nextLevelIndex < schemaLevels.length;
   };
 
+  const getSiblings = (): TreeNode[] => {
+    if (breadcrumb.length <= 1) {
+      // Current node is root or no parent
+      return treeData;
+    }
+    const parent = breadcrumb[breadcrumb.length - 2];
+    return parent.children || [];
+  };
+
+  const getPreviousSibling = (): TreeNode | null => {
+    if (!selectedId) return null;
+    const siblings = getSiblings();
+    const currentIndex = siblings.findIndex((s) => s.id === selectedId);
+    if (currentIndex <= 0) return null;
+    return siblings[currentIndex - 1];
+  };
+
+  const getNextSibling = (): TreeNode | null => {
+    if (!selectedId) return null;
+    const siblings = getSiblings();
+    const currentIndex = siblings.findIndex((s) => s.id === selectedId);
+    if (currentIndex < 0 || currentIndex >= siblings.length - 1) return null;
+    return siblings[currentIndex + 1];
+  };
+
   const handleModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!actionNode || !action) return;
@@ -1311,6 +1336,32 @@ function ScripturesContent() {
                           Loading...
                         </span>
                       )}
+                      <div className="flex items-center gap-1 border-l pl-2 border-black/10">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const prev = getPreviousSibling();
+                            if (prev) selectNode(prev.id);
+                          }}
+                          disabled={!getPreviousSibling()}
+                          title="Previous item"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
+                        >
+                          ←
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = getNextSibling();
+                            if (next) selectNode(next.id);
+                          }}
+                          disabled={!getNextSibling()}
+                          title="Next item"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
+                        >
+                          →
+                        </button>
+                      </div>
                       {isLeafSelected && (
                         <>
                           <button
