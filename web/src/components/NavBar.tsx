@@ -117,14 +117,6 @@ export default function NavBar() {
           >
             Explorer
           </a>
-          <a
-            href="/about"
-            className={`hover:text-[color:var(--accent)] ${
-              isActive("/about") ? "font-semibold text-[color:var(--deep)]" : ""
-            }`}
-          >
-            About
-          </a>
           {canAdmin && (
             <>
               <a
@@ -206,17 +198,6 @@ export default function NavBar() {
               }`}
             >
               Explorer
-            </a>
-            <a
-              href="/about"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                isActive("/about")
-                  ? "font-semibold text-[color:var(--deep)]"
-                  : "text-zinc-600 hover:text-[color:var(--accent)]"
-              }`}
-            >
-              About
             </a>
             {canAdmin && (
               <>
