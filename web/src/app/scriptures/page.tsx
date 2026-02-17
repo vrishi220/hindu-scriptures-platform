@@ -898,25 +898,6 @@ function ScripturesContent() {
               })()}
             </span>
           </button>
-          {bookId && node.children && node.children.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                const url = `${window.location.origin}/scriptures?book=${bookId}&node=${node.id}`;
-                navigator.clipboard.writeText(url);
-                setAuthMessage("Link copied.");
-                setCopyTarget("node");
-                setTimeout(() => {
-                  setAuthMessage(null);
-                  setCopyTarget(null);
-                }, 2000);
-              }}
-              title="Copy link"
-              className="flex h-6 w-6 items-center justify-center rounded-full border border-blue-500/30 bg-blue-50/50 text-[10px] text-blue-700 transition hover:border-blue-500/60"
-            >
-              🔗
-            </button>
-          )}
           {canContribute && canAddChild(node) && (
             <button
               type="button"
