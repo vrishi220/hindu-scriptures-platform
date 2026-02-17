@@ -1076,7 +1076,7 @@ function ScripturesContent() {
             )}
           </div>
 
-          <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500 sm:hidden">
+          <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500 lg:hidden">
             <button
               type="button"
               onClick={() => setMobilePanel("tree")}
