@@ -1004,7 +1004,7 @@ function ScripturesContent() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 pb-20 pt-12">
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 pt-8 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-12">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">
             <a
@@ -1025,7 +1025,7 @@ function ScripturesContent() {
           </p>
         </header>
 
-        <section className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg">
+        <section className="rounded-2xl border border-black/10 bg-white/80 p-4 shadow-lg sm:rounded-[32px] sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -1122,7 +1122,7 @@ function ScripturesContent() {
             </button>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:mt-6 sm:gap-6 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
             {/* Tree Section */}
             <div
               className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-4 lg:flex lg:h-full lg:flex-col ${
@@ -1213,7 +1213,7 @@ function ScripturesContent() {
 
             {/* Content Section */}
             <div
-              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-6 shadow-lg lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
+              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-4 shadow-lg sm:p-6 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
                 mobilePanel === "content" ? "block" : "hidden"
               } lg:block`}
             >
