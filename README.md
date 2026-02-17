@@ -150,7 +150,12 @@ See `.env.example` for required configuration. Key variables include:
 2. Click "Import Project" → Connect your GitHub repo
 3. Vercel auto-detects Next.js
 4. Set root directory to `web`
-5. Deploy!
+5. Add GitHub repository secrets for CI deploy:
+  - `VERCEL_TOKEN`
+  - `VERCEL_ORG_ID`
+  - `VERCEL_PROJECT_ID`
+6. Use `.github/workflows/deploy-vercel.yml` to deploy production from GitHub Actions.
+7. In Vercel project settings, disable automatic Git-based production deployment so all prod builds come from GitHub Actions (this guarantees numeric `GITHUB_RUN_NUMBER` build metadata on every build).
 
 **Environment Variables on Vercel:**
 - `NEXT_PUBLIC_API_URL`: Your Render backend URL (e.g., `https://your-app.onrender.com`)

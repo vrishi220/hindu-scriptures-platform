@@ -11,7 +11,6 @@ const getBuildNumber = () => {
   return (
     process.env.NEXT_PUBLIC_BUILD_NUMBER ||
     process.env.GITHUB_RUN_NUMBER ||
-    process.env.VERCEL_GIT_COMMIT_REF ||
     "0"
   );
 };

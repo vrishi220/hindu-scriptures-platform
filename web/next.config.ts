@@ -4,7 +4,6 @@ const nextConfig: NextConfig = {
 	env: {
 		NEXT_PUBLIC_BUILD_NUMBER:
 			process.env.NEXT_PUBLIC_BUILD_NUMBER ||
-			process.env.VERCEL_GIT_COMMIT_REF ||
 			process.env.GITHUB_RUN_NUMBER ||
 			"0",
 		NEXT_PUBLIC_GIT_SHA:
