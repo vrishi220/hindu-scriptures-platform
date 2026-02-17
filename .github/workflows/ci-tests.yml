@@ -87,6 +87,11 @@ jobs:
         run: npm install -g npm@10.9.3
       - name: Show Node and npm versions
         run: node -v && npm -v
+      - name: Set build metadata
+        run: |
+          echo "NEXT_PUBLIC_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_APP_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm install --no-audit --no-fund
       - name: Install Playwright browsers
