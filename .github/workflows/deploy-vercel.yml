@@ -38,25 +38,24 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Set build metadata
+      - name: Validate run number
         run: |
           if ! [[ "${GITHUB_RUN_NUMBER}" =~ ^[0-9]+$ ]]; then
             echo "GITHUB_RUN_NUMBER is missing or invalid"
             exit 1
           fi
-          echo "NEXT_PUBLIC_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_GIT_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_APP_VERSION=$(node -p \"require('./package.json').version\")" >> "$GITHUB_ENV"
 
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build frontend
-        env:
-          NEXT_PUBLIC_BUILD_NUMBER: ${{ env.NEXT_PUBLIC_BUILD_NUMBER }}
-          NEXT_PUBLIC_GIT_SHA: ${{ env.NEXT_PUBLIC_GIT_SHA }}
-          NEXT_PUBLIC_APP_VERSION: ${{ env.NEXT_PUBLIC_APP_VERSION }}
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          APP_VERSION=$(node -p "require('./package.json').version")
+          echo "Building with NEXT_PUBLIC_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
+          NEXT_PUBLIC_BUILD_NUMBER="${GITHUB_RUN_NUMBER}" \
+          NEXT_PUBLIC_GIT_SHA="${GITHUB_SHA}" \
+          NEXT_PUBLIC_APP_VERSION="${APP_VERSION}" \
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy frontend
         run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
