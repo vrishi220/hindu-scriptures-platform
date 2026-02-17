@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
+const deriveNumericBuildFromSha = (sha?: string) => {
+	if (!sha || sha.length < 8) return undefined;
+	const parsed = Number.parseInt(sha.slice(0, 8), 16);
+	if (Number.isNaN(parsed)) return undefined;
+	return String(parsed);
+};
+
 const resolvedBuildNumber =
-	process.env.NEXT_PUBLIC_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER;
+	process.env.NEXT_PUBLIC_BUILD_NUMBER ||
+	process.env.GITHUB_RUN_NUMBER ||
+	deriveNumericBuildFromSha(process.env.VERCEL_GIT_COMMIT_SHA);
 
 if (process.env.NODE_ENV === "production") {
 	if (!resolvedBuildNumber || !/^\d+$/.test(resolvedBuildNumber)) {
