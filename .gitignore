@@ -81,6 +81,9 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+web/playwright-report/
+web/test-results/
+web/blob-report/
 
 # Database
 *.db

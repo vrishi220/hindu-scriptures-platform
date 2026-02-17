@@ -72,11 +72,11 @@ npx playwright install
 
 **Run Tests:**
 ```bash
-npx playwright test              # Run all tests (headless)
-npx playwright test --ui         # Interactive UI mode (recommended)
-npx playwright test --headed     # Show browser window
-npx playwright test --debug      # Debug mode step-by-step
-npx playwright test --project=chromium  # Specific browser only
+npm run test:e2e                 # Run all tests (headless)
+npm run test:e2e:ui              # Playwright dashboard UI
+npm run test:e2e:headed          # Single visible browser (recommended)
+npm run test:e2e:debug           # Step-by-step debug in one browser
+npm run test:e2e:file            # Run one file visibly
 npx playwright show-report       # View HTML report
 ```
 
