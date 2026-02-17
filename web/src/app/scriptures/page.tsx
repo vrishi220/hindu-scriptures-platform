@@ -133,6 +133,8 @@ function ScripturesContent() {
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
   const lastLoadedNodeId = useRef<number | null>(null);
+  const activeTreeRequestId = useRef(0);
+  const activeTreeAbortController = useRef<AbortController | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [formData, setFormData] = useState({
     levelName: "",
@@ -284,25 +286,13 @@ function ScripturesContent() {
     loadBooks();
   }, []);
 
-  const loadBookDetails = async (selectedId: string) => {
-    if (!selectedId) {
-      setCurrentBook(null);
-      return;
-    }
-    try {
-      const response = await fetch(`/api/books/${selectedId}`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = (await response.json()) as BookDetails;
-        setCurrentBook(data);
-      }
-    } catch {
-      setCurrentBook(null);
-    }
-  };
-
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
+    activeTreeAbortController.current?.abort();
+    const abortController = new AbortController();
+    activeTreeAbortController.current = abortController;
+    const requestId = activeTreeRequestId.current + 1;
+    activeTreeRequestId.current = requestId;
+
     if (!selectedId) {
       setTreeData([]);
       setTreeError(null);
@@ -311,17 +301,29 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setCurrentBook(null);
       return;
-    }
-    
-    // Load book details with schema
-    await loadBookDetails(selectedId);
+
     
     setTreeLoading(true);
     setTreeError(null);
     try {
+        const detailsResponse = await fetch(`/api/books/${selectedId}`, {
+          credentials: "include",
+          signal: abortController.signal,
+        });
+        if (requestId !== activeTreeRequestId.current) return;
+        if (detailsResponse.ok) {
+          const detailsData = (await detailsResponse.json()) as BookDetails;
+          if (requestId !== activeTreeRequestId.current) return;
+          setCurrentBook(detailsData);
+        } else {
+          setCurrentBook(null);
+        }
+
       const response = await fetch(`/api/books/${selectedId}/tree`, {
         credentials: "include",
+          signal: abortController.signal,
       });
+        if (requestId !== activeTreeRequestId.current) return;
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as {
           detail?: string;
@@ -329,6 +331,7 @@ function ScripturesContent() {
         throw new Error(payload?.detail || "Tree fetch failed");
       }
       const data = (await response.json()) as TreeNode[];
+        if (requestId !== activeTreeRequestId.current) return;
       setTreeData(data);
       setExpandedIds(new Set());
       
@@ -346,10 +349,16 @@ function ScripturesContent() {
       
       setUrlInitialized(true);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      if (requestId !== activeTreeRequestId.current) return;
       setTreeError(err instanceof Error ? err.message : "Tree fetch failed");
       setUrlInitialized(true);
     } finally {
-      setTreeLoading(false);
+      if (requestId === activeTreeRequestId.current) {
+        setTreeLoading(false);
+      }
     }
   };
 
@@ -1033,7 +1042,6 @@ function ScripturesContent() {
                   } else {
                     router.push("/scriptures", { scroll: false });
                   }
-                  loadTree(value);
                   setSelectedId(null);
                   setBreadcrumb([]);
                 }}
