@@ -759,6 +759,7 @@ def list_book_tree_nested(
     
     node_map: dict[int, ContentNodeTree] = {}
     roots: list[ContentNodeTree] = []
+    node_lookup = {n.id: n for n in nodes}
 
     for node in nodes:
         tree_node = ContentNodeTree.model_validate(node)
@@ -768,7 +769,25 @@ def list_book_tree_nested(
     for node in nodes:
         tree_node = node_map[node.id]
         if node.parent_node_id and node.parent_node_id in node_map:
-            node_map[node.parent_node_id].children.append(tree_node)
+            # Check for cycles by tracing up max 100 levels
+            current = node.parent_node_id
+            path_set = {node.id}  # Track visited ids in this path
+            cycle_detected = False
+            for _ in range(100):
+                if current is None:
+                    break
+                if current in path_set:
+                    cycle_detected = True
+                    break
+                path_set.add(current)
+                parent = node_lookup.get(current)
+                current = parent.parent_node_id if parent else None
+            
+            # Only add child if no cycle detected
+            if not cycle_detected:
+                node_map[node.parent_node_id].children.append(tree_node)
+            else:
+                roots.append(tree_node)
         else:
             roots.append(tree_node)
 

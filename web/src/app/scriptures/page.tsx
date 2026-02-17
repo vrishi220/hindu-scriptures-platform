@@ -230,12 +230,6 @@ function ScripturesContent() {
       return;
     }
 
-    if (treeData.length === 0) {
-      lastAutoSelectNodeId.current = nodeId ?? null;
-      loadTree(bookId, nodeId);
-      return;
-    }
-
     if (nodeId) {
       const path = findPath(treeData, nodeId);
       if (path) {
@@ -259,7 +253,7 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setNodeContent(null);
     }
-  }, [bookId, urlInitialized, searchParams.get("node"), treeData, selectedId]);
+  }, [bookId, urlInitialized, searchParams.get("node"), selectedId]);
 
   useEffect(() => {
     const loadBooks = async () => {
