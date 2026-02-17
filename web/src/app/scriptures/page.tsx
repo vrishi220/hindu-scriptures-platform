@@ -416,7 +416,7 @@ function ScripturesContent() {
   const selectNode = (nodeId: number, syncUrl = true) => {
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, true);
+      applySelection(nodeId, path, false);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
@@ -557,22 +557,35 @@ function ScripturesContent() {
     return normalizeLevelName(lastLevel) === normalizeLevelName(levelName);
   };
 
+  const getLevelIndexFromName = (levelName: string, schemaLevels: string[]) => {
+    if (!levelName) return -1;
+    const normalized = normalizeLevelName(levelName);
+    return schemaLevels.findIndex(
+      (level) => normalizeLevelName(level) === normalized
+    );
+  };
+
   const getNextLevelName = (parentNode: TreeNode): string => {
     if (!currentBook?.schema?.levels) {
       return ""; // No schema, can't determine
     }
 
     const schemaLevels = currentBook.schema.levels;
-    
+
     // If parent is BOOK, return first level
     if (parentNode.level_name?.toUpperCase() === "BOOK") {
       return schemaLevels[0] || "";
     }
 
-    // Otherwise use level_order to determine position in hierarchy
+    // Prefer level_name to locate next level; fall back to level_order
+    const levelIndex = getLevelIndexFromName(parentNode.level_name, schemaLevels);
+    if (levelIndex >= 0 && levelIndex + 1 < schemaLevels.length) {
+      return schemaLevels[levelIndex + 1];
+    }
+
     const parentLevelOrder = parentNode.level_order || 0;
-    const nextLevelIndex = parentLevelOrder; // level_order 1 = index 0, level_order 2 = index 1, etc.
-    
+    const nextLevelIndex = parentLevelOrder; // level_order 1 = index 0
+
     if (nextLevelIndex < schemaLevels.length) {
       return schemaLevels[nextLevelIndex];
     }
@@ -586,16 +599,21 @@ function ScripturesContent() {
     }
 
     const schemaLevels = currentBook.schema.levels;
-    
+
     // If it's a BOOK node, can add first level
     if (node.level_name?.toUpperCase() === "BOOK") {
       return schemaLevels.length > 0;
     }
 
-    // Otherwise check if there's a next level in the schema
+    const levelIndex = getLevelIndexFromName(node.level_name, schemaLevels);
+    if (levelIndex >= 0) {
+      return levelIndex + 1 < schemaLevels.length;
+    }
+
+    // Fall back to level_order check
     const parentLevelOrder = node.level_order || 0;
-    const nextLevelIndex = parentLevelOrder + 1; // Child would be at next level
-    
+    const nextLevelIndex = parentLevelOrder + 1;
+
     return nextLevelIndex < schemaLevels.length;
   };
 
@@ -1167,20 +1185,26 @@ function ScripturesContent() {
                         + Add
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setExpandedIds(new Set(treeData.map((node) => node.id)))}
-                      className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                    >
-                      Expand all
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedIds(new Set())}
-                      className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                    >
-                      Collapse all
-                    </button>
+                    {currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedIds(new Set(treeData.map((node) => node.id)))
+                          }
+                          className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        >
+                          Expand all
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedIds(new Set())}
+                          className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        >
+                          Collapse all
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

@@ -19,8 +19,7 @@ class ContentNode(Base):
     id = Column(Integer, primary_key=True)
     book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"))
     parent_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="CASCADE"))
-    # TODO: Add referenced_node_id after applying migrations/add_node_references.sql
-    # referenced_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="CASCADE"))
+    referenced_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="CASCADE"))
     level_name = Column(String(100), nullable=False)
     level_order = Column(Integer, nullable=False)
     sequence_number = Column(Integer)

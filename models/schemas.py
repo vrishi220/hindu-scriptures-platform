@@ -140,8 +140,7 @@ class BookPublic(BookBase):
 class ContentNodeBase(BaseModel):
     book_id: int
     parent_node_id: int | None = None
-    # TODO: Uncomment after applying migrations/add_node_references.sql
-    # referenced_node_id: int | None = None
+    referenced_node_id: int | None = None
     level_name: str
     level_order: int
     sequence_number: str | None = None
@@ -165,8 +164,7 @@ class ContentNodeCreate(ContentNodeBase):
 
 class ContentNodeUpdate(BaseModel):
     parent_node_id: int | None = None
-    # TODO: Uncomment after applying migrations/add_node_references.sql
-    # referenced_node_id: int | None = None
+    referenced_node_id: int | None = None
     level_name: str | None = None
     level_order: int | None = None
     sequence_number: str | None = None

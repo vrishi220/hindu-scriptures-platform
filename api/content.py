@@ -50,6 +50,11 @@ class ImportResponse(BaseModel):
     error: str | None = None
 
 
+class InsertReferencesPayload(BaseModel):
+    parent_node_id: int | None = None
+    node_ids: list[int]
+
+
 def require_view_permission(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> User | None:
@@ -870,6 +875,25 @@ def get_node(
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if source_node:
+            payload = ContentNodePublic.model_validate(node).model_dump()
+            payload.update(
+                {
+                    "content_data": source_node.content_data,
+                    "summary_data": source_node.summary_data,
+                    "has_content": source_node.has_content,
+                    "source_attribution": source_node.source_attribution,
+                    "license_type": source_node.license_type,
+                    "original_source_url": source_node.original_source_url,
+                }
+            )
+            return ContentNodePublic.model_validate(payload)
     return ContentNodePublic.model_validate(node)
 
 
@@ -1033,86 +1057,87 @@ def delete_node_media(
     return {"message": "Deleted"}
 
 
-# TODO: Enable after applying migrations/add_node_references.sql
-# @router.post("/books/{book_id}/insert-references", response_model=dict)
-# def insert_references(
-#     book_id: int,
-#     parent_node_id: int | None,
-#     node_ids: list[int],
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(require_permission("can_edit")),
-# ) -> dict:
-#     """
-#     Insert nodes from other books as references into the target book.
-#     References point to original content, so changes propagate automatically.
-#     """
-#     # Verify target book exists
-#     target_book = db.query(Book).filter(Book.id == book_id).first()
-#     if not target_book:
-#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target book not found")
-#
-#     # Verify parent node if specified
-#     if parent_node_id:
-#         parent = db.query(ContentNode).filter(
-#             ContentNode.id == parent_node_id,
-#             ContentNode.book_id == book_id
-#         ).first()
-#         if not parent:
-#             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent node not found")
-#         parent_level_order = parent.level_order
-#     else:
-#         parent_level_order = -1
-#
-#     # Get schema to determine level structure
-#     schema = target_book.schema
-#     if not schema:
-#         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Book has no schema")
-#
-#     created_refs = []
-#     
-#     for node_id in node_ids:
-#         # Get the source node
-#         source_node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
-#         if not source_node:
-#             continue
-#             
-#         # Calculate sequence number (max + 1)
-#         max_seq = (
-#             db.query(func.max(ContentNode.sequence_number))
-#             .filter(
-#                 ContentNode.book_id == book_id,
-#                 ContentNode.parent_node_id == parent_node_id
-#             )
-#             .scalar()
-#         )
-#         sequence = (max_seq or 0) + 1
-#         
-#         # Create reference node
-#         ref_node = ContentNode(
-#             book_id=book_id,
-#             parent_node_id=parent_node_id,
-#             referenced_node_id=source_node.id,
-#             level_name=source_node.level_name,
-#             level_order=parent_level_order + 1,
-#             sequence_number=sequence,
-#             # Copy titles for display/search purposes
-#             title_sanskrit=source_node.title_sanskrit,
-#             title_transliteration=source_node.title_transliteration,
-#             title_english=source_node.title_english,
-#             title_hindi=source_node.title_hindi,
-#             title_tamil=source_node.title_tamil,
-#             has_content=False,  # References don't store content directly
-#             created_by=current_user.id,
-#             last_modified_by=current_user.id,
-#         )
-#         db.add(ref_node)
-#         db.flush()
-#         created_refs.append(ref_node.id)
-#     
-#     db.commit()
-#     
-#     return {
-#         "message": f"Created {len(created_refs)} reference(s)",
-#         "created_ids": created_refs
-#     }
+@router.post("/books/{book_id}/insert-references", response_model=dict)
+def insert_references(
+    book_id: int,
+    payload: InsertReferencesPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("can_edit")),
+) -> dict:
+    """
+    Insert nodes from other books as references into the target book.
+    References point to original content, so changes propagate automatically.
+    """
+    parent_node_id = payload.parent_node_id
+    node_ids = payload.node_ids
+
+    # Verify target book exists
+    target_book = db.query(Book).filter(Book.id == book_id).first()
+    if not target_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target book not found")
+
+    # Verify parent node if specified
+    if parent_node_id is not None:
+        parent = db.query(ContentNode).filter(
+            ContentNode.id == parent_node_id,
+            ContentNode.book_id == book_id,
+        ).first()
+        if not parent:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent node not found")
+        parent_level_order = parent.level_order
+    else:
+        parent_level_order = 0
+
+    # Get schema to determine level structure
+    schema = target_book.schema
+    if not schema:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Book has no schema")
+
+    created_refs = []
+
+    for node_id in node_ids:
+        # Get the source node
+        source_node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+        if not source_node:
+            continue
+
+        # Calculate sequence number (max + 1)
+        max_seq = (
+            db.query(func.max(ContentNode.sequence_number))
+            .filter(
+                ContentNode.book_id == book_id,
+                ContentNode.parent_node_id == parent_node_id,
+            )
+            .scalar()
+        )
+        sequence = (int(max_seq) if max_seq else 0) + 1
+
+        # Create reference node
+        ref_node = ContentNode(
+            book_id=book_id,
+            parent_node_id=parent_node_id,
+            referenced_node_id=source_node.id,
+            level_name=source_node.level_name,
+            level_order=parent_level_order + 1,
+            sequence_number=sequence,
+            # Copy titles for display/search purposes
+            title_sanskrit=source_node.title_sanskrit,
+            title_transliteration=source_node.title_transliteration,
+            title_english=source_node.title_english,
+            title_hindi=source_node.title_hindi,
+            title_tamil=source_node.title_tamil,
+            has_content=False,  # References don't store content directly
+            created_by=current_user.id,
+            last_modified_by=current_user.id,
+        )
+        db.add(ref_node)
+        db.flush()
+        created_refs.append(ref_node.id)
+
+    db.commit()
+
+    return {
+        "message": f"Created {len(created_refs)} reference(s)",
+        "created_ids": created_refs,
+    }
 
