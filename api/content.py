@@ -827,11 +827,11 @@ def create_node(
             ContentNode.book_id == payload.book_id,
             ContentNode.parent_node_id == payload.parent_node_id,
         )
-        max_seq = db.query(db.func.max(ContentNode.sequence_number)).filter(
+        max_seq = db.query(func.max(ContentNode.sequence_number)).filter(
             ContentNode.book_id == payload.book_id,
             ContentNode.parent_node_id == payload.parent_node_id,
         ).scalar()
-        sequence_number = (max_seq or 0) + 1
+        sequence_number = (int(max_seq) if max_seq else 0) + 1
 
     node = ContentNode(
         book_id=payload.book_id,

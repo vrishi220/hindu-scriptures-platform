@@ -32,7 +32,7 @@ export default function ContributePage() {
   const [titleSanskrit, setTitleSanskrit] = useState("");
   const [titleTransliteration, setTitleTransliteration] = useState("");
   const [titleEnglish, setTitleEnglish] = useState("");
-  const [hasContent, setHasContent] = useState(false);
+  const [hasContent, setHasContent] = useState(true);
   const [contentSanskrit, setContentSanskrit] = useState("");
   const [contentTransliteration, setContentTransliteration] = useState("");
   const [contentEnglish, setContentEnglish] = useState("");
@@ -360,25 +360,27 @@ export default function ContributePage() {
                 </select>
               </label>
 
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Parent node
-                </span>
-                <select
-                  value={parentNodeId || ""}
-                  onChange={(event) =>
-                    setParentNodeId(event.target.value ? parseInt(event.target.value, 10) : null)
-                  }
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                >
-                  <option value="">None (top level)</option>
-                  {flatNodes.map((node) => (
-                    <option key={node.id} value={node.id.toString()}>
-                      {node.title_english || node.title_sanskrit || `Node ${node.id}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {flatNodes.length > 0 && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Parent node
+                  </span>
+                  <select
+                    value={parentNodeId || ""}
+                    onChange={(event) =>
+                      setParentNodeId(event.target.value ? parseInt(event.target.value, 10) : null)
+                    }
+                    className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                  >
+                    <option value="">None (top level)</option>
+                    {flatNodes.map((node) => (
+                      <option key={node.id} value={node.id.toString()}>
+                        {node.title_english || node.title_sanskrit || `Node ${node.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

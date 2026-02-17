@@ -129,7 +129,7 @@ function ScripturesContent() {
     titleTransliteration: "",
     titleEnglish: "",
     sequenceNumber: "",
-    hasContent: false,
+    hasContent: true,
     contentSanskrit: "",
     contentTransliteration: "",
     contentEnglish: "",
@@ -546,6 +546,17 @@ function ScripturesContent() {
     };
   };
 
+  const normalizeLevelName = (value: string) => value.trim().toLowerCase();
+
+  const isLeafLevelName = (levelName: string): boolean => {
+    const schemaLevels = currentBook?.schema?.levels;
+    if (!schemaLevels || schemaLevels.length === 0 || !levelName) {
+      return false;
+    }
+    const lastLevel = schemaLevels[schemaLevels.length - 1];
+    return normalizeLevelName(lastLevel) === normalizeLevelName(levelName);
+  };
+
   const getNextLevelName = (parentNode: TreeNode): string => {
     if (!currentBook?.schema?.levels) {
       return ""; // No schema, can't determine
@@ -642,7 +653,7 @@ function ScripturesContent() {
           ? {
               ...basePayload,
               book_id: parseInt(bookId, 10),
-              parent_node_id: actionNode.id,
+              parent_node_id: actionNode.level_name === "BOOK" ? null : actionNode.id,
               level_order: levelOrder,
             }
           : basePayload;
@@ -804,6 +815,7 @@ function ScripturesContent() {
               type="button"
               onClick={() => {
                 const nextLevel = getNextLevelName(node);
+                const defaultHasContent = isLeafLevelName(nextLevel);
                 setActionNode(node);
                 setFormData({
                   levelName: nextLevel,
@@ -811,7 +823,7 @@ function ScripturesContent() {
                   titleTransliteration: "",
                   titleEnglish: "",
                   sequenceNumber: "",
-                  hasContent: false,
+                  hasContent: defaultHasContent,
                   contentSanskrit: "",
                   contentTransliteration: "",
                   contentEnglish: "",
@@ -1131,6 +1143,7 @@ function ScripturesContent() {
                             title_english: books.find(b => b.id.toString() === bookId)?.book_name,
                           };
                           const firstLevel = currentBook.schema?.levels[0] || "";
+                          const defaultHasContent = isLeafLevelName(firstLevel);
                           setActionNode(virtualBook);
                           setFormData({
                             levelName: firstLevel,
@@ -1138,7 +1151,7 @@ function ScripturesContent() {
                             titleTransliteration: "",
                             titleEnglish: "",
                             sequenceNumber: "",
-                            hasContent: false,
+                            hasContent: defaultHasContent,
                             contentSanskrit: "",
                             contentTransliteration: "",
                             contentEnglish: "",
