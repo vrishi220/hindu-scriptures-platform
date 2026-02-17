@@ -1,0 +1,26 @@
+name: Branch Policy
+
+on:
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  validate-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR source branch
+        run: |
+          echo "Base branch: ${{ github.base_ref }}"
+          echo "Head branch: ${{ github.head_ref }}"
+
+          if [ "${{ github.head_ref }}" = "main" ]; then
+            echo "PR source branch cannot be main. Create a feature branch from main and open a PR."
+            exit 1
+          fi
+
+          if [ "${{ github.base_ref }}" != "main" ]; then
+            echo "PR must target main."
+            exit 1
+          fi
+
+          echo "Branch policy validation passed."
