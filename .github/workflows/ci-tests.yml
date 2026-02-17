@@ -44,6 +44,23 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_scriptures
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/test_scriptures
+      PSQL_URL: postgresql://postgres:postgres@localhost:5432/test_scriptures
     defaults:
       run:
         working-directory: web
@@ -56,6 +73,10 @@ jobs:
           python-version: "3.11"
       - name: Install backend dependencies
         run: pip install -r ../requirements.txt
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Load schema
+        run: psql "$PSQL_URL" -f ../schema.sql
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
