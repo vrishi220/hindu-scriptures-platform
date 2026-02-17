@@ -774,13 +774,15 @@ function ScripturesContent() {
                 const displaySeq =
                   formatSequenceDisplay(node.sequence_number ?? node.id, isLeaf) ||
                   node.id.toString();
-                if (isLeaf) {
-                  return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
-                }
                 const titleText =
                   formatValue(node.title_english) ||
                   formatValue(node.title_sanskrit) ||
                   formatValue(node.title_transliteration);
+                if (isLeaf) {
+                  return titleText
+                    ? titleText
+                    : `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
+                }
                 if (titleText) {
                   return `${displaySeq}. ${titleText}`;
                 }
@@ -1222,15 +1224,16 @@ function ScripturesContent() {
                                 node.sequence_number || node.id,
                                 isLeaf
                               ) || node.id;
-                            if (isLeaf) {
-                              return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
-                            }
-                            return (
+                            const titleText =
                               formatValue(node.title_english) ||
                               formatValue(node.title_sanskrit) ||
-                              formatValue(node.title_transliteration) ||
-                              `Verse ${displaySeq}`
-                            );
+                              formatValue(node.title_transliteration);
+                            if (isLeaf) {
+                              return titleText
+                                ? titleText
+                                : `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
+                            }
+                            return titleText || `Verse ${displaySeq}`;
                           })()}
                         </button>
                         {index < breadcrumb.length - 1 && <span>/</span>}
