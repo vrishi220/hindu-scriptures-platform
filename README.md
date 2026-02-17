@@ -186,6 +186,43 @@ Or use Render's "Shell" feature in the dashboard.
 
 **Note**: Free tier has cold starts (15-50 seconds). Upgrade to paid tier (~$12/month) for always-on service.
 
+## Testing & Quality Assurance
+
+The project includes a comprehensive sanity test suite to ensure no regressions at each checkpoint.
+
+### Running Tests
+
+**Quick sanity check:**
+```bash
+make test              # Run all backend sanity tests
+make checkpoint       # Run quick checkpoint tests
+```
+
+**Detailed testing:**
+```bash
+make test-backend     # Run backend tests only
+make test-coverage    # Generate coverage report
+make test-verbose     # Verbose output
+make test-watch       # Watch mode (re-run on file changes)
+```
+
+**Or using pytest directly:**
+```bash
+pip install -r requirements.txt
+pytest tests/test_backend_sanity.py -v
+```
+
+### Test Suite Coverage
+
+- **Health Check**: API status and connectivity
+- **Authentication**: Login, registration, permissions
+- **Content Browsing**: Book retrieval, node hierarchies, tree navigation
+- **Search**: Query handling and result retrieval
+- **Error Handling**: Invalid inputs, edge cases
+- **User Permissions**: Role-based access control
+
+For more details, see [tests/README.md](tests/README.md).
+
 ## Browser Support
 
 Modern browsers with ES2020+ support:

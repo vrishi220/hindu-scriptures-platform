@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS content_nodes (
   id SERIAL PRIMARY KEY,
   book_id INTEGER REFERENCES books(id) ON DELETE CASCADE,
   parent_node_id INTEGER REFERENCES content_nodes(id) ON DELETE CASCADE,
+  referenced_node_id INTEGER REFERENCES content_nodes(id) ON DELETE SET NULL,
   level_name VARCHAR(100) NOT NULL, -- e.g., "Adhyaya"
   level_order INTEGER NOT NULL, -- depth
   sequence_number VARCHAR(50), -- within parent (e.g., "1", "1.34", "2-5")
