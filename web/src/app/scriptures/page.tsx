@@ -301,8 +301,8 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setCurrentBook(null);
       return;
+    }
 
-    
     setTreeLoading(true);
     setTreeError(null);
     try {
