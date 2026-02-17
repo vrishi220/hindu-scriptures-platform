@@ -165,9 +165,14 @@ test.describe('Logout Regression', () => {
     await expect(mobileSignOut).toBeVisible();
     await mobileSignOut.click();
 
+    await page.waitForURL('**/');
     await page.waitForLoadState('networkidle');
-    await openMobileMenu(page);
-    await expect(page.getByRole('link', { name: 'Sign in' }).last()).toBeVisible();
+
+    const authStatus = await page.evaluate(async () => {
+      const response = await fetch('/api/me', { credentials: 'include' });
+      return response.status;
+    });
+    expect(authStatus).toBe(401);
   });
 });
 
