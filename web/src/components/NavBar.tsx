@@ -35,7 +35,12 @@ export default function NavBar() {
       }
     };
     loadAuth();
-  }, []);
+
+    // Re-check auth when window regains focus
+    const handleFocus = () => loadAuth();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [pathname]);
 
   const handleSignOut = async () => {
     try {
