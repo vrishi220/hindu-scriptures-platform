@@ -338,48 +338,6 @@ export default function AdminPage() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <nav className="border-b border-black/10 bg-white/80">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-6">
-            <a href="/" className="flex items-center gap-2">
-              <img
-                src="/logo-mark.svg"
-                alt="Hindu Scriptures"
-                className="h-8 w-8"
-              />
-              <span className="text-sm font-semibold text-[color:var(--deep)]">
-                Hindu Scriptures
-              </span>
-            </a>
-            <div className="hidden items-center gap-4 text-sm text-zinc-600 sm:flex">
-              <a href="/" className="hover:text-[color:var(--accent)]">
-                Home
-              </a>
-              <a href="/scriptures" className="hover:text-[color:var(--accent)]">
-                Scriptures
-              </a>
-              <a href="/explorer" className="hover:text-[color:var(--accent)]">
-                Explorer
-              </a>
-              <a href="/admin" className="font-semibold text-[color:var(--deep)]">
-                Users
-              </a>
-              <a href="/admin/schemas" className="hover:text-[color:var(--accent)]">
-                Schemas
-              </a>
-            </div>
-          </div>
-          <div className="relative flex flex-col items-end gap-2">
-            <button
-              onClick={handleLogout}
-              className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              title={authEmail || ""}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </nav>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
         <header className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Users</p>

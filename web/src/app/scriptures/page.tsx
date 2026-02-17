@@ -85,6 +85,16 @@ const parseSequenceNumber = (value: unknown) => {
   return match ? parseInt(match[1], 10) : null;
 };
 
+const getSequenceSortValue = (node: TreeNode) => {
+  const direct = parseSequenceNumber(node.sequence_number);
+  if (direct !== null) return direct;
+  const titleCandidate =
+    node.title_english || node.title_sanskrit || node.title_transliteration;
+  const titleSeq = titleCandidate ? parseSequenceNumber(titleCandidate) : null;
+  if (titleSeq !== null) return titleSeq;
+  return node.id;
+};
+
 const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
   const parsed = parseSequenceNumber(value);
   if (parsed === null) return "";
@@ -122,6 +132,7 @@ function ScripturesContent() {
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
+  const lastLoadedNodeId = useRef<number | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [formData, setFormData] = useState({
     levelName: "",
@@ -233,7 +244,7 @@ function ScripturesContent() {
     if (nodeId) {
       const path = findPath(treeData, nodeId);
       if (path) {
-        if (selectedId !== nodeId) {
+        if (selectedId !== nodeId || nodeContent?.id !== nodeId) {
           applySelection(nodeId, path);
         }
         lastAutoSelectNodeId.current = nodeId;
@@ -253,7 +264,7 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setNodeContent(null);
     }
-  }, [bookId, urlInitialized, searchParams.get("node"), selectedId]);
+  }, [bookId, urlInitialized, searchParams.get("node"), selectedId, nodeContent?.id]);
 
   useEffect(() => {
     const loadBooks = async () => {
@@ -370,6 +381,9 @@ function ScripturesContent() {
   };
 
   const loadNodeContent = async (nodeId: number) => {
+    if (contentLoading && lastLoadedNodeId.current === nodeId) return;
+    if (!contentLoading && nodeContent?.id === nodeId) return;
+    lastLoadedNodeId.current = nodeId;
     setContentLoading(true);
     try {
       const response = await fetch(contentPath(`/nodes/${nodeId}`), {
@@ -399,7 +413,12 @@ function ScripturesContent() {
     });
   };
 
-  const applySelection = (nodeId: number, path: TreeNode[], scroll = false) => {
+  const applySelection = (
+    nodeId: number,
+    path: TreeNode[],
+    scroll = false,
+    skipLoad = false
+  ) => {
     setSelectedId(nodeId);
     setBreadcrumb(path);
     setExpandedIds((prev) => {
@@ -407,7 +426,9 @@ function ScripturesContent() {
       path.forEach((node) => next.add(node.id));
       return next;
     });
-    loadNodeContent(nodeId);
+    if (!skipLoad) {
+      loadNodeContent(nodeId);
+    }
     if (scroll) {
       scrollToNode(nodeId);
     }
@@ -416,11 +437,13 @@ function ScripturesContent() {
   const selectNode = (nodeId: number, syncUrl = true) => {
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, false);
+      applySelection(nodeId, path, false, syncUrl);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
-      loadNodeContent(nodeId);
+      if (!syncUrl) {
+        loadNodeContent(nodeId);
+      }
     }
     
     // Update URL with current selection
@@ -623,23 +646,53 @@ function ScripturesContent() {
       return treeData;
     }
     const parent = breadcrumb[breadcrumb.length - 2];
-    return parent.children || [];
+    const siblings = parent.children || [];
+    // Sort by sequence_number for consistent ordering
+    return [...siblings].sort((a, b) => {
+      const seqA = getSequenceSortValue(a);
+      const seqB = getSequenceSortValue(b);
+      return seqA - seqB;
+    });
+  };
+
+  // Get all nodes in the tree flattened in depth-first order
+  const getAllNodesInOrder = (): TreeNode[] => {
+    const nodes: TreeNode[] = [];
+    const traverse = (node: TreeNode) => {
+      nodes.push(node);
+      if (node.children && node.children.length > 0) {
+        // Sort children by sequence_number for consistent ordering
+        const sorted = [...node.children].sort((a, b) => {
+          const seqA = getSequenceSortValue(a);
+          const seqB = getSequenceSortValue(b);
+          return seqA - seqB;
+        });
+        sorted.forEach((child) => traverse(child));
+      }
+    };
+    const sortedRoots = [...treeData].sort((a, b) => {
+      const seqA = getSequenceSortValue(a);
+      const seqB = getSequenceSortValue(b);
+      return seqA - seqB;
+    });
+    sortedRoots.forEach((root) => traverse(root));
+    return nodes;
   };
 
   const getPreviousSibling = (): TreeNode | null => {
     if (!selectedId) return null;
-    const siblings = getSiblings();
-    const currentIndex = siblings.findIndex((s) => s.id === selectedId);
+    const allNodes = getAllNodesInOrder();
+    const currentIndex = allNodes.findIndex((n) => n.id === selectedId);
     if (currentIndex <= 0) return null;
-    return siblings[currentIndex - 1];
+    return allNodes[currentIndex - 1];
   };
 
   const getNextSibling = (): TreeNode | null => {
     if (!selectedId) return null;
-    const siblings = getSiblings();
-    const currentIndex = siblings.findIndex((s) => s.id === selectedId);
-    if (currentIndex < 0 || currentIndex >= siblings.length - 1) return null;
-    return siblings[currentIndex + 1];
+    const allNodes = getAllNodesInOrder();
+    const currentIndex = allNodes.findIndex((n) => n.id === selectedId);
+    if (currentIndex < 0 || currentIndex >= allNodes.length - 1) return null;
+    return allNodes[currentIndex + 1];
   };
 
   const handleModalSubmit = async (e: React.FormEvent) => {
@@ -942,102 +995,6 @@ function ScripturesContent() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <nav className="border-b border-black/10 bg-white/80">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-6">
-            <a href="/" className="flex items-center gap-2">
-              <img
-                src="/logo-mark.svg"
-                alt="Hindu Scriptures"
-                className="h-8 w-8"
-              />
-              <span className="text-sm font-semibold text-[color:var(--deep)]">
-                Hindu Scriptures
-              </span>
-            </a>
-            <div className="hidden items-center gap-4 text-sm text-zinc-600 sm:flex">
-              <a href="/" className="hover:text-[color:var(--accent)]">
-                Home
-              </a>
-              <a href="/scriptures" className="font-semibold text-[color:var(--deep)]">
-                Scriptures
-              </a>
-              <a href="/explorer" className="hover:text-[color:var(--accent)]">
-                Explorer
-              </a>
-              {canAdmin && (
-                <>
-                  <a href="/admin" className="hover:text-[color:var(--accent)]">
-                    Users
-                  </a>
-                  <a href="/admin/schemas" className="hover:text-[color:var(--accent)]">
-                    Schemas
-                  </a>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="relative flex flex-col items-end gap-2">
-            {authEmail ? (
-              <>
-                <button
-                  onClick={handleSignOut}
-                  className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                  title={authEmail || ""}
-                >
-                  Sign out
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => setShowLogin((prev) => !prev)}
-                  className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                >
-                  Sign in
-                </button>
-                {showLogin && (
-                  <form
-                    className="fade-in absolute right-0 top-full mt-2 w-72 rounded-2xl border border-black/10 bg-white/95 p-4 shadow-lg z-10"
-                    onSubmit={handleLogin}
-                  >
-                    <div className="flex flex-col gap-3">
-                      <input
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        placeholder="Email"
-                        type="email"
-                        className="rounded-2xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                      <input
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        placeholder="Password"
-                        type="password"
-                        className="rounded-2xl border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-2xl bg-[color:var(--deep)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5"
-                      >
-                        Log in
-                      </button>
-                    </div>
-                    {authMessage && (
-                      <p className="mt-2 text-xs text-[color:var(--accent)]">
-                        {authMessage}
-                      </p>
-                    )}
-                    {authStatus && (
-                      <p className="mt-1 text-xs text-zinc-500">{authStatus}</p>
-                    )}
-                  </form>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
       <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 pb-20 pt-12">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">

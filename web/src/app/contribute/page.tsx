@@ -233,18 +233,6 @@ export default function ContributePage() {
   if (!canContribute) {
     return (
       <div className="grainy-bg min-h-screen">
-        <nav className="border-b border-black/10 bg-white/80">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-            <div className="flex items-center gap-6">
-              <a href="/" className="flex items-center gap-2">
-                <span className="h-8 w-8 rounded-full border border-black/10 bg-white/70 shadow-sm" />
-                <span className="text-sm font-semibold text-[color:var(--deep)]">
-                  Hindu Scriptures
-                </span>
-              </a>
-            </div>
-          </div>
-        </nav>
         <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
             Contributor access required. Please sign in with a contributor, editor, or admin
@@ -262,51 +250,6 @@ export default function ContributePage() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <nav className="border-b border-black/10 bg-white/80">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-6">
-            <a href="/" className="flex items-center gap-2">
-              <img
-                src="/logo-mark.svg"
-                alt="Hindu Scriptures"
-                className="h-8 w-8"
-              />
-              <span className="text-sm font-semibold text-[color:var(--deep)]">
-                Hindu Scriptures
-              </span>
-            </a>
-            <div className="hidden items-center gap-4 text-sm text-zinc-600 sm:flex">
-              <a href="/" className="hover:text-[color:var(--accent)]">
-                Home
-              </a>
-              <a href="/scriptures" className="hover:text-[color:var(--accent)]">
-                Scriptures
-              </a>
-              <a href="/contribute" className="font-semibold text-[color:var(--deep)]">
-                Contribute
-              </a>
-              {canAdmin && (
-                <a href="/admin" className="hover:text-[color:var(--accent)]">
-                  Admin
-                </a>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {authEmail && (
-              <>
-                <button
-                  onClick={handleSignOut}
-                  className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                  title={authEmail || ""}
-                >
-                  Sign out
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
         <header className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Contribute</p>

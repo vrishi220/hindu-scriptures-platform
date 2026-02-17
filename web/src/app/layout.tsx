@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import NavBar from "@/components/NavBar";
 
 const displayFont = Playfair_Display({
   variable: "--font-display",
@@ -26,6 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${displayFont.variable} ${sansFont.variable} antialiased`}>
+        <NavBar />
         {children}
       </body>
     </html>
