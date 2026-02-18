@@ -908,6 +908,19 @@ def update_node(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+
     updates = payload.model_dump(exclude_unset=True)
     if "parent_node_id" in updates and updates["parent_node_id"] is not None:
         parent = (
@@ -920,12 +933,41 @@ def update_node(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
             )
 
+    content_keys = {
+        "has_content",
+        "content_data",
+        "summary_data",
+        "source_attribution",
+        "license_type",
+        "original_source_url",
+    }
+
     for key, value in updates.items():
-        setattr(node, key, value)
+        if source_node is not None and key in content_keys:
+            setattr(source_node, key, value)
+        else:
+            setattr(node, key, value)
 
     node.last_modified_by = current_user.id
+    if source_node is not None:
+        source_node.last_modified_by = current_user.id
     db.commit()
     db.refresh(node)
+    if source_node is not None:
+        db.refresh(source_node)
+        payload = ContentNodePublic.model_validate(node).model_dump()
+        payload.update(
+            {
+                "content_data": source_node.content_data,
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        return ContentNodePublic.model_validate(payload)
+
     return ContentNodePublic.model_validate(node)
 
 

@@ -148,6 +148,7 @@ function ScripturesContent() {
     contentEnglish: "",
     tags: "",
   });
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
@@ -389,9 +390,9 @@ function ScripturesContent() {
     });
   };
 
-  const loadNodeContent = async (nodeId: number) => {
-    if (contentLoading && lastLoadedNodeId.current === nodeId) return;
-    if (!contentLoading && nodeContent?.id === nodeId) return;
+  const loadNodeContent = async (nodeId: number, force = false) => {
+    if (!force && contentLoading && lastLoadedNodeId.current === nodeId) return;
+    if (!force && !contentLoading && nodeContent?.id === nodeId) return;
     lastLoadedNodeId.current = nodeId;
     setContentLoading(true);
     try {
@@ -709,6 +710,7 @@ function ScripturesContent() {
     if (!actionNode || !action) return;
 
     setSubmitting(true);
+    setActionMessage(null);
     try {
       const contentData: Record<string, unknown> = {};
       if (formData.hasContent) {
@@ -779,6 +781,7 @@ function ScripturesContent() {
         // Reset form and close modal
         setAction(null);
         setActionNode(null);
+        setActionMessage(null);
         setFormData({
           levelName: "",
           titleSanskrit: "",
@@ -814,7 +817,7 @@ function ScripturesContent() {
           }
         }
         if (wasEdit && updatedNodeId) {
-          await loadNodeContent(updatedNodeId);
+          await loadNodeContent(updatedNodeId, true);
         }
       } else {
         const errorText = await response.text();
@@ -827,9 +830,15 @@ function ScripturesContent() {
               }
             })()
           : null;
+        const detail =
+          typeof errData === "string"
+            ? errData
+            : errData?.detail || response.statusText;
+        setActionMessage(`Save failed (${response.status}): ${detail}`);
         console.error("Error response:", errData || response.statusText);
       }
     } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : "Save failed.");
       console.error("Error submitting form:", err);
     } finally {
       setSubmitting(false);
@@ -1645,6 +1654,7 @@ function ScripturesContent() {
                     onClick={() => {
                       setAction(null);
                       setActionNode(null);
+                      setActionMessage(null);
                     }}
                     className="text-2xl text-zinc-400 hover:text-zinc-600"
                   >
@@ -1830,6 +1840,11 @@ function ScripturesContent() {
                 </div>
 
                 <div className="flex-shrink-0 p-6 pt-4 border-t border-black/10">
+                  {actionMessage && (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {actionMessage}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                   <button
                     type="submit"
@@ -1843,6 +1858,7 @@ function ScripturesContent() {
                     onClick={() => {
                       setAction(null);
                       setActionNode(null);
+                      setActionMessage(null);
                     }}
                     className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
                   >
