@@ -904,6 +904,8 @@ def update_node(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("can_edit")),
 ) -> ContentNodePublic:
+    from datetime import datetime
+    
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -922,6 +924,8 @@ def update_node(
             )
 
     updates = payload.model_dump(exclude_unset=True)
+    edit_reason = updates.pop("edit_reason", None)  # Remove from updates dict
+    
     if "parent_node_id" in updates and updates["parent_node_id"] is not None:
         parent = (
             db.query(ContentNode)
@@ -940,7 +944,23 @@ def update_node(
         "source_attribution",
         "license_type",
         "original_source_url",
+        "metadata_json",
+        "tags",
     }
+
+    # Track version history for content changes
+    content_changed = any(k in updates for k in content_keys)
+    if content_changed:
+        version_entry = {
+            "edited_by": current_user.id,
+            "edited_at": datetime.utcnow().isoformat(),
+            "reason": edit_reason,
+            "changes": {k: v for k, v in updates.items() if k in content_keys}
+        }
+        # Append to version history
+        version_history = node.version_history or []
+        version_history.append(version_entry)
+        node.version_history = version_history
 
     for key, value in updates.items():
         if source_node is not None and key in content_keys:
@@ -955,8 +975,8 @@ def update_node(
     db.refresh(node)
     if source_node is not None:
         db.refresh(source_node)
-        payload = ContentNodePublic.model_validate(node).model_dump()
-        payload.update(
+        response_payload = ContentNodePublic.model_validate(node).model_dump()
+        response_payload.update(
             {
                 "content_data": source_node.content_data,
                 "summary_data": source_node.summary_data,
@@ -966,7 +986,7 @@ def update_node(
                 "original_source_url": source_node.original_source_url,
             }
         )
-        return ContentNodePublic.model_validate(payload)
+        return ContentNodePublic.model_validate(response_payload)
 
     return ContentNodePublic.model_validate(node)
 

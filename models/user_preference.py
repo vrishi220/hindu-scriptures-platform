@@ -1,0 +1,29 @@
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.sql import func
+
+from models.database import Base
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    source_language = Column(String(10), default="en", nullable=False)
+    transliteration_enabled = Column(Boolean, default=True, nullable=False)
+    transliteration_script = Column(String(20), default="devanagari", nullable=False)
+    show_roman_transliteration = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', name='uq_user_preferences_user_id'),
+    )

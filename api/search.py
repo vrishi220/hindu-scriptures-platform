@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import TSVECTOR
 
 from api.users import get_current_user_optional
 from models.content_node import ContentNode
@@ -186,3 +187,118 @@ def advanced_search(
         total,
     )
     return SearchResponse(query=payload.text, total=total, results=results)
+
+
+# === Phase 1: Full-Text Search (using TSVECTOR) ===
+@router.get("/fulltext", response_model=SearchResponse)
+def fulltext_search(
+    q: str = Query(..., min_length=1),
+    book_id: int | None = None,
+    tags: str | None = None,  # Comma-separated tags to filter
+    language: str = "en",
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
+) -> SearchResponse:
+    """
+    Full-text search using PostgreSQL TSVECTOR.
+    Faster and more accurate than basic string matching.
+    """
+    if not q or not q.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Query required"
+        )
+    
+    # Build query with status = published visible to all
+    query = db.query(ContentNode).filter(
+        ContentNode.status == "published",
+        ContentNode.has_content == True,
+    )
+    
+    # Full-text search using TSVECTOR match
+    # to_tsquery converts search text to tsquery format
+    tsquery = func.plainto_tsquery('english', q)
+    query = query.filter(ContentNode.search_vector.op('@@')(tsquery))
+    
+    # Apply filters
+    if book_id is not None:
+        query = query.filter(ContentNode.book_id == book_id)
+    
+    if tags:
+        # Filter by tags (any tag match)
+        tag_list = [t.strip() for t in tags.split(',')]
+        # Check if any tag in content_nodes.tags matches
+        for tag in tag_list:
+            query = query.filter(
+                ContentNode.tags.op('?|')(tag_list)  # JSONB contains any key
+            )
+    
+    # Count total before pagination
+    total = query.count()
+    
+    # Rank by relevance (ts_rank)
+    rank = func.ts_rank(ContentNode.search_vector, tsquery).label("rank")
+    
+    # Get results with ranking
+    rows = query.add_columns(rank).order_by(rank.desc()).offset(offset).limit(limit).all()
+    
+    results = [
+        SearchResult(
+            node=ContentNodePublic.model_validate(row[0]),
+            snippet=extract_snippet(row[0], q)
+        )
+        for row in rows
+    ]
+    
+    # Log search
+    log_search(
+        db,
+        current_user,
+        q,
+        {
+            "book_id": book_id,
+            "tags": tags,
+            "language": language,
+            "limit": limit,
+            "offset": offset,
+        },
+        total,
+    )
+    
+    return SearchResponse(query=q, total=total, results=results)
+
+
+def extract_snippet(node: ContentNode, query: str, max_length: int = 150) -> str:
+    """Extract a snippet from content_data with query highlighted"""
+    # Try to extract from English translation first
+    if node.content_data and isinstance(node.content_data, dict):
+        text = node.content_data.get('text') or node.content_data.get('english', '')
+    else:
+        text = ""
+    
+    if not text:
+        return None
+    
+    # Find first occurrence of query in text
+    lower_text = text.lower()
+    query_lower = query.lower()
+    idx = lower_text.find(query_lower)
+    
+    if idx == -1:
+        # Not found, return first max_length chars
+        return text[:max_length] + ("..." if len(text) > max_length else "")
+    
+    # Extract snippet around match
+    start = max(0, idx - 50)
+    end = min(len(text), idx + len(query) + 100)
+    snippet = text[start:end]
+    
+    # Add ellipsis if not at boundaries
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(text):
+        snippet = snippet + "..."
+    
+    return snippet

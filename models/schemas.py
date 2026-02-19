@@ -176,10 +176,16 @@ class ContentNodeUpdate(BaseModel):
     has_content: bool | None = None
     content_data: dict | None = None
     summary_data: dict | None = None
+    metadata_json: dict | None = None
     source_attribution: str | None = None
     license_type: str | None = None
     original_source_url: str | None = None
     tags: list | None = None
+    # Phase 1: Draft workflow
+    status: str | None = None  # draft, published, archived
+    visibility: str | None = None  # private, draft, published, archived
+    language_code: str | None = None
+    edit_reason: str | None = None  # Reason for edit (included in version history)
 
 
 class ContentNodePublic(ContentNodeBase):
@@ -223,3 +229,62 @@ class MediaFilePublic(BaseModel):
     url: str
     metadata: dict | None = Field(default=None, alias="metadata_json")
     created_at: datetime | None = None
+
+
+# === Phase 1: User Preferences ===
+class UserPreferenceBase(BaseModel):
+    source_language: str = "en"
+    transliteration_enabled: bool = True
+    transliteration_script: str = "devanagari"
+    show_roman_transliteration: bool = True
+
+
+class UserPreferenceUpdate(BaseModel):
+    source_language: str | None = None
+    transliteration_enabled: bool | None = None
+    transliteration_script: str | None = None
+    show_roman_transliteration: bool | None = None
+
+
+class UserPreferencePublic(UserPreferenceBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+# === Phase 1: Compilations (Book Assembly) ===
+class CompilationBase(BaseModel):
+    title: str
+    description: str | None = None
+    schema_type: str | None = None  # e.g., 'bhagavad_gita', 'ramayana', 'custom'
+    items: list[dict] = []  # [{node_id, order}, ...]
+    metadata: dict | None = None  # {introduction, footer, custom_fields}
+
+
+class CompilationCreate(CompilationBase):
+    status: str | None = "draft"  # draft or published
+    is_public: bool = False
+
+
+class CompilationUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    schema_type: str | None = None
+    items: list[dict] | None = None
+    metadata: dict | None = None
+    status: str | None = None
+    is_public: bool | None = None
+
+
+class CompilationPublic(CompilationBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    creator_id: int
+    status: str
+    is_public: bool
+    created_at: datetime
+    updated_at: datetime

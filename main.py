@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, content, search, users
+from api import auth, content, search, users, preferences, compilations
 
 MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -20,5 +20,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(content.router, prefix="/api")
+app.include_router(preferences.router, prefix="/api")
+app.include_router(compilations.router, prefix="/api")
 
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")

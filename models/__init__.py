@@ -6,16 +6,20 @@ from models.search_query import SearchQuery
 from models.session import UserSession
 from models.scripture_schema import ScriptureSchema
 from models.user import User
+from models.user_preference import UserPreference
+from models.compilation import Compilation
 
 __all__ = [
 	"Base",
 	"Book",
+	"Compilation",
 	"ContentNode",
 	"MediaFile",
 	"SearchQuery",
 	"ScriptureSchema",
 	"SessionLocal",
 	"User",
+	"UserPreference",
 	"UserSession",
 	"get_db",
 ]
