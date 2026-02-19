@@ -61,6 +61,19 @@ type NodeContent = {
   tags?: string[] | null;
 };
 
+type UserPreferences = {
+  source_language: string;
+  transliteration_enabled: boolean;
+  transliteration_script: string;
+  show_roman_transliteration: boolean;
+};
+
+type BasketItem = {
+  node_id: number;
+  label: string;
+  added_at: string;
+};
+
 const formatValue = (value: unknown) => {
   if (typeof value === "string") {
     return value;
@@ -159,6 +172,12 @@ function ScripturesContent() {
     languagePrimary: "sanskrit",
   });
   const [bookSubmitting, setBookSubmitting] = useState(false);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [basketMessage, setBasketMessage] = useState<string | null>(null);
+  const [savingCompilation, setSavingCompilation] = useState(false);
 
   const loadAuth = async () => {
     try {
@@ -196,6 +215,127 @@ function ScripturesContent() {
   useEffect(() => {
     loadAuth();
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("scriptle-basket");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as BasketItem[];
+      if (Array.isArray(parsed)) {
+        setBasketItems(parsed);
+      }
+    } catch {
+      setBasketItems([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("scriptle-basket", JSON.stringify(basketItems));
+  }, [basketItems]);
+
+  useEffect(() => {
+    const loadPreferences = async () => {
+      if (!authEmail) {
+        setPreferences(null);
+        return;
+      }
+      try {
+        const response = await fetch("/api/preferences", { credentials: "include" });
+        if (!response.ok) return;
+        const data = (await response.json()) as UserPreferences;
+        setPreferences(data);
+      } catch {
+        setPreferences(null);
+      }
+    };
+
+    loadPreferences();
+  }, [authEmail]);
+
+  const addCurrentToBasket = () => {
+    if (!nodeContent) return;
+    const seq = formatSequenceDisplay(
+      nodeContent.sequence_number ?? nodeContent.id,
+      Boolean(nodeContent.has_content)
+    ) || nodeContent.id;
+    const label = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
+
+    setBasketItems((prev) => {
+      if (prev.some((item) => item.node_id === nodeContent.id)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          node_id: nodeContent.id,
+          label,
+          added_at: new Date().toISOString(),
+        },
+      ];
+    });
+    setBasketMessage("Added to basket");
+    setTimeout(() => setBasketMessage(null), 1500);
+  };
+
+  const removeFromBasket = (nodeId: number) => {
+    setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+  };
+
+  const savePreferences = async () => {
+    if (!preferences) return;
+    try {
+      setPreferencesSaving(true);
+      setPreferencesMessage(null);
+      const response = await fetch("/api/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save preferences");
+      }
+      setPreferencesMessage("Preferences saved");
+    } catch (err) {
+      setPreferencesMessage(err instanceof Error ? err.message : "Failed to save preferences");
+    } finally {
+      setPreferencesSaving(false);
+      setTimeout(() => setPreferencesMessage(null), 2000);
+    }
+  };
+
+  const saveBasketAsCompilation = async () => {
+    if (!basketItems.length) return;
+    try {
+      setSavingCompilation(true);
+      setBasketMessage(null);
+      const response = await fetch("/api/compilations", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `My Compilation ${new Date().toLocaleDateString()}`,
+          schema_type: "custom",
+          items: basketItems.map((item, index) => ({ node_id: item.node_id, order: index + 1 })),
+          metadata: { source: "scriptures-page-basket" },
+          status: "draft",
+          is_public: false,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string; id?: number } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save compilation");
+      }
+      setBasketMessage(payload?.id ? `Compilation #${payload.id} created` : "Compilation created");
+      setBasketItems([]);
+    } catch (err) {
+      setBasketMessage(err instanceof Error ? err.message : "Failed to save compilation");
+    } finally {
+      setSavingCompilation(false);
+      setTimeout(() => setBasketMessage(null), 2500);
+    }
+  };
 
   useEffect(() => {
     if (selectedId) {
@@ -1321,6 +1461,14 @@ function ScripturesContent() {
                         <>
                           <button
                             type="button"
+                            onClick={addCurrentToBasket}
+                            title="Add to basket"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => {
                               const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
                               navigator.clipboard.writeText(url);
@@ -1397,6 +1545,133 @@ function ScripturesContent() {
                   </div>
 
                   <div className="flex flex-col gap-6">
+                    {authEmail && preferences && (
+                      <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                        <div className="mb-3 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                          Display preferences
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Source language
+                            </span>
+                            <select
+                              value={preferences.source_language}
+                              onChange={(event) =>
+                                setPreferences({
+                                  ...preferences,
+                                  source_language: event.target.value,
+                                })
+                              }
+                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                            >
+                              <option value="sanskrit">Sanskrit</option>
+                              <option value="hindi">Hindi</option>
+                              <option value="english">English</option>
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Transliteration script
+                            </span>
+                            <select
+                              value={preferences.transliteration_script}
+                              onChange={(event) =>
+                                setPreferences({
+                                  ...preferences,
+                                  transliteration_script: event.target.value,
+                                })
+                              }
+                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                            >
+                              <option value="iast">IAST</option>
+                              <option value="harvard_kyoto">Harvard-Kyoto</option>
+                              <option value="itrans">ITRANS</option>
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-zinc-700">
+                            <input
+                              type="checkbox"
+                              checked={preferences.transliteration_enabled}
+                              onChange={(event) =>
+                                setPreferences({
+                                  ...preferences,
+                                  transliteration_enabled: event.target.checked,
+                                })
+                              }
+                            />
+                            Enable transliteration
+                          </label>
+                          <label className="flex items-center gap-2 text-sm text-zinc-700">
+                            <input
+                              type="checkbox"
+                              checked={preferences.show_roman_transliteration}
+                              onChange={(event) =>
+                                setPreferences({
+                                  ...preferences,
+                                  show_roman_transliteration: event.target.checked,
+                                })
+                              }
+                            />
+                            Show Roman transliteration
+                          </label>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={savePreferences}
+                            disabled={preferencesSaving}
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
+                          >
+                            {preferencesSaving ? "Saving..." : "Save prefs"}
+                          </button>
+                          {preferencesMessage && (
+                            <span className="text-xs text-zinc-600">{preferencesMessage}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                          Basket ({basketItems.length})
+                        </div>
+                        <button
+                          type="button"
+                          onClick={saveBasketAsCompilation}
+                          disabled={!basketItems.length || savingCompilation || !authEmail}
+                          className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-emerald-700 transition disabled:opacity-50"
+                        >
+                          {savingCompilation ? "Saving..." : "Save compilation"}
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-col gap-2">
+                        {basketItems.length === 0 && (
+                          <p className="text-sm text-zinc-500">No items added yet.</p>
+                        )}
+                        {basketItems.map((item) => (
+                          <div
+                            key={item.node_id}
+                            className="flex items-center justify-between rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm"
+                          >
+                            <span className="text-zinc-700">{item.label}</span>
+                            <button
+                              type="button"
+                              onClick={() => removeFromBasket(item.node_id)}
+                              className="text-xs text-zinc-500 transition hover:text-[color:var(--accent)]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {basketMessage && <p className="mt-2 text-xs text-zinc-600">{basketMessage}</p>}
+                      {!authEmail && (
+                        <p className="mt-2 text-xs text-zinc-500">Log in to save basket as a compilation.</p>
+                      )}
+                    </div>
+
                     {/* Titles (hide for verses) */}
                     {!nodeContent.has_content && (
                       <div className="flex flex-col gap-2">

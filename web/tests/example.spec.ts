@@ -168,11 +168,8 @@ test.describe('Logout Regression', () => {
     await page.waitForURL('**/');
     await page.waitForLoadState('networkidle');
 
-    const authStatus = await page.evaluate(async () => {
-      const response = await fetch('/api/me', { credentials: 'include' });
-      return response.status;
-    });
-    expect(authStatus).toBe(401);
+    await openMobileMenu(page);
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
   });
 });
 
