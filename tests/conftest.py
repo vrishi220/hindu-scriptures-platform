@@ -2,6 +2,7 @@
 import os
 import pytest
 from fastapi.testclient import TestClient
+from services.schema_bootstrap import ensure_phase1_schema
 
 # Set up test database URL before importing models
 TEST_DATABASE_URL = os.getenv(
@@ -11,6 +12,12 @@ TEST_DATABASE_URL = os.getenv(
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 from main import app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def bootstrap_phase1_schema():
+    """Ensure required Phase 1 schema exists for local test DB."""
+    ensure_phase1_schema(TEST_DATABASE_URL)
 
 
 @pytest.fixture
