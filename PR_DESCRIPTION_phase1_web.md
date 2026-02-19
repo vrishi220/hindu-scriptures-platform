@@ -4,6 +4,13 @@ feat(web): add auth-aware preferences/compilations proxies and scriptures basket
 # Summary
 This PR completes Phase 1 web integration for user preferences and compilations by adding frontend API proxy routes, wiring scriptures-page UX for basket + preferences, and adding route-level Playwright coverage for both normal and backend-unavailable modes.
 
+# Executive Summary (Short)
+- Adds frontend proxy routes for register, preferences, and compilations with token-refresh retry and structured 502 fallback.
+- Wires scriptures page UX for display preferences, local basket persistence, and saving basket items as a draft compilation.
+- Adds Playwright coverage for authenticated/unauthenticated proxy behavior and outage-mode fallback behavior.
+- Stabilizes mobile logout regression assertion for reliable cross-browser runs.
+- Validation status: Playwright 90 passed, 10 skipped, 0 failed; backend pytest 22 passed.
+
 # What Changed
 - Added frontend register proxy route:
 	- web/src/app/api/auth/register/route.ts
