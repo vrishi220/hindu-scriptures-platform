@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, and_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import TSVECTOR
 
 from api.users import get_current_user_optional
 from models.content_node import ContentNode
@@ -227,13 +226,9 @@ def fulltext_search(
         query = query.filter(ContentNode.book_id == book_id)
     
     if tags:
-        # Filter by tags (any tag match)
-        tag_list = [t.strip() for t in tags.split(',')]
-        # Check if any tag in content_nodes.tags matches
+        tag_list = [t.strip() for t in tags.split(',') if t.strip()]
         for tag in tag_list:
-            query = query.filter(
-                ContentNode.tags.op('?|')(tag_list)  # JSONB contains any key
-            )
+            query = query.filter(ContentNode.tags.contains([tag]))
     
     # Count total before pagination
     total = query.count()
@@ -270,7 +265,7 @@ def fulltext_search(
     return SearchResponse(query=q, total=total, results=results)
 
 
-def extract_snippet(node: ContentNode, query: str, max_length: int = 150) -> str:
+def extract_snippet(node: ContentNode, query: str, max_length: int = 150) -> str | None:
     """Extract a snippet from content_data with query highlighted"""
     # Try to extract from English translation first
     if node.content_data and isinstance(node.content_data, dict):

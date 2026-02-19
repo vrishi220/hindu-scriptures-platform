@@ -197,7 +197,7 @@ class ContentNodePublic(ContentNodeBase):
 
 
 class ContentNodeTree(ContentNodePublic):
-    children: list["ContentNodeTree"] = []
+    children: list["ContentNodeTree"] = Field(default_factory=list)
 
 
 class SearchRequest(BaseModel):
@@ -257,11 +257,13 @@ class UserPreferencePublic(UserPreferenceBase):
 
 # === Phase 1: Compilations (Book Assembly) ===
 class CompilationBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str
     description: str | None = None
     schema_type: str | None = None  # e.g., 'bhagavad_gita', 'ramayana', 'custom'
-    items: list[dict] = []  # [{node_id, order}, ...]
-    metadata: dict | None = None  # {introduction, footer, custom_fields}
+    items: list[dict] = Field(default_factory=list)  # [{node_id, order}, ...]
+    metadata: dict | None = Field(default=None, alias="compilation_metadata")
 
 
 class CompilationCreate(CompilationBase):

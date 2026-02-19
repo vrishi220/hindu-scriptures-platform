@@ -951,16 +951,16 @@ def update_node(
     # Track version history for content changes
     content_changed = any(k in updates for k in content_keys)
     if content_changed:
+        version_target = source_node if source_node is not None else node
         version_entry = {
             "edited_by": current_user.id,
             "edited_at": datetime.utcnow().isoformat(),
             "reason": edit_reason,
             "changes": {k: v for k, v in updates.items() if k in content_keys}
         }
-        # Append to version history
-        version_history = node.version_history or []
+        version_history = version_target.version_history or []
         version_history.append(version_entry)
-        node.version_history = version_history
+        version_target.version_history = version_history
 
     for key, value in updates.items():
         if source_node is not None and key in content_keys:
