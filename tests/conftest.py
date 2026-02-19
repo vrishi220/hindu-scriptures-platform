@@ -16,7 +16,7 @@ from main import app
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI application."""
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture

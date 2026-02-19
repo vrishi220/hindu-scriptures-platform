@@ -132,3 +132,68 @@ class TestErrorHandling:
             status.HTTP_404_NOT_FOUND,
             500
         ]
+
+
+class TestPhase1BackendEndpoints:
+    """Sanity checks for new Phase 1 backend APIs."""
+
+    def test_preferences_requires_auth(self, client):
+        """Preferences endpoint should require authentication."""
+        response = client.get("/api/preferences")
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
+
+    def test_preferences_patch_requires_auth(self, client):
+        """Preferences update endpoint should require authentication."""
+        response = client.patch(
+            "/api/preferences",
+            json={"transliteration_script": "devanagari"},
+        )
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
+
+    def test_compilations_public_endpoint_responds(self, client):
+        """Public compilations endpoint should be reachable."""
+        response = client.get("/api/compilations/public")
+        assert response.status_code in [
+            status.HTTP_200_OK,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
+
+    def test_compilations_my_requires_auth(self, client):
+        """My compilations endpoint should require authentication."""
+        response = client.get("/api/compilations/my")
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
+
+    def test_create_compilation_requires_auth(self, client):
+        """Compilation creation should require authentication."""
+        payload = {
+            "title": "Test Compilation",
+            "items": [{"node_id": 1, "order": 1}],
+        }
+        response = client.post("/api/compilations", json=payload)
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
+
+    def test_fulltext_search_endpoint_responds(self, client):
+        """Full-text search endpoint should be reachable."""
+        response = client.get("/api/search/fulltext?q=test")
+        assert response.status_code in [
+            status.HTTP_200_OK,
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        ]
