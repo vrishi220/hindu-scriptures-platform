@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
@@ -132,25 +132,35 @@ def _share_permission_rank(permission: str | None) -> int:
 
 
 def _book_share_permission(db: Session, book_id: int, user_id: int) -> str | None:
-    share = (
-        db.query(BookShare)
-        .filter(
-            BookShare.book_id == book_id,
-            BookShare.shared_with_user_id == user_id,
+    try:
+        share = (
+            db.query(BookShare)
+            .filter(
+                BookShare.book_id == book_id,
+                BookShare.shared_with_user_id == user_id,
+            )
+            .first()
         )
-        .first()
-    )
+    except ProgrammingError as exc:
+        original = getattr(exc, "orig", None)
+        pgcode = getattr(original, "pgcode", None)
+        if pgcode == "42P01":
+            db.rollback()
+            return None
+        raise
     if not share:
         return None
     return str(share.permission).strip().lower()
 
 
 def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
-    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
-        return max(1, 0)
-
     if current_user is None:
-        return 0
+        return 1
+
+    read_rank = 1
+
+    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
+        read_rank = max(read_rank, 1)
 
     if _user_can_edit_any(current_user):
         return 3
@@ -158,7 +168,7 @@ def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int
     if _book_owner_id(book) == current_user.id:
         return 3
 
-    return _share_permission_rank(_book_share_permission(db, book.id, current_user.id))
+    return max(read_rank, _share_permission_rank(_book_share_permission(db, book.id, current_user.id)))
 
 
 def _book_is_visible_to_user(db: Session, book: Book, current_user: User | None) -> bool:

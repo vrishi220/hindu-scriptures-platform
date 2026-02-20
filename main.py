@@ -4,11 +4,18 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from api import auth, content, search, users, preferences, compilations
+from models.database import DATABASE_URL
+from services.schema_bootstrap import ensure_phase1_schema
 
 MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
 app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
+
+
+@app.on_event("startup")
+def bootstrap_schema() -> None:
+    ensure_phase1_schema(DATABASE_URL)
 
 
 @app.get("/health")
