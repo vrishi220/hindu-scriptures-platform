@@ -829,7 +829,7 @@ export default function BasketPanel({
               </div>
 
               {/* Right: Tools */}
-              <div className="w-80 flex flex-col gap-4">
+              <div className="w-80 flex flex-col gap-4 overflow-y-auto pr-2">
                 <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
                   <h4 className="mb-3 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
                     Add Organizational Node
