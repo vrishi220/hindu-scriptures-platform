@@ -1,21 +1,37 @@
 """Pytest configuration and fixtures for the test suite."""
 import os
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import text
+import getpass
+from sqlalchemy import text, create_engine
+from sqlalchemy.orm import sessionmaker
 from services.schema_bootstrap import ensure_phase1_schema
 
 # Set up test database URL before importing models
-# In CI: TEST_DATABASE_URL is set to postgres:postgres credentials
-# Locally: Can use either postgres:postgres or the user's own account
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/test_scriptures"
-)
+# In CI: TEST_DATABASE_URL is set to postgres:postgres credentials (GitHub Actions)
+# Locally: Use current user's credentials (since local PostgreSQL is owned by the user)
+if "TEST_DATABASE_URL" in os.environ:
+    TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]
+else:
+    # For local development, use current user
+    current_user = getpass.getuser()
+    TEST_DATABASE_URL = f"postgresql+psycopg2://{current_user}@localhost/test_scriptures"
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 from main import app
+import models.database
+
+# CRITICAL: Recreate the database engine with the correct TEST_DATABASE_URL
+# This ensures all database operations use the test database
+models.database.engine.dispose()  # Close old connections
+models.database.engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+models.database.SessionLocal = sessionmaker(
+    bind=models.database.engine, 
+    autoflush=False, 
+    autocommit=False
+)
+
 from models.database import SessionLocal
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="session", autouse=True)
