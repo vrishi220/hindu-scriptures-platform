@@ -1,11 +1,6 @@
 name: Deploy Frontend (Vercel)
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "web/**"
-      - ".github/workflows/deploy-vercel.yml"
   workflow_dispatch:
 
 concurrency:
