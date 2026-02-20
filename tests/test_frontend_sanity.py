@@ -1,6 +1,7 @@
 """Frontend integration tests using Playwright."""
 import pytest
 import asyncio
+from pathlib import Path
 
 
 # For local testing with Playwright
@@ -104,6 +105,22 @@ class TestResponsiveness:
     def test_layout_desktop(self):
         """Layout should work on desktop."""
         pass
+
+
+class TestVersionMetadataContract:
+    """Regression tests for deterministic version/build metadata."""
+
+    def test_version_build_defaults_are_deterministic(self):
+        """Version/build defaults should avoid APP_VERSION and timestamp fallbacks."""
+        repo_root = Path(__file__).resolve().parents[1]
+        next_config = (repo_root / "web" / "next.config.ts").read_text(encoding="utf-8")
+        about_page = (repo_root / "web" / "src" / "app" / "about" / "page.tsx").read_text(encoding="utf-8")
+
+        assert "process.env.APP_VERSION" not in next_config
+        assert "utcTimestampBuildNumber" not in next_config
+        assert "process.env.APP_VERSION" not in about_page
+        assert "process.env.NEXT_PUBLIC_APP_VERSION ||\n\t\t\tpackageVersion" in next_config
+        assert "process.env.NEXT_PUBLIC_APP_VERSION ||\n    packageJson.version" in about_page
 
 
 # Note: This file contains test stubs. To run these tests, install playwright:
