@@ -67,3 +67,42 @@ export async function DELETE(
 
   return NextResponse.json(payload);
 }
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ bookId: string }> }
+) {
+  const { bookId } = await params;
+  const store = await cookies();
+  const target = new URL(`/api/content/books/${bookId}`, API_BASE_URL);
+
+  const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
+  const headers: HeadersInit = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  const body = await request.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ detail: "Invalid request body" }, { status: 400 });
+  }
+
+  const response = await fetch(target.toString(), {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    return NextResponse.json(
+      payload || { detail: "Book update failed" },
+      { status: response.status }
+    );
+  }
+
+  return NextResponse.json(payload);
+}

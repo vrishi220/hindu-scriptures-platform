@@ -9,12 +9,28 @@ type BookOption = {
   id: number;
   book_name: string;
   schema_id?: number | null;
+  status?: "draft" | "published";
+  visibility?: "private" | "public";
 };
 
 type BookDetails = {
   id: number;
   book_name: string;
   schema_id: number | null;
+  status?: "draft" | "published";
+  visibility?: "private" | "public";
+  metadata_json?: {
+    owner_id?: number;
+    status?: "draft" | "published";
+    visibility?: "private" | "public";
+    [key: string]: unknown;
+  } | null;
+  metadata?: {
+    owner_id?: number;
+    status?: "draft" | "published";
+    visibility?: "private" | "public";
+    [key: string]: unknown;
+  } | null;
   schema?: {
     id: number;
     name: string;
@@ -139,9 +155,11 @@ function ScripturesContent() {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [bookVisibilitySubmitting, setBookVisibilitySubmitting] = useState(false);
   const [nodeContent, setNodeContent] = useState<NodeContent | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [actionNode, setActionNode] = useState<TreeNode | null>(null);
@@ -189,6 +207,7 @@ function ScripturesContent() {
       const response = await fetch("/api/me", { credentials: "include" });
       if (!response.ok) {
         setAuthEmail(null);
+        setAuthUserId(null);
         setAuthStatus("Not authenticated");
         setCanAdmin(false);
         setCanContribute(false);
@@ -196,6 +215,7 @@ function ScripturesContent() {
         return;
       }
       const data = (await response.json()) as {
+        id?: number;
         email?: string;
         role?: string;
         permissions?: {
@@ -204,12 +224,14 @@ function ScripturesContent() {
           can_edit?: boolean;
         } | null;
       };
+      setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
     } catch {
+      setAuthUserId(null);
       setAuthStatus("Auth check failed");
       setCanAdmin(false);
       setCanContribute(false);
@@ -220,6 +242,66 @@ function ScripturesContent() {
   useEffect(() => {
     loadAuth();
   }, []);
+
+  const currentBookMetadata =
+    currentBook?.metadata_json || currentBook?.metadata || null;
+  const currentBookOwnerId =
+    typeof currentBookMetadata?.owner_id === "number"
+      ? currentBookMetadata.owner_id
+      : null;
+  const canTogglePublish =
+    Boolean(bookId) &&
+    Boolean(currentBook) &&
+    (canAdmin || (authUserId !== null && currentBookOwnerId === authUserId));
+
+  const handleTogglePublish = async () => {
+    if (!bookId || !currentBook) return;
+    const isPublic = (currentBook.visibility || "private") === "public";
+    const payload = isPublic
+      ? { status: "draft", visibility: "private" }
+      : { status: "published", visibility: "public" };
+
+    try {
+      setBookVisibilitySubmitting(true);
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        alert(
+          (result as { detail?: string } | null)?.detail ||
+            "Failed to update publish state"
+        );
+        return;
+      }
+
+      const updatedBook = result as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id.toString() === bookId
+            ? {
+                ...book,
+                status: updatedBook.status,
+                visibility: updatedBook.visibility,
+              }
+            : book
+        )
+      );
+    } catch {
+      alert("Failed to update publish state");
+    } finally {
+      setBookVisibilitySubmitting(false);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -1201,6 +1283,7 @@ function ScripturesContent() {
                 {books.map((book) => (
                   <option key={book.id} value={book.id.toString()}>
                     {book.book_name}
+                    {book.visibility === "private" ? " (Private draft)" : ""}
                   </option>
                 ))}
               </select>
@@ -1242,6 +1325,27 @@ function ScripturesContent() {
               >
                 + Create Book
               </button>
+            )}
+            {canTogglePublish && (
+              <button
+                type="button"
+                onClick={handleTogglePublish}
+                disabled={bookVisibilitySubmitting}
+                className="rounded-full border border-indigo-500/30 bg-indigo-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:opacity-50"
+              >
+                {bookVisibilitySubmitting
+                  ? "Saving..."
+                  : currentBook?.visibility === "public"
+                  ? "Unpublish"
+                  : "Publish"}
+              </button>
+            )}
+            {bookId && currentBook && (
+              <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+                {(currentBook.visibility || "private") === "public"
+                  ? "Public"
+                  : "Private draft"}
+              </span>
             )}
           </div>
 
