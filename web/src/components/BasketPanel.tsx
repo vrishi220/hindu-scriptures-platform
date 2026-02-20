@@ -60,6 +60,7 @@ export default function BasketPanel({
   const [languagePrimary, setLanguagePrimary] = useState("sanskrit");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [insertMode, setInsertMode] = useState<"copy" | "reference">("copy");
   const [organizedTree, setOrganizedTree] = useState<OrganizedNode[]>([]);
   const [targetBookId, setTargetBookId] = useState<number | null>(null);
   const [targetSchemaLevels, setTargetSchemaLevels] = useState<string[]>([]);
@@ -264,7 +265,8 @@ export default function BasketPanel({
         throw new Error("No items were added. Please verify source nodes are accessible.");
       }
 
-      setMessage(`✓ Added ${createdCount} item${createdCount === 1 ? "" : "s"} to book`);
+      const actionWord = insertMode === "reference" ? "Added references for" : "Copied";
+      setMessage(`✓ ${actionWord} ${createdCount} item${createdCount === 1 ? "" : "s"} to book`);
       
       // Clear basket and close organizer after success
       setTimeout(() => {
@@ -291,31 +293,40 @@ export default function BasketPanel({
       let createdNodeId: number | null = null;
 
       if (node.type === "content" && node.node_id) {
-        // Fetch original node content
-        const nodeResponse = await fetch(`/api/nodes/${node.node_id}`, {
-          credentials: "include",
-        });
+        let createPayload: Record<string, unknown> = {
+          book_id: bookId,
+          parent_node_id: parentNodeId,
+          level_name: node.target_level,
+          level_order: node.target_level_order,
+          sequence_number: String(node.sequence_number),
+        };
 
-        if (!nodeResponse.ok) {
-          const details = await nodeResponse.text().catch(() => "");
-          throw new Error(
-            `Failed to load source node ${node.node_id}${details ? `: ${details}` : ""}`
-          );
-        }
+        if (insertMode === "reference") {
+          createPayload = {
+            ...createPayload,
+            referenced_node_id: node.node_id,
+            title_english: node.title || null,
+            has_content: false,
+            content_data: {},
+            summary_data: {},
+            license_type: "CC-BY-SA-4.0",
+            tags: [],
+          };
+        } else {
+          const nodeResponse = await fetch(`/api/nodes/${node.node_id}`, {
+            credentials: "include",
+          });
 
-        const originalNode = await nodeResponse.json();
+          if (!nodeResponse.ok) {
+            const details = await nodeResponse.text().catch(() => "");
+            throw new Error(
+              `Failed to load source node ${node.node_id}${details ? `: ${details}` : ""}`
+            );
+          }
 
-        // Create new node in target book
-        const createResponse = await fetch("/api/nodes", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            book_id: bookId,
-            parent_node_id: parentNodeId,
-            level_name: node.target_level,
-            level_order: node.target_level_order,
-            sequence_number: String(node.sequence_number),
+          const originalNode = await nodeResponse.json();
+          createPayload = {
+            ...createPayload,
             title_sanskrit: originalNode.title_sanskrit,
             title_transliteration: originalNode.title_transliteration,
             title_english: originalNode.title_english,
@@ -328,7 +339,14 @@ export default function BasketPanel({
             license_type: originalNode.license_type || "CC-BY-SA-4.0",
             original_source_url: originalNode.original_source_url,
             tags: originalNode.tags || [],
-          }),
+          };
+        }
+
+        const createResponse = await fetch("/api/nodes", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload),
         });
 
         if (!createResponse.ok) {
@@ -707,6 +725,36 @@ export default function BasketPanel({
               </button>
             </div>
 
+            <div className="mx-6 mt-4 rounded-2xl border border-black/10 bg-white/90 p-4">
+              <div className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+                Add Mode
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setInsertMode("copy")}
+                  disabled={loading}
+                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    insertMode === "copy"
+                      ? "border border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
+                      : "border border-black/10 bg-white text-zinc-700 hover:border-[color:var(--accent)]"
+                  }`}
+                >
+                  Copy (independent)
+                </button>
+                <button
+                  onClick={() => setInsertMode("reference")}
+                  disabled={loading}
+                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                    insertMode === "reference"
+                      ? "border border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
+                      : "border border-black/10 bg-white text-zinc-700 hover:border-[color:var(--accent)]"
+                  }`}
+                >
+                  Reference (linked)
+                </button>
+              </div>
+            </div>
+
             {message && (
               <div className={`mx-6 mt-4 rounded-lg p-3 text-sm ${
                 message.startsWith("✓")
@@ -808,7 +856,11 @@ export default function BasketPanel({
                   disabled={loading || organizedTree.length === 0}
                   className="rounded-lg border border-emerald-500/30 bg-emerald-500 px-4 py-3 font-medium text-white transition hover:bg-emerald-600 hover:shadow-lg disabled:opacity-50"
                 >
-                  {loading ? "Adding to Book..." : "Finalize & Add to Book"}
+                  {loading
+                    ? "Adding to Book..."
+                    : insertMode === "reference"
+                    ? "Finalize & Add References"
+                    : "Finalize & Add Copies"}
                 </button>
 
                 <button
