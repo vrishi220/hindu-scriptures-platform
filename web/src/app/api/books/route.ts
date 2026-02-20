@@ -41,25 +41,45 @@ export async function POST(request: Request) {
     ? { Authorization: `Bearer ${accessToken}` }
     : {};
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ detail: "Invalid request body" }, { status: 400 });
+  }
 
-  const response = await fetch(target.toString(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...authHeader,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
+  let response: Response;
+  try {
+    response = await fetch(target.toString(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...authHeader,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
     return NextResponse.json(
-      payload || { detail: "Book creation failed" },
+      { detail: "Content service unavailable. Please start the API server and try again." },
+      { status: 503 }
+    );
+  }
+
+  const rawText = await response.text().catch(() => "");
+  const payload = (() => {
+    if (!rawText) return null;
+    try {
+      return JSON.parse(rawText) as { detail?: string };
+    } catch {
+      return null;
+    }
+  })();
+  if (!response.ok) {
+    const fallbackDetail = rawText || response.statusText || "Book creation failed";
+    return NextResponse.json(
+      payload || { detail: `Book creation failed (${response.status}): ${fallbackDetail}` },
       { status: response.status }
     );
   }
 
-  return NextResponse.json(payload, { status: 201 });
+  return NextResponse.json(payload ?? null, { status: 201 });
 }

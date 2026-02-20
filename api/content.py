@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -217,20 +218,43 @@ def create_book(
 ) -> BookPublic:
     _ensure_can_contribute(current_user)
 
+    if payload.schema_id is not None:
+        schema = (
+            db.query(ScriptureSchema)
+            .filter(ScriptureSchema.id == payload.schema_id)
+            .first()
+        )
+        if not schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid schema_id",
+            )
+
     metadata_json = payload.metadata or {}
     if not isinstance(metadata_json, dict):
         metadata_json = {}
     metadata_json["owner_id"] = current_user.id
 
+    book_code = payload.book_code
+    if isinstance(book_code, str) and not book_code.strip():
+        book_code = None
+
     book = Book(
         schema_id=payload.schema_id,
         book_name=payload.book_name,
-        book_code=payload.book_code,
+        book_code=book_code,
         language_primary=payload.language_primary,
         metadata_json=metadata_json,
     )
     db.add(book)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Book could not be created. Check schema and book code uniqueness.",
+        )
     db.refresh(book)
     return BookPublic.model_validate(book)
 
@@ -912,6 +936,16 @@ def create_node(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid book")
 
     _ensure_book_edit_access(current_user, book)
+
+    if (
+        not _user_can_edit_any(current_user)
+        and payload.referenced_node_id is None
+        and (payload.source_attribution or payload.original_source_url)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only add existing content as references",
+        )
 
     # Validate hierarchy against schema if book has one
     if book.schema and book.schema.levels:
