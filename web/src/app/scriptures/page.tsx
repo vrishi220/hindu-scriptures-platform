@@ -366,7 +366,7 @@ function ScripturesContent() {
       const path = findPath(treeData, nodeId);
       if (path) {
         const isCurrentNodeAlreadyLoading =
-          activeContentNodeId.current === nodeId && contentLoading;
+          activeContentNodeId.current === nodeId;
         if (
           selectedId !== nodeId ||
           (!isCurrentNodeAlreadyLoading && nodeContent?.id !== nodeId)
@@ -587,13 +587,22 @@ function ScripturesContent() {
   };
 
   const selectNode = (nodeId: number, syncUrl = true) => {
+    const syncSelectionUrl = (targetNodeId: number) => {
+      if (typeof window === "undefined" || !bookId) return;
+      const url = new URL(window.location.href);
+      const currentBook = url.searchParams.get("book") || "";
+      const currentNode = url.searchParams.get("node") || "";
+      if (currentBook === bookId && currentNode === String(targetNodeId)) {
+        return;
+      }
+      url.searchParams.set("book", bookId);
+      url.searchParams.set("node", String(targetNodeId));
+      window.history.replaceState(window.history.state, "", url.toString());
+    };
+
     if (selectedId === nodeId && nodeContent?.id === nodeId && !contentLoading) {
       if (syncUrl && bookId) {
-        const currentBookParam = searchParams.get("book") || "";
-        const currentNodeParam = searchParams.get("node") || "";
-        if (currentBookParam !== bookId || currentNodeParam !== String(nodeId)) {
-          router.push(`/scriptures?book=${bookId}&node=${nodeId}`, { scroll: false });
-        }
+        syncSelectionUrl(nodeId);
       }
       return;
     }
@@ -609,11 +618,7 @@ function ScripturesContent() {
     
     // Update URL with current selection
     if (syncUrl && bookId) {
-      const currentBookParam = searchParams.get("book") || "";
-      const currentNodeParam = searchParams.get("node") || "";
-      if (currentBookParam !== bookId || currentNodeParam !== String(nodeId)) {
-        router.push(`/scriptures?book=${bookId}&node=${nodeId}`, { scroll: false });
-      }
+      syncSelectionUrl(nodeId);
     }
   };
 
