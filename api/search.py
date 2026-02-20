@@ -12,6 +12,15 @@ from services import get_db
 router = APIRouter(prefix="/search", tags=["search"])
 
 
+def apply_stable_search_order(query, rank):
+    return query.order_by(
+        rank.desc(),
+        ContentNode.book_id.asc(),
+        func.coalesce(ContentNode.level_order, 0).asc(),
+        ContentNode.id.asc(),
+    )
+
+
 def build_search_query(
     db: Session,
     text: str,
@@ -22,14 +31,18 @@ def build_search_query(
     if not text or not text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Query required")
 
-    # Content fields
-    sanskrit = func.coalesce(ContentNode.content_data["basic"]["sanskrit"].astext, "")
-    translit = func.coalesce(
+    # Content fields (normalized for display and search)
+    sanskrit_raw = func.coalesce(ContentNode.content_data["basic"]["sanskrit"].astext, "")
+    translit_raw = func.coalesce(
         ContentNode.content_data["basic"]["transliteration"].astext, ""
     )
-    english = func.coalesce(
+    english_raw = func.coalesce(
         ContentNode.content_data["translations"]["english"].astext, ""
     )
+
+    sanskrit = func.nullif(func.trim(sanskrit_raw), "")
+    translit = func.nullif(func.trim(translit_raw), "")
+    english = func.nullif(func.trim(english_raw), "")
     # Title fields
     title_english = func.coalesce(ContentNode.title_english, "")
     title_sanskrit = func.coalesce(ContentNode.title_sanskrit, "")
@@ -37,7 +50,19 @@ def build_search_query(
     # Level name field
     level_name_text = func.coalesce(ContentNode.level_name, "")
     
-    combined = func.concat_ws(" ", sanskrit, translit, english, title_english, title_sanskrit, title_translit, level_name_text)
+    searchable_combined = func.concat_ws(
+        " ",
+        sanskrit_raw,
+        translit_raw,
+        english_raw,
+        title_english,
+        title_sanskrit,
+        title_translit,
+        level_name_text,
+    )
+
+    display_combined = func.concat_ws("\n", sanskrit, translit, english)
+    snippet_source = func.coalesce(func.nullif(display_combined, ""), searchable_combined)
     
     # Check if search term is in quotes for exact matching
     search_text = text.strip()
@@ -50,14 +75,14 @@ def build_search_query(
         escaped_text = re.escape(search_text)
         
         query = db.query(ContentNode).filter(
-            func.lower(combined).like(f"%{search_text.lower()}%")
+            func.lower(searchable_combined).like(f"%{search_text.lower()}%")
         )
         # Shorter texts rank higher (invert length)
-        rank = (10000 - func.length(combined)).label("rank")
+        rank = (10000 - func.length(searchable_combined)).label("rank")
         # Highlight the matched text with <mark> tags using case-insensitive regex
         # Use a capturing group and backreference (\1 refers to first captured group)
         headline = func.regexp_replace(
-            combined,
+            snippet_source,
             f"({escaped_text})",
             r"<mark>\1</mark>",
             "gi"
@@ -65,15 +90,15 @@ def build_search_query(
     else:
         # Partial/prefix matching - use ILIKE for broader matching
         query = db.query(ContentNode).filter(
-            func.lower(combined).like(f"%{search_text.lower()}%")
+            func.lower(searchable_combined).like(f"%{search_text.lower()}%")
         )
-        rank = (10000 - func.length(combined)).label("rank")
+        rank = (10000 - func.length(searchable_combined)).label("rank")
         
         # Try to highlight with regex
         import re
         escaped = re.sub(r'([\\.\[\]\(\)\{\}\^\$\*\+\?\|])', r'\\\1', search_text)
         headline = func.regexp_replace(
-            combined,
+            snippet_source,
             f"({escaped})",
             r"<mark>\1</mark>",
             "gi"
@@ -121,8 +146,7 @@ def basic_search(
     query, rank, headline = build_search_query(db, q, book_id, level_name, has_content)
     total = query.count()
     rows = (
-        query.add_columns(rank, headline)
-        .order_by(rank.desc())
+        apply_stable_search_order(query.add_columns(rank, headline), rank)
         .limit(limit)
         .offset(offset)
         .all()
@@ -162,8 +186,7 @@ def advanced_search(
     )
     total = query.count()
     rows = (
-        query.add_columns(rank, headline)
-        .order_by(rank.desc())
+        apply_stable_search_order(query.add_columns(rank, headline), rank)
         .limit(payload.limit)
         .offset(payload.offset)
         .all()
@@ -237,7 +260,7 @@ def fulltext_search(
     rank = func.ts_rank(ContentNode.search_vector, tsquery).label("rank")
     
     # Get results with ranking
-    rows = query.add_columns(rank).order_by(rank.desc()).offset(offset).limit(limit).all()
+    rows = apply_stable_search_order(query.add_columns(rank), rank).offset(offset).limit(limit).all()
     
     results = [
         SearchResult(
