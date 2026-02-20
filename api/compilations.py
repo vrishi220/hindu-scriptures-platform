@@ -1,15 +1,28 @@
 """Compilations (basket/book assembly) API endpoints"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user, get_current_user_optional
 from models.user import User
 from models.compilation import Compilation
-from models.schemas import CompilationPublic, CompilationCreate, CompilationUpdate
+from models.book import Book
+from models.content_node import ContentNode
+from models.scripture_schema import ScriptureSchema
+from models.schemas import CompilationPublic, CompilationCreate, CompilationUpdate, BookPublic
 from services import get_db
 
 router = APIRouter(prefix="/compilations", tags=["compilations"])
+
+
+class PublishAsBookPayload(BaseModel):
+    """Payload for publishing compilation as a book"""
+    schema_id: int
+    book_name: str
+    book_code: str | None = None
+    language_primary: str = "sanskrit"
+    description: str | None = None
 
 
 @router.get("/my", response_model=list[CompilationPublic])
@@ -168,3 +181,150 @@ def delete_compilation(
     
     db.delete(compilation)
     db.commit()
+
+
+@router.post("/{compilation_id}/publish-as-book", response_model=BookPublic)
+def publish_compilation_as_book(
+    compilation_id: int,
+    payload: PublishAsBookPayload,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Publish a compilation as a new book.
+    
+    This creates a new book with the specified schema and copies all nodes
+    from the compilation into the new book, maintaining their content and order.
+    """
+    # Fetch compilation
+    compilation = db.query(Compilation).filter(
+        Compilation.id == compilation_id
+    ).first()
+    
+    if not compilation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Compilation not found"
+        )
+    
+    # Check authorization - only creator can publish
+    if compilation.creator_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only creator can publish compilation as book"
+        )
+    
+    # Validate schema exists
+    schema = db.query(ScriptureSchema).filter(
+        ScriptureSchema.id == payload.schema_id
+    ).first()
+    
+    if not schema:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid schema_id"
+        )
+    
+    # Create the new book
+    book = Book(
+        schema_id=payload.schema_id,
+        book_name=payload.book_name,
+        book_code=payload.book_code,
+        language_primary=payload.language_primary,
+        metadata_json={
+            "source": "compilation",
+            "compilation_id": compilation_id,
+            "compilation_title": compilation.title,
+            "description": payload.description or compilation.description,
+        }
+    )
+    db.add(book)
+    db.flush()  # Get book.id without committing
+    
+    # Extract node IDs from compilation items
+    if not compilation.items or len(compilation.items) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Compilation has no items to publish"
+        )
+    
+    # Fetch all original nodes
+    node_ids = [item.get("node_id") for item in compilation.items if item.get("node_id")]
+    original_nodes = db.query(ContentNode).filter(
+        ContentNode.id.in_(node_ids)
+    ).all()
+    
+    if len(original_nodes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid nodes found in compilation"
+        )
+    
+    # Create a mapping for quick lookup
+    node_map = {node.id: node for node in original_nodes}
+    
+    # Determine the target level (use the last level from schema as leaf level)
+    if not schema.levels or len(schema.levels) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Schema has no levels defined"
+        )
+    
+    # Use the last level as the target level for all nodes (e.g., "Shloka", "Verse")
+    target_level = schema.levels[-1]
+    target_level_order = len(schema.levels)  # Level order is 1-indexed
+    
+    # Copy nodes to the new book in the order specified by compilation
+    new_nodes = []
+    for idx, item in enumerate(compilation.items):
+        node_id = item.get("node_id")
+        if not node_id or node_id not in node_map:
+            continue
+        
+        original = node_map[node_id]
+        
+        # Create new node with content from original
+        new_node = ContentNode(
+            book_id=book.id,
+            parent_node_id=None,  # All nodes at root level for simplicity
+            level_name=target_level,
+            level_order=target_level_order,
+            sequence_number=idx + 1,  # Sequential numbering
+            title_sanskrit=original.title_sanskrit,
+            title_transliteration=original.title_transliteration,
+            title_english=original.title_english,
+            title_hindi=original.title_hindi,
+            title_tamil=original.title_tamil,
+            has_content=original.has_content,
+            content_data=original.content_data or {},
+            summary_data=original.summary_data or {},
+            metadata_json={
+                "source_node_id": original.id,
+                "source_book_id": original.book_id,
+                "original_level": original.level_name,
+                **(original.metadata_json or {})
+            },
+            source_attribution=original.source_attribution,
+            license_type=original.license_type or "CC-BY-SA-4.0",
+            original_source_url=original.original_source_url,
+            tags=original.tags or [],
+            created_by=current_user.id,
+            last_modified_by=current_user.id,
+        )
+        new_nodes.append(new_node)
+    
+    if len(new_nodes) == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No valid nodes could be copied from compilation"
+        )
+    
+    # Add all new nodes to the database
+    db.add_all(new_nodes)
+    
+    # Commit the transaction
+    db.commit()
+    db.refresh(book)
+    
+    return BookPublic.model_validate(book)

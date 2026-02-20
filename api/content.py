@@ -695,9 +695,35 @@ def _insert_content_nodes(
 def list_nodes(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
+    q: str | None = None,  # Search query
+    book_id: int | None = None,  # Filter by book
+    limit: int = 100,
 ) -> list[ContentNodePublic]:
+    """
+    List content nodes with optional search and filtering.
+    
+    - q: Search query (searches in titles and content)
+    - book_id: Filter by specific book
+    - limit: Max results to return
+    """
     _ = current_user
-    nodes = db.query(ContentNode).order_by(ContentNode.id).all()
+    query = db.query(ContentNode)
+    
+    # Search filter
+    if q:
+        search_term = f"%{q}%"
+        query = query.filter(
+            (ContentNode.title_english.ilike(search_term)) |
+            (ContentNode.title_sanskrit.ilike(search_term)) |
+            (ContentNode.title_transliteration.ilike(search_term)) |
+            (ContentNode.content_data.cast(str).ilike(search_term))
+        )
+    
+    # Book filter
+    if book_id:
+        query = query.filter(ContentNode.book_id == book_id)
+    
+    nodes = query.order_by(ContentNode.id).limit(limit).all()
     return [ContentNodePublic.model_validate(item) for item in nodes]
 
 

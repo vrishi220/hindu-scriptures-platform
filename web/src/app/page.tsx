@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { contentPath } from "../lib/apiPaths";
+import BasketPanel from "../components/BasketPanel";
 
 type SearchNode = {
   id: number;
@@ -93,6 +94,58 @@ function HomeContent() {
     node_id?: number;
   } | null>(null);
   const [verseMode, setVerseMode] = useState<"daily" | "random">("daily");
+  const [basketItems, setBasketItems] = useState<Array<{
+    node_id: number;
+    title?: string;
+    book_name?: string;
+    level_name?: string;
+    order: number;
+  }>>([]);
+
+  // Load basket from localStorage
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("scriptle-basket");
+      const parsed = JSON.parse(raw || "[]") as typeof basketItems;
+      if (Array.isArray(parsed)) {
+        setBasketItems(parsed);
+      }
+    } catch {
+      setBasketItems([]);
+    }
+  }, []);
+
+  // Save basket to localStorage
+  useEffect(() => {
+    window.localStorage.setItem("scriptle-basket", JSON.stringify(basketItems));
+  }, [basketItems]);
+
+  const addToBasket = (nodeId: number, title: string, bookName?: string, levelName?: string) => {
+    setBasketItems((prev) => {
+      // Avoid duplicates
+      if (prev.some((item) => item.node_id === nodeId)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          node_id: nodeId,
+          title,
+          book_name: bookName,
+          level_name: levelName,
+          order: prev.length + 1,
+        },
+      ];
+    });
+  };
+
+  const removeFromBasket = (nodeId: number) => {
+    setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+  };
+
+  const clearBasket = () => {
+    setBasketItems([]);
+  };
 
   const loadBooks = async () => {
     try {
@@ -621,14 +674,8 @@ function HomeContent() {
                         const destinationUrl = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&from=search&searchContext=${encodeURIComponent(searchContext.toString())}`;
                         
                         return (
-                        <a
+                        <div
                           key={result.node.id}
-                          href={destinationUrl}
-                          onClick={() => {
-                            // Save scroll position before navigating
-                            const scrollY = window.scrollY;
-                            sessionStorage.setItem("searchScrollY", scrollY.toString());
-                          }}
                           className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
                         >
                           <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -638,12 +685,44 @@ function HomeContent() {
                                 <span>#{result.node.sequence_number}</span>
                               )}
                           </div>
-                          <h4 className="mt-2 font-[var(--font-display)] text-lg text-[color:var(--deep)]">
-                            {result.node.title_english ||
-                              result.node.title_sanskrit ||
-                              result.node.title_transliteration ||
-                              "Untitled"}
-                          </h4>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1">
+                              <h4 className="font-[var(--font-display)] text-lg text-[color:var(--deep)]">
+                                {result.node.title_english ||
+                                  result.node.title_sanskrit ||
+                                  result.node.title_transliteration ||
+                                  "Untitled"}
+                              </h4>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
+                                  addToBasket(
+                                    result.node.id,
+                                    result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
+                                    bookName,
+                                    result.node.level_name
+                                  );
+                                }}
+                                className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100"
+                              >
+                                + Basket
+                              </button>
+                              <a
+                                href={destinationUrl}
+                                onClick={() => {
+                                  const scrollY = window.scrollY;
+                                  sessionStorage.setItem("searchScrollY", scrollY.toString());
+                                }}
+                                className="rounded-lg border border-blue-500/30 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+                              >
+                                View
+                              </a>
+                            </div>
+                          </div>
                           {result.snippet ? (
                             <p
                               className="mt-2 text-sm text-zinc-700"
@@ -658,7 +737,7 @@ function HomeContent() {
                           <div className="mt-3 text-xs text-[color:var(--accent)] hover:underline">
                             View details →
                           </div>
-                        </a>
+                        </div>
                       )})}
                     </div>
                   )}
@@ -778,25 +857,17 @@ function HomeContent() {
             </div>
           </div>
         </section>
-
-        <footer className="flex flex-col items-center justify-between gap-4 border-t border-black/10 pt-8 text-xs text-zinc-500 sm:flex-row">
-          <p>Hindu Scriptures Platform · Open knowledge, shared carefully.</p>
-          <div className="flex gap-4">
-            <a href="/about" className="hover:text-[color:var(--accent)]">
-              About
-            </a>
-            <a href="/" className="hover:text-[color:var(--accent)]">
-              Docs
-            </a>
-            <a href="/" className="hover:text-[color:var(--accent)]">
-              Community
-            </a>
-            <a href="/" className="hover:text-[color:var(--accent)]">
-              Licensing
-            </a>
-          </div>
-        </footer>
       </main>
+
+      {/* Floating Basket Panel */}
+      <BasketPanel
+        items={basketItems}
+        onRemoveItem={removeFromBasket}
+        onClearBasket={clearBasket}
+        onItemsAdded={() => {
+          // Refresh or handle after items are added to book
+        }}
+      />
     </div>
   );
 }

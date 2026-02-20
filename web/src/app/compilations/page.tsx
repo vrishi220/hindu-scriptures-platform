@@ -20,6 +20,13 @@ type Compilation = {
   updated_at: string;
 };
 
+type Schema = {
+  id: number;
+  name: string;
+  description?: string | null;
+  levels: string[];
+};
+
 export default function CompilationsPage() {
   const router = useRouter();
   const [compilations, setCompilations] = useState<Compilation[]>([]);
@@ -27,6 +34,13 @@ export default function CompilationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [schemas, setSchemas] = useState<Schema[]>([]);
+  const [publishingId, setPublishingId] = useState<number | null>(null);
+  const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
+  const [bookName, setBookName] = useState("");
+  const [bookCode, setBookCode] = useState("");
+  const [languagePrimary, setLanguagePrimary] = useState("sanskrit");
+  const [publishMessage, setPublishMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -91,6 +105,72 @@ export default function CompilationsPage() {
       setCompilations((prev) => prev.filter((c) => c.id !== id));
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete");
+    }
+  };
+
+  const loadSchemas = async () => {
+    try {
+      const response = await fetch(
+        process.env.NEXT_PUBLIC_API_URL 
+          ? `${process.env.NEXT_PUBLIC_API_URL}/schemas`
+          : "/api/schemas",
+        { credentials: "include" }
+      );
+      if (response.ok) {
+        const data = (await response.json()) as Schema[];
+        setSchemas(data);
+      }
+    } catch {
+      // Ignore errors
+    }
+  };
+
+  const handlePublishClick = async (compilation: Compilation) => {
+    setPublishingId(compilation.id);
+    setBookName(compilation.title);
+    setBookCode("");
+    setLanguagePrimary("sanskrit");
+    setSelectedSchema(null);
+    setPublishMessage(null);
+    await loadSchemas();
+  };
+
+  const handlePublishSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!publishingId || !selectedSchema) return;
+
+    try {
+      setPublishMessage("Publishing...");
+      const response = await fetch(`/api/compilations/${publishingId}/publish`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema_id: selectedSchema,
+          book_name: bookName,
+          book_code: bookCode || null,
+          language_primary: languagePrimary,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to publish");
+      }
+
+      const newBook = await response.json();
+      setPublishMessage(`✓ Published as book: ${newBook.book_name}`);
+      
+      // Close modal after 2 seconds
+      setTimeout(() => {
+        setPublishingId(null);
+        setPublishMessage(null);
+        router.push(`/scriptures?book=${newBook.id}`);
+      }, 2000);
+    } catch (err) {
+      setPublishMessage(
+        `✗ ${err instanceof Error ? err.message : "Failed to publish"}`
+      );
     }
   };
 
@@ -199,6 +279,12 @@ export default function CompilationsPage() {
                         className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
                       >
                         {expandedId === compilation.id ? "Hide" : "View"} Items
+                      </button>
+                      <button
+                        onClick={() => handlePublishClick(compilation)}
+                        className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-emerald-700 transition hover:border-emerald-500/60 hover:bg-emerald-100"
+                      >
+                        Publish as Book
                       </button>
                       <button
                         onClick={() => handleDelete(compilation.id)}

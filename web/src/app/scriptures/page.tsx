@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { contentPath } from "../../lib/apiPaths";
+import BasketPanel from "../../components/BasketPanel";
 
 type BookOption = {
   id: number;
@@ -176,8 +177,6 @@ function ScripturesContent() {
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
-  const [basketMessage, setBasketMessage] = useState<string | null>(null);
-  const [savingCompilation, setSavingCompilation] = useState(false);
 
   const loadAuth = async () => {
     try {
@@ -273,12 +272,14 @@ function ScripturesContent() {
         },
       ];
     });
-    setBasketMessage("Added to basket");
-    setTimeout(() => setBasketMessage(null), 1500);
   };
 
   const removeFromBasket = (nodeId: number) => {
     setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+  };
+
+  const clearBasket = () => {
+    setBasketItems([]);
   };
 
   const savePreferences = async () => {
@@ -302,38 +303,6 @@ function ScripturesContent() {
     } finally {
       setPreferencesSaving(false);
       setTimeout(() => setPreferencesMessage(null), 2000);
-    }
-  };
-
-  const saveBasketAsCompilation = async () => {
-    if (!basketItems.length) return;
-    try {
-      setSavingCompilation(true);
-      setBasketMessage(null);
-      const response = await fetch("/api/compilations", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `My Compilation ${new Date().toLocaleDateString()}`,
-          schema_type: "custom",
-          items: basketItems.map((item, index) => ({ node_id: item.node_id, order: index + 1 })),
-          metadata: { source: "scriptures-page-basket" },
-          status: "draft",
-          is_public: false,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string; id?: number } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to save compilation");
-      }
-      setBasketMessage(payload?.id ? `Compilation #${payload.id} created` : "Compilation created");
-      setBasketItems([]);
-    } catch (err) {
-      setBasketMessage(err instanceof Error ? err.message : "Failed to save compilation");
-    } finally {
-      setSavingCompilation(false);
-      setTimeout(() => setBasketMessage(null), 2500);
     }
   };
 
@@ -1632,45 +1601,7 @@ function ScripturesContent() {
                       </div>
                     )}
 
-                    <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                          Basket ({basketItems.length})
-                        </div>
-                        <button
-                          type="button"
-                          onClick={saveBasketAsCompilation}
-                          disabled={!basketItems.length || savingCompilation || !authEmail}
-                          className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-emerald-700 transition disabled:opacity-50"
-                        >
-                          {savingCompilation ? "Saving..." : "Save compilation"}
-                        </button>
-                      </div>
-                      <div className="mt-3 flex flex-col gap-2">
-                        {basketItems.length === 0 && (
-                          <p className="text-sm text-zinc-500">No items added yet.</p>
-                        )}
-                        {basketItems.map((item) => (
-                          <div
-                            key={item.node_id}
-                            className="flex items-center justify-between rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm"
-                          >
-                            <span className="text-zinc-700">{item.label}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeFromBasket(item.node_id)}
-                              className="text-xs text-zinc-500 transition hover:text-[color:var(--accent)]"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      {basketMessage && <p className="mt-2 text-xs text-zinc-600">{basketMessage}</p>}
-                      {!authEmail && (
-                        <p className="mt-2 text-xs text-zinc-500">Log in to save basket as a compilation.</p>
-                      )}
-                    </div>
+
 
                     {/* Titles (hide for verses) */}
                     {!nodeContent.has_content && (
@@ -2146,6 +2077,25 @@ function ScripturesContent() {
           </div>
         )}
       </main>
+
+      {/* Floating Basket Panel */}
+      <BasketPanel
+        items={basketItems.map(item => ({
+          node_id: item.node_id,
+          order: item.order,
+          title: item.label,
+          book_name: item.book_name,
+          level_name: item.level_name,
+        }))}
+        onRemoveItem={removeFromBasket}
+        onClearBasket={clearBasket}
+        onItemsAdded={() => {
+          // Optionally refresh the tree if needed
+          if (bookId) {
+            loadTreeData(parseInt(bookId, 10));
+          }
+        }}
+      />
     </div>
   );
 }
