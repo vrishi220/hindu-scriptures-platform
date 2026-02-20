@@ -265,7 +265,7 @@ class TestBookCreationValidation:
 
 
 class TestBookPrivacyAndPublishToggle:
-    def test_private_draft_visible_only_to_owner_until_published(self, client):
+    def test_private_draft_readable_but_not_publishable_by_non_owner(self, client):
         headers_owner = _register_and_login(client)
         headers_other = _register_and_login(client)
 
@@ -299,10 +299,14 @@ class TestBookPrivacyAndPublishToggle:
 
         list_other_before = client.get("/api/content/books", headers=headers_other)
         assert list_other_before.status_code == status.HTTP_200_OK
-        assert all(item["id"] != book_id for item in list_other_before.json())
+        assert any(item["id"] == book_id for item in list_other_before.json())
 
         get_other_before = client.get(f"/api/content/books/{book_id}", headers=headers_other)
-        assert get_other_before.status_code == status.HTTP_404_NOT_FOUND
+        assert get_other_before.status_code == status.HTTP_200_OK
+
+        list_anon_before = client.get("/api/content/books")
+        assert list_anon_before.status_code == status.HTTP_200_OK
+        assert any(item["id"] == book_id for item in list_anon_before.json())
 
         unauthorized_publish = client.patch(
             f"/api/content/books/{book_id}",
@@ -372,7 +376,7 @@ class TestBookSharesPhase2:
         book_id = book_response.json()["id"]
 
         pre_share_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
-        assert pre_share_view.status_code == status.HTTP_404_NOT_FOUND
+        assert pre_share_view.status_code == status.HTTP_200_OK
 
         share_viewer_response = client.post(
             f"/api/content/books/{book_id}/shares",
@@ -436,7 +440,7 @@ class TestBookSharesPhase2:
         assert delete_share_response.status_code == status.HTTP_200_OK
 
         post_delete_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
-        assert post_delete_view.status_code == status.HTTP_404_NOT_FOUND
+        assert post_delete_view.status_code == status.HTTP_200_OK
 
 
 class TestHierarchyInsertionRegression:

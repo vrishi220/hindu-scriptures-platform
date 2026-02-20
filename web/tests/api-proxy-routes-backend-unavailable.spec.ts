@@ -45,4 +45,19 @@ test.describe('API proxy routes backend unavailable', () => {
 
     await freshContext.dispose();
   });
+
+  test('books route returns structured 503', async ({ playwright }) => {
+    const freshContext = await playwright.request.newContext({
+      baseURL: 'http://localhost:3000',
+    });
+
+    const booksResponse = await freshContext.get('/api/books');
+    expect(booksResponse.status()).toBe(503);
+    const booksBody = (await booksResponse.json()) as { detail?: string };
+    expect(booksBody.detail).toBe(
+      'Content service unavailable. Please start the API server and try again.'
+    );
+
+    await freshContext.dispose();
+  });
 });
