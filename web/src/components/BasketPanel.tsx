@@ -302,10 +302,26 @@ export default function BasketPanel({
         };
 
         if (insertMode === "reference") {
+          const nodeResponse = await fetch(`/api/nodes/${node.node_id}`, {
+            credentials: "include",
+          });
+
+          if (!nodeResponse.ok) {
+            const details = await nodeResponse.text().catch(() => "");
+            throw new Error(
+              `Failed to load source node ${node.node_id}${details ? `: ${details}` : ""}`
+            );
+          }
+
+          const originalNode = await nodeResponse.json();
           createPayload = {
             ...createPayload,
             referenced_node_id: node.node_id,
-            title_english: node.title || null,
+            title_sanskrit: originalNode.title_sanskrit,
+            title_transliteration: originalNode.title_transliteration,
+            title_english: originalNode.title_english,
+            title_hindi: originalNode.title_hindi,
+            title_tamil: originalNode.title_tamil,
             has_content: false,
             content_data: {},
             summary_data: {},
