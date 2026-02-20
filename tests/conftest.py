@@ -27,15 +27,23 @@ def bootstrap_phase1_schema():
         print(f"Warning: Failed to bootstrap Phase 1 schema: {e}")
         # Try manually creating the tables if bootstrap fails
         try:
-            db = SessionLocal()
+            from sqlalchemy import create_engine, MetaData
+            from models.database import Base
+            
+            # Create a fresh engine with the test database URL
+            test_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+            
             # Check if tables exist
-            result = db.execute(text("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='user_preferences');"))
-            if not result.scalar():
-                print("Creating user_preferences table manually...")
-                from sqlalchemy import MetaData
-                from models.database import Base, engine
-                Base.metadata.create_all(bind=engine)
-            db.close()
+            with test_engine.connect() as conn:
+                result = conn.execute(text("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='user_preferences');"))
+                table_exists = result.scalar()
+            
+            if not table_exists:
+                print("Creating schema tables manually...")
+                Base.metadata.create_all(bind=test_engine)
+                print("Schema tables created successfully")
+            
+            test_engine.dispose()
         except Exception as e2:
             print(f"Warning: Failed to create tables manually: {e2}")
 
