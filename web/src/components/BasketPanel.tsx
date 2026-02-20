@@ -75,6 +75,7 @@ export default function BasketPanel({
   const [bookTree, setBookTree] = useState<BookTreeNode[]>([]);
   const [selectedParentNodeId, setSelectedParentNodeId] = useState<number | null>(null);
   const [selectedParentLevel, setSelectedParentLevel] = useState<string>("");
+  const [selectedNodeInfo, setSelectedNodeInfo] = useState<{ id: number; level: string; parentId: number | null; isLeaf: boolean } | null>(null);
 
   const loadSchemas = async () => {
     try {
@@ -956,11 +957,13 @@ export default function BasketPanel({
                           node={node}
                           depth={0}
                           schemaLevels={targetSchemaLevels}
-                          selectedParentNodeId={selectedParentNodeId}
-                          onSelect={(nodeId, level) => {
-                            setSelectedParentNodeId(nodeId);
+                          selectedNodeInfo={selectedNodeInfo}
+                          onSelect={(nodeId, level, parentId, isLeaf) => {
+                            setSelectedNodeInfo({ id: nodeId, level, parentId, isLeaf });
+                            setSelectedParentNodeId(parentId);
                             setSelectedParentLevel(level);
                           }}
+                          parentNodeId={null}
                         />
                       ))}
                     </div>
@@ -1003,10 +1006,15 @@ export default function BasketPanel({
                         Will be added as:
                       </h4>
                       <p className="text-xs text-emerald-700">
-                        <strong>Children of:</strong> {selectedParentLevel}
+                        <strong>Insertion type:</strong> {selectedNodeInfo?.isLeaf ? "Siblings" : "Children"}
                       </p>
-                      <p className="mt-2 text-xs text-emerald-700">
-                        <strong>Item level:</strong> {targetSchemaLevels[targetSchemaLevels.length - 1]}
+                      <p className="text-xs text-emerald-700">
+                        <strong>Parent:</strong> {selectedNodeInfo?.level || selectedParentLevel}
+                      </p>
+                      <p className="mt-2 text-xs text-emerald-600 italic">
+                        {selectedNodeInfo?.isLeaf 
+                          ? `Items will be added as siblings to the selected ${selectedNodeInfo?.level} node`
+                          : `Items will be added as children of the selected ${selectedNodeInfo?.level?.split(" ")[0]} node`}
                       </p>
                     </div>
                   )}
@@ -1030,6 +1038,7 @@ export default function BasketPanel({
                     setShowOrganizer(false);
                     setSelectedParentNodeId(null);
                     setSelectedParentLevel("");
+                    setSelectedNodeInfo(null);
                   }}
                   disabled={loading}
                   className="rounded-lg border border-black/10 bg-white px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20 disabled:opacity-50"
@@ -1146,33 +1155,45 @@ function BookTreeNodeItem({
   node,
   depth,
   schemaLevels,
-  selectedParentNodeId,
+  selectedNodeInfo,
   onSelect,
+  parentNodeId,
 }: {
   node: BookTreeNode;
   depth: number;
   schemaLevels: string[];
-  selectedParentNodeId: number | null;
-  onSelect: (nodeId: number, level: string) => void;
+  selectedNodeInfo: { id: number; level: string; parentId: number | null; isLeaf: boolean } | null;
+  onSelect: (nodeId: number, level: string, parentId: number | null, isLeaf: boolean) => void;
+  parentNodeId: number | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
 
   // Check if this node can have children (not at leaf level)
   const canHaveChildren = schemaLevels.indexOf(node.level_name) < schemaLevels.length - 1;
-  const isSelected = selectedParentNodeId === node.id;
+  const isLeafLevel = schemaLevels.indexOf(node.level_name) === schemaLevels.length - 1;
+  const isSelected = selectedNodeInfo?.id === node.id;
+
+  // Can select this node if it can have children, OR if it's a leaf node (to add as siblings)
+  const isSelectable = canHaveChildren || isLeafLevel;
 
   return (
     <div style={{ marginLeft: `${depth * 16}px` }}>
       <div
         onClick={() => {
-          if (canHaveChildren) {
-            onSelect(node.id, node.level_name);
+          if (isSelectable) {
+            // If leaf node, use its parent as insertion parent (siblings)
+            // If non-leaf node, use itself as insertion parent (children)
+            const insertionParentId = isLeafLevel ? parentNodeId : node.id;
+            const insertionLevel = isLeafLevel 
+              ? node.level_name  // siblings at same level
+              : schemaLevels[schemaLevels.indexOf(node.level_name) + 1]; // children at next level
+            onSelect(node.id, insertionLevel, insertionParentId, isLeafLevel);
           }
         }}
         className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
           isSelected
             ? "border-emerald-500 bg-emerald-50"
-            : canHaveChildren
+            : isSelectable
             ? "border-black/10 bg-white hover:border-emerald-300 hover:bg-emerald-50/50"
             : "border-black/10 bg-gray-50 cursor-not-allowed text-zinc-500"
         }`}
@@ -1194,7 +1215,7 @@ function BookTreeNodeItem({
           </div>
           <div className="text-xs text-zinc-500">
             {node.level_name}
-            {!canHaveChildren && " (leaf level - cannot add)"}
+            {isLeafLevel && " (add as siblings)"}
           </div>
         </div>
         {isSelected && <span className="text-emerald-600 font-bold">✓</span>}
@@ -1207,8 +1228,9 @@ function BookTreeNodeItem({
               node={child}
               depth={depth + 1}
               schemaLevels={schemaLevels}
-              selectedParentNodeId={selectedParentNodeId}
+              selectedNodeInfo={selectedNodeInfo}
               onSelect={onSelect}
+              parentNodeId={node.id}
             />
           ))}
         </div>
