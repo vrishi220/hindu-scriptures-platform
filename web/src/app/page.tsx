@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ShoppingBasket } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import BasketPanel from "../components/BasketPanel";
 
@@ -80,6 +81,8 @@ function HomeContent() {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
+  const treeCacheRef = useRef<Map<string, TreeNode[]>>(new Map());
+  const [cachedTreeBooks, setCachedTreeBooks] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<{
     books_count: number;
     nodes_count: number;
@@ -391,6 +394,12 @@ function HomeContent() {
       setTreeError(null);
       return;
     }
+    // Check cache first
+    if (treeCacheRef.current.has(selectedId)) {
+      setTreeData(treeCacheRef.current.get(selectedId) || []);
+      setTreeError(null);
+      return;
+    }
     setTreeLoading(true);
     setTreeError(null);
     try {
@@ -404,11 +413,46 @@ function HomeContent() {
         throw new Error(payload?.detail || "Tree fetch failed");
       }
       const data = (await response.json()) as TreeNode[];
+      // Cache the tree data
+      treeCacheRef.current.set(selectedId, data);
+      setCachedTreeBooks(prev => new Set([...prev, selectedId]));
       setTreeData(data);
     } catch (err) {
       setTreeError(err instanceof Error ? err.message : "Tree fetch failed");
     } finally {
       setTreeLoading(false);
+    }
+  };
+
+  const getTreeForBook = (bookIdStr: string): TreeNode[] => {
+    return treeCacheRef.current.get(bookIdStr) || [];
+  };
+
+  const loadTreeForBooksInResults = async (resultsList: SearchResult[]) => {
+    if (!resultsList || resultsList.length === 0) return;
+    
+    // Get unique book IDs from results
+    const uniqueBookIds = new Set<string>();
+    resultsList.forEach(result => {
+      uniqueBookIds.add(result.node.book_id.toString());
+    });
+
+    // Load trees for any books we don't have cached yet
+    for (const bookIdStr of uniqueBookIds) {
+      if (!treeCacheRef.current.has(bookIdStr)) {
+        try {
+          const response = await fetch(`/api/books/${bookIdStr}/tree`, {
+            credentials: "include",
+          });
+          if (response.ok) {
+            const data = (await response.json()) as TreeNode[];
+            treeCacheRef.current.set(bookIdStr, data);
+            setCachedTreeBooks(prev => new Set([...prev, bookIdStr]));
+          }
+        } catch (err) {
+          console.error(`Failed to load tree for book ${bookIdStr}:`, err);
+        }
+      }
     }
   };
 
@@ -772,9 +816,10 @@ function HomeContent() {
                                     result.node.level_name
                                   );
                                 }}
-                                className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100"
+                                title="Add to basket"
+                                className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-2 py-2 text-emerald-700 transition hover:bg-emerald-100"
                               >
-                                + Basket
+                                <ShoppingBasket size={16} />
                               </button>
                               <a
                                 href={destinationUrl}
