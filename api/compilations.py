@@ -66,20 +66,27 @@ def create_compilation(
     db: Session = Depends(get_db),
 ):
     """Create new compilation from basket items"""
-    compilation = Compilation(
-        creator_id=current_user.id,
-        title=payload.title,
-        description=payload.description,
-        schema_type=payload.schema_type,
-        items=payload.items,  # [{node_id, order}, ...]
-        compilation_metadata=payload.metadata,
-        status=payload.status or "draft",
-        is_public=payload.is_public or False,
-    )
-    db.add(compilation)
-    db.commit()
-    db.refresh(compilation)
-    return CompilationPublic.model_validate(compilation)
+    try:
+        compilation = Compilation(
+            creator_id=current_user.id,
+            title=payload.title,
+            description=payload.description,
+            schema_type=payload.schema_type,
+            items=payload.items,  # [{node_id, order}, ...]
+            compilation_metadata=payload.metadata,
+            status=payload.status or "draft",
+            is_public=payload.is_public or False,
+        )
+        db.add(compilation)
+        db.commit()
+        db.refresh(compilation)
+        return CompilationPublic.model_validate(compilation)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create compilation: {str(e)}"
+        )
 
 
 @router.get("/{compilation_id}", response_model=CompilationPublic)
