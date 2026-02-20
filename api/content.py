@@ -867,6 +867,7 @@ def create_node(
     node = ContentNode(
         book_id=payload.book_id,
         parent_node_id=payload.parent_node_id,
+        referenced_node_id=payload.referenced_node_id,
         level_name=payload.level_name,
         level_order=payload.level_order,
         sequence_number=sequence_number,
