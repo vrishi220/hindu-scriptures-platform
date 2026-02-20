@@ -383,6 +383,46 @@ export default function ExplorerPage() {
     return count;
   };
 
+  const buildNodePathExplorer = (nodeId: number, nodes: ContentNode[]): ContentNode[] => {
+    const buildFullPath = (id: number, nodeList: ContentNode[], currentPath: ContentNode[] = []): ContentNode[] | null => {
+      for (const node of nodeList) {
+        if (node.id === id) {
+          return [...currentPath, node];
+        }
+        if (node.children) {
+          const result = buildFullPath(id, node.children, [...currentPath, node]);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+
+    const fullPath = buildFullPath(nodeId, nodes);
+    return fullPath || [];
+  };
+
+  const renderBreadcrumbExplorer = (resultNode: ContentNode) => {
+    const pathNodes = buildNodePathExplorer(resultNode.id, tree);
+
+    return (
+      <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+        {pathNodes.length > 0 ? (
+          pathNodes.map((node, idx) => (
+            <div key={`${node.id}-crumb`} className="flex items-center gap-1.5">
+              <span className="text-zinc-500 font-medium">
+                {node.title_english || node.title_sanskrit || node.title_hindi || node.title_transliteration || node.title_tamil || `${node.level_name} ${node.sequence_number || ''}`}
+              </span>
+              {idx < pathNodes.length - 1 && <span className="text-zinc-400">/</span>}
+            </div>
+          ))
+        ) : (
+          <span className="text-zinc-400 italic">Path unavailable</span>
+        )}
+      </div>
+    );
+  };
+
+
   const getNodeText = (node: ContentNode): string => {
     if (!node.content_data) return "";
     const data = node.content_data;
@@ -758,6 +798,7 @@ export default function ExplorerPage() {
                         key={`${node.id}-${idx}`}
                         className="rounded-xl border border-black/10 bg-white/90 p-4"
                       >
+                        {renderBreadcrumbExplorer(node)}
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <h4 className="font-semibold text-[color:var(--deep)]">

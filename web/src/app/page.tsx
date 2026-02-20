@@ -429,6 +429,69 @@ function HomeContent() {
     return "";
   };
 
+  // Helper function to build breadcrumb path for a node from tree
+  const buildNodePath = (nodeId: number, nodes: TreeNode[]): TreeNode[] => {
+    const path: TreeNode[] = [];
+    
+    const findNode = (id: number, nodeList: TreeNode[]): TreeNode | null => {
+      for (const node of nodeList) {
+        if (node.id === id) return node;
+        if (node.children) {
+          const found = findNode(id, node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    // Build path from root to target node
+    const buildFullPath = (id: number, nodeList: TreeNode[], currentPath: TreeNode[] = []): TreeNode[] | null => {
+      for (const node of nodeList) {
+        if (node.id === id) {
+          return [...currentPath, node];
+        }
+        if (node.children) {
+          const result = buildFullPath(id, node.children, [...currentPath, node]);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+
+    const fullPath = buildFullPath(nodeId, nodes);
+    return fullPath || [];
+  };
+
+  const renderBreadcrumb = (result: SearchResult, bookName?: string) => {
+    const bookBookId = result.node.book_id;
+    const currentBook = books.find(b => b.id === bookBookId);
+    const treeForBook = treeData; // Use the currently loaded tree
+
+    let pathNodes: TreeNode[] = [];
+    if (treeForBook.length > 0 && bookBookId === parseInt(bookId)) {
+      pathNodes = buildNodePath(result.node.id, treeForBook);
+    }
+
+    return (
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+        <span className="font-medium">{bookName || currentBook?.book_name || "Book"}</span>
+        {pathNodes.length > 0 && (
+          <>
+            <span className="text-zinc-400">/</span>
+            {pathNodes.map((node, idx) => (
+              <div key={`${node.id}-crumb`} className="flex items-center gap-1.5">
+                <span className="text-zinc-500">
+                  {node.title_english || node.title_sanskrit || node.title_transliteration || `${node.level_name} ${node.sequence_number || ''}`}
+                </span>
+                {idx < pathNodes.length - 1 && <span className="text-zinc-400">/</span>}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderTree = (nodes: TreeNode[], depth = 0) => {
     return nodes.map((node) => (
       <div key={node.id} className="mt-2">
@@ -672,12 +735,14 @@ function HomeContent() {
                         if (hasContent) searchContext.set("has_content", "true");
                         
                         const destinationUrl = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&from=search&searchContext=${encodeURIComponent(searchContext.toString())}`;
+                        const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
                         
                         return (
                         <div
                           key={result.node.id}
                           className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
                         >
+                          {renderBreadcrumb(result, bookName)}
                           <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                             <span>{result.node.level_name}</span>
                             {result.node.sequence_number !== null &&
