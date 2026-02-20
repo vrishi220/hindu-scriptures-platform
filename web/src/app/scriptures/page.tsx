@@ -390,7 +390,7 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setNodeContent(null);
     }
-  }, [bookId, urlInitialized, searchParams.get("node"), selectedId, nodeContent?.id]);
+  }, [bookId, urlInitialized, searchParams.get("node"), treeData]);
 
   useEffect(() => {
     const loadBooks = async () => {
@@ -514,7 +514,7 @@ function ScripturesContent() {
   };
 
   const loadNodeContent = async (nodeId: number, force = false) => {
-    if (!force && contentLoading && activeContentNodeId.current === nodeId) return;
+    if (!force && activeContentNodeId.current === nodeId) return;
     if (!force && !contentLoading && nodeContent?.id === nodeId) return;
 
     activeContentAbortController.current?.abort();

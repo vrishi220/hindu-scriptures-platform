@@ -39,8 +39,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Load schema
         run: psql "$PSQL_URL" -f schema.sql
-      - name: Run backend sanity tests
-        run: pytest tests/test_backend_sanity.py -v
+      - name: Run backend sanity + integration tests
+        run: pytest tests/test_backend_sanity.py tests/test_phase1_backend_integration.py -v
 
   frontend:
     runs-on: ubuntu-latest

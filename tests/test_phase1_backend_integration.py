@@ -1,8 +1,17 @@
 """Strict integration tests for Phase 1 backend APIs."""
 
 from uuid import uuid4
+from types import SimpleNamespace
 
+from api.content import create_node
+from fastapi import HTTPException
 from fastapi import status
+from models.book import Book
+from models.content_node import ContentNode
+from models.database import SessionLocal
+from models.schemas import ContentNodeCreate
+from models.scripture_schema import ScriptureSchema
+import pytest
 
 
 def _register_and_login(client):
@@ -90,3 +99,156 @@ class TestPhase1CompilationsIntegration:
         assert public_response.status_code == status.HTTP_200_OK
         public_ids = [item["id"] for item in public_response.json()]
         assert compilation_id in public_ids
+
+
+class TestHierarchyInsertionRegression:
+    def test_schema_hierarchy_rules_and_tree_payload(self, client):
+        suffix = uuid4().hex[:8]
+        db = SessionLocal()
+        try:
+            test_user = SimpleNamespace(id=1)
+
+            schema = ScriptureSchema(
+                name=f"Ramayana Regression {suffix}",
+                description="Regression schema for hierarchy validation",
+                levels=["Kanda", "Sarga", "Shloka"],
+            )
+            db.add(schema)
+            db.commit()
+            db.refresh(schema)
+
+            book = Book(
+                schema_id=schema.id,
+                book_name=f"Ramayana Test {suffix}",
+                book_code=f"ram-reg-{suffix}",
+                language_primary="sanskrit",
+                metadata_json={},
+            )
+            db.add(book)
+            db.commit()
+            db.refresh(book)
+
+            kanda = ContentNode(
+                book_id=book.id,
+                parent_node_id=None,
+                level_name="Kanda",
+                level_order=1,
+                sequence_number=1,
+                title_english="Bala Kanda",
+                has_content=False,
+                created_by=test_user.id,
+                last_modified_by=test_user.id,
+            )
+            db.add(kanda)
+            db.commit()
+            db.refresh(kanda)
+            kanda_id = kanda.id
+
+            with pytest.raises(HTTPException) as invalid_root_exc:
+                create_node(
+                    payload=ContentNodeCreate(
+                        book_id=book.id,
+                        parent_node_id=None,
+                        level_name="Sarga",
+                        level_order=2,
+                        sequence_number="1",
+                        title_english="Invalid Root Sarga",
+                        has_content=False,
+                    ),
+                    db=db,
+                    current_user=test_user,
+                )
+            assert invalid_root_exc.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Root level items must be at" in invalid_root_exc.value.detail
+
+            with pytest.raises(HTTPException) as invalid_nonleaf_content_exc:
+                create_node(
+                    payload=ContentNodeCreate(
+                        book_id=book.id,
+                        parent_node_id=kanda_id,
+                        level_name="Sarga",
+                        level_order=2,
+                        sequence_number="1",
+                        title_english="Sarga with content should fail",
+                        has_content=True,
+                        content_data={"basic": {"translation": "invalid"}},
+                    ),
+                    db=db,
+                    current_user=test_user,
+                )
+            assert invalid_nonleaf_content_exc.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Content items can only be placed" in invalid_nonleaf_content_exc.value.detail
+
+            with pytest.raises(HTTPException) as invalid_direct_leaf_exc:
+                create_node(
+                    payload=ContentNodeCreate(
+                        book_id=book.id,
+                        parent_node_id=kanda_id,
+                        level_name="Shloka",
+                        level_order=3,
+                        sequence_number="1",
+                        title_english="Invalid direct Shloka",
+                        has_content=True,
+                        content_data={"basic": {"translation": "invalid"}},
+                    ),
+                    db=db,
+                    current_user=test_user,
+                )
+            assert invalid_direct_leaf_exc.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Expected child level" in invalid_direct_leaf_exc.value.detail
+
+            sarga = ContentNode(
+                book_id=book.id,
+                parent_node_id=kanda_id,
+                level_name="Sarga",
+                level_order=2,
+                sequence_number=1,
+                title_english="Sarga 1",
+                has_content=False,
+                created_by=test_user.id,
+                last_modified_by=test_user.id,
+            )
+            db.add(sarga)
+            db.commit()
+            db.refresh(sarga)
+            sarga_id = sarga.id
+
+            shloka = ContentNode(
+                book_id=book.id,
+                parent_node_id=sarga_id,
+                level_name="Shloka",
+                level_order=3,
+                sequence_number=1,
+                title_english="Shloka 1",
+                has_content=True,
+                content_data={"basic": {"translation": "valid"}},
+                created_by=test_user.id,
+                last_modified_by=test_user.id,
+            )
+            db.add(shloka)
+            db.commit()
+            db.refresh(shloka)
+            shloka_id = shloka.id
+
+            with pytest.raises(HTTPException) as invalid_child_of_leaf_exc:
+                create_node(
+                    payload=ContentNodeCreate(
+                        book_id=book.id,
+                        parent_node_id=shloka_id,
+                        level_name="Shloka",
+                        level_order=3,
+                        sequence_number="2",
+                        title_english="Invalid child of leaf",
+                        has_content=True,
+                        content_data={"basic": {"translation": "invalid"}},
+                    ),
+                    db=db,
+                    current_user=test_user,
+                )
+            assert invalid_child_of_leaf_exc.value.status_code == status.HTTP_400_BAD_REQUEST
+            assert "Cannot add children" in invalid_child_of_leaf_exc.value.detail
+
+            persisted_nodes = db.query(ContentNode).filter(ContentNode.book_id == book.id).all()
+            assert len(persisted_nodes) == 3
+        finally:
+            db.close()
