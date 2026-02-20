@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS user_preferences (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_language VARCHAR(10) NOT NULL DEFAULT 'en',
+  transliteration_enabled BOOLEAN NOT NULL DEFAULT true,
+  transliteration_script VARCHAR(50) NOT NULL DEFAULT 'devanagari',
+  show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)
+);
+
 -- Scripture schema templates
 CREATE TABLE IF NOT EXISTS scripture_schemas (
   id SERIAL PRIMARY KEY,
