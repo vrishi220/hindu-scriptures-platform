@@ -107,6 +107,18 @@ export default function NavBar() {
           >
             Scriptures
           </a>
+          {authEmail && (
+            <a
+              href="/compilations"
+              className={`hover:text-[color:var(--accent)] ${
+                isActive("/compilations")
+                  ? "font-semibold text-[color:var(--deep)]"
+                  : ""
+              }`}
+            >
+              Compilations
+            </a>
+          )}
           <a
             href="/explorer"
             className={`hover:text-[color:var(--accent)] ${
@@ -188,6 +200,19 @@ export default function NavBar() {
             >
               Scriptures
             </a>
+            {authEmail && (
+              <a
+                href="/compilations"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                  isActive("/compilations")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : "text-zinc-600 hover:text-[color:var(--accent)]"
+                }`}
+              >
+                Compilations
+              </a>
+            )}
             <a
               href="/explorer"
               onClick={() => setMobileMenuOpen(false)}
