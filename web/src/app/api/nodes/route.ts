@@ -1,8 +1,11 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.API_BASE_URL || "http://localhost:8000/api";
+const RAW_API_BASE_URL =
+  process.env.API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
+const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "").replace(/\/api$/, "");
 
 async function buildAuthHeader(): Promise<string | null> {
   const cookieStore = await cookies();
@@ -16,7 +19,7 @@ async function refreshAccessToken(): Promise<string | null> {
   if (!refreshToken) return null;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -53,7 +56,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    const response = await fetch(`${API_BASE_URL}/nodes`, {
+    const response = await fetch(`${API_BASE_URL}/api/content/nodes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -67,7 +70,7 @@ export async function POST(request: Request) {
       const newToken = await refreshAccessToken();
       if (newToken) {
         authHeader = `Bearer ${newToken}`;
-        const retryResponse = await fetch(`${API_BASE_URL}/nodes`, {
+        const retryResponse = await fetch(`${API_BASE_URL}/api/content/nodes`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
