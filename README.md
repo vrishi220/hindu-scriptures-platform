@@ -309,6 +309,24 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ### Common Tasks
 
+**Secure Prod → Local Import:**
+```bash
+# 1) Set one-time prod URL in current shell (do not commit to files)
+export PROD_DATABASE_URL='postgresql://<user>:<password>@<host>:<port>/<db>?sslmode=require'
+
+# 2) Optional: override local target DB
+export LOCAL_DATABASE_URL='postgresql://localhost/scriptures_db'
+
+# 3) Run safe import (creates local pre-import backup first)
+./scripts/import_prod_to_local.sh
+```
+
+Notes:
+- Uses `PROD_DATABASE_URL` from environment only (safer than inline command history).
+- Creates timestamped dumps in `backups/` before restore.
+- If prod is PostgreSQL 17, ensure client tools are available:
+  `brew install postgresql@17`
+
 **Add Migration:**
 ```bash
 cat > migrations/add_feature.sql << 'EOF'
