@@ -4,11 +4,5 @@
   "framework": "nextjs",
   "public": true,
   "outputDirectory": ".next",
-  "cleanUrls": true,
-  "redirects": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://hindu-scriptures-api-production.up.railway.app/api/:path*"
-    }
-  ]
+  "cleanUrls": true
 }
