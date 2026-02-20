@@ -37,6 +37,54 @@ def _register_and_login(client):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _register_user(client):
+    suffix = uuid4().hex[:8]
+    email = f"phase1_reset_{suffix}@example.com"
+    password = "StrongPass123"
+
+    register_payload = {
+        "email": email,
+        "password": password,
+        "username": f"phase1_reset_{suffix}",
+        "full_name": "Phase1 Reset Test User",
+    }
+    register_response = client.post("/api/auth/register", json=register_payload)
+    assert register_response.status_code == status.HTTP_201_CREATED
+    return email, password
+
+
+class TestPasswordResetIntegration:
+    def test_forgot_and_reset_password_flow(self, client):
+        email, old_password = _register_user(client)
+
+        forgot_response = client.post("/api/auth/forgot-password", json={"email": email})
+        assert forgot_response.status_code == status.HTTP_200_OK
+        forgot_payload = forgot_response.json()
+        assert "message" in forgot_payload
+        assert forgot_payload.get("reset_token")
+
+        reset_response = client.post(
+            "/api/auth/reset-password",
+            json={
+                "token": forgot_payload["reset_token"],
+                "new_password": "NewStrongPass456",
+            },
+        )
+        assert reset_response.status_code == status.HTTP_200_OK
+
+        old_login_response = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": old_password},
+        )
+        assert old_login_response.status_code == status.HTTP_401_UNAUTHORIZED
+
+        new_login_response = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "NewStrongPass456"},
+        )
+        assert new_login_response.status_code == status.HTTP_200_OK
+
+
 class TestPhase1PreferencesIntegration:
     def test_get_and_update_preferences_authenticated(self, client):
         headers = _register_and_login(client)

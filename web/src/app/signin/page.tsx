@@ -95,6 +95,13 @@ export default function SignInPage() {
             >
               Sign In
             </button>
+
+            <a
+              href="/forgot-password"
+              className="text-center text-sm font-medium text-[color:var(--accent)] hover:underline"
+            >
+              Forgot password?
+            </a>
           </form>
 
           <div className="mt-6 border-t border-black/10 pt-4">

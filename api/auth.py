@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 
 from api.users import get_current_user
 from models.schemas import (
+    ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LogoutRequest,
     MessageResponse,
+    ResetPasswordRequest,
     RefreshRequest,
     TokenResponse,
     UserCreate,
@@ -19,11 +22,14 @@ from models.session import UserSession
 from models.user import User
 from services import (
     create_access_token,
+    create_password_reset_token,
     create_refresh_token,
     decode_token,
     get_db,
     get_token_subject,
     hash_password,
+    password_hash_signature,
+    verify_password_reset_token,
     verify_password,
 )
 
@@ -35,6 +41,15 @@ COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN")
 COOKIE_PATH = os.getenv("COOKIE_PATH", "/")
+
+
+def include_reset_token_in_response() -> bool:
+    explicit_value = os.getenv("INCLUDE_RESET_TOKEN_IN_RESPONSE")
+    if explicit_value is not None:
+        return explicit_value.lower() == "true"
+
+    app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
+    return app_env != "production"
 
 DEFAULT_PERMISSIONS = {
     "can_view": True,
@@ -228,3 +243,67 @@ def logout_all(
     db.commit()
     clear_auth_cookies(response)
     return MessageResponse(message="Logged out all sessions")
+
+
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+) -> ForgotPasswordResponse:
+    user = db.query(User).filter(User.email == payload.email).first()
+    reset_token: str | None = None
+
+    if user and user.password_hash and user.is_active:
+        reset_token = create_password_reset_token(user.id, user.password_hash)
+
+    if include_reset_token_in_response():
+        return ForgotPasswordResponse(
+            message="If an account exists for that email, a reset link has been generated.",
+            reset_token=reset_token,
+        )
+
+    return ForgotPasswordResponse(
+        message="If an account exists for that email, a reset link has been generated."
+    )
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    try:
+        token_payload = verify_password_reset_token(payload.token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user_id = token_payload.get("sub")
+    token_pwd_signature = token_payload.get("pwd")
+    if not user_id or not token_pwd_signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if not user or not user.is_active or not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    current_signature = password_hash_signature(user.password_hash)
+    if current_signature != token_pwd_signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete(synchronize_session=False)
+    db.commit()
+
+    return MessageResponse(message="Password reset successful")
