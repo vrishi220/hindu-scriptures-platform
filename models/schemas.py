@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -116,6 +117,8 @@ class BookBase(BaseModel):
     book_code: str | None = None
     language_primary: str = "sanskrit"
     metadata: dict | None = Field(default=None, alias="metadata_json")
+    status: Literal["draft", "published"] = "draft"
+    visibility: Literal["private", "public"] = "private"
 
 
 class BookCreate(BookBase):
@@ -128,6 +131,8 @@ class BookUpdate(BaseModel):
     book_code: str | None = None
     language_primary: str | None = None
     metadata: dict | None = None
+    status: Literal["draft", "published"] | None = None
+    visibility: Literal["private", "public"] | None = None
 
 
 class BookPublic(BookBase):

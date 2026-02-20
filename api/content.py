@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
 
 from api.import_parser import ExtractionRules, GenericHTMLImporter, ImportConfig
@@ -39,6 +40,10 @@ MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image"}
+BOOK_STATUS_DRAFT = "draft"
+BOOK_STATUS_PUBLISHED = "published"
+BOOK_VISIBILITY_PRIVATE = "private"
+BOOK_VISIBILITY_PUBLIC = "public"
 
 
 # Import request/response schemas
@@ -90,6 +95,67 @@ def _book_owner_id(book: Book) -> int | None:
         return int(owner_id) if owner_id is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _book_status(book: Book) -> str:
+    metadata = book.metadata_json or {}
+    if isinstance(metadata, dict):
+        status = str(metadata.get("status") or "").strip().lower()
+        if status in {BOOK_STATUS_DRAFT, BOOK_STATUS_PUBLISHED}:
+            return status
+    return BOOK_STATUS_DRAFT
+
+
+def _book_visibility(book: Book) -> str:
+    metadata = book.metadata_json or {}
+    if isinstance(metadata, dict):
+        visibility = str(metadata.get("visibility") or "").strip().lower()
+        if visibility in {BOOK_VISIBILITY_PRIVATE, BOOK_VISIBILITY_PUBLIC}:
+            return visibility
+    return BOOK_VISIBILITY_PRIVATE
+
+
+def _book_is_visible_to_user(book: Book, current_user: User | None) -> bool:
+    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
+        return True
+
+    if current_user is None:
+        return False
+
+    if _user_can_edit_any(current_user):
+        return True
+
+    return _book_owner_id(book) == current_user.id
+
+
+def _ensure_book_view_access(book: Book, current_user: User | None) -> None:
+    if _book_is_visible_to_user(book, current_user):
+        return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def _book_public_model(book: Book) -> BookPublic:
+    existing_metadata = book.metadata_json or {}
+    if not isinstance(existing_metadata, dict):
+        existing_metadata = {}
+    metadata = dict(existing_metadata)
+
+    metadata_out = dict(metadata)
+    metadata_out["status"] = _book_status(book)
+    metadata_out["visibility"] = _book_visibility(book)
+
+    payload = {
+        "id": book.id,
+        "schema_id": book.schema_id,
+        "book_name": book.book_name,
+        "book_code": book.book_code,
+        "language_primary": book.language_primary,
+        "metadata_json": metadata_out,
+        "status": metadata_out["status"],
+        "visibility": metadata_out["visibility"],
+        "schema": book.schema,
+    }
+    return BookPublic.model_validate(payload)
 
 
 def _ensure_can_contribute(current_user: User) -> None:
@@ -204,10 +270,12 @@ def delete_schema(
 @router.get("/books", response_model=list[BookPublic])
 def list_books(
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> list[BookPublic]:
-    """Public endpoint - list all books"""
+    """List public books and include private drafts only for owners."""
     books = db.query(Book).order_by(Book.id).all()
-    return [BookPublic.model_validate(item) for item in books]
+    visible_books = [book for book in books if _book_is_visible_to_user(book, current_user)]
+    return [_book_public_model(item) for item in visible_books]
 
 
 @router.post("/books", response_model=BookPublic, status_code=status.HTTP_201_CREATED)
@@ -234,6 +302,8 @@ def create_book(
     if not isinstance(metadata_json, dict):
         metadata_json = {}
     metadata_json["owner_id"] = current_user.id
+    metadata_json["status"] = BOOK_STATUS_DRAFT
+    metadata_json["visibility"] = BOOK_VISIBILITY_PRIVATE
 
     book_code = payload.book_code
     if isinstance(book_code, str) and not book_code.strip():
@@ -256,7 +326,7 @@ def create_book(
             detail="Book could not be created. Check schema and book code uniqueness.",
         )
     db.refresh(book)
-    return BookPublic.model_validate(book)
+    return _book_public_model(book)
 
 
 @router.get("/books/{book_id}", response_model=BookPublic)
@@ -265,11 +335,11 @@ def get_book(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
 ) -> BookPublic:
-    _ = current_user
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    return BookPublic.model_validate(book)
+    _ensure_book_view_access(book, current_user)
+    return _book_public_model(book)
 
 
 @router.patch("/books/{book_id}", response_model=BookPublic)
@@ -285,16 +355,58 @@ def update_book(
 
     _ensure_book_edit_access(current_user, book)
 
+    if payload.status is not None or payload.visibility is not None:
+        owner_id = _book_owner_id(book)
+        if owner_id != current_user.id and not _user_can_edit_any(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the book owner can publish or change visibility",
+            )
+
     updates = payload.model_dump(exclude_unset=True)
+    metadata = book.metadata_json or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
     for key, value in updates.items():
         if key == "metadata":
-            setattr(book, "metadata_json", value)
+            metadata = dict(value) if isinstance(value, dict) else {}
+        elif key == "status":
+            normalized_status = str(value).strip().lower() if value else ""
+            if normalized_status not in {BOOK_STATUS_DRAFT, BOOK_STATUS_PUBLISHED}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid status. Use 'draft' or 'published'",
+                )
+            metadata["status"] = normalized_status
+            if normalized_status == BOOK_STATUS_PUBLISHED:
+                metadata["visibility"] = BOOK_VISIBILITY_PUBLIC
+        elif key == "visibility":
+            normalized_visibility = str(value).strip().lower() if value else ""
+            if normalized_visibility not in {BOOK_VISIBILITY_PRIVATE, BOOK_VISIBILITY_PUBLIC}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid visibility. Use 'private' or 'public'",
+                )
+            metadata["visibility"] = normalized_visibility
+            if normalized_visibility == BOOK_VISIBILITY_PRIVATE:
+                metadata["status"] = BOOK_STATUS_DRAFT
         else:
             setattr(book, key, value)
 
+    if _book_owner_id(book) is None:
+        metadata["owner_id"] = current_user.id
+    if "status" not in metadata:
+        metadata["status"] = BOOK_STATUS_DRAFT
+    if "visibility" not in metadata:
+        metadata["visibility"] = BOOK_VISIBILITY_PRIVATE
+
+    setattr(book, "metadata_json", metadata)
+    flag_modified(book, "metadata_json")
+
     db.commit()
     db.refresh(book)
-    return BookPublic.model_validate(book)
+    return _book_public_model(book)
 
 
 @router.delete("/books/{book_id}", response_model=dict)
@@ -342,8 +454,19 @@ def get_daily_verse(
     try:
         from datetime import date
         
-        # Get all verses with content
-        verses_query = db.query(ContentNode).filter(ContentNode.has_content == True)
+        # Get all verses with content from public books only
+        public_book_ids = [
+            book.id
+            for book in db.query(Book).all()
+            if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC
+        ]
+        if not public_book_ids:
+            return None
+
+        verses_query = db.query(ContentNode).filter(
+            ContentNode.has_content == True,
+            ContentNode.book_id.in_(public_book_ids),
+        )
         
         if mode == "daily":
             # Use current date as seed for consistent daily verse
@@ -800,7 +923,6 @@ def list_nodes(
     - book_id: Filter by specific book
     - limit: Max results to return
     """
-    _ = current_user
     query = db.query(ContentNode)
     
     # Search filter
@@ -815,7 +937,20 @@ def list_nodes(
     
     # Book filter
     if book_id:
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        _ensure_book_view_access(book, current_user)
         query = query.filter(ContentNode.book_id == book_id)
+    else:
+        visible_book_ids = [
+            book.id
+            for book in db.query(Book).all()
+            if _book_is_visible_to_user(book, current_user)
+        ]
+        if not visible_book_ids:
+            return []
+        query = query.filter(ContentNode.book_id.in_(visible_book_ids))
     
     nodes = query.order_by(ContentNode.id).limit(limit).all()
     return [ContentNodePublic.model_validate(item) for item in nodes]
@@ -827,7 +962,11 @@ def list_book_tree(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
 ) -> list[ContentNodePublic]:
-    _ = current_user
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(book, current_user)
+
     nodes = (
         db.query(ContentNode)
         .filter(ContentNode.book_id == book_id)
@@ -857,7 +996,11 @@ def list_book_tree_nested(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
 ) -> list[ContentNodeTree]:
-    _ = current_user
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(book, current_user)
+
     nodes = (
         db.query(ContentNode)
         .filter(ContentNode.book_id == book_id)

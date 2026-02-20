@@ -264,6 +264,71 @@ class TestBookCreationValidation:
         assert create_response.json()["detail"] == "Invalid schema_id"
 
 
+class TestBookPrivacyAndPublishToggle:
+    def test_private_draft_visible_only_to_owner_until_published(self, client):
+        headers_owner = _register_and_login(client)
+        headers_other = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Privacy Schema {uuid4().hex[:8]}",
+                "description": "Schema for privacy test",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers_owner,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Owner Draft {uuid4().hex[:6]}",
+                "book_code": f"owner-draft-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers_owner,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        created_book = book_response.json()
+        book_id = created_book["id"]
+        assert created_book["status"] == "draft"
+        assert created_book["visibility"] == "private"
+
+        list_other_before = client.get("/api/content/books", headers=headers_other)
+        assert list_other_before.status_code == status.HTTP_200_OK
+        assert all(item["id"] != book_id for item in list_other_before.json())
+
+        get_other_before = client.get(f"/api/content/books/{book_id}", headers=headers_other)
+        assert get_other_before.status_code == status.HTTP_404_NOT_FOUND
+
+        unauthorized_publish = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=headers_other,
+        )
+        assert unauthorized_publish.status_code == status.HTTP_403_FORBIDDEN
+
+        publish_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=headers_owner,
+        )
+        assert publish_response.status_code == status.HTTP_200_OK
+        published_book = publish_response.json()
+        assert published_book["status"] == "published"
+        assert published_book["visibility"] == "public"
+
+        list_other_after = client.get("/api/content/books", headers=headers_other)
+        assert list_other_after.status_code == status.HTTP_200_OK
+        assert any(item["id"] == book_id for item in list_other_after.json())
+
+        get_other_after = client.get(f"/api/content/books/{book_id}", headers=headers_other)
+        assert get_other_after.status_code == status.HTTP_200_OK
+
+
 class TestHierarchyInsertionRegression:
     def test_schema_hierarchy_rules_and_tree_payload(self, client):
         suffix = uuid4().hex[:8]
