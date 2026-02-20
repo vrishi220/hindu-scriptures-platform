@@ -830,18 +830,15 @@ function HomeContent() {
                           </div>
                           {result.snippet ? (
                             <p
-                              className="mt-2 text-sm text-zinc-700"
+                              className="mt-1 whitespace-pre-wrap text-sm text-zinc-700"
                               dangerouslySetInnerHTML={{ __html: result.snippet }}
                             />
                           ) : (
-                            <p className="mt-2 text-sm text-zinc-700">
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">
                               {result.node.content_data?.translations?.english ||
                                 "No snippet available."}
                             </p>
                           )}
-                          <div className="mt-3 text-xs text-[color:var(--accent)] hover:underline">
-                            View details →
-                          </div>
                         </div>
                       )})}
                     </div>
