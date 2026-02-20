@@ -901,13 +901,26 @@ def get_node(
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
     if node.referenced_node_id:
-        source_node = (
-            db.query(ContentNode)
-            .filter(ContentNode.id == node.referenced_node_id)
-            .first()
-        )
-        if source_node:
+        source_node = node
+        visited_ids: set[int] = set()
+
+        while source_node.referenced_node_id:
+            if source_node.id in visited_ids:
+                break
+            visited_ids.add(source_node.id)
+
+            next_source = (
+                db.query(ContentNode)
+                .filter(ContentNode.id == source_node.referenced_node_id)
+                .first()
+            )
+            if not next_source:
+                break
+            source_node = next_source
+
+        if source_node and source_node.id != node.id:
             payload = ContentNodePublic.model_validate(node).model_dump()
             payload.update(
                 {
