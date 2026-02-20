@@ -1,4 +1,4 @@
-.PHONY: test test-backend test-frontend test-sanity test-watch test-coverage help install-deps prepush-check
+.PHONY: test test-backend test-frontend test-sanity test-watch test-coverage help install-deps prepush-check api ui
 
 # Default help target
 help:
@@ -14,6 +14,8 @@ help:
 	@echo "  make test-verbose      - Run tests with verbose output"
 	@echo "  make test-failed       - Re-run only failed tests"
 	@echo "  make prepush-check     - Run frontend production build + backend/frontend sanity tests"
+	@echo "  make api               - Start FastAPI server on http://localhost:8000"
+	@echo "  make ui                - Start Next.js frontend on http://localhost:3000"
 	@echo "  make install-deps      - Install all test dependencies"
 	@echo ""
 	@echo "Notes:"
@@ -88,6 +90,12 @@ checkpoint:
 
 prepush-check:
 	./scripts/prepush-check.sh
+
+api:
+	uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+ui:
+	npm --prefix web run dev
 
 # Clean up test artifacts
 clean:

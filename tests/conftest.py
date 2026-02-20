@@ -15,6 +15,17 @@ else:
     # For local development, use current user
     current_user = getpass.getuser()
     TEST_DATABASE_URL = f"postgresql+psycopg2://{current_user}@localhost/test_scriptures"
+
+# Safety guard: never allow tests to run against non-test databases by default.
+if (
+    "test" not in TEST_DATABASE_URL.lower()
+    and os.getenv("ALLOW_NON_TEST_DB_FOR_PYTEST") != "1"
+):
+    raise RuntimeError(
+        f"Refusing to run tests against non-test database URL: {TEST_DATABASE_URL}. "
+        "Set TEST_DATABASE_URL to a test DB (e.g. test_scriptures). "
+        "Override only if intentional with ALLOW_NON_TEST_DB_FOR_PYTEST=1."
+    )
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
 from main import app
