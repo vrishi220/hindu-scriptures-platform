@@ -34,6 +34,14 @@ type OrganizedNode = {
   sequence_number: number;
 };
 
+type BookTreeNode = {
+  id: number;
+  title: string;
+  level_name: string;
+  level_order: number;
+  children: BookTreeNode[];
+};
+
 type BasketPanelProps = {
   items: BasketItem[];
   onRemoveItem: (nodeId: number) => void;
@@ -64,6 +72,9 @@ export default function BasketPanel({
   const [organizedTree, setOrganizedTree] = useState<OrganizedNode[]>([]);
   const [targetBookId, setTargetBookId] = useState<number | null>(null);
   const [targetSchemaLevels, setTargetSchemaLevels] = useState<string[]>([]);
+  const [bookTree, setBookTree] = useState<BookTreeNode[]>([]);
+  const [selectedParentNodeId, setSelectedParentNodeId] = useState<number | null>(null);
+  const [selectedParentLevel, setSelectedParentLevel] = useState<string>("");
 
   const loadSchemas = async () => {
     try {
@@ -96,8 +107,54 @@ export default function BasketPanel({
     await Promise.all([loadSchemas(), loadBooks()]);
   };
 
-  const initializeOrganizer = (schemaLevels: string[], bookId: number) => {
-    // Initialize tree with basket items as flat list at leaf level
+  const getValidChildLevels = (parentLevel: string | null, schemaLevels: string[]): string[] => {
+    if (!parentLevel || parentLevel === "BOOK") {
+      // Root level - can only add first level
+      return schemaLevels.length > 0 ? [schemaLevels[0]] : [];
+    }
+
+    const parentIndex = schemaLevels.indexOf(parentLevel);
+    if (parentIndex >= 0 && parentIndex + 1 < schemaLevels.length) {
+      // Can only add the next level
+      return [schemaLevels[parentIndex + 1]];
+    }
+
+    // Leaf level - cannot have children
+    return [];
+  };
+
+  const canAddAtLevel = (level: string, schemaLevels: string[], itemType: "content" | "placeholder"): boolean => {
+    const levelIndex = schemaLevels.indexOf(level);
+    if (levelIndex < 0) return false;
+
+    // Content nodes can only be added at leaf level
+    if (itemType === "content") {
+      return levelIndex === schemaLevels.length - 1;
+    }
+
+    // Organizational nodes can be at any level except the leaf
+    return levelIndex < schemaLevels.length - 1;
+  };
+
+  const loadBookTree = async (bookId: number): Promise<BookTreeNode[]> => {
+    try {
+      const response = await fetch(`/api/books/${bookId}/tree`, {
+        credentials: "include",
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data as BookTreeNode[];
+    } catch {
+      return [];
+    }
+  };
+
+  const initializeOrganizer = async (schemaLevels: string[], bookId: number) => {
+    // Load existing tree structure
+    const tree = await loadBookTree(bookId);
+    setBookTree(tree);
+
+    // Initialize basket items as flat list at leaf level
     const leafLevel = schemaLevels[schemaLevels.length - 1];
     const leafLevelOrder = schemaLevels.length;
     
@@ -115,11 +172,19 @@ export default function BasketPanel({
     setOrganizedTree(initialTree);
     setTargetSchemaLevels(schemaLevels);
     setTargetBookId(bookId);
+    setSelectedParentNodeId(null);
+    setSelectedParentLevel("");
     setShowAddToBook(false);
     setShowOrganizer(true);
   };
 
   const addOrganizationalNode = (level: string, levelOrder: number, title: string) => {
+    // Verify that this level can have organizational nodes (not leaf level)
+    if (!canAddAtLevel(level, targetSchemaLevels, "placeholder")) {
+      setMessage(`✗ Cannot create organizational nodes at ${level} level`);
+      return;
+    }
+
     const newNode: OrganizedNode = {
       id: `placeholder-${Date.now()}`,
       type: "placeholder",
@@ -205,10 +270,8 @@ export default function BasketPanel({
       setMessage(`✓ Book created. Now organize your content...`);
       
       // Open organizer with the new book
-      setTimeout(() => {
-        setLoading(false);
-        initializeOrganizer(schema.levels, newBook.id);
-      }, 800);
+      await initializeOrganizer(schema.levels, newBook.id);
+      setLoading(false);
     } catch (err) {
       setMessage(`✗ ${err instanceof Error ? err.message : "Failed to create book"}`);
       setLoading(false);
@@ -242,10 +305,8 @@ export default function BasketPanel({
       }
 
       setMessage("Opening organizer...");
-      setTimeout(() => {
-        setLoading(false);
-        initializeOrganizer(schema.levels, selectedBook);
-      }, 500);
+      await initializeOrganizer(schema.levels, selectedBook);
+      setLoading(false);
     } catch (err) {
       setMessage(`✗ ${err instanceof Error ? err.message : "Failed to load book"}`);
       setLoading(false);
@@ -259,10 +320,90 @@ export default function BasketPanel({
     setMessage("Adding content to book...");
 
     try {
-      const createdCount = await addOrganizedNodesToBook(targetBookId, organizedTree);
+      // All basket items go as direct children of selected parent (or root if none selected)
+      const leafLevel = targetSchemaLevels[targetSchemaLevels.length - 1];
+      const leafLevelOrder = targetSchemaLevels.length;
+      
+      let createdCount = 0;
+      
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        let createPayload: Record<string, unknown> = {
+          book_id: targetBookId,
+          parent_node_id: selectedParentNodeId,
+          level_name: leafLevel,
+          level_order: leafLevelOrder,
+          sequence_number: String(i + 1),
+        };
+
+        if (insertMode === "reference") {
+          const nodeResponse = await fetch(`/api/nodes/${item.node_id}`, {
+            credentials: "include",
+          });
+
+          if (!nodeResponse.ok) {
+            throw new Error(`Failed to load source node ${item.node_id}`);
+          }
+
+          const originalNode = await nodeResponse.json();
+          const sourceNodeId = originalNode.referenced_node_id ?? item.node_id;
+          createPayload = {
+            ...createPayload,
+            referenced_node_id: sourceNodeId,
+            title_sanskrit: originalNode.title_sanskrit,
+            title_transliteration: originalNode.title_transliteration,
+            title_english: originalNode.title_english,
+            title_hindi: originalNode.title_hindi,
+            title_tamil: originalNode.title_tamil,
+            has_content: false,
+            content_data: {},
+            summary_data: {},
+            license_type: "CC-BY-SA-4.0",
+            tags: [],
+          };
+        } else {
+          const nodeResponse = await fetch(`/api/nodes/${item.node_id}`, {
+            credentials: "include",
+          });
+
+          if (!nodeResponse.ok) {
+            throw new Error(`Failed to load source node ${item.node_id}`);
+          }
+
+          const originalNode = await nodeResponse.json();
+          createPayload = {
+            ...createPayload,
+            title_sanskrit: originalNode.title_sanskrit,
+            title_transliteration: originalNode.title_transliteration,
+            title_english: originalNode.title_english,
+            title_hindi: originalNode.title_hindi,
+            title_tamil: originalNode.title_tamil,
+            has_content: originalNode.has_content,
+            content_data: originalNode.content_data || {},
+            summary_data: originalNode.summary_data || {},
+            source_attribution: originalNode.source_attribution,
+            license_type: originalNode.license_type || "CC-BY-SA-4.0",
+            original_source_url: originalNode.original_source_url,
+            tags: originalNode.tags || [],
+          };
+        }
+
+        const createResponse = await fetch("/api/nodes", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload),
+        });
+
+        if (!createResponse.ok) {
+          throw new Error(`Failed to create node for item ${item.node_id}`);
+        }
+
+        createdCount += 1;
+      }
 
       if (createdCount === 0) {
-        throw new Error("No items were added. Please verify source nodes are accessible.");
+        throw new Error("No items were added.");
       }
 
       const actionWord = insertMode === "reference" ? "Added references for" : "Copied";
@@ -272,6 +413,8 @@ export default function BasketPanel({
       setTimeout(() => {
         onClearBasket();
         setShowOrganizer(false);
+        setSelectedParentNodeId(null);
+        setSelectedParentLevel("");
         setMessage(null);
         if (onItemsAdded) onItemsAdded();
       }, 1500);
@@ -785,41 +928,38 @@ export default function BasketPanel({
             )}
 
             <div className="flex flex-1 gap-6 overflow-hidden p-6">
-              {/* Left: Organization Tree */}
+              {/* Left: Existing Book Tree (insertion point selector) */}
               <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-black/10 bg-white/90">
                 <div className="border-b border-black/10 p-4">
                   <h3 className="font-medium text-[color:var(--deep)]">
-                    Content Structure
+                    Select Insertion Point
                   </h3>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {organizedTree.length} items • Schema: {targetSchemaLevels.join(" → ")}
+                    Click a {targetSchemaLevels[targetSchemaLevels.length - 2] || "parent"} to insert items under it
                   </p>
+                  {selectedParentLevel && (
+                    <p className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-700">
+                      Selected: <span className="font-medium">{selectedParentLevel}</span>
+                    </p>
+                  )}
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
-                  {organizedTree.length === 0 ? (
+                  {bookTree.length === 0 ? (
                     <p className="text-center text-sm text-zinc-500">
-                      No items to organize
+                      {bookTree.length === 0 ? "Empty book - items will be added at root level" : "No items yet"}
                     </p>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      {organizedTree.map((node) => (
-                        <OrganizedNodeItem
+                    <div className="flex flex-col gap-1">
+                      {bookTree.map((node) => (
+                        <BookTreeNodeItem
                           key={node.id}
                           node={node}
                           depth={0}
-                          availableLevels={targetSchemaLevels}
-                          onRemove={() => {
-                            setOrganizedTree(prev => prev.filter(n => n.id !== node.id));
-                          }}
-                          onChangelevel={(newLevel) => {
-                            const levelOrder = targetSchemaLevels.indexOf(newLevel) + 1;
-                            setOrganizedTree(prev =>
-                              prev.map(n =>
-                                n.id === node.id
-                                  ? { ...n, target_level: newLevel, target_level_order: levelOrder }
-                                  : n
-                              )
-                            );
+                          schemaLevels={targetSchemaLevels}
+                          selectedParentNodeId={selectedParentNodeId}
+                          onSelect={(nodeId, level) => {
+                            setSelectedParentNodeId(nodeId);
+                            setSelectedParentLevel(level);
                           }}
                         />
                       ))}
@@ -828,53 +968,54 @@ export default function BasketPanel({
                 </div>
               </div>
 
-              {/* Right: Tools */}
-              <div className="w-80 flex flex-col gap-4">
+              {/* Right: Items to Add */}
+              <div className="w-96 flex flex-col gap-4">
                 {/* Scrollable content area */}
                 <div className="flex-1 overflow-y-auto pr-2 flex flex-col gap-4">
                   <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                    <h4 className="mb-3 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
-                      Add Organizational Node
+                    <h4 className="mb-2 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
+                      Items to Add ({organizedTree.length})
                     </h4>
-                    <p className="mb-3 text-xs text-zinc-600">
-                      Create chapters, parts, or sections to organize content
-                    </p>
-                    <div className="flex flex-col gap-2">
-                      {targetSchemaLevels.slice(0, -1).map((level, index) => (
-                        <button
-                          key={level}
-                          onClick={() => {
-                            const title = prompt(`Enter title for ${level}:`);
-                            if (title) {
-                              addOrganizationalNode(level, index + 1, title);
-                            }
-                          }}
-                          disabled={loading}
-                          className="rounded-lg border border-blue-500/30 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
-                        >
-                          + Add {level}
-                        </button>
-                      ))}
-                    </div>
+                    {organizedTree.length === 0 ? (
+                      <p className="text-xs text-zinc-500">
+                        Your basket is empty
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {organizedTree.map((node) => (
+                          <div
+                            key={node.id}
+                            className="rounded-lg border border-black/10 bg-white p-3 text-sm"
+                          >
+                            <div className="font-medium text-zinc-900">{node.title}</div>
+                            <div className="mt-1 text-xs text-zinc-500">
+                              {node.type === "content" ? "Content Item" : "Organizational"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                    <h4 className="mb-2 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
-                      Quick Tips
-                    </h4>
-                    <ul className="space-y-2 text-xs text-zinc-600">
-                      <li>• Create organizational nodes first (chapters, parts)</li>
-                      <li>• Drag items under organizational nodes (coming soon)</li>
-                      <li>• Change item levels using the dropdown</li>
-                      <li>• All items will be added to the book when you finalize</li>
-                    </ul>
-                  </div>
+                  {selectedParentLevel && organizedTree.length > 0 && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <h4 className="mb-2 text-sm font-medium text-emerald-900">
+                        Will be added as:
+                      </h4>
+                      <p className="text-xs text-emerald-700">
+                        <strong>Children of:</strong> {selectedParentLevel}
+                      </p>
+                      <p className="mt-2 text-xs text-emerald-700">
+                        <strong>Item level:</strong> {targetSchemaLevels[targetSchemaLevels.length - 1]}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Fixed buttons at bottom */}
                 <button
                   onClick={createOrganizedTree}
-                  disabled={loading || organizedTree.length === 0}
+                  disabled={loading || items.length === 0}
                   className="rounded-lg border border-emerald-500/30 bg-emerald-500 px-4 py-3 font-medium text-white transition hover:bg-emerald-600 hover:shadow-lg disabled:opacity-50"
                 >
                   {loading
@@ -885,7 +1026,11 @@ export default function BasketPanel({
                 </button>
 
                 <button
-                  onClick={() => setShowOrganizer(false)}
+                  onClick={() => {
+                    setShowOrganizer(false);
+                    setSelectedParentNodeId(null);
+                    setSelectedParentLevel("");
+                  }}
                   disabled={loading}
                   className="rounded-lg border border-black/10 bg-white px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20 disabled:opacity-50"
                 >
@@ -916,9 +1061,24 @@ function OrganizedNodeItem({
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
 
+  // Determine valid levels for this node based on its type
+  const getValidLevels = (): string[] => {
+    if (node.type === "content") {
+      // Content nodes can only go at leaf level
+      return [availableLevels[availableLevels.length - 1]];
+    } else {
+      // Organizational nodes can go at any non-leaf level
+      return availableLevels.slice(0, -1);
+    }
+  };
+
+  const validLevels = getValidLevels();
+  const isValidLevel = validLevels.includes(node.target_level);
+
   return (
     <div style={{ marginLeft: `${depth * 20}px` }}>
       <div className={`flex items-center gap-2 rounded-lg border p-2 text-sm ${
+        !isValidLevel ? "border-red-300 bg-red-50" :
         node.type === "placeholder"
           ? "border-blue-500/30 bg-blue-50"
           : "border-black/10 bg-white/80"
@@ -935,16 +1095,26 @@ function OrganizedNodeItem({
           <div className="font-medium text-zinc-900">{node.title}</div>
           <div className="text-xs text-zinc-500">
             {node.type === "placeholder" ? "Organizational Node" : "Content"} • {node.target_level}
+            {!isValidLevel && <span className="ml-2 text-red-600 font-medium">Invalid level</span>}
           </div>
         </div>
         <select
           value={node.target_level}
           onChange={(e) => onChangelevel(e.target.value)}
-          className="rounded border border-black/10 px-2 py-1 text-xs outline-none"
+          className={`rounded border px-2 py-1 text-xs outline-none ${
+            !isValidLevel 
+              ? "border-red-300 bg-red-50 text-red-700"
+              : "border-black/10"
+          }`}
         >
-          {availableLevels.map(level => (
+          {validLevels.map(level => (
             <option key={level} value={level}>{level}</option>
           ))}
+          {!isValidLevel && (
+            <option value={node.target_level} disabled>
+              {node.target_level} (invalid)
+            </option>
+          )}
         </select>
         <button
           onClick={onRemove}
@@ -963,6 +1133,82 @@ function OrganizedNodeItem({
               availableLevels={availableLevels}
               onRemove={() => {}}
               onChangelevel={() => {}}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Helper component to render existing book tree nodes (clickable for insertion point selection)
+function BookTreeNodeItem({
+  node,
+  depth,
+  schemaLevels,
+  selectedParentNodeId,
+  onSelect,
+}: {
+  node: BookTreeNode;
+  depth: number;
+  schemaLevels: string[];
+  selectedParentNodeId: number | null;
+  onSelect: (nodeId: number, level: string) => void;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // Check if this node can have children (not at leaf level)
+  const canHaveChildren = schemaLevels.indexOf(node.level_name) < schemaLevels.length - 1;
+  const isSelected = selectedParentNodeId === node.id;
+
+  return (
+    <div style={{ marginLeft: `${depth * 16}px` }}>
+      <div
+        onClick={() => {
+          if (canHaveChildren) {
+            onSelect(node.id, node.level_name);
+          }
+        }}
+        className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
+          isSelected
+            ? "border-emerald-500 bg-emerald-50"
+            : canHaveChildren
+            ? "border-black/10 bg-white hover:border-emerald-300 hover:bg-emerald-50/50"
+            : "border-black/10 bg-gray-50 cursor-not-allowed text-zinc-500"
+        }`}
+      >
+        {node.children && node.children.length > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="text-xs text-zinc-500"
+          >
+            {isExpanded ? "▼" : "▶"}
+          </button>
+        )}
+        <div className="flex-1">
+          <div className={`font-medium ${isSelected ? "text-emerald-900" : "text-zinc-900"}`}>
+            {node.title}
+          </div>
+          <div className="text-xs text-zinc-500">
+            {node.level_name}
+            {!canHaveChildren && " (leaf level - cannot add)"}
+          </div>
+        </div>
+        {isSelected && <span className="text-emerald-600 font-bold">✓</span>}
+      </div>
+      {isExpanded && node.children && node.children.length > 0 && (
+        <div className="mt-1">
+          {node.children.map(child => (
+            <BookTreeNodeItem
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              schemaLevels={schemaLevels}
+              selectedParentNodeId={selectedParentNodeId}
+              onSelect={onSelect}
             />
           ))}
         </div>

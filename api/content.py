@@ -839,16 +839,81 @@ def create_node(
     if not book:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid book")
 
-    if payload.parent_node_id:
-        parent = (
-            db.query(ContentNode)
-            .filter(ContentNode.id == payload.parent_node_id)
-            .first()
-        )
-        if not parent:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
+    # Validate hierarchy against schema if book has one
+    if book.schema and book.schema.levels:
+        schema_levels = book.schema.levels if isinstance(book.schema.levels, list) else []
+        
+        if schema_levels:
+            # Check if level_name is valid in the schema
+            if payload.level_name not in schema_levels:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid level '{payload.level_name}'. Valid levels: {', '.join(schema_levels)}"
+                )
+
+            # Get the index of this level in the schema
+            level_index = schema_levels.index(payload.level_name)
+            leaf_level = schema_levels[-1]
+
+            # Content nodes (with content) can only be at leaf level
+            if payload.has_content and payload.level_name != leaf_level:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Content items can only be placed at the '{leaf_level}' level"
+                )
+
+            # Check parent-child relationship in schema
+            if payload.parent_node_id:
+                parent = (
+                    db.query(ContentNode)
+                    .filter(ContentNode.id == payload.parent_node_id)
+                    .first()
+                )
+                if not parent:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
+                    )
+
+                # Parent's child level must be next level in schema
+                parent_level_index = schema_levels.index(parent.level_name) if parent.level_name in schema_levels else -1
+                
+                if parent_level_index >= 0:
+                    expected_child_level_index = parent_level_index + 1
+                    
+                    # Parent cannot have children if it's at leaf level
+                    if parent_level_index == len(schema_levels) - 1:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Cannot add children to '{parent.level_name}' level - it's the leaf level"
+                        )
+                    
+                    # Child must be at the next level
+                    if expected_child_level_index < len(schema_levels):
+                        expected_child_level = schema_levels[expected_child_level_index]
+                        if payload.level_name != expected_child_level:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"'{payload.level_name}' cannot be a child of '{parent.level_name}'. Expected child level: '{expected_child_level}'"
+                            )
+            else:
+                # Root level nodes must be at the first level in schema
+                if level_index != 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Root level items must be at '{schema_levels[0]}' level, not '{payload.level_name}'"
+                    )
+    else:
+        # No schema - basic parent validation only
+        if payload.parent_node_id:
+            parent = (
+                db.query(ContentNode)
+                .filter(ContentNode.id == payload.parent_node_id)
+                .first()
             )
+            if not parent:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
+                )
 
     # Auto-calculate sequence number if not provided
     sequence_number = payload.sequence_number
