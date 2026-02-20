@@ -365,7 +365,6 @@ export default function BasketPanel({
           parent_node_id: selectedParentNodeId,
           level_name: leafLevel,
           level_order: leafLevelOrder,
-          sequence_number: String(i + 1),
         };
 
         if (insertMode === "reference") {
