@@ -1,5 +1,7 @@
 import packageJson from "../../../package.json";
 
+const sanitizeSha = (value: string) => value.trim().replace(/['"]/g, "");
+
 const getVersionParts = (version: string) => {
   const parts = version.split(".");
   const major = parts[0] || "0";
@@ -8,21 +10,26 @@ const getVersionParts = (version: string) => {
 };
 
 const getBuildNumber = () => {
-  return (
+  const raw = (
     process.env.NEXT_PUBLIC_BUILD_NUMBER ||
     process.env.GITHUB_RUN_NUMBER ||
     process.env.VERCEL_BUILD_ID ||
     "0"
   );
+
+  const digitsOnly = raw.replace(/\D/g, "");
+  return digitsOnly || "1";
 };
 
 const getCommitSha = () => {
-  return (
+  const raw = (
     process.env.NEXT_PUBLIC_GIT_SHA ||
     process.env.GITHUB_SHA ||
     process.env.VERCEL_GIT_COMMIT_SHA ||
     "local"
   );
+
+  return raw === "local" ? "local" : sanitizeSha(raw);
 };
 
 const formatVersion = () => {

@@ -15,6 +15,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -50,7 +53,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install dependencies
-        run: npm install --prefix web --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
@@ -67,7 +70,7 @@ jobs:
 
       - name: Build frontend
         run: |
-          APP_VERSION=$(node -p "require('./web/package.json').version")
+          APP_VERSION=$(node -p "require('./package.json').version")
           echo "Building with NEXT_PUBLIC_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
           NEXT_PUBLIC_BUILD_NUMBER="${GITHUB_RUN_NUMBER}" \
           NEXT_PUBLIC_GIT_SHA="${GITHUB_SHA}" \
@@ -75,4 +78,4 @@ jobs:
           vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy frontend
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN"
