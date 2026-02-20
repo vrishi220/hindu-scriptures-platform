@@ -27,7 +27,6 @@ const getCommitSha = () => {
 const formatVersion = () => {
   const rawVersion =
     process.env.NEXT_PUBLIC_APP_VERSION ||
-    process.env.APP_VERSION ||
     packageJson.version ||
     "0.1.0";
   const { major, minor } = getVersionParts(rawVersion);
