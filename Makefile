@@ -1,4 +1,4 @@
-.PHONY: test test-backend test-frontend test-sanity test-watch test-coverage help install-deps
+.PHONY: test test-backend test-frontend test-sanity test-watch test-coverage help install-deps prepush-check
 
 # Default help target
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make test-watch        - Run tests in watch mode (re-run on file change)"
 	@echo "  make test-verbose      - Run tests with verbose output"
 	@echo "  make test-failed       - Re-run only failed tests"
+	@echo "  make prepush-check     - Run frontend production build + backend/frontend sanity tests"
 	@echo "  make install-deps      - Install all test dependencies"
 	@echo ""
 	@echo "Notes:"
@@ -84,6 +85,9 @@ checkpoint:
 	pytest tests/test_backend_sanity.py::TestContentBrowsing -v --tb=short
 	@echo ""
 	@echo "✓ Checkpoint tests completed"
+
+prepush-check:
+	./scripts/prepush-check.sh
 
 # Clean up test artifacts
 clean:
