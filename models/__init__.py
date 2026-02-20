@@ -1,5 +1,6 @@
 from models.database import Base, SessionLocal, get_db
 from models.book import Book
+from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.media_file import MediaFile
 from models.search_query import SearchQuery
@@ -12,6 +13,7 @@ from models.compilation import Compilation
 __all__ = [
 	"Base",
 	"Book",
+	"BookShare",
 	"Compilation",
 	"ContentNode",
 	"MediaFile",
