@@ -1,3 +1,14 @@
 {
-  "version": 2
+  "version": 2,
+  "buildCommand": "cd web && npm run build",
+  "framework": "nextjs",
+  "public": "web/public",
+  "outputDirectory": "web/.next",
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://hindu-scriptures-api-production.up.railway.app/api/:path*"
+    }
+  ]
 }
