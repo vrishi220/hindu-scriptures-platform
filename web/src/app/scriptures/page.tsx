@@ -63,6 +63,7 @@ type TreeNode = {
   level_order?: number;
   sequence_number?: string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   children?: TreeNode[];
@@ -74,6 +75,7 @@ type NodeContent = {
   level_order?: number;
   sequence_number?: string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   has_content: boolean;
@@ -145,6 +147,20 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
   if (parsed === null) return "";
   if (!isLeaf) return parsed.toString();
   return parsed.toString();
+};
+
+const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "en" || normalized === "eng" || normalized === "english") {
+    return "english";
+  }
+  if (normalized === "sa" || normalized === "sanskrit") {
+    return "sanskrit";
+  }
+  if (normalized === "hi" || normalized === "hindi") {
+    return "hindi";
+  }
+  return "english";
 };
 
 function ScripturesContent() {
@@ -352,7 +368,10 @@ function ScripturesContent() {
         const response = await fetch("/api/preferences", { credentials: "include" });
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
-        setPreferences(data);
+        setPreferences({
+          ...data,
+          source_language: normalizeSourceLanguage(data.source_language),
+        });
       } catch {
         setPreferences(null);
       }
@@ -417,6 +436,36 @@ function ScripturesContent() {
       setPreferencesSaving(false);
       setTimeout(() => setPreferencesMessage(null), 2000);
     }
+  };
+
+  const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
+  const showTransliteration =
+    (preferences?.transliteration_enabled ?? true) &&
+    (preferences?.show_roman_transliteration ?? true);
+
+  const getPreferredTitle = (node: TreeNode | NodeContent): string => {
+    if (sourceLanguage === "sanskrit") {
+      return (
+        formatValue(node.title_sanskrit) ||
+        formatValue(node.title_english) ||
+        formatValue(node.title_hindi) ||
+        (showTransliteration ? formatValue(node.title_transliteration) : "")
+      );
+    }
+    if (sourceLanguage === "hindi") {
+      return (
+        formatValue(node.title_hindi) ||
+        formatValue(node.title_english) ||
+        formatValue(node.title_sanskrit) ||
+        (showTransliteration ? formatValue(node.title_transliteration) : "")
+      );
+    }
+    return (
+      formatValue(node.title_english) ||
+      formatValue(node.title_hindi) ||
+      formatValue(node.title_sanskrit) ||
+      (showTransliteration ? formatValue(node.title_transliteration) : "")
+    );
   };
 
   useEffect(() => {
@@ -1933,61 +1982,93 @@ function ScripturesContent() {
                     {/* Titles (hide for verses) */}
                     {!nodeContent.has_content && (
                       <div className="flex flex-col gap-2">
-                        {nodeContent.title_sanskrit && (
+                        {getPreferredTitle(nodeContent) && (
                           <div className="text-xl font-medium text-zinc-900">
-                            {formatValue(nodeContent.title_sanskrit)}
+                            {getPreferredTitle(nodeContent)}
                           </div>
                         )}
-                        {nodeContent.title_transliteration && (
-                          <div className="text-lg italic text-zinc-700">
-                            {formatValue(nodeContent.title_transliteration)}
-                          </div>
-                        )}
-                        {nodeContent.title_english && (
-                          <div className="text-lg text-zinc-700">
-                            {formatValue(nodeContent.title_english)}
-                          </div>
-                        )}
+                        {showTransliteration &&
+                          nodeContent.title_transliteration &&
+                          nodeContent.title_transliteration !== getPreferredTitle(nodeContent) && (
+                            <div className="text-lg italic text-zinc-700">
+                              {formatValue(nodeContent.title_transliteration)}
+                            </div>
+                          )}
                       </div>
                     )}
 
                     {/* Content Data */}
                     {nodeContent.has_content && nodeContent.content_data && (
                       <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                        {nodeContent.content_data.basic?.sanskrit && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Sanskrit
-                            </div>
-                            <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
-                              {formatValue(nodeContent.content_data.basic.sanskrit)}
-                            </div>
-                          </div>
-                        )}
-                        {nodeContent.content_data.basic?.transliteration && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Transliteration
-                            </div>
-                            <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
-                              {formatValue(nodeContent.content_data.basic.transliteration)}
-                            </div>
-                          </div>
-                        )}
-                        {(nodeContent.content_data.translations?.english ||
-                          nodeContent.content_data.basic?.translation) && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              English Translation
-                            </div>
-                            <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                              {formatValue(
-                                nodeContent.content_data.translations?.english ||
-                                  nodeContent.content_data.basic?.translation
+                        {(() => {
+                          const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
+                          const transliteration = formatValue(
+                            nodeContent.content_data?.basic?.transliteration
+                          );
+                          const english = formatValue(
+                            nodeContent.content_data?.translations?.english ||
+                              nodeContent.content_data?.basic?.translation
+                          );
+
+                          const primaryContent =
+                            sourceLanguage === "sanskrit"
+                              ? sanskrit || english
+                              : sourceLanguage === "hindi"
+                              ? english || sanskrit
+                              : english || sanskrit;
+
+                          const primaryLabel =
+                            sourceLanguage === "sanskrit"
+                              ? "Sanskrit"
+                              : sourceLanguage === "hindi"
+                              ? "Hindi/Translation"
+                              : "English Translation";
+
+                          return (
+                            <>
+                              {primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    {primaryLabel}
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
+                                    {primaryContent}
+                                  </div>
+                                </div>
                               )}
-                            </div>
-                          </div>
-                        )}
+                              {showTransliteration && transliteration && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    Transliteration ({preferences?.transliteration_script || "iast"})
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
+                                    {transliteration}
+                                  </div>
+                                </div>
+                              )}
+                              {sourceLanguage !== "sanskrit" && sanskrit && sanskrit !== primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    Sanskrit
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                    {sanskrit}
+                                  </div>
+                                </div>
+                              )}
+                              {sourceLanguage !== "english" && english && english !== primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    English Translation
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                    {english}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
 
