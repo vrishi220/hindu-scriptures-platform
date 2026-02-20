@@ -861,7 +861,7 @@ function ScripturesContent() {
 
       const basePayload = {
         level_name: formData.levelName,
-        sequence_number: formData.sequenceNumber || null,
+        sequence_number: formData.sequenceNumber ? formData.sequenceNumber.trim() : null,
         title_sanskrit: formData.titleSanskrit || null,
         title_transliteration: formData.titleTransliteration || null,
         title_english: formData.titleEnglish || null,

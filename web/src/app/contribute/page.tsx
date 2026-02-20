@@ -161,7 +161,7 @@ export default function ContributePage() {
       parent_node_id: parentNodeId,
       level_name: levelName,
       level_order: 0, // Will be adjusted by backend if needed
-      sequence_number: sequenceNumber ? parseInt(sequenceNumber, 10) : null,
+      sequence_number: sequenceNumber ? sequenceNumber.trim() : null,
       title_sanskrit: titleSanskrit || null,
       title_transliteration: titleTransliteration || null,
       title_english: titleEnglish || null,
