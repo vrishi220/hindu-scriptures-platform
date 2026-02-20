@@ -365,7 +365,12 @@ function ScripturesContent() {
     if (nodeId) {
       const path = findPath(treeData, nodeId);
       if (path) {
-        if (selectedId !== nodeId || nodeContent?.id !== nodeId) {
+        const isCurrentNodeAlreadyLoading =
+          activeContentNodeId.current === nodeId && contentLoading;
+        if (
+          selectedId !== nodeId ||
+          (!isCurrentNodeAlreadyLoading && nodeContent?.id !== nodeId)
+        ) {
           applySelection(nodeId, path);
         }
         lastAutoSelectNodeId.current = nodeId;
