@@ -152,6 +152,9 @@ function ScripturesContent() {
   const lastLoadedNodeId = useRef<number | null>(null);
   const activeTreeRequestId = useRef(0);
   const activeTreeAbortController = useRef<AbortController | null>(null);
+  const activeContentRequestId = useRef(0);
+  const activeContentAbortController = useRef<AbortController | null>(null);
+  const activeContentNodeId = useRef<number | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [formData, setFormData] = useState({
     levelName: "",
@@ -506,25 +509,44 @@ function ScripturesContent() {
   };
 
   const loadNodeContent = async (nodeId: number, force = false) => {
-    if (!force && contentLoading && lastLoadedNodeId.current === nodeId) return;
+    if (!force && contentLoading && activeContentNodeId.current === nodeId) return;
     if (!force && !contentLoading && nodeContent?.id === nodeId) return;
+
+    activeContentAbortController.current?.abort();
+    const abortController = new AbortController();
+    activeContentAbortController.current = abortController;
+    const requestId = activeContentRequestId.current + 1;
+    activeContentRequestId.current = requestId;
+    activeContentNodeId.current = nodeId;
+
     lastLoadedNodeId.current = nodeId;
     setContentLoading(true);
     try {
       const response = await fetch(contentPath(`/nodes/${nodeId}`), {
         credentials: "include",
+        signal: abortController.signal,
       });
+      if (requestId !== activeContentRequestId.current) return;
       if (response.ok) {
         const data = (await response.json()) as NodeContent;
+        if (requestId !== activeContentRequestId.current) return;
         setNodeContent(data);
       } else {
+        if (requestId !== activeContentRequestId.current) return;
         setNodeContent(null);
       }
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
       console.error("Content load error:", err);
+      if (requestId !== activeContentRequestId.current) return;
       setNodeContent(null);
     } finally {
-      setContentLoading(false);
+      if (requestId === activeContentRequestId.current) {
+        setContentLoading(false);
+        activeContentNodeId.current = null;
+      }
     }
   };
 
@@ -560,6 +582,17 @@ function ScripturesContent() {
   };
 
   const selectNode = (nodeId: number, syncUrl = true) => {
+    if (selectedId === nodeId && nodeContent?.id === nodeId && !contentLoading) {
+      if (syncUrl && bookId) {
+        const currentBookParam = searchParams.get("book") || "";
+        const currentNodeParam = searchParams.get("node") || "";
+        if (currentBookParam !== bookId || currentNodeParam !== String(nodeId)) {
+          router.push(`/scriptures?book=${bookId}&node=${nodeId}`, { scroll: false });
+        }
+      }
+      return;
+    }
+
     const path = findPath(treeData, nodeId);
     if (path) {
       applySelection(nodeId, path, false, false);
@@ -571,7 +604,11 @@ function ScripturesContent() {
     
     // Update URL with current selection
     if (syncUrl && bookId) {
-      router.push(`/scriptures?book=${bookId}&node=${nodeId}`, { scroll: false });
+      const currentBookParam = searchParams.get("book") || "";
+      const currentNodeParam = searchParams.get("node") || "";
+      if (currentBookParam !== bookId || currentNodeParam !== String(nodeId)) {
+        router.push(`/scriptures?book=${bookId}&node=${nodeId}`, { scroll: false });
+      }
     }
   };
 
