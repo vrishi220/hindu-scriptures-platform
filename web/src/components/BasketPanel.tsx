@@ -258,9 +258,13 @@ export default function BasketPanel({
     setMessage("Adding content to book...");
 
     try {
-      await addOrganizedNodesToBook(targetBookId, organizedTree);
-      
-      setMessage(`✓ Added ${items.length} items to book`);
+      const createdCount = await addOrganizedNodesToBook(targetBookId, organizedTree);
+
+      if (createdCount === 0) {
+        throw new Error("No items were added. Please verify source nodes are accessible.");
+      }
+
+      setMessage(`✓ Added ${createdCount} item${createdCount === 1 ? "" : "s"} to book`);
       
       // Clear basket and close organizer after success
       setTimeout(() => {
@@ -280,7 +284,9 @@ export default function BasketPanel({
     bookId: number,
     tree: OrganizedNode[],
     parentNodeId: number | null = null
-  ): Promise<void> => {
+  ): Promise<number> => {
+    let createdCount = 0;
+
     for (const node of tree) {
       let createdNodeId: number | null = null;
 
@@ -290,7 +296,12 @@ export default function BasketPanel({
           credentials: "include",
         });
 
-        if (!nodeResponse.ok) continue;
+        if (!nodeResponse.ok) {
+          const details = await nodeResponse.text().catch(() => "");
+          throw new Error(
+            `Failed to load source node ${node.node_id}${details ? `: ${details}` : ""}`
+          );
+        }
 
         const originalNode = await nodeResponse.json();
 
@@ -320,10 +331,16 @@ export default function BasketPanel({
           }),
         });
 
-        if (createResponse.ok) {
-          const created = await createResponse.json();
-          createdNodeId = created.id;
+        if (!createResponse.ok) {
+          const details = await createResponse.text().catch(() => "");
+          throw new Error(
+            `Failed to create content node${details ? `: ${details}` : ""}`
+          );
         }
+
+        const created = await createResponse.json();
+        createdNodeId = created.id;
+        createdCount += 1;
       } else if (node.type === "placeholder") {
         // Create organizational node (chapter, part, etc.)
         const createResponse = await fetch("/api/nodes", {
@@ -345,17 +362,25 @@ export default function BasketPanel({
           }),
         });
 
-        if (createResponse.ok) {
-          const created = await createResponse.json();
-          createdNodeId = created.id;
+        if (!createResponse.ok) {
+          const details = await createResponse.text().catch(() => "");
+          throw new Error(
+            `Failed to create organizational node${details ? `: ${details}` : ""}`
+          );
         }
+
+        const created = await createResponse.json();
+        createdNodeId = created.id;
+        createdCount += 1;
       }
 
       // Recursively create children
       if (node.children.length > 0 && createdNodeId) {
-        await addOrganizedNodesToBook(bookId, node.children, createdNodeId);
+        createdCount += await addOrganizedNodesToBook(bookId, node.children, createdNodeId);
       }
     }
+
+    return createdCount;
   };
 
   if (items.length === 0 && !isExpanded) {
