@@ -36,10 +36,41 @@ type OrganizedNode = {
 
 type BookTreeNode = {
   id: number;
-  title: string;
+  title?: string | null;
   level_name: string;
   level_order: number;
+  sequence_number?: string | null;
+  title_english?: string | null;
+  title_sanskrit?: string | null;
+  title_transliteration?: string | null;
   children: BookTreeNode[];
+};
+
+const parseSequenceNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const match = value.toString().match(/(\d+)(?!.*\d)/);
+  return match ? parseInt(match[1], 10) : null;
+};
+
+const getBookTreeNodeLabel = (node: BookTreeNode): string => {
+  const title =
+    node.title_english ||
+    node.title_sanskrit ||
+    node.title_transliteration ||
+    node.title;
+  const seq = parseSequenceNumber(node.sequence_number);
+  const hasChildren = Boolean(node.children && node.children.length > 0);
+
+  if (!hasChildren) {
+    return title || `${node.level_name} ${seq ?? node.id}`;
+  }
+
+  if (title) {
+    return seq !== null ? `${seq}. ${title}` : title;
+  }
+
+  return `${node.level_name} ${seq ?? node.id}`;
 };
 
 type BasketPanelProps = {
@@ -75,7 +106,7 @@ export default function BasketPanel({
   const [bookTree, setBookTree] = useState<BookTreeNode[]>([]);
   const [selectedParentNodeId, setSelectedParentNodeId] = useState<number | null>(null);
   const [selectedParentLevel, setSelectedParentLevel] = useState<string>("");
-  const [selectedNodeInfo, setSelectedNodeInfo] = useState<{ id: number; level: string; parentId: number | null; isLeaf: boolean } | null>(null);
+  const [selectedNodeInfo, setSelectedNodeInfo] = useState<{ id: number; level: string; parentId: number | null; isLeaf: boolean; label: string } | null>(null);
 
   const loadSchemas = async () => {
     try {
@@ -397,7 +428,10 @@ export default function BasketPanel({
         });
 
         if (!createResponse.ok) {
-          throw new Error(`Failed to create node for item ${item.node_id}`);
+          const detailPayload = await createResponse.json().catch(() => null) as { detail?: string } | null;
+          throw new Error(
+            `Failed to create node for item ${item.node_id}${detailPayload?.detail ? `: ${detailPayload.detail}` : ""}`
+          );
         }
 
         createdCount += 1;
@@ -936,7 +970,7 @@ export default function BasketPanel({
                     Select Insertion Point
                   </h3>
                   <p className="mt-1 text-xs text-zinc-500">
-                    Click a {targetSchemaLevels[targetSchemaLevels.length - 2] || "parent"} to insert items under it
+                    Click nodes in the full book tree to insert as children or siblings where valid
                   </p>
                   {selectedParentLevel && (
                     <p className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs text-blue-700">
@@ -958,10 +992,10 @@ export default function BasketPanel({
                           depth={0}
                           schemaLevels={targetSchemaLevels}
                           selectedNodeInfo={selectedNodeInfo}
-                          onSelect={(nodeId, level, parentId, isLeaf) => {
-                            setSelectedNodeInfo({ id: nodeId, level, parentId, isLeaf });
+                          onSelect={(nodeId, level, parentId, isLeaf, label) => {
+                            setSelectedNodeInfo({ id: nodeId, level, parentId, isLeaf, label });
                             setSelectedParentNodeId(parentId);
-                            setSelectedParentLevel(level);
+                            setSelectedParentLevel(`${label} → ${level}`);
                           }}
                           parentNodeId={null}
                         />
@@ -1009,7 +1043,10 @@ export default function BasketPanel({
                         <strong>Insertion type:</strong> {selectedNodeInfo?.isLeaf ? "Siblings" : "Children"}
                       </p>
                       <p className="text-xs text-emerald-700">
-                        <strong>Parent:</strong> {selectedNodeInfo?.level || selectedParentLevel}
+                        <strong>Selected node:</strong> {selectedNodeInfo?.label || "-"}
+                      </p>
+                      <p className="text-xs text-emerald-700">
+                        <strong>Target level:</strong> {selectedNodeInfo?.level || "-"}
                       </p>
                       <p className="mt-2 text-xs text-emerald-600 italic">
                         {selectedNodeInfo?.isLeaf 
@@ -1023,7 +1060,14 @@ export default function BasketPanel({
                 {/* Fixed buttons at bottom */}
                 <button
                   onClick={createOrganizedTree}
-                  disabled={loading || items.length === 0}
+                  disabled={(() => {
+                    const leafLevel = targetSchemaLevels[targetSchemaLevels.length - 1];
+                    const isSingleLevelSchema = targetSchemaLevels.length === 1;
+                    const hasValidRootInsert = isSingleLevelSchema && selectedParentNodeId === null;
+                    const hasValidParentInsert = selectedParentLevel.endsWith(`→ ${leafLevel}`) && (isSingleLevelSchema || selectedParentNodeId !== null);
+                    const hasEmptyMultiLevelTree = bookTree.length === 0 && !isSingleLevelSchema;
+                    return loading || items.length === 0 || hasEmptyMultiLevelTree || !(hasValidRootInsert || hasValidParentInsert);
+                  })()}
                   className="rounded-lg border border-emerald-500/30 bg-emerald-500 px-4 py-3 font-medium text-white transition hover:bg-emerald-600 hover:shadow-lg disabled:opacity-50"
                 >
                   {loading
@@ -1032,6 +1076,25 @@ export default function BasketPanel({
                     ? "Finalize & Add References"
                     : "Finalize & Add Copies"}
                 </button>
+
+                {(() => {
+                  const leafLevel = targetSchemaLevels[targetSchemaLevels.length - 1];
+                  const isSingleLevelSchema = targetSchemaLevels.length === 1;
+                  const hasValidRootInsert = isSingleLevelSchema && selectedParentNodeId === null;
+                  const hasValidParentInsert = selectedParentLevel.endsWith(`→ ${leafLevel}`) && (isSingleLevelSchema || selectedParentNodeId !== null);
+                  const hasEmptyMultiLevelTree = bookTree.length === 0 && !isSingleLevelSchema;
+                  const canInsert = !hasEmptyMultiLevelTree && (hasValidRootInsert || hasValidParentInsert);
+
+                  if (canInsert || loading || items.length === 0) return null;
+
+                  return (
+                    <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                      {hasEmptyMultiLevelTree
+                        ? "This book has no hierarchy yet. Add the top levels in Scriptures first, then insert basket items at the leaf level."
+                        : `Select a valid insertion point that targets the '${leafLevel}' level.`}
+                    </p>
+                  );
+                })()}
 
                 <button
                   onClick={() => {
@@ -1162,8 +1225,8 @@ function BookTreeNodeItem({
   node: BookTreeNode;
   depth: number;
   schemaLevels: string[];
-  selectedNodeInfo: { id: number; level: string; parentId: number | null; isLeaf: boolean } | null;
-  onSelect: (nodeId: number, level: string, parentId: number | null, isLeaf: boolean) => void;
+  selectedNodeInfo: { id: number; level: string; parentId: number | null; isLeaf: boolean; label: string } | null;
+  onSelect: (nodeId: number, level: string, parentId: number | null, isLeaf: boolean, label: string) => void;
   parentNodeId: number | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -1187,7 +1250,7 @@ function BookTreeNodeItem({
             const insertionLevel = isLeafLevel 
               ? node.level_name  // siblings at same level
               : schemaLevels[schemaLevels.indexOf(node.level_name) + 1]; // children at next level
-            onSelect(node.id, insertionLevel, insertionParentId, isLeafLevel);
+            onSelect(node.id, insertionLevel, insertionParentId, isLeafLevel, getBookTreeNodeLabel(node));
           }
         }}
         className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition ${
@@ -1211,10 +1274,10 @@ function BookTreeNodeItem({
         )}
         <div className="flex-1">
           <div className={`font-medium ${isSelected ? "text-emerald-900" : "text-zinc-900"}`}>
-            {node.title}
+            {getBookTreeNodeLabel(node)}
           </div>
           <div className="text-xs text-zinc-500">
-            {node.level_name}
+            {node.level_name}{node.sequence_number ? ` • ${node.sequence_number}` : ""}
             {isLeafLevel && " (add as siblings)"}
           </div>
         </div>
