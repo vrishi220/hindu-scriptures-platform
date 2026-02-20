@@ -45,6 +45,30 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)
 );
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'compilation_status') THEN
+    CREATE TYPE compilation_status AS ENUM ('draft', 'published');
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS compilations (
+  id SERIAL PRIMARY KEY,
+  creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  schema_type VARCHAR(50),
+  items JSONB NOT NULL,
+  compilation_metadata JSONB,
+  status compilation_status NOT NULL DEFAULT 'draft',
+  is_public BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_compilations_creator ON compilations(creator_id);
+CREATE INDEX IF NOT EXISTS idx_compilations_status ON compilations(status);
+
 -- Scripture schema templates
 CREATE TABLE IF NOT EXISTS scripture_schemas (
   id SERIAL PRIMARY KEY,
