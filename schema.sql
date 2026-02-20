@@ -90,6 +90,16 @@ CREATE TABLE IF NOT EXISTS books (
 );
 
 -- Hierarchical content nodes
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'content_status') THEN
+    CREATE TYPE content_status AS ENUM ('draft', 'published', 'archived');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'content_visibility') THEN
+    CREATE TYPE content_visibility AS ENUM ('private', 'draft', 'published', 'archived');
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS content_nodes (
   id SERIAL PRIMARY KEY,
   book_id INTEGER REFERENCES books(id) ON DELETE CASCADE,
@@ -106,10 +116,17 @@ CREATE TABLE IF NOT EXISTS content_nodes (
   has_content BOOLEAN DEFAULT false,
   content_data JSONB DEFAULT '{}'::jsonb,
   summary_data JSONB DEFAULT '{}'::jsonb,
+  metadata_json JSONB DEFAULT '{}'::jsonb,
   source_attribution TEXT,
   license_type VARCHAR(100) DEFAULT 'CC-BY-SA-4.0',
   original_source_url TEXT,
   tags JSONB DEFAULT '[]'::jsonb,
+  status content_status NOT NULL DEFAULT 'published',
+  visibility content_visibility NOT NULL DEFAULT 'published',
+  language_code VARCHAR(10) NOT NULL DEFAULT 'en',
+  collaborators JSONB NOT NULL DEFAULT '[]'::jsonb,
+  version_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  search_vector TSVECTOR,
   created_by INTEGER REFERENCES users(id),
   last_modified_by INTEGER REFERENCES users(id),
   created_at TIMESTAMP DEFAULT NOW(),
@@ -118,6 +135,14 @@ CREATE TABLE IF NOT EXISTS content_nodes (
 
 CREATE INDEX IF NOT EXISTS idx_content_nodes_book ON content_nodes(book_id);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_parent ON content_nodes(parent_node_id);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_status ON content_nodes(status);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_visibility ON content_nodes(visibility);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_language ON content_nodes(language_code);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_book_status ON content_nodes(book_id, status);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_created_by ON content_nodes(created_by);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_metadata_gin ON content_nodes USING GIN (metadata_json);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_tags_gin ON content_nodes USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_search_gin ON content_nodes USING GIN (search_vector);
 
 -- Media attachments
 CREATE TABLE IF NOT EXISTS media_files (
