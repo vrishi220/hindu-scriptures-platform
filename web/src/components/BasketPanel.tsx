@@ -314,9 +314,10 @@ export default function BasketPanel({
           }
 
           const originalNode = await nodeResponse.json();
+          const sourceNodeId = originalNode.referenced_node_id ?? node.node_id;
           createPayload = {
             ...createPayload,
-            referenced_node_id: node.node_id,
+            referenced_node_id: sourceNodeId,
             title_sanskrit: originalNode.title_sanskrit,
             title_transliteration: originalNode.title_transliteration,
             title_english: originalNode.title_english,
