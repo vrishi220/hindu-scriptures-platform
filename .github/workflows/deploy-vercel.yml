@@ -75,4 +75,19 @@ jobs:
           vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy frontend
-        run: vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN"
+        run: |
+          set +e
+          DEPLOY_OUTPUT=$(vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN" 2>&1)
+          DEPLOY_EXIT=$?
+          echo "$DEPLOY_OUTPUT"
+
+          if [ "$DEPLOY_EXIT" -eq 0 ]; then
+            exit 0
+          fi
+
+          if echo "$DEPLOY_OUTPUT" | grep -q "api-upload-free"; then
+            echo "::warning::Vercel free-tier upload limit reached. Deployment skipped; retry after cooldown window."
+            exit 0
+          fi
+
+          exit "$DEPLOY_EXIT"
