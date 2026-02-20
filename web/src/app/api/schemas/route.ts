@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.API_BASE_URL || "http://localhost:8000/api";
+  process.env.API_BASE_URL || "http://127.0.0.1:8000";
 
 export async function GET() {
   try {
-    const response = await fetch(`${API_BASE_URL}/schemas`, {
+    const response = await fetch(`${API_BASE_URL}/api/content/schemas`, {
       cache: "no-store",
     });
 

@@ -66,12 +66,7 @@ export default function BasketPanel({
 
   const loadSchemas = async () => {
     try {
-      const response = await fetch(
-        process.env.NEXT_PUBLIC_API_URL
-          ? `${process.env.NEXT_PUBLIC_API_URL}/schemas`
-          : "/api/schemas",
-        { credentials: "include" }
-      );
+      const response = await fetch("/api/schemas", { credentials: "include" });
       if (response.ok) {
         const data = (await response.json()) as Schema[];
         setSchemas(data);
@@ -230,12 +225,9 @@ export default function BasketPanel({
 
     try {
       // Fetch the book details to get its schema
-      const response = await fetch(
-        process.env.NEXT_PUBLIC_API_URL
-          ? `${process.env.NEXT_PUBLIC_API_URL}/books/${selectedBook}`
-          : `/api/books/${selectedBook}`,
-        { credentials: "include" }
-      );
+      const response = await fetch(`/api/books/${selectedBook}`, {
+        credentials: "include",
+      });
 
       if (!response.ok) {
         throw new Error("Failed to fetch book details");
@@ -294,47 +286,39 @@ export default function BasketPanel({
 
       if (node.type === "content" && node.node_id) {
         // Fetch original node content
-        const nodeResponse = await fetch(
-          process.env.NEXT_PUBLIC_API_URL
-            ? `${process.env.NEXT_PUBLIC_API_URL}/nodes/${node.node_id}`
-            : `/api/nodes/${node.node_id}`,
-          { credentials: "include" }
-        );
+        const nodeResponse = await fetch(`/api/nodes/${node.node_id}`, {
+          credentials: "include",
+        });
 
         if (!nodeResponse.ok) continue;
 
         const originalNode = await nodeResponse.json();
 
         // Create new node in target book
-        const createResponse = await fetch(
-          process.env.NEXT_PUBLIC_API_URL
-            ? `${process.env.NEXT_PUBLIC_API_URL}/nodes`
-            : "/api/nodes",
-          {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              book_id: bookId,
-              parent_node_id: parentNodeId,
-              level_name: node.target_level,
-              level_order: node.target_level_order,
-              sequence_number: node.sequence_number,
-              title_sanskrit: originalNode.title_sanskrit,
-              title_transliteration: originalNode.title_transliteration,
-              title_english: originalNode.title_english,
-              title_hindi: originalNode.title_hindi,
-              title_tamil: originalNode.title_tamil,
-              has_content: originalNode.has_content,
-              content_data: originalNode.content_data || {},
-              summary_data: originalNode.summary_data || {},
-              source_attribution: originalNode.source_attribution,
-              license_type: originalNode.license_type || "CC-BY-SA-4.0",
-              original_source_url: originalNode.original_source_url,
-              tags: originalNode.tags || [],
-            }),
-          }
-        );
+        const createResponse = await fetch("/api/nodes", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            book_id: bookId,
+            parent_node_id: parentNodeId,
+            level_name: node.target_level,
+            level_order: node.target_level_order,
+            sequence_number: node.sequence_number,
+            title_sanskrit: originalNode.title_sanskrit,
+            title_transliteration: originalNode.title_transliteration,
+            title_english: originalNode.title_english,
+            title_hindi: originalNode.title_hindi,
+            title_tamil: originalNode.title_tamil,
+            has_content: originalNode.has_content,
+            content_data: originalNode.content_data || {},
+            summary_data: originalNode.summary_data || {},
+            source_attribution: originalNode.source_attribution,
+            license_type: originalNode.license_type || "CC-BY-SA-4.0",
+            original_source_url: originalNode.original_source_url,
+            tags: originalNode.tags || [],
+          }),
+        });
 
         if (createResponse.ok) {
           const created = await createResponse.json();
@@ -342,29 +326,24 @@ export default function BasketPanel({
         }
       } else if (node.type === "placeholder") {
         // Create organizational node (chapter, part, etc.)
-        const createResponse = await fetch(
-          process.env.NEXT_PUBLIC_API_URL
-            ? `${process.env.NEXT_PUBLIC_API_URL}/nodes`
-            : "/api/nodes",
-          {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              book_id: bookId,
-              parent_node_id: parentNodeId,
-              level_name: node.target_level,
-              level_order: node.target_level_order,
-              sequence_number: node.sequence_number,
-              title_english: node.title,
-              has_content: false,
-              content_data: {},
-              summary_data: {},
-              license_type: "CC-BY-SA-4.0",
-              tags: [],
-            }),
-          }
-        );
+        const createResponse = await fetch("/api/nodes", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            book_id: bookId,
+            parent_node_id: parentNodeId,
+            level_name: node.target_level,
+            level_order: node.target_level_order,
+            sequence_number: node.sequence_number,
+            title_english: node.title,
+            has_content: false,
+            content_data: {},
+            summary_data: {},
+            license_type: "CC-BY-SA-4.0",
+            tags: [],
+          }),
+        });
 
         if (createResponse.ok) {
           const created = await createResponse.json();
