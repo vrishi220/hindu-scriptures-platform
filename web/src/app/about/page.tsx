@@ -11,6 +11,7 @@ const getBuildNumber = () => {
   return (
     process.env.NEXT_PUBLIC_BUILD_NUMBER ||
     process.env.GITHUB_RUN_NUMBER ||
+    process.env.VERCEL_BUILD_ID ||
     "0"
   );
 };
@@ -37,6 +38,19 @@ const formatVersion = () => {
   return `${major}.${minor}.${build}.${shortSha}`;
 };
 
+const getVersionDetails = () => {
+  const rawVersion =
+    process.env.NEXT_PUBLIC_APP_VERSION ||
+    packageJson.version ||
+    "0.1.0";
+  const { major, minor } = getVersionParts(rawVersion);
+  const build = getBuildNumber();
+  const sha = getCommitSha();
+  const shortSha = sha === "local" ? "local" : sha.slice(0, 7);
+
+  return { major, minor, build, shortSha };
+};
+
 export default function AboutPage() {
   const companyName =
     process.env.NEXT_PUBLIC_COMPANY_NAME || "Hindu Scriptures Platform";
@@ -44,6 +58,7 @@ export default function AboutPage() {
   const contactPhone = process.env.NEXT_PUBLIC_CONTACT_PHONE || "Not set";
   const contactAddress = process.env.NEXT_PUBLIC_CONTACT_ADDRESS || "Not set";
   const version = formatVersion();
+  const { major, minor, build, shortSha } = getVersionDetails();
   const year = new Date().getFullYear();
 
   return (
@@ -92,16 +107,42 @@ export default function AboutPage() {
           <h2 className="text-sm font-semibold text-[color:var(--deep)]">
             Version
           </h2>
-          <div className="mt-4 space-y-3 text-sm text-zinc-600">
+          <div className="mt-4 space-y-4 text-sm text-zinc-600">
             <div className="flex flex-col">
               <span className="text-xs uppercase tracking-wide text-zinc-400">
-                Release
+                Full Version
               </span>
-              <span className="font-mono text-sm text-[color:var(--deep)]">
+              <span className="font-mono text-base font-semibold text-[color:var(--deep)]">
                 {version}
               </span>
             </div>
-            <div className="flex flex-col">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col">
+                <span className="text-xs uppercase tracking-wide text-zinc-400">
+                  Release
+                </span>
+                <span className="font-mono text-[color:var(--deep)]">
+                  {major}.{minor}
+                </span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs uppercase tracking-wide text-zinc-400">
+                  Build #
+                </span>
+                <span className="font-mono text-[color:var(--deep)]">
+                  {build}
+                </span>
+              </div>
+              <div className="col-span-2 flex flex-col">
+                <span className="text-xs uppercase tracking-wide text-zinc-400">
+                  Commit SHA
+                </span>
+                <span className="font-mono text-[color:var(--deep)]">
+                  {shortSha}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-col pt-2 border-t border-black/5">
               <span className="text-xs uppercase tracking-wide text-zinc-400">
                 Copyright
               </span>
