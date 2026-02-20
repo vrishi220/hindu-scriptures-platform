@@ -336,6 +336,11 @@ function HomeContent() {
       setResults(data.results || []);
       setTotal(data.total || 0);
       
+      // Load trees for all books in results for breadcrumb rendering
+      if (data.results && data.results.length > 0) {
+        await loadTreeForBooksInResults(data.results);
+      }
+      
       // Update URL with search params
       const urlParams = new URLSearchParams({ q: searchTerm });
       if (finalBookId.trim()) urlParams.set("book_id", finalBookId.trim());
@@ -509,10 +514,11 @@ function HomeContent() {
   const renderBreadcrumb = (result: SearchResult, bookName?: string) => {
     const bookBookId = result.node.book_id;
     const currentBook = books.find(b => b.id === bookBookId);
-    const treeForBook = treeData; // Use the currently loaded tree
+    // Use cached tree for the result's book
+    const treeForBook = getTreeForBook(bookBookId.toString());
 
     let pathNodes: TreeNode[] = [];
-    if (treeForBook.length > 0 && bookBookId === parseInt(bookId)) {
+    if (treeForBook.length > 0) {
       pathNodes = buildNodePath(result.node.id, treeForBook);
     }
 
