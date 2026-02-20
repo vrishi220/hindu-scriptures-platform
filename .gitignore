@@ -99,3 +99,5 @@ logs/
 temp/
 tmp/
 migrate_db.py
+.vercel
+.env*.local
