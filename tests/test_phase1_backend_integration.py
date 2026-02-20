@@ -101,6 +101,169 @@ class TestPhase1CompilationsIntegration:
         assert compilation_id in public_ids
 
 
+class TestViewerOwnershipAndReferences:
+    def test_viewer_cannot_edit_others_but_can_reference_into_own_book(self, client):
+        headers_a = _register_and_login(client)
+        headers_b = _register_and_login(client)
+
+        schema_payload = {
+            "name": f"Ownership Schema {uuid4().hex[:8]}",
+            "description": "Schema for ownership integration test",
+            "levels": ["Chapter", "Verse"],
+        }
+        schema_response = client.post("/api/content/schemas", json=schema_payload, headers=headers_a)
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_a_payload = {
+            "schema_id": schema_id,
+            "book_name": f"Book A {uuid4().hex[:6]}",
+            "book_code": f"book-a-{uuid4().hex[:6]}",
+            "language_primary": "sanskrit",
+        }
+        book_a_response = client.post("/api/content/books", json=book_a_payload, headers=headers_a)
+        assert book_a_response.status_code == status.HTTP_201_CREATED
+        book_a_id = book_a_response.json()["id"]
+
+        node_a_payload = {
+            "book_id": book_a_id,
+            "parent_node_id": None,
+            "level_name": "Chapter",
+            "level_order": 1,
+            "sequence_number": "1",
+            "title_english": "Chapter 1",
+            "has_content": False,
+        }
+        node_a_response = client.post("/api/content/nodes", json=node_a_payload, headers=headers_a)
+        assert node_a_response.status_code == status.HTTP_201_CREATED
+        node_a_id = node_a_response.json()["id"]
+
+        forbidden_edit = client.patch(
+            f"/api/content/nodes/{node_a_id}",
+            json={"title_english": "Unauthorized Edit Attempt"},
+            headers=headers_b,
+        )
+        assert forbidden_edit.status_code == status.HTTP_403_FORBIDDEN
+
+        book_b_payload = {
+            "schema_id": schema_id,
+            "book_name": f"Book B {uuid4().hex[:6]}",
+            "book_code": f"book-b-{uuid4().hex[:6]}",
+            "language_primary": "sanskrit",
+        }
+        book_b_response = client.post("/api/content/books", json=book_b_payload, headers=headers_b)
+        assert book_b_response.status_code == status.HTTP_201_CREATED
+        book_b_id = book_b_response.json()["id"]
+
+        insert_refs_response = client.post(
+            f"/api/content/books/{book_b_id}/insert-references",
+            json={"node_ids": [node_a_id]},
+            headers=headers_b,
+        )
+        assert insert_refs_response.status_code == status.HTTP_200_OK
+        payload = insert_refs_response.json()
+        assert payload["created_ids"]
+        assert len(payload["created_ids"]) == 1
+
+    def test_viewer_cannot_copy_existing_content_as_independent_node(self, client):
+        headers_a = _register_and_login(client)
+        headers_b = _register_and_login(client)
+
+        schema_payload = {
+            "name": f"Copy Restriction Schema {uuid4().hex[:8]}",
+            "description": "Schema for copy restriction integration test",
+            "levels": ["Chapter", "Verse"],
+        }
+        schema_response = client.post("/api/content/schemas", json=schema_payload, headers=headers_a)
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Source Book {uuid4().hex[:6]}",
+                "book_code": f"src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers_a,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        source_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Source Chapter",
+                "has_content": False,
+            },
+            headers=headers_a,
+        )
+        assert source_node_response.status_code == status.HTTP_201_CREATED
+
+        target_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Target Book {uuid4().hex[:6]}",
+                "book_code": f"tgt-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers_b,
+        )
+        assert target_book_response.status_code == status.HTTP_201_CREATED
+        target_book_id = target_book_response.json()["id"]
+
+        source_node = source_node_response.json()
+        forbidden_copy = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": target_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": source_node.get("title_english"),
+                "has_content": source_node.get("has_content", False),
+                "content_data": source_node.get("content_data") or {},
+                "summary_data": source_node.get("summary_data") or {},
+                "source_attribution": "Copied from source node",
+                "license_type": source_node.get("license_type") or "CC-BY-SA-4.0",
+                "tags": source_node.get("tags") or [],
+            },
+            headers=headers_b,
+        )
+        assert forbidden_copy.status_code == status.HTTP_403_FORBIDDEN
+        assert (
+            forbidden_copy.json()["detail"]
+            == "You can only add existing content as references"
+        )
+
+
+class TestBookCreationValidation:
+    def test_create_book_with_invalid_schema_returns_400(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": 999999,
+                "book_name": f"Invalid Schema Book {uuid4().hex[:6]}",
+                "book_code": None,
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert create_response.json()["detail"] == "Invalid schema_id"
+
+
 class TestHierarchyInsertionRegression:
     def test_schema_hierarchy_rules_and_tree_payload(self, client):
         suffix = uuid4().hex[:8]

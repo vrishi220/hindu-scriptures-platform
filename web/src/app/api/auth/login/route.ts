@@ -10,11 +10,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ detail: "Email and password required" }, { status: 400 });
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return NextResponse.json(
+      { detail: "Auth service unavailable. Please start the API server and try again." },
+      { status: 503 }
+    );
+  }
 
   const rawText = await response.text().catch(() => "");
   const payload = (() => {

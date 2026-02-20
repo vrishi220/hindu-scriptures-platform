@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ShoppingBasket } from "lucide-react";
+import { Eye, ShoppingBasket } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import BasketPanel from "../components/BasketPanel";
 
@@ -523,7 +523,7 @@ function HomeContent() {
     }
 
     return (
-      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
         <span className="font-medium">{bookName || currentBook?.book_name || "Book"}</span>
         {pathNodes.length > 0 && (
           <>
@@ -792,24 +792,11 @@ function HomeContent() {
                           key={result.node.id}
                           className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
                         >
-                          {renderBreadcrumb(result, bookName)}
-                          <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                            <span>{result.node.level_name}</span>
-                            {result.node.sequence_number !== null &&
-                              result.node.sequence_number !== undefined && (
-                                <span>#{result.node.sequence_number}</span>
-                              )}
-                          </div>
                           <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1">
-                              <h4 className="font-[var(--font-display)] text-lg text-[color:var(--deep)]">
-                                {result.node.title_english ||
-                                  result.node.title_sanskrit ||
-                                  result.node.title_transliteration ||
-                                  "Untitled"}
-                              </h4>
+                            <div className="min-w-0 flex-1">
+                              {renderBreadcrumb(result, bookName)}
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex shrink-0 gap-2">
                               <button
                                 onClick={(e) => {
                                   e.preventDefault();
@@ -833,26 +820,25 @@ function HomeContent() {
                                   const scrollY = window.scrollY;
                                   sessionStorage.setItem("searchScrollY", scrollY.toString());
                                 }}
-                                className="rounded-lg border border-blue-500/30 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+                                title="View"
+                                aria-label="View"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50 text-blue-700 transition hover:bg-blue-100"
                               >
-                                View
+                                <Eye size={16} />
                               </a>
                             </div>
                           </div>
                           {result.snippet ? (
                             <p
-                              className="mt-2 text-sm text-zinc-700"
+                              className="mt-1 whitespace-pre-wrap text-sm text-zinc-700"
                               dangerouslySetInnerHTML={{ __html: result.snippet }}
                             />
                           ) : (
-                            <p className="mt-2 text-sm text-zinc-700">
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">
                               {result.node.content_data?.translations?.english ||
                                 "No snippet available."}
                             </p>
                           )}
-                          <div className="mt-3 text-xs text-[color:var(--accent)] hover:underline">
-                            View details →
-                          </div>
                         </div>
                       )})}
                     </div>

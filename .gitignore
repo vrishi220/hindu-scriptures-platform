@@ -101,3 +101,7 @@ tmp/
 migrate_db.py
 .vercel
 .env*.local
+
+# Local DB backup artifacts
+backups/*.sql
+backups/*.dump

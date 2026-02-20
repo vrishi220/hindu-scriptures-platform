@@ -46,6 +46,13 @@ type BookTreeNode = {
   children: BookTreeNode[];
 };
 
+type MeResponse = {
+  permissions?: {
+    can_edit?: boolean;
+    can_admin?: boolean;
+  } | null;
+};
+
 const parseSequenceNumber = (value: unknown): number | null => {
   if (value === null || value === undefined) return null;
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -100,6 +107,7 @@ export default function BasketPanel({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [insertMode, setInsertMode] = useState<"copy" | "reference">("copy");
+  const [canCopyExistingContent, setCanCopyExistingContent] = useState(false);
   const [organizedTree, setOrganizedTree] = useState<OrganizedNode[]>([]);
   const [targetBookId, setTargetBookId] = useState<number | null>(null);
   const [targetSchemaLevels, setTargetSchemaLevels] = useState<string[]>([]);
@@ -137,6 +145,26 @@ export default function BasketPanel({
     setMode("select");
     setMessage(null);
     await Promise.all([loadSchemas(), loadBooks()]);
+
+    try {
+      const response = await fetch("/api/me", { credentials: "include" });
+      if (!response.ok) {
+        setCanCopyExistingContent(false);
+        setInsertMode("reference");
+        return;
+      }
+
+      const me = (await response.json()) as MeResponse;
+      const perms = me.permissions || {};
+      const allowCopy = Boolean(perms.can_edit || perms.can_admin);
+      setCanCopyExistingContent(allowCopy);
+      if (!allowCopy) {
+        setInsertMode("reference");
+      }
+    } catch {
+      setCanCopyExistingContent(false);
+      setInsertMode("reference");
+    }
   };
 
   const getValidChildLevels = (parentLevel: string | null, schemaLevels: string[]): string[] => {
@@ -367,7 +395,7 @@ export default function BasketPanel({
           level_order: leafLevelOrder,
         };
 
-        if (insertMode === "reference") {
+        if (insertMode === "reference" || !canCopyExistingContent) {
           const nodeResponse = await fetch(`/api/nodes/${item.node_id}`, {
             credentials: "include",
           });
@@ -440,7 +468,7 @@ export default function BasketPanel({
         throw new Error("No items were added.");
       }
 
-      const actionWord = insertMode === "reference" ? "Added references for" : "Copied";
+      const actionWord = insertMode === "reference" || !canCopyExistingContent ? "Added references for" : "Copied";
       setMessage(`✓ ${actionWord} ${createdCount} item${createdCount === 1 ? "" : "s"} to book`);
       
       // Clear basket and close organizer after success
@@ -478,7 +506,7 @@ export default function BasketPanel({
           sequence_number: String(node.sequence_number),
         };
 
-        if (insertMode === "reference") {
+        if (insertMode === "reference" || !canCopyExistingContent) {
           const nodeResponse = await fetch(`/api/nodes/${node.node_id}`, {
             credentials: "include",
           });
@@ -924,22 +952,24 @@ export default function BasketPanel({
                 Add Mode
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => setInsertMode("copy")}
-                  disabled={loading}
-                  className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    insertMode === "copy"
-                      ? "border border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
-                      : "border border-black/10 bg-white text-zinc-700 hover:border-[color:var(--accent)]"
-                  }`}
-                >
-                  Copy (independent)
-                </button>
+                {canCopyExistingContent && (
+                  <button
+                    onClick={() => setInsertMode("copy")}
+                    disabled={loading}
+                    className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                      insertMode === "copy"
+                        ? "border border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
+                        : "border border-black/10 bg-white text-zinc-700 hover:border-[color:var(--accent)]"
+                    }`}
+                  >
+                    Copy (independent)
+                  </button>
+                )}
                 <button
                   onClick={() => setInsertMode("reference")}
                   disabled={loading}
                   className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                    insertMode === "reference"
+                    insertMode === "reference" || !canCopyExistingContent
                       ? "border border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
                       : "border border-black/10 bg-white text-zinc-700 hover:border-[color:var(--accent)]"
                   }`}
@@ -947,6 +977,11 @@ export default function BasketPanel({
                   Reference (linked)
                 </button>
               </div>
+              {!canCopyExistingContent && (
+                <p className="mt-2 text-xs text-zinc-500">
+                  Existing content can only be inserted as references.
+                </p>
+              )}
             </div>
 
             {message && (

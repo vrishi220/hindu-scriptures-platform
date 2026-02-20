@@ -38,7 +38,7 @@ COOKIE_PATH = os.getenv("COOKIE_PATH", "/")
 
 DEFAULT_PERMISSIONS = {
     "can_view": True,
-    "can_contribute": False,
+    "can_contribute": True,
     "can_edit": False,
     "can_moderate": False,
     "can_admin": False,

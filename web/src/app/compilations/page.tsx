@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Eye } from "lucide-react";
 
 type CompilationItem = {
   node_id: number;
@@ -313,12 +314,14 @@ export default function CompilationsPage() {
                               <span className="text-zinc-700">
                                 Node ID: {item.node_id}
                               </span>
-                              <a
-                                href={`/scriptures?node=${item.node_id}`}
-                                className="ml-auto text-xs text-[color:var(--accent)] hover:underline"
-                              >
-                                View →
-                              </a>
+                                        <a
+                                          href={`/scriptures?node=${item.node_id}`}
+                                          title="View"
+                                          aria-label="View"
+                                          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--accent)]/30 bg-[color:var(--paper)] text-[color:var(--accent)] transition hover:bg-[color:var(--paper)]/80"
+                                        >
+                                          <Eye size={16} />
+                                        </a>
                             </div>
                           ))}
                       </div>

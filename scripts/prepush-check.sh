@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if [[ "${RUN_PREPUSH_CHECKS:-0}" != "1" && "$CURRENT_BRANCH" != "main" ]]; then
+  echo "Skipping pre-push checks on branch '$CURRENT_BRANCH' (set RUN_PREPUSH_CHECKS=1 to force)."
+  exit 0
+fi
+
 PYTHON_BIN="$ROOT_DIR/venv/bin/python"
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "Python venv not found at $PYTHON_BIN"

@@ -18,7 +18,7 @@ class User(Base):
         JSONB,
         default=lambda: {
             "can_view": True,
-            "can_contribute": False,
+            "can_contribute": True,
             "can_edit": False,
             "can_moderate": False,
             "can_admin": False,
