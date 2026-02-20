@@ -829,45 +829,49 @@ export default function BasketPanel({
               </div>
 
               {/* Right: Tools */}
-              <div className="w-80 flex flex-col gap-4 overflow-y-auto pr-2">
-                <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                  <h4 className="mb-3 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
-                    Add Organizational Node
-                  </h4>
-                  <p className="mb-3 text-xs text-zinc-600">
-                    Create chapters, parts, or sections to organize content
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {targetSchemaLevels.slice(0, -1).map((level, index) => (
-                      <button
-                        key={level}
-                        onClick={() => {
-                          const title = prompt(`Enter title for ${level}:`);
-                          if (title) {
-                            addOrganizationalNode(level, index + 1, title);
-                          }
-                        }}
-                        disabled={loading}
-                        className="rounded-lg border border-blue-500/30 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
-                      >
-                        + Add {level}
-                      </button>
-                    ))}
+              <div className="w-80 flex flex-col gap-4">
+                {/* Scrollable content area */}
+                <div className="flex-1 overflow-y-auto pr-2 flex flex-col gap-4">
+                  <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                    <h4 className="mb-3 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
+                      Add Organizational Node
+                    </h4>
+                    <p className="mb-3 text-xs text-zinc-600">
+                      Create chapters, parts, or sections to organize content
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {targetSchemaLevels.slice(0, -1).map((level, index) => (
+                        <button
+                          key={level}
+                          onClick={() => {
+                            const title = prompt(`Enter title for ${level}:`);
+                            if (title) {
+                              addOrganizationalNode(level, index + 1, title);
+                            }
+                          }}
+                          disabled={loading}
+                          className="rounded-lg border border-blue-500/30 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+                        >
+                          + Add {level}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                    <h4 className="mb-2 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
+                      Quick Tips
+                    </h4>
+                    <ul className="space-y-2 text-xs text-zinc-600">
+                      <li>• Create organizational nodes first (chapters, parts)</li>
+                      <li>• Drag items under organizational nodes (coming soon)</li>
+                      <li>• Change item levels using the dropdown</li>
+                      <li>• All items will be added to the book when you finalize</li>
+                    </ul>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                  <h4 className="mb-2 text-sm font-medium uppercase tracking-[0.2em] text-zinc-500">
-                    Quick Tips
-                  </h4>
-                  <ul className="space-y-2 text-xs text-zinc-600">
-                    <li>• Create organizational nodes first (chapters, parts)</li>
-                    <li>• Drag items under organizational nodes (coming soon)</li>
-                    <li>• Change item levels using the dropdown</li>
-                    <li>• All items will be added to the book when you finalize</li>
-                  </ul>
-                </div>
-
+                {/* Fixed buttons at bottom */}
                 <button
                   onClick={createOrganizedTree}
                   disabled={loading || organizedTree.length === 0}
