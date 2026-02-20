@@ -38,6 +38,18 @@ type BookDetails = {
   } | null;
 };
 
+type SharePermission = "viewer" | "contributor" | "editor";
+
+type BookShare = {
+  id: number;
+  book_id: number;
+  shared_with_user_id: number;
+  permission: SharePermission;
+  shared_by_user_id: number | null;
+  shared_with_email: string;
+  shared_with_username: string | null;
+};
+
 type SchemaOption = {
   id: number;
   name: string;
@@ -189,6 +201,7 @@ function ScripturesContent() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
+  const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
   const [bookFormData, setBookFormData] = useState({
@@ -197,6 +210,14 @@ function ScripturesContent() {
     languagePrimary: "sanskrit",
   });
   const [bookSubmitting, setBookSubmitting] = useState(false);
+  const [bookShares, setBookShares] = useState<BookShare[]>([]);
+  const [sharesLoading, setSharesLoading] = useState(false);
+  const [sharesError, setSharesError] = useState<string | null>(null);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
+  const [sharesSubmitting, setSharesSubmitting] = useState(false);
+  const [shareUpdatingUserId, setShareUpdatingUserId] = useState<number | null>(null);
+  const [shareRemovingUserId, setShareRemovingUserId] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
@@ -253,6 +274,7 @@ function ScripturesContent() {
     Boolean(bookId) &&
     Boolean(currentBook) &&
     (canAdmin || (authUserId !== null && currentBookOwnerId === authUserId));
+  const canManageShares = canTogglePublish;
 
   const handleTogglePublish = async () => {
     if (!bookId || !currentBook) return;
@@ -730,6 +752,145 @@ function ScripturesContent() {
       }
     } catch {
       // Ignore errors
+    }
+  };
+
+  const loadBookShares = async () => {
+    if (!bookId) return;
+    setSharesLoading(true);
+    setSharesError(null);
+    try {
+      const response = await fetch(`/api/books/${bookId}/shares`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookShare[]
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        setBookShares([]);
+        setSharesError(
+          (payload as { detail?: string } | null)?.detail || "Failed to load shares"
+        );
+        return;
+      }
+      setBookShares(Array.isArray(payload) ? payload : []);
+    } catch {
+      setBookShares([]);
+      setSharesError("Failed to load shares");
+    } finally {
+      setSharesLoading(false);
+    }
+  };
+
+  const handleOpenShareManager = async () => {
+    setShowShareManager(true);
+    await loadBookShares();
+  };
+
+  const handleCreateShare = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bookId || !shareEmail.trim()) return;
+
+    setSharesSubmitting(true);
+    setSharesError(null);
+    try {
+      const response = await fetch(`/api/books/${bookId}/shares`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: shareEmail.trim(),
+          permission: sharePermission,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookShare
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        setSharesError(
+          (payload as { detail?: string } | null)?.detail || "Failed to add share"
+        );
+        return;
+      }
+      setShareEmail("");
+      setSharePermission("viewer");
+      await loadBookShares();
+    } catch {
+      setSharesError("Failed to add share");
+    } finally {
+      setSharesSubmitting(false);
+    }
+  };
+
+  const handleUpdateSharePermission = async (
+    sharedUserId: number,
+    permission: SharePermission
+  ) => {
+    if (!bookId) return;
+
+    setShareUpdatingUserId(sharedUserId);
+    setSharesError(null);
+    try {
+      const response = await fetch(
+        `/api/books/${bookId}/shares/${sharedUserId}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ permission }),
+        }
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | BookShare
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        setSharesError(
+          (payload as { detail?: string } | null)?.detail || "Failed to update share"
+        );
+        return;
+      }
+      setBookShares((prev) =>
+        prev.map((share) =>
+          share.shared_with_user_id === sharedUserId
+            ? { ...share, permission }
+            : share
+        )
+      );
+    } catch {
+      setSharesError("Failed to update share");
+    } finally {
+      setShareUpdatingUserId(null);
+    }
+  };
+
+  const handleDeleteShare = async (sharedUserId: number) => {
+    if (!bookId) return;
+
+    setShareRemovingUserId(sharedUserId);
+    setSharesError(null);
+    try {
+      const response = await fetch(`/api/books/${bookId}/shares/${sharedUserId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { message?: string; detail?: string }
+        | null;
+      if (!response.ok) {
+        setSharesError(payload?.detail || "Failed to remove share");
+        return;
+      }
+      setBookShares((prev) =>
+        prev.filter((share) => share.shared_with_user_id !== sharedUserId)
+      );
+    } catch {
+      setSharesError("Failed to remove share");
+    } finally {
+      setShareRemovingUserId(null);
     }
   };
 
@@ -1340,6 +1501,17 @@ function ScripturesContent() {
                   : "Publish"}
               </button>
             )}
+            {canManageShares && (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleOpenShareManager();
+                }}
+                className="rounded-full border border-purple-500/30 bg-purple-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
+              >
+                Manage Shares
+              </button>
+            )}
             {bookId && currentBook && (
               <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
                 {(currentBook.visibility || "private") === "public"
@@ -1852,6 +2024,122 @@ function ScripturesContent() {
             </div>
           </div>
         </section>
+
+        {/* Share Manager Modal */}
+        {showShareManager && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                  Manage Book Shares
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowShareManager(false);
+                    setSharesError(null);
+                  }}
+                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateShare} className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <label className="sm:col-span-2 flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Invite user email</span>
+                  <input
+                    type="email"
+                    value={shareEmail}
+                    onChange={(event) => setShareEmail(event.target.value)}
+                    required
+                    className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    placeholder="user@example.com"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Permission</span>
+                  <select
+                    value={sharePermission}
+                    onChange={(event) =>
+                      setSharePermission(event.target.value as SharePermission)
+                    }
+                    className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="contributor">Contributor</option>
+                    <option value="editor">Editor</option>
+                  </select>
+                </label>
+                <div className="sm:col-span-3">
+                  <button
+                    type="submit"
+                    disabled={sharesSubmitting}
+                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                  >
+                    {sharesSubmitting ? "Adding..." : "Add Share"}
+                  </button>
+                </div>
+              </form>
+
+              {sharesError && (
+                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {sharesError}
+                </div>
+              )}
+
+              <div className="max-h-[45vh] overflow-y-auto rounded-2xl border border-black/10">
+                {sharesLoading ? (
+                  <div className="p-4 text-sm text-zinc-600">Loading shares...</div>
+                ) : bookShares.length === 0 ? (
+                  <div className="p-4 text-sm text-zinc-500">No shared users yet.</div>
+                ) : (
+                  <div className="divide-y divide-black/10">
+                    {bookShares.map((share) => (
+                      <div key={share.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-[color:var(--deep)]">
+                            {share.shared_with_email}
+                          </p>
+                          {share.shared_with_username && (
+                            <p className="text-xs text-zinc-500">{share.shared_with_username}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={share.permission}
+                            onChange={(event) =>
+                              void handleUpdateSharePermission(
+                                share.shared_with_user_id,
+                                event.target.value as SharePermission
+                              )
+                            }
+                            disabled={shareUpdatingUserId === share.shared_with_user_id}
+                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs uppercase tracking-[0.15em] outline-none focus:border-[color:var(--accent)] disabled:opacity-50"
+                          >
+                            <option value="viewer">Viewer</option>
+                            <option value="contributor">Contributor</option>
+                            <option value="editor">Editor</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handleDeleteShare(share.shared_with_user_id);
+                            }}
+                            disabled={shareRemovingUserId === share.shared_with_user_id}
+                            className="rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.15em] text-red-700 transition hover:border-red-400 disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Create Book Modal */}
         {showCreateBook && (
