@@ -329,6 +329,116 @@ class TestBookPrivacyAndPublishToggle:
         assert get_other_after.status_code == status.HTTP_200_OK
 
 
+class TestBookSharesPhase2:
+    def test_owner_can_share_private_book_with_selected_users(self, client):
+        headers_owner = _register_and_login(client)
+        headers_viewer = _register_and_login(client)
+        headers_contributor = _register_and_login(client)
+
+        owner_me = client.get("/api/users/me", headers=headers_owner)
+        viewer_me = client.get("/api/users/me", headers=headers_viewer)
+        contributor_me = client.get("/api/users/me", headers=headers_contributor)
+        assert owner_me.status_code == status.HTTP_200_OK
+        assert viewer_me.status_code == status.HTTP_200_OK
+        assert contributor_me.status_code == status.HTTP_200_OK
+
+        viewer_email = viewer_me.json()["email"]
+        viewer_id = viewer_me.json()["id"]
+        contributor_email = contributor_me.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for sharing tests",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers_owner,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Private Shared Book {uuid4().hex[:6]}",
+                "book_code": f"share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers_owner,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        pre_share_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
+        assert pre_share_view.status_code == status.HTTP_404_NOT_FOUND
+
+        share_viewer_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": viewer_email, "permission": "viewer"},
+            headers=headers_owner,
+        )
+        assert share_viewer_response.status_code == status.HTTP_201_CREATED
+
+        share_contributor_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": contributor_email, "permission": "contributor"},
+            headers=headers_owner,
+        )
+        assert share_contributor_response.status_code == status.HTTP_201_CREATED
+
+        list_shares_response = client.get(
+            f"/api/content/books/{book_id}/shares",
+            headers=headers_owner,
+        )
+        assert list_shares_response.status_code == status.HTTP_200_OK
+        shared_ids = {item["shared_with_user_id"] for item in list_shares_response.json()}
+        assert viewer_id in shared_ids
+
+        post_share_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
+        assert post_share_view.status_code == status.HTTP_200_OK
+
+        viewer_edit_attempt = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Viewer should not edit",
+                "has_content": False,
+            },
+            headers=headers_viewer,
+        )
+        assert viewer_edit_attempt.status_code == status.HTTP_403_FORBIDDEN
+
+        contributor_edit_attempt = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Contributor can edit",
+                "has_content": False,
+            },
+            headers=headers_contributor,
+        )
+        assert contributor_edit_attempt.status_code == status.HTTP_201_CREATED
+
+        delete_share_response = client.delete(
+            f"/api/content/books/{book_id}/shares/{viewer_id}",
+            headers=headers_owner,
+        )
+        assert delete_share_response.status_code == status.HTTP_200_OK
+
+        post_delete_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
+        assert post_delete_view.status_code == status.HTTP_404_NOT_FOUND
+
+
 class TestHierarchyInsertionRegression:
     def test_schema_hierarchy_rules_and_tree_payload(self, client):
         suffix = uuid4().hex[:8]

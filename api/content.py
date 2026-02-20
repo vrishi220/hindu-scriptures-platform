@@ -14,11 +14,15 @@ from api.pdf_importer import PDFImporter, PDFImportConfig
 from api.json_importer import JSONImporter, JSONImportConfig
 from api.users import get_current_user, get_current_user_optional, require_permission
 from models.book import Book
+from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.media_file import MediaFile
 from models.schemas import (
     BookCreate,
     BookPublic,
+    BookShareCreate,
+    BookSharePublic,
+    BookShareUpdate,
     BookUpdate,
     ContentNodeCreate,
     ContentNodePublic,
@@ -44,6 +48,9 @@ BOOK_STATUS_DRAFT = "draft"
 BOOK_STATUS_PUBLISHED = "published"
 BOOK_VISIBILITY_PRIVATE = "private"
 BOOK_VISIBILITY_PUBLIC = "public"
+BOOK_SHARE_VIEWER = "viewer"
+BOOK_SHARE_CONTRIBUTOR = "contributor"
+BOOK_SHARE_EDITOR = "editor"
 
 
 # Import request/response schemas
@@ -115,21 +122,51 @@ def _book_visibility(book: Book) -> str:
     return BOOK_VISIBILITY_PRIVATE
 
 
-def _book_is_visible_to_user(book: Book, current_user: User | None) -> bool:
+def _share_permission_rank(permission: str | None) -> int:
+    rank_map = {
+        BOOK_SHARE_VIEWER: 1,
+        BOOK_SHARE_CONTRIBUTOR: 2,
+        BOOK_SHARE_EDITOR: 3,
+    }
+    return rank_map.get((permission or "").strip().lower(), 0)
+
+
+def _book_share_permission(db: Session, book_id: int, user_id: int) -> str | None:
+    share = (
+        db.query(BookShare)
+        .filter(
+            BookShare.book_id == book_id,
+            BookShare.shared_with_user_id == user_id,
+        )
+        .first()
+    )
+    if not share:
+        return None
+    return str(share.permission).strip().lower()
+
+
+def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
     if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
-        return True
+        return max(1, 0)
 
     if current_user is None:
-        return False
+        return 0
 
     if _user_can_edit_any(current_user):
-        return True
+        return 3
 
-    return _book_owner_id(book) == current_user.id
+    if _book_owner_id(book) == current_user.id:
+        return 3
+
+    return _share_permission_rank(_book_share_permission(db, book.id, current_user.id))
 
 
-def _ensure_book_view_access(book: Book, current_user: User | None) -> None:
-    if _book_is_visible_to_user(book, current_user):
+def _book_is_visible_to_user(db: Session, book: Book, current_user: User | None) -> bool:
+    return _book_access_rank(db, book, current_user) >= 1
+
+
+def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
+    if _book_is_visible_to_user(db, book, current_user):
         return
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
@@ -163,14 +200,12 @@ def _ensure_can_contribute(current_user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
-def _ensure_book_edit_access(current_user: User, book: Book) -> None:
-    if _user_can_edit_any(current_user):
-        return
-    if _book_owner_id(book) == current_user.id:
+def _ensure_book_edit_access(db: Session, current_user: User, book: Book) -> None:
+    if _book_access_rank(db, book, current_user) >= 2:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail="You can only edit your own books",
+        detail="You do not have edit access to this book",
     )
 
 
@@ -180,11 +215,25 @@ def _ensure_node_edit_access(db: Session, current_user: User, node: ContentNode)
     if node.created_by == current_user.id:
         return
     book = db.query(Book).filter(Book.id == node.book_id).first()
-    if book and _book_owner_id(book) == current_user.id:
+    if book and _book_access_rank(db, book, current_user) >= 2:
         return
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You can only edit your own content",
+    )
+
+
+def _book_share_public_model(share: BookShare, shared_user: User) -> BookSharePublic:
+    return BookSharePublic.model_validate(
+        {
+            "id": share.id,
+            "book_id": share.book_id,
+            "shared_with_user_id": share.shared_with_user_id,
+            "permission": share.permission,
+            "shared_by_user_id": share.shared_by_user_id,
+            "shared_with_email": shared_user.email,
+            "shared_with_username": shared_user.username,
+        }
     )
 
 
@@ -274,7 +323,7 @@ def list_books(
 ) -> list[BookPublic]:
     """List public books and include private drafts only for owners."""
     books = db.query(Book).order_by(Book.id).all()
-    visible_books = [book for book in books if _book_is_visible_to_user(book, current_user)]
+    visible_books = [book for book in books if _book_is_visible_to_user(db, book, current_user)]
     return [_book_public_model(item) for item in visible_books]
 
 
@@ -338,7 +387,7 @@ def get_book(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    _ensure_book_view_access(book, current_user)
+    _ensure_book_view_access(db, book, current_user)
     return _book_public_model(book)
 
 
@@ -353,7 +402,7 @@ def update_book(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    _ensure_book_edit_access(current_user, book)
+    _ensure_book_edit_access(db, current_user, book)
 
     if payload.status is not None or payload.visibility is not None:
         owner_id = _book_owner_id(book)
@@ -419,9 +468,142 @@ def delete_book(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    _ensure_book_edit_access(current_user, book)
+    _ensure_book_edit_access(db, current_user, book)
 
     db.delete(book)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.get("/books/{book_id}/shares", response_model=list[BookSharePublic])
+def list_book_shares(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[BookSharePublic]:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    shares = db.query(BookShare).filter(BookShare.book_id == book_id).order_by(BookShare.id).all()
+    users_by_id = {
+        user.id: user
+        for user in db.query(User)
+        .filter(User.id.in_([share.shared_with_user_id for share in shares]))
+        .all()
+    }
+    return [
+        _book_share_public_model(share, users_by_id[share.shared_with_user_id])
+        for share in shares
+        if share.shared_with_user_id in users_by_id
+    ]
+
+
+@router.post("/books/{book_id}/shares", response_model=BookSharePublic, status_code=status.HTTP_201_CREATED)
+def create_or_update_book_share(
+    book_id: int,
+    payload: BookShareCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookSharePublic:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    shared_user = db.query(User).filter(User.email == payload.email).first()
+    if not shared_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    owner_id = _book_owner_id(book)
+    if owner_id is not None and shared_user.id == owner_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot be shared")
+
+    share = (
+        db.query(BookShare)
+        .filter(BookShare.book_id == book_id, BookShare.shared_with_user_id == shared_user.id)
+        .first()
+    )
+    if share:
+        share.permission = payload.permission
+        share.shared_by_user_id = current_user.id
+    else:
+        share = BookShare(
+            book_id=book_id,
+            shared_with_user_id=shared_user.id,
+            permission=payload.permission,
+            shared_by_user_id=current_user.id,
+        )
+        db.add(share)
+
+    db.commit()
+    db.refresh(share)
+    return _book_share_public_model(share, shared_user)
+
+
+@router.patch("/books/{book_id}/shares/{shared_user_id}", response_model=BookSharePublic)
+def update_book_share(
+    book_id: int,
+    shared_user_id: int,
+    payload: BookShareUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookSharePublic:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    share = (
+        db.query(BookShare)
+        .filter(BookShare.book_id == book_id, BookShare.shared_with_user_id == shared_user_id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+
+    share.permission = payload.permission
+    share.shared_by_user_id = current_user.id
+    db.commit()
+    db.refresh(share)
+
+    shared_user = db.query(User).filter(User.id == shared_user_id).first()
+    if not shared_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    return _book_share_public_model(share, shared_user)
+
+
+@router.delete("/books/{book_id}/shares/{shared_user_id}", response_model=dict)
+def delete_book_share(
+    book_id: int,
+    shared_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    share = (
+        db.query(BookShare)
+        .filter(BookShare.book_id == book_id, BookShare.shared_with_user_id == shared_user_id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+
+    db.delete(share)
     db.commit()
     return {"message": "Deleted"}
 
@@ -940,13 +1122,13 @@ def list_nodes(
         book = db.query(Book).filter(Book.id == book_id).first()
         if not book:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        _ensure_book_view_access(book, current_user)
+        _ensure_book_view_access(db, book, current_user)
         query = query.filter(ContentNode.book_id == book_id)
     else:
         visible_book_ids = [
             book.id
             for book in db.query(Book).all()
-            if _book_is_visible_to_user(book, current_user)
+            if _book_is_visible_to_user(db, book, current_user)
         ]
         if not visible_book_ids:
             return []
@@ -965,7 +1147,7 @@ def list_book_tree(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    _ensure_book_view_access(book, current_user)
+    _ensure_book_view_access(db, book, current_user)
 
     nodes = (
         db.query(ContentNode)
@@ -999,7 +1181,7 @@ def list_book_tree_nested(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    _ensure_book_view_access(book, current_user)
+    _ensure_book_view_access(db, book, current_user)
 
     nodes = (
         db.query(ContentNode)
@@ -1078,7 +1260,7 @@ def create_node(
     if not book:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid book")
 
-    _ensure_book_edit_access(current_user, book)
+    _ensure_book_edit_access(db, current_user, book)
 
     if (
         not _user_can_edit_any(current_user)
@@ -1214,10 +1396,14 @@ def get_node(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
 ) -> ContentNodePublic:
-    _ = current_user
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
 
     if node.referenced_node_id:
         source_node = node
@@ -1374,7 +1560,14 @@ def list_node_media(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
 ) -> list[MediaFilePublic]:
-    _ = current_user
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
     media = (
         db.query(MediaFile)
         .filter(MediaFile.node_id == node_id)
@@ -1507,7 +1700,7 @@ def insert_references(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target book not found")
 
     _ensure_can_contribute(current_user)
-    _ensure_book_edit_access(current_user, target_book)
+    _ensure_book_edit_access(db, current_user, target_book)
 
     # Verify parent node if specified
     if parent_node_id is not None:

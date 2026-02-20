@@ -142,6 +142,27 @@ class BookPublic(BookBase):
     schema: ScriptureSchemaPublic | None = None
 
 
+class BookShareCreate(BaseModel):
+    email: EmailStr
+    permission: Literal["viewer", "contributor", "editor"] = "viewer"
+
+
+class BookShareUpdate(BaseModel):
+    permission: Literal["viewer", "contributor", "editor"]
+
+
+class BookSharePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    shared_with_user_id: int
+    permission: Literal["viewer", "contributor", "editor"]
+    shared_by_user_id: int | None = None
+    shared_with_email: EmailStr
+    shared_with_username: str | None = None
+
+
 class ContentNodeBase(BaseModel):
     book_id: int
     parent_node_id: int | None = None

@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS books (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS book_shares (
+  id SERIAL PRIMARY KEY,
+  book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  shared_with_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission VARCHAR(20) NOT NULL DEFAULT 'viewer',
+  shared_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT uq_book_shares_book_user UNIQUE (book_id, shared_with_user_id),
+  CONSTRAINT ck_book_shares_permission CHECK (permission IN ('viewer', 'contributor', 'editor'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_book_shares_book_id ON book_shares(book_id);
+CREATE INDEX IF NOT EXISTS idx_book_shares_shared_with_user_id ON book_shares(shared_with_user_id);
+
 -- Hierarchical content nodes
 DO $$
 BEGIN
