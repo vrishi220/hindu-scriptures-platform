@@ -439,9 +439,10 @@ function ScripturesContent() {
   };
 
   const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
+  const transliterationEnabled = preferences?.transliteration_enabled ?? true;
+  const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
   const showTransliteration =
-    (preferences?.transliteration_enabled ?? true) &&
-    (preferences?.show_roman_transliteration ?? true);
+    transliterationEnabled && showRomanTransliteration;
 
   const getPreferredTitle = (node: TreeNode | NodeContent): string => {
     if (sourceLanguage === "sanskrit") {
@@ -1927,7 +1928,8 @@ function ScripturesContent() {
                                   transliteration_script: event.target.value,
                                 })
                               }
-                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                              disabled={!transliterationEnabled || !showRomanTransliteration}
+                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <option value="iast">IAST</option>
                               <option value="harvard_kyoto">Harvard-Kyoto</option>
@@ -1937,7 +1939,7 @@ function ScripturesContent() {
                           <label className="flex items-center gap-2 text-sm text-zinc-700">
                             <input
                               type="checkbox"
-                              checked={preferences.transliteration_enabled}
+                              checked={transliterationEnabled}
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
@@ -1950,7 +1952,8 @@ function ScripturesContent() {
                           <label className="flex items-center gap-2 text-sm text-zinc-700">
                             <input
                               type="checkbox"
-                              checked={preferences.show_roman_transliteration}
+                              checked={showRomanTransliteration}
+                              disabled={!transliterationEnabled}
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
