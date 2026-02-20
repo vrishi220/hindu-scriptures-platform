@@ -72,6 +72,9 @@ type UserPreferences = {
 type BasketItem = {
   node_id: number;
   label: string;
+  order: number;
+  book_name?: string;
+  level_name?: string;
   added_at: string;
 };
 
@@ -268,6 +271,9 @@ function ScripturesContent() {
         {
           node_id: nodeContent.id,
           label,
+          order: prev.length + 1,
+          book_name: currentBook?.book_name,
+          level_name: nodeContent.level_name,
           added_at: new Date().toISOString(),
         },
       ];
@@ -2092,7 +2098,7 @@ function ScripturesContent() {
         onItemsAdded={() => {
           // Optionally refresh the tree if needed
           if (bookId) {
-            loadTreeData(parseInt(bookId, 10));
+            void loadTree(bookId);
           }
         }}
       />
