@@ -6,9 +6,11 @@ from sqlalchemy import text
 from services.schema_bootstrap import ensure_phase1_schema
 
 # Set up test database URL before importing models
+# In CI: TEST_DATABASE_URL is set to postgres:postgres credentials
+# Locally: Can use either postgres:postgres or the user's own account
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg2://localhost/test_scriptures"
+    "postgresql+psycopg2://postgres:postgres@localhost:5432/test_scriptures"
 )
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 
