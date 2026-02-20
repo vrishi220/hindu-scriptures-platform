@@ -62,6 +62,65 @@ def require_view_permission(
     return current_user
 
 
+def _user_can_contribute(current_user: User) -> bool:
+    perms = getattr(current_user, "permissions", None)
+    if perms is None:
+        return True
+    return bool(
+        perms.get("can_contribute")
+        or perms.get("can_edit")
+        or perms.get("can_admin")
+    )
+
+
+def _user_can_edit_any(current_user: User) -> bool:
+    perms = getattr(current_user, "permissions", None)
+    if perms is None:
+        return True
+    return bool(perms.get("can_edit") or perms.get("can_admin"))
+
+
+def _book_owner_id(book: Book) -> int | None:
+    metadata = book.metadata_json or {}
+    if not isinstance(metadata, dict):
+        return None
+    owner_id = metadata.get("owner_id")
+    try:
+        return int(owner_id) if owner_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ensure_can_contribute(current_user: User) -> None:
+    if not _user_can_contribute(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def _ensure_book_edit_access(current_user: User, book: Book) -> None:
+    if _user_can_edit_any(current_user):
+        return
+    if _book_owner_id(book) == current_user.id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You can only edit your own books",
+    )
+
+
+def _ensure_node_edit_access(db: Session, current_user: User, node: ContentNode) -> None:
+    if _user_can_edit_any(current_user):
+        return
+    if node.created_by == current_user.id:
+        return
+    book = db.query(Book).filter(Book.id == node.book_id).first()
+    if book and _book_owner_id(book) == current_user.id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You can only edit your own content",
+    )
+
+
 @router.get("/schemas", response_model=list[ScriptureSchemaPublic])
 def list_schemas(
     db: Session = Depends(get_db),
@@ -154,15 +213,21 @@ def list_books(
 def create_book(
     payload: BookCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_contribute")),
+    current_user: User = Depends(get_current_user),
 ) -> BookPublic:
-    _ = current_user
+    _ensure_can_contribute(current_user)
+
+    metadata_json = payload.metadata or {}
+    if not isinstance(metadata_json, dict):
+        metadata_json = {}
+    metadata_json["owner_id"] = current_user.id
+
     book = Book(
         schema_id=payload.schema_id,
         book_name=payload.book_name,
         book_code=payload.book_code,
         language_primary=payload.language_primary,
-        metadata_json=payload.metadata or {},
+        metadata_json=metadata_json,
     )
     db.add(book)
     db.commit()
@@ -188,11 +253,13 @@ def update_book(
     book_id: int,
     payload: BookUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> BookPublic:
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_edit_access(current_user, book)
 
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
@@ -210,11 +277,14 @@ def update_book(
 def delete_book(
     book_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_edit_access(current_user, book)
+
     db.delete(book)
     db.commit()
     return {"message": "Deleted"}
@@ -833,11 +903,15 @@ def list_book_tree_nested(
 def create_node(
     payload: ContentNodeCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_contribute")),
+    current_user: User = Depends(get_current_user),
 ) -> ContentNodePublic:
+    _ensure_can_contribute(current_user)
+
     book = db.query(Book).filter(Book.id == payload.book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid book")
+
+    _ensure_book_edit_access(current_user, book)
 
     # Validate hierarchy against schema if book has one
     if book.schema and book.schema.levels:
@@ -1007,13 +1081,15 @@ def update_node(
     node_id: int,
     payload: ContentNodeUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> ContentNodePublic:
     from datetime import datetime
     
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
 
     source_node = None
     if node.referenced_node_id:
@@ -1100,11 +1176,14 @@ def update_node(
 def delete_node(
     node_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
     db.delete(node)
     db.commit()
     return {"message": "Deleted"}
@@ -1139,12 +1218,14 @@ def upload_node_media(
     node_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_contribute")),
+    current_user: User = Depends(get_current_user),
 ) -> MediaFilePublic:
-    _ = current_user
+    _ensure_can_contribute(current_user)
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
 
     content_type = file.content_type or ""
     media_category = content_type.split("/")[0] if "/" in content_type else ""
@@ -1203,9 +1284,14 @@ def delete_node_media(
     node_id: int,
     media_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    _ = current_user
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
     media = (
         db.query(MediaFile)
         .filter(MediaFile.id == media_id, MediaFile.node_id == node_id)
@@ -1229,7 +1315,7 @@ def insert_references(
     book_id: int,
     payload: InsertReferencesPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_edit")),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """
     Insert nodes from other books as references into the target book.
@@ -1242,6 +1328,9 @@ def insert_references(
     target_book = db.query(Book).filter(Book.id == book_id).first()
     if not target_book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target book not found")
+
+    _ensure_can_contribute(current_user)
+    _ensure_book_edit_access(current_user, target_book)
 
     # Verify parent node if specified
     if parent_node_id is not None:

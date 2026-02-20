@@ -101,6 +101,71 @@ class TestPhase1CompilationsIntegration:
         assert compilation_id in public_ids
 
 
+class TestViewerOwnershipAndReferences:
+    def test_viewer_cannot_edit_others_but_can_reference_into_own_book(self, client):
+        headers_a = _register_and_login(client)
+        headers_b = _register_and_login(client)
+
+        schema_payload = {
+            "name": f"Ownership Schema {uuid4().hex[:8]}",
+            "description": "Schema for ownership integration test",
+            "levels": ["Chapter", "Verse"],
+        }
+        schema_response = client.post("/api/content/schemas", json=schema_payload, headers=headers_a)
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_a_payload = {
+            "schema_id": schema_id,
+            "book_name": f"Book A {uuid4().hex[:6]}",
+            "book_code": f"book-a-{uuid4().hex[:6]}",
+            "language_primary": "sanskrit",
+        }
+        book_a_response = client.post("/api/content/books", json=book_a_payload, headers=headers_a)
+        assert book_a_response.status_code == status.HTTP_201_CREATED
+        book_a_id = book_a_response.json()["id"]
+
+        node_a_payload = {
+            "book_id": book_a_id,
+            "parent_node_id": None,
+            "level_name": "Chapter",
+            "level_order": 1,
+            "sequence_number": "1",
+            "title_english": "Chapter 1",
+            "has_content": False,
+        }
+        node_a_response = client.post("/api/content/nodes", json=node_a_payload, headers=headers_a)
+        assert node_a_response.status_code == status.HTTP_201_CREATED
+        node_a_id = node_a_response.json()["id"]
+
+        forbidden_edit = client.patch(
+            f"/api/content/nodes/{node_a_id}",
+            json={"title_english": "Unauthorized Edit Attempt"},
+            headers=headers_b,
+        )
+        assert forbidden_edit.status_code == status.HTTP_403_FORBIDDEN
+
+        book_b_payload = {
+            "schema_id": schema_id,
+            "book_name": f"Book B {uuid4().hex[:6]}",
+            "book_code": f"book-b-{uuid4().hex[:6]}",
+            "language_primary": "sanskrit",
+        }
+        book_b_response = client.post("/api/content/books", json=book_b_payload, headers=headers_b)
+        assert book_b_response.status_code == status.HTTP_201_CREATED
+        book_b_id = book_b_response.json()["id"]
+
+        insert_refs_response = client.post(
+            f"/api/content/books/{book_b_id}/insert-references",
+            json={"node_ids": [node_a_id]},
+            headers=headers_b,
+        )
+        assert insert_refs_response.status_code == status.HTTP_200_OK
+        payload = insert_refs_response.json()
+        assert payload["created_ids"]
+        assert len(payload["created_ids"]) == 1
+
+
 class TestHierarchyInsertionRegression:
     def test_schema_hierarchy_rules_and_tree_payload(self, client):
         suffix = uuid4().hex[:8]
