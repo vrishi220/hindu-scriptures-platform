@@ -562,13 +562,11 @@ function ScripturesContent() {
   const selectNode = (nodeId: number, syncUrl = true) => {
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, false, syncUrl);
+      applySelection(nodeId, path, false, false);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
-      if (!syncUrl) {
-        loadNodeContent(nodeId);
-      }
+      loadNodeContent(nodeId);
     }
     
     // Update URL with current selection
