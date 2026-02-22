@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from liquid import Template
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -73,6 +74,27 @@ _DEFAULT_TEMPLATE_FIELD_LABELS = {
     "transliteration": "Transliteration",
     "english": "English",
     "text": "Text",
+}
+
+_DEFAULT_TEMPLATE_LABEL_TO_FIELD = {
+    label.lower(): field_name for field_name, label in _DEFAULT_TEMPLATE_FIELD_LABELS.items()
+}
+
+_DEFAULT_LIQUID_TEMPLATES = {
+    "default.front.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
 }
 
 
@@ -598,6 +620,50 @@ def _resolve_default_template_fields(section_name: str, level_name: str | None) 
     return list(_DEFAULT_TEMPLATE_FIELDS_BY_SECTION.get(section_name, ["english", "text"]))
 
 
+def _build_default_liquid_template_from_fields(fields: list[str]) -> str:
+    lines: list[str] = []
+    for field_name in fields:
+        label = _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
+        lines.append(f"{{% if {field_name} %}}{label}: {{{{ {field_name} }}}}\\n{{% endif %}}")
+    return "".join(lines)
+
+
+def _resolve_liquid_template_source(template_key: str, section_name: str, level_name: str | None) -> str:
+    registered = _DEFAULT_LIQUID_TEMPLATES.get(template_key)
+    if isinstance(registered, str) and registered:
+        return registered
+
+    fallback_fields = _resolve_default_template_fields(section_name, level_name)
+    return _build_default_liquid_template_from_fields(fallback_fields)
+
+
+def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, str]]:
+    rendered = Template(template_source).render(**context)
+    lines: list[dict[str, str]] = []
+
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+
+        label, value = line.split(":", 1)
+        resolved_label = _as_clean_string(label)
+        resolved_value = _as_clean_string(value)
+        if not resolved_label or not resolved_value:
+            continue
+
+        field_name = _DEFAULT_TEMPLATE_LABEL_TO_FIELD.get(resolved_label.lower(), resolved_label.lower())
+        lines.append(
+            {
+                "field": field_name,
+                "label": resolved_label,
+                "value": resolved_value,
+            }
+        )
+
+    return lines
+
+
 def _render_block_content_with_template(
     section_name: str,
     template_key: str,
@@ -605,20 +671,23 @@ def _render_block_content_with_template(
     item: dict,
 ) -> dict:
     context = _build_template_context(source_node, item)
-    selected_fields = _resolve_default_template_fields(section_name, context.get("level_name"))
-
-    rendered_lines: list[dict[str, str]] = []
-    for field_name in selected_fields:
-        value = _as_clean_string(context.get(field_name))
-        if not value:
-            continue
-        rendered_lines.append(
-            {
-                "field": field_name,
-                "label": _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title()),
-                "value": value,
-            }
-        )
+    template_source = _resolve_liquid_template_source(template_key, section_name, context.get("level_name"))
+    try:
+        rendered_lines = _render_liquid_lines(template_source, context)
+    except Exception:
+        fallback_fields = _resolve_default_template_fields(section_name, context.get("level_name"))
+        rendered_lines = []
+        for field_name in fallback_fields:
+            value = _as_clean_string(context.get(field_name))
+            if not value:
+                continue
+            rendered_lines.append(
+                {
+                    "field": field_name,
+                    "label": _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title()),
+                    "value": value,
+                }
+            )
 
     content: dict = {
         "level_name": context.get("level_name"),
