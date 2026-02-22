@@ -7,7 +7,7 @@ from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from liquid import Template
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
@@ -488,6 +488,10 @@ def _book_is_visible_to_user(db: Session, book: Book, user_id: int) -> bool:
     if _book_owner_id(book) == user_id:
         return True
 
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    if "owner_id" not in metadata:
+        return True
+
     if _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC:
         return True
 
@@ -696,6 +700,49 @@ def _safe_int(value: object) -> int | None:
     if parsed < 0:
         return None
     return parsed
+
+
+def _content_node_sort_key(node: ContentNode) -> tuple[int, int, int, int]:
+    level_order = node.level_order if isinstance(node.level_order, int) else 10**9
+    sequence_number = node.sequence_number if isinstance(node.sequence_number, int) else 10**9
+    parent_node_id = node.parent_node_id if isinstance(node.parent_node_id, int) else 0
+    return (level_order, sequence_number, parent_node_id, node.id)
+
+
+def _ordered_nodes_by_hierarchy(nodes: list[ContentNode]) -> list[ContentNode]:
+    if not nodes:
+        return []
+
+    children_by_parent: dict[int | None, list[ContentNode]] = {}
+    node_by_id: dict[int, ContentNode] = {}
+    for node in nodes:
+        node_by_id[node.id] = node
+        parent_id = node.parent_node_id if isinstance(node.parent_node_id, int) else None
+        children_by_parent.setdefault(parent_id, []).append(node)
+
+    for child_list in children_by_parent.values():
+        child_list.sort(key=_content_node_sort_key)
+
+    ordered: list[ContentNode] = []
+    visited_ids: set[int] = set()
+
+    def _walk(parent_id: int | None) -> None:
+        for child in children_by_parent.get(parent_id, []):
+            if child.id in visited_ids:
+                continue
+            visited_ids.add(child.id)
+            ordered.append(child)
+            _walk(child.id)
+
+    _walk(None)
+
+    for node in sorted(nodes, key=_content_node_sort_key):
+        if node.id in visited_ids:
+            continue
+        ordered.append(node)
+        _walk(node.id)
+
+    return ordered
 
 
 def _as_clean_string(value: object) -> str:
@@ -1088,26 +1135,27 @@ def _render_book_preview_template(
         resolved_metadata=None,
     )
 
-    child_snippets: list[str] = []
+    child_titles: list[str] = []
     for block in sections.body:
-        rendered_lines = block.content.get("rendered_lines") if isinstance(block.content, dict) else None
-        if not isinstance(rendered_lines, list):
+        title = _as_clean_string(block.title)
+        if not title:
             continue
+        normalized = " ".join(title.split())
+        if len(normalized) > 80:
+            normalized = f"{normalized[:77].rstrip()}..."
+        child_titles.append(normalized)
 
-        line_values: list[str] = []
-        for line in rendered_lines:
-            if not isinstance(line, dict):
-                continue
-            value = _as_clean_string(line.get("value"))
-            if value:
-                line_values.append(value)
-        if line_values:
-            child_snippets.append(f"{block.title}: {' | '.join(line_values)}")
+    max_children = 8
+    visible_children = child_titles[:max_children]
+    hidden_count = max(len(child_titles) - max_children, 0)
+    children_summary = ", ".join(visible_children)
+    if hidden_count > 0:
+        children_summary = f"{children_summary} (+{hidden_count} more)" if children_summary else f"(+{hidden_count} more)"
 
     context = {
         "title": _as_clean_string(book.book_name),
         "child_count": str(len(sections.body)),
-        "children": " || ".join(child_snippets),
+        "children": children_summary,
     }
     rendered_text = Template(template_source).render(**context).strip()
 
@@ -1150,16 +1198,12 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 source_book_id=source_book_id,
             ):
                 if source_book_id not in source_nodes_by_book_id:
-                    source_nodes_by_book_id[source_book_id] = (
+                    source_nodes = (
                         db.query(ContentNode)
                         .filter(ContentNode.book_id == source_book_id)
-                        .order_by(
-                            ContentNode.level_order.asc(),
-                            ContentNode.sequence_number.asc(),
-                            ContentNode.id.asc(),
-                        )
                         .all()
                     )
+                    source_nodes_by_book_id[source_book_id] = _ordered_nodes_by_hierarchy(source_nodes)
 
                 expanded_nodes = source_nodes_by_book_id[source_book_id]
                 for expanded_index, node in enumerate(expanded_nodes):
@@ -1782,6 +1826,7 @@ def update_draft_book(
 @router.delete("/draft-books/{draft_id}", response_model=dict)
 def delete_draft_book(
     draft_id: int,
+    force: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -1789,22 +1834,50 @@ def delete_draft_book(
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
-    has_snapshots = (
-        db.query(EditionSnapshot.id)
+    snapshot_count = (
+        db.query(EditionSnapshot)
         .filter(EditionSnapshot.draft_book_id == draft.id)
-        .first()
-        is not None
+        .count()
     )
-    if draft.status == "published" or has_snapshots:
+    is_published = draft.status == "published"
+    has_snapshots = snapshot_count > 0
+    if (is_published or has_snapshots) and not force:
+        reasons: list[str] = []
+        if is_published:
+            reasons.append("draft is published")
+        if has_snapshots:
+            reasons.append(f"draft has {snapshot_count} immutable snapshot(s)")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete published drafts or drafts with snapshots",
+            detail=(
+                "Cannot delete draft because "
+                + " and ".join(reasons)
+                + ". Retry with ?force=true to permanently delete the draft and its snapshots."
+            ),
+        )
+
+    deleted_snapshot_count = 0
+    if has_snapshots:
+        deleted_snapshot_count = (
+            db.query(EditionSnapshot)
+            .filter(EditionSnapshot.draft_book_id == draft.id)
+            .delete(synchronize_session=False)
         )
 
     db.delete(draft)
     db.commit()
-    _audit_event("draft.deleted", current_user.id, draft_id=draft_id)
-    return {"message": "Deleted"}
+    _audit_event(
+        "draft.deleted",
+        current_user.id,
+        draft_id=draft_id,
+        forced=force,
+        deleted_snapshot_count=deleted_snapshot_count,
+    )
+    return {
+        "message": "Deleted",
+        "forced": force,
+        "deleted_snapshot_count": deleted_snapshot_count,
+    }
 
 
 @router.get("/draft-books/{draft_id}/license-policy", response_model=DraftLicensePolicyReport)
@@ -2070,9 +2143,9 @@ def preview_book_render(
     source_nodes = (
         db.query(ContentNode)
         .filter(ContentNode.book_id == book.id)
-        .order_by(ContentNode.level_order.asc(), ContentNode.sequence_number.asc(), ContentNode.id.asc())
         .all()
     )
+    source_nodes = _ordered_nodes_by_hierarchy(source_nodes)
 
     body_items = [
         {

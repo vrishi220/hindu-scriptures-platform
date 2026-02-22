@@ -1935,9 +1935,11 @@ function ScripturesContent() {
                     void handleAddBookAsDraftBody();
                   }}
                   disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
-                  className="rounded-full border border-amber-500/30 bg-amber-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:opacity-50"
+                  title="Add this book as body to your basket"
+                  aria-label="Add book as body"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-50 text-base text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {bookBodyAddLoading ? "Adding..." : "Add Book as Body"}
+                  {bookBodyAddLoading ? "⏳" : "🧺"}
                 </button>
                 <button
                   type="button"
@@ -1945,9 +1947,11 @@ function ScripturesContent() {
                     void handleCreateDraftFromBookBody();
                   }}
                   disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                  className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs uppercase tracking-[0.2em] text-white transition hover:shadow-sm disabled:opacity-50"
+                  title="Create a new draft from this book body"
+                  aria-label="Create draft from book"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-base text-zinc-700 transition hover:bg-zinc-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {bookBodyCreateDraftLoading ? "Creating Draft..." : "Create Draft from Book"}
+                  {bookBodyCreateDraftLoading ? "⏳" : "📝"}
                 </button>
                 <button
                   type="button"
@@ -1955,9 +1959,11 @@ function ScripturesContent() {
                     void handlePreviewBook();
                   }}
                   disabled={bookPreviewLoading}
-                  className="rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:opacity-50"
+                  title="Preview this book"
+                  aria-label="Preview book"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-base text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {bookPreviewLoading ? "Previewing..." : "Preview Book"}
+                  {bookPreviewLoading ? "⏳" : "👁"}
                 </button>
                 <button
                   type="button"
@@ -1971,8 +1977,9 @@ function ScripturesContent() {
                       setCopyTarget(null);
                     }, 2000);
                   }}
-                  title="Copy book link"
-                  className="rounded-full border border-blue-500/30 bg-blue-50/50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
+                  title="Copy link to this book"
+                  aria-label="Copy book link"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50/50 text-base text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
                 >
                   🔗
                 </button>
@@ -2000,13 +2007,23 @@ function ScripturesContent() {
                 type="button"
                 onClick={handleTogglePublish}
                 disabled={bookVisibilitySubmitting}
-                className="rounded-full border border-indigo-500/30 bg-indigo-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:opacity-50"
+                title={
+                  currentBook?.visibility === "public"
+                    ? "Unpublish this book"
+                    : "Publish this book"
+                }
+                aria-label={
+                  currentBook?.visibility === "public"
+                    ? "Unpublish book"
+                    : "Publish book"
+                }
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/30 bg-indigo-50 text-base text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {bookVisibilitySubmitting
-                  ? "Saving..."
+                  ? "⏳"
                   : currentBook?.visibility === "public"
-                  ? "Unpublish"
-                  : "Publish"}
+                  ? "📕"
+                  : "📗"}
               </button>
             )}
             {canManageShares && (
@@ -2015,13 +2032,27 @@ function ScripturesContent() {
                 onClick={() => {
                   void handleOpenShareManager();
                 }}
-                className="rounded-full border border-purple-500/30 bg-purple-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
+                title="Manage book sharing"
+                aria-label="Manage shares"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-50 text-base text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
               >
-                Manage Shares
+                👥
               </button>
             )}
             {bookId && currentBook && (
-              <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+              <span
+                title={
+                  (currentBook.visibility || "private") === "public"
+                    ? "Visible to all users"
+                    : "Private draft: only you and users you explicitly share this book with can view it"
+                }
+                aria-label={
+                  (currentBook.visibility || "private") === "public"
+                    ? "Public visibility"
+                    : "Private draft visibility: only you and explicitly shared users can view"
+                }
+                className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
+              >
                 {(currentBook.visibility || "private") === "public"
                   ? "Public"
                   : "Private draft"}

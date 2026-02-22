@@ -161,12 +161,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const search = new URL(request.url).search;
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
 
   const doDelete = (token?: string) =>
-    fetch(`${API_BASE_URL}/api/draft-books/${id}`, {
+    fetch(`${API_BASE_URL}/api/draft-books/${id}${search}`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",
@@ -208,7 +209,10 @@ export async function DELETE(
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    return NextResponse.json(payload || { detail: "Failed to delete draft" }, { status: response.status });
+    return NextResponse.json(
+      payload || { detail: `Failed to delete draft (${response.status} ${response.statusText})` },
+      { status: response.status }
+    );
   }
 
   return NextResponse.json(payload);

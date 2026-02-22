@@ -102,6 +102,11 @@ type CartComposeBodyResponse = {
   skipped_item_count?: number;
 };
 
+type ApiErrorPayload = {
+  detail?: unknown;
+  message?: unknown;
+};
+
 const formatDate = (dateString: string) => {
   try {
     return new Date(dateString).toLocaleString("en-US", {
@@ -114,6 +119,26 @@ const formatDate = (dateString: string) => {
   } catch {
     return dateString;
   }
+};
+
+const extractApiErrorMessage = (payload: ApiErrorPayload | null, fallback: string): string => {
+  if (!payload) {
+    return fallback;
+  }
+  if (typeof payload.detail === "string" && payload.detail.trim()) {
+    return payload.detail;
+  }
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+  if (payload.detail && typeof payload.detail === "object") {
+    try {
+      return JSON.stringify(payload.detail);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 };
 
 function DraftsPageContent() {
@@ -692,25 +717,41 @@ function DraftsPageContent() {
   };
 
   const handleDeleteDraft = async (draft: DraftBook) => {
-    const confirmed = window.confirm(
-      `Delete draft \"${draft.title}\"? This cannot be undone.`
-    );
-    if (!confirmed) {
-      return;
-    }
-
     setBusyDraftId(draft.id);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/draft-books/${draft.id}`, {
+      let requiresForceDelete = draft.status === "published";
+      if (!requiresForceDelete) {
+        const snapshotsResponse = await fetch(`/api/draft-books/${draft.id}/snapshots`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (snapshotsResponse.ok) {
+          const snapshots = (await snapshotsResponse.json().catch(() => [])) as EditionSnapshot[];
+          requiresForceDelete = snapshots.length > 0;
+        }
+      }
+
+      const confirmed = window.confirm("Are you sure you want to delete?");
+      if (!confirmed) {
+        return;
+      }
+
+      const response = await fetch(
+        `/api/draft-books/${draft.id}${requiresForceDelete ? "?force=true" : ""}`,
+        {
         method: "DELETE",
         credentials: "include",
-      });
+        }
+      );
 
-      const payload = (await response.json().catch(() => null)) as { detail?: string; message?: string } | null;
+      const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
       if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to delete draft");
+        throw new Error(
+          extractApiErrorMessage(payload, `Failed to delete draft (HTTP ${response.status})`)
+        );
       }
 
       setDrafts((prev) => prev.filter((item) => item.id !== draft.id));
