@@ -3223,3 +3223,184 @@ class TestContentCoverageSprintCOV02:
         media_response = client.get("/api/content/nodes/999999/media", headers=headers)
         assert media_response.status_code == status.HTTP_404_NOT_FOUND
         assert media_response.json()["detail"] == "Not found"
+
+
+class TestUsersCoverageSprintCOV03:
+    def test_non_admin_cannot_access_admin_user_endpoints(self, client):
+        headers = _register_and_login(client)
+
+        list_response = client.get("/api/users", headers=headers)
+        assert list_response.status_code == status.HTTP_403_FORBIDDEN
+
+        create_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_user_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_user_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_create_user_and_list_users(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+
+        create_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_admin_create_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_admin_create_{uuid4().hex[:8]}",
+                "full_name": "Coverage Admin Created",
+                "role": "editor",
+                "permissions": {"can_moderate": True},
+            },
+            headers=admin_headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        created = create_response.json()
+        assert created["role"] == "editor"
+        assert created["permissions"]["can_edit"] is True
+        assert created["permissions"]["can_moderate"] is True
+
+        list_response = client.get("/api/users", headers=admin_headers)
+        assert list_response.status_code == status.HTTP_200_OK
+        ids = {item["id"] for item in list_response.json()}
+        assert created["id"] in ids
+
+    def test_admin_create_user_rejects_duplicate_email_and_username(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        user_headers = _register_and_login(client)
+        user_me = client.get("/api/users/me", headers=user_headers)
+        assert user_me.status_code == status.HTTP_200_OK
+        existing_email = user_me.json()["email"]
+        existing_username = user_me.json()["username"]
+
+        duplicate_email = client.post(
+            "/api/users",
+            json={
+                "email": existing_email,
+                "password": "StrongPass123",
+                "username": f"cov_unique_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert duplicate_email.status_code == status.HTTP_400_BAD_REQUEST
+        assert duplicate_email.json()["detail"] == "Email in use"
+
+        duplicate_username = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_dup_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": existing_username,
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert duplicate_username.status_code == status.HTTP_400_BAD_REQUEST
+        assert duplicate_username.json()["detail"] == "Username in use"
+
+    def test_admin_can_update_permissions_and_status(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+
+        created_user_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_update_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_update_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert created_user_response.status_code == status.HTTP_201_CREATED
+        target_user_id = created_user_response.json()["id"]
+
+        permissions_response = client.patch(
+            f"/api/users/{target_user_id}/permissions",
+            json={"can_edit": True, "role": "editor"},
+            headers=admin_headers,
+        )
+        assert permissions_response.status_code == status.HTTP_200_OK
+        permissions_payload = permissions_response.json()
+        assert permissions_payload["role"] == "editor"
+        assert permissions_payload["permissions"]["can_edit"] is True
+
+        deactivate_response = client.patch(
+            f"/api/users/{target_user_id}/status?is_active=false",
+            headers=admin_headers,
+        )
+        assert deactivate_response.status_code == status.HTTP_200_OK
+        assert deactivate_response.json()["is_active"] is False
+
+        not_found_permissions = client.patch(
+            "/api/users/999999/permissions",
+            json={"can_edit": True},
+            headers=admin_headers,
+        )
+        assert not_found_permissions.status_code == status.HTTP_404_NOT_FOUND
+
+        not_found_status = client.patch(
+            "/api/users/999999/status?is_active=false",
+            headers=admin_headers,
+        )
+        assert not_found_status.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_admin_delete_user_respects_contribution_guard(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        contributor_headers = _register_and_login(client)
+
+        contributor_me = client.get("/api/users/me", headers=contributor_headers)
+        assert contributor_me.status_code == status.HTTP_200_OK
+        contributor_id = contributor_me.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Delete Guard Schema {uuid4().hex[:8]}",
+                "description": "Schema for delete-user contribution guard coverage",
+                "levels": ["Chapter"],
+            },
+            headers=contributor_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Delete Guard Book {uuid4().hex[:6]}",
+                "book_code": f"cov-delete-guard-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=contributor_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Contributor Node",
+                "has_content": False,
+            },
+            headers=contributor_headers,
+        )
+        assert node_response.status_code == status.HTTP_201_CREATED
+
+        delete_with_contrib = client.delete(f"/api/users/{contributor_id}", headers=admin_headers)
+        assert delete_with_contrib.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cannot delete user with existing contributions" in delete_with_contrib.json()["detail"].lower()
+
+        non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
+        assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
