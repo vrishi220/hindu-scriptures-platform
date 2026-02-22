@@ -2874,3 +2874,192 @@ class TestCollectLicensePolicyIntegration:
         assert report["warning_issues"][0]["license_type"] == "CC-BY-NC-4.0"
         assert report["blocked_issues"][0]["source_node_id"] == blocked_node_id
         assert report["blocked_issues"][0]["license_type"] == "ALL-RIGHTS-RESERVED"
+
+
+class TestContentCoverageSprintCOV01:
+    def test_update_book_rejects_invalid_status_and_visibility(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Status Schema {uuid4().hex[:8]}",
+                "description": "Schema for update-book validation coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Status Book {uuid4().hex[:6]}",
+                "book_code": f"cov-status-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        invalid_status_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "archived"},
+            headers=headers,
+        )
+        assert invalid_status_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+        invalid_visibility_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"visibility": "internal"},
+            headers=headers,
+        )
+        assert invalid_visibility_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def test_book_share_rejects_owner_email(self, client):
+        headers = _register_and_login(client)
+
+        me_response = client.get("/api/users/me", headers=headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        owner_email = me_response.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for share-owner guard coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": owner_email, "permission": "viewer"},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "owner cannot be shared" in share_response.json()["detail"].lower()
+
+    def test_insert_references_validates_schema_and_parent(self, client):
+        headers = _register_and_login(client)
+
+        target_no_schema_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": None,
+                "book_name": f"COV No Schema Target {uuid4().hex[:6]}",
+                "book_code": f"cov-noschema-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_no_schema_response.status_code == status.HTTP_201_CREATED
+        target_no_schema_id = target_no_schema_response.json()["id"]
+
+        no_schema_insert_response = client.post(
+            f"/api/content/books/{target_no_schema_id}/insert-references",
+            json={"node_ids": []},
+            headers=headers,
+        )
+        assert no_schema_insert_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "book has no schema" in no_schema_insert_response.json()["detail"].lower()
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Ref Schema {uuid4().hex[:8]}",
+                "description": "Schema for insert-reference parent validation",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        target_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Target {uuid4().hex[:6]}",
+                "book_code": f"cov-target-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_response.status_code == status.HTTP_201_CREATED
+        target_book_id = target_response.json()["id"]
+
+        bad_parent_response = client.post(
+            f"/api/content/books/{target_book_id}/insert-references",
+            json={"node_ids": [], "parent_node_id": 999999},
+            headers=headers,
+        )
+        assert bad_parent_response.status_code == status.HTTP_404_NOT_FOUND
+        assert "parent node not found" in bad_parent_response.json()["detail"].lower()
+
+    def test_delete_book_requires_edit_access(self, client):
+        owner_headers = _register_and_login(client)
+        other_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Delete Schema {uuid4().hex[:8]}",
+                "description": "Schema for delete-book access coverage",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Delete Book {uuid4().hex[:6]}",
+                "book_code": f"cov-delete-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        forbidden_delete_response = client.delete(
+            f"/api/content/books/{book_id}",
+            headers=other_headers,
+        )
+        assert forbidden_delete_response.status_code == status.HTTP_403_FORBIDDEN
+
+        owner_delete_response = client.delete(
+            f"/api/content/books/{book_id}",
+            headers=owner_headers,
+        )
+        assert owner_delete_response.status_code == status.HTTP_200_OK
+        assert owner_delete_response.json()["message"] == "Deleted"
+
+        get_deleted_response = client.get(
+            f"/api/content/books/{book_id}",
+            headers=owner_headers,
+        )
+        assert get_deleted_response.status_code == status.HTTP_404_NOT_FOUND
