@@ -104,6 +104,8 @@ export default function BasketPanel({
   onItemsAdded,
 }: BasketPanelProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const [panelMessage, setPanelMessage] = useState<string | null>(null);
   const [showAddToBook, setShowAddToBook] = useState(false);
   const [showOrganizer, setShowOrganizer] = useState(false);
   const [mode, setMode] = useState<"select" | "create">("select");
@@ -216,6 +218,7 @@ export default function BasketPanel({
   };
 
   const handleAddToBookClick = async () => {
+    setPanelMessage(null);
     setShowAddToBook(true);
     setMode("select");
     setMessage(null);
@@ -237,6 +240,48 @@ export default function BasketPanel({
     } catch {
       setCanCopyExistingContent(false);
       setInsertMode("reference");
+    }
+  };
+
+  const handleCreateDraftFromBasket = async () => {
+    if (items.length === 0 || creatingDraft) {
+      return;
+    }
+
+    setCreatingDraft(true);
+    setPanelMessage(null);
+
+    try {
+      const response = await fetch("/api/cart/me/create-draft", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Draft from Basket",
+          clear_cart_after_create: true,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { id?: number; detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to create draft from basket");
+      }
+
+      const createdDraftId = payload?.id;
+      if (typeof createdDraftId === "number") {
+        onClearBasket();
+        window.location.href = `/drafts?draftId=${createdDraftId}`;
+        return;
+      }
+
+      throw new Error("Draft created, but response did not include an id");
+    } catch (error) {
+      setPanelMessage(error instanceof Error ? error.message : "Failed to create draft from basket");
+    } finally {
+      setCreatingDraft(false);
     }
   };
 
@@ -861,17 +906,31 @@ export default function BasketPanel({
 
           {items.length > 0 && (
             <div className="border-t border-black/10 p-4">
+              {panelMessage && (
+                <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {panelMessage}
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
+                  onClick={handleCreateDraftFromBasket}
+                  disabled={loading || creatingDraft}
+                  className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {creatingDraft ? "Creating Draft..." : "Create Draft"}
+                </button>
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
                   onClick={handleAddToBookClick}
-                  disabled={loading}
+                  disabled={loading || creatingDraft}
                   className="flex-1 rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition hover:shadow-lg disabled:opacity-50"
                 >
                   Add to Book
                 </button>
                 <button
                   onClick={onClearBasket}
-                  disabled={loading}
+                  disabled={loading || creatingDraft}
                   className="rounded-lg border border-red-500/30 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-50"
                 >
                   Clear

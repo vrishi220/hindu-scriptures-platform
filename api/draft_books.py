@@ -1,21 +1,33 @@
 import logging
 import textwrap
+import hashlib
+import json
+import re
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from liquid import Template
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
-from api.users import get_current_user
+from api.users import get_current_user, require_permission
+from models.book import Book
 from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    AdminDraftBookCreate,
+    BookPreviewRenderArtifactPublic,
+    BookPreviewRenderRequest,
+    DraftPreviewRenderArtifactPublic,
+    DraftPreviewRenderRequest,
+    DraftRevisionEventPublic,
+    DraftRevisionFeedPublic,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
     DraftProvenanceAppendix,
@@ -45,6 +57,111 @@ _SNAPSHOT_TEMPLATE_VERSION = "v1"
 _SNAPSHOT_TEMPLATE_PATTERN = "default.{section}.content_item.v1"
 _SNAPSHOT_RENDERER = "edition_snapshot_renderer"
 _SNAPSHOT_OUTPUT_PROFILE = "reader_pdf_parity_v1"
+_TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*\.content_item\.v1$")
+
+_DEFAULT_TEMPLATE_FIELDS_BY_LEVEL = {
+    "chapter": ["english", "text"],
+    "section": ["english", "text"],
+    "verse": ["sanskrit", "transliteration", "english", "text"],
+    "shloka": ["sanskrit", "transliteration", "english", "text"],
+}
+
+_DEFAULT_TEMPLATE_FIELDS_BY_SECTION = {
+    "front": ["english", "text"],
+    "body": ["sanskrit", "transliteration", "english", "text"],
+    "back": ["english", "text"],
+}
+
+_DEFAULT_TEMPLATE_FIELD_LABELS = {
+    "title": "Title",
+    "sanskrit": "Sanskrit",
+    "transliteration": "Transliteration",
+    "english": "English",
+    "text": "Text",
+}
+
+_DEFAULT_TEMPLATE_LABEL_TO_FIELD = {
+    label.lower(): field_name for field_name, label in _DEFAULT_TEMPLATE_FIELD_LABELS.items()
+}
+
+_BOOK_VISIBILITY_PUBLIC = "public"
+
+_DEFAULT_LIQUID_TEMPLATES = {
+    "default.front.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+}
 
 
 def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> str | None:
@@ -100,6 +217,59 @@ def _default_sections() -> dict:
     return {"front": [], "body": [], "back": []}
 
 
+def _book_owner_id(book: Book) -> int | None:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    owner_id = metadata.get("owner_id")
+    try:
+        return int(owner_id) if owner_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _book_visibility(book: Book) -> str:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    raw_visibility = metadata.get("visibility")
+    visibility = str(raw_visibility).strip().lower() if raw_visibility is not None else ""
+    return visibility if visibility else "private"
+
+
+def _book_title_for_preview(node: ContentNode) -> str:
+    return (
+        _as_clean_string(node.title_english)
+        or _as_clean_string(node.title_transliteration)
+        or _as_clean_string(node.title_sanskrit)
+        or f"Node {node.id}"
+    )
+
+
+def _is_book_body_reference_item(
+    section_name: str,
+    raw_item: dict,
+    source_node_id: int | None,
+    source_book_id: int | None,
+) -> bool:
+    if section_name != "body":
+        return False
+    if source_node_id is not None and source_node_id > 0:
+        return False
+    if source_book_id is None or source_book_id <= 0:
+        return False
+
+    source_scope = _as_clean_string(raw_item.get("source_scope")).lower()
+    if source_scope in {"book", "entire_book", "book_body"}:
+        return True
+
+    include_whole_book = raw_item.get("include_whole_book")
+    if isinstance(include_whole_book, bool):
+        return include_whole_book
+
+    expand_book_body = raw_item.get("expand_book_body")
+    if isinstance(expand_book_body, bool):
+        return expand_book_body
+
+    return False
+
+
 def _default_template_metadata() -> SnapshotTemplateMetadata:
     return SnapshotTemplateMetadata(
         template_family=_SNAPSHOT_TEMPLATE_FAMILY,
@@ -137,6 +307,362 @@ def _apply_template_metadata(snapshot_payload: dict) -> None:
     snapshot_payload["template_metadata"] = _extract_template_metadata(snapshot_payload).model_dump()
 
 
+def _canonical_hash(value: object) -> str:
+    payload = value if value is not None else {}
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _compute_snapshot_fingerprint(snapshot_payload: dict) -> dict:
+    resolved = snapshot_payload if isinstance(snapshot_payload, dict) else {}
+    content_basis = {
+        "front": resolved.get("front") if isinstance(resolved.get("front"), list) else [],
+        "body": resolved.get("body") if isinstance(resolved.get("body"), list) else [],
+        "back": resolved.get("back") if isinstance(resolved.get("back"), list) else [],
+    }
+    template_basis = {
+        "template_metadata": _extract_template_metadata(resolved).model_dump(),
+        "template_bindings": _extract_template_bindings(resolved),
+    }
+    render_basis = {
+        "render_settings": _extract_render_settings(resolved).model_dump(),
+        "output_profile": _extract_template_metadata(resolved).output_profile,
+    }
+
+    content_hash = _canonical_hash(content_basis)
+    template_hash = _canonical_hash(template_basis)
+    render_hash = _canonical_hash(render_basis)
+    combined_hash = _canonical_hash(
+        {
+            "content_hash": content_hash,
+            "template_hash": template_hash,
+            "render_hash": render_hash,
+        }
+    )
+
+    return {
+        "version": "v1",
+        "algorithm": "sha256",
+        "content_hash": content_hash,
+        "template_hash": template_hash,
+        "render_hash": render_hash,
+        "combined_hash": combined_hash,
+    }
+
+
+def _apply_snapshot_fingerprint(snapshot_payload: dict) -> None:
+    snapshot_payload["snapshot_fingerprint"] = _compute_snapshot_fingerprint(snapshot_payload)
+
+
+def _read_metadata_dict(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+
+    resolved: dict = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if raw_value is None:
+            continue
+        resolved[key.strip()] = raw_value
+    return resolved
+
+
+def _extract_metadata_bindings(snapshot_data: dict | None) -> dict:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("metadata_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+
+    global_metadata = _read_metadata_dict(
+        bindings.get("global")
+        or bindings.get("global_metadata")
+    )
+    book_metadata = _read_metadata_dict(
+        bindings.get("book")
+        or bindings.get("book_metadata")
+    )
+
+    raw_level_bindings = (
+        bindings.get("levels")
+        if isinstance(bindings.get("levels"), dict)
+        else bindings.get("level_metadata")
+    )
+    level_bindings: dict[str, dict] = {}
+    if isinstance(raw_level_bindings, dict):
+        for key, value in raw_level_bindings.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            normalized = _read_metadata_dict(value)
+            if normalized:
+                level_bindings[key.strip().lower()] = normalized
+
+    raw_node_bindings = (
+        bindings.get("nodes")
+        if isinstance(bindings.get("nodes"), dict)
+        else bindings.get("node_metadata")
+    )
+    node_bindings: dict[int, dict] = {}
+    if isinstance(raw_node_bindings, dict):
+        for key, value in raw_node_bindings.items():
+            parsed_node_id = _safe_int(key)
+            if parsed_node_id is None:
+                continue
+            normalized = _read_metadata_dict(value)
+            if normalized:
+                node_bindings[parsed_node_id] = normalized
+
+    return {
+        "global_metadata": global_metadata,
+        "book_metadata": book_metadata,
+        "level_metadata": level_bindings,
+        "node_metadata": node_bindings,
+    }
+
+
+def _merge_metadata_layers(*layers: dict) -> dict:
+    merged: dict = {}
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        for key, value in layer.items():
+            if value is None:
+                continue
+            merged[key] = value
+    return merged
+
+
+def _resolve_block_metadata(
+    item: dict,
+    source_node: ContentNode | None,
+    metadata_bindings: dict,
+) -> dict:
+    node_scope: dict = {}
+    node_binding_map = metadata_bindings.get("node_metadata")
+    if isinstance(node_binding_map, dict):
+        source_node_id = item.get("source_node_id")
+        if isinstance(source_node_id, int) and source_node_id > 0:
+            node_scope = _read_metadata_dict(node_binding_map.get(source_node_id))
+
+    level_scope: dict = {}
+    level_binding_map = metadata_bindings.get("level_metadata")
+    if isinstance(level_binding_map, dict):
+        level_name = source_node.level_name if source_node else item.get("level_name")
+        if isinstance(level_name, str) and level_name.strip():
+            level_scope = _read_metadata_dict(level_binding_map.get(level_name.strip().lower()))
+
+    book_scope: dict = {}
+    source_book_id = item.get("source_book_id")
+    if isinstance(source_book_id, int) and source_book_id > 0:
+        book_scope = _read_metadata_dict(metadata_bindings.get("book_metadata"))
+
+    global_scope = _read_metadata_dict(metadata_bindings.get("global_metadata"))
+    field_scope = _read_metadata_dict(item.get("metadata_overrides"))
+    if not field_scope:
+        field_scope = _read_metadata_dict(item.get("metadata"))
+
+    return _merge_metadata_layers(
+        global_scope,
+        book_scope,
+        level_scope,
+        node_scope,
+        field_scope,
+    )
+
+
+def _read_template_key(value: object) -> str | None:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _is_valid_template_key(template_key: str) -> bool:
+    return bool(_TEMPLATE_KEY_PATTERN.fullmatch(template_key))
+
+
+def _validate_template_bindings(snapshot_data: dict | None) -> list[str]:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("template_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+    if not bindings:
+        return []
+
+    errors: list[str] = []
+
+    def _validate_template_value(path: str, raw_value: object) -> None:
+        template_key = _read_template_key(raw_value)
+        if template_key is None:
+            return
+        if not _is_valid_template_key(template_key):
+            errors.append(
+                f"{path}: invalid template key '{template_key}' (must end with '.content_item.v1')"
+            )
+
+    _validate_template_value(
+        "global_template_key",
+        bindings.get("global_template_key") or bindings.get("global"),
+    )
+    _validate_template_value(
+        "book_template_key",
+        bindings.get("book_template_key") or bindings.get("book"),
+    )
+
+    raw_level_bindings = (
+        bindings.get("level_template_keys")
+        if isinstance(bindings.get("level_template_keys"), dict)
+        else bindings.get("levels")
+    )
+    if isinstance(raw_level_bindings, dict):
+        for level_name, raw_value in raw_level_bindings.items():
+            level_label = level_name.strip() if isinstance(level_name, str) and level_name.strip() else "<unknown>"
+            _validate_template_value(f"level_template_keys.{level_label}", raw_value)
+
+    raw_node_bindings = (
+        bindings.get("node_template_keys")
+        if isinstance(bindings.get("node_template_keys"), dict)
+        else bindings.get("nodes")
+    )
+    if isinstance(raw_node_bindings, dict):
+        for node_id, raw_value in raw_node_bindings.items():
+            parsed_node_id = _safe_int(node_id)
+            node_label = str(node_id)
+            if parsed_node_id is None:
+                errors.append(f"node_template_keys.{node_label}: invalid node id")
+                continue
+            _validate_template_value(f"node_template_keys.{parsed_node_id}", raw_value)
+
+    return errors
+
+
+def _extract_template_bindings(snapshot_data: dict | None) -> dict:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("template_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+
+    global_template_key = _read_template_key(
+        bindings.get("global")
+        or bindings.get("global_template_key")
+    )
+    book_template_key = _read_template_key(
+        bindings.get("book")
+        or bindings.get("book_template_key")
+    )
+
+    raw_level_bindings = (
+        bindings.get("levels")
+        if isinstance(bindings.get("levels"), dict)
+        else bindings.get("level_template_keys")
+    )
+    level_bindings: dict[str, str] = {}
+    if isinstance(raw_level_bindings, dict):
+        for key, value in raw_level_bindings.items():
+            if not isinstance(key, str):
+                continue
+            template_key = _read_template_key(value)
+            if template_key:
+                level_bindings[key.strip().lower()] = template_key
+
+    raw_node_bindings = (
+        bindings.get("nodes")
+        if isinstance(bindings.get("nodes"), dict)
+        else bindings.get("node_template_keys")
+    )
+    node_bindings: dict[int, str] = {}
+    if isinstance(raw_node_bindings, dict):
+        for key, value in raw_node_bindings.items():
+            template_key = _read_template_key(value)
+            if not template_key:
+                continue
+
+            parsed_node_id = _safe_int(key)
+            if parsed_node_id is None:
+                continue
+            node_bindings[parsed_node_id] = template_key
+
+    return {
+        "global_template_key": global_template_key,
+        "book_template_key": book_template_key,
+        "level_template_keys": level_bindings,
+        "node_template_keys": node_bindings,
+    }
+
+
+def _apply_session_template_bindings(snapshot_payload: dict, session_template_bindings: dict | None) -> None:
+    if not isinstance(snapshot_payload, dict) or not isinstance(session_template_bindings, dict):
+        return
+
+    base_bindings = _extract_template_bindings(snapshot_payload)
+    session_bindings = _extract_template_bindings({"template_bindings": session_template_bindings})
+
+    merged_global = session_bindings.get("global_template_key") or base_bindings.get("global_template_key")
+    merged_book = session_bindings.get("book_template_key") or base_bindings.get("book_template_key")
+
+    base_level = base_bindings.get("level_template_keys") if isinstance(base_bindings.get("level_template_keys"), dict) else {}
+    session_level = session_bindings.get("level_template_keys") if isinstance(session_bindings.get("level_template_keys"), dict) else {}
+    merged_level = {**base_level, **session_level}
+
+    base_node = base_bindings.get("node_template_keys") if isinstance(base_bindings.get("node_template_keys"), dict) else {}
+    session_node = session_bindings.get("node_template_keys") if isinstance(session_bindings.get("node_template_keys"), dict) else {}
+    merged_node = {**base_node, **session_node}
+
+    serialized_bindings: dict = {}
+    if merged_global:
+        serialized_bindings["global_template_key"] = merged_global
+    if merged_book:
+        serialized_bindings["book_template_key"] = merged_book
+    if merged_level:
+        serialized_bindings["level_template_keys"] = merged_level
+    if merged_node:
+        serialized_bindings["node_template_keys"] = {str(key): value for key, value in merged_node.items()}
+
+    snapshot_payload["template_bindings"] = serialized_bindings
+
+
+def _resolve_block_template_key(
+    section_name: str,
+    item: dict,
+    source_node: ContentNode | None,
+    template_bindings: dict,
+) -> str:
+    default_template = f"default.{section_name}.content_item.v1"
+    level_name = source_node.level_name if source_node else item.get("level_name")
+    level_fallback_template = None
+    if isinstance(level_name, str) and level_name.strip():
+        normalized_level = level_name.strip().lower()
+        level_fallback_template = f"default.{section_name}.{normalized_level}.content_item.v1"
+
+    node_bindings = template_bindings.get("node_template_keys")
+    if isinstance(node_bindings, dict):
+        source_node_id = item.get("source_node_id")
+        if isinstance(source_node_id, int) and source_node_id > 0:
+            node_template = _read_template_key(node_bindings.get(source_node_id))
+            if node_template:
+                return node_template
+
+    level_bindings = template_bindings.get("level_template_keys")
+    if isinstance(level_bindings, dict):
+        if isinstance(level_name, str) and level_name.strip():
+            level_template = _read_template_key(level_bindings.get(level_name.strip().lower()))
+            if level_template:
+                return level_template
+
+    source_book_id = item.get("source_book_id")
+    if isinstance(source_book_id, int) and source_book_id > 0:
+        book_template = _read_template_key(template_bindings.get("book_template_key"))
+        if book_template:
+            return book_template
+
+    global_template = _read_template_key(template_bindings.get("global_template_key"))
+    if global_template:
+        return global_template
+
+    if level_fallback_template:
+        return level_fallback_template
+
+    return default_template
+
+
 def _safe_int(value: object) -> int | None:
     try:
         parsed = int(value)
@@ -147,9 +673,23 @@ def _safe_int(value: object) -> int | None:
     return parsed
 
 
-def _extract_render_content(source_node: ContentNode | None) -> dict:
+def _as_clean_string(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _build_template_context(source_node: ContentNode | None, item: dict) -> dict:
     if source_node is None:
-        return {}
+        return {
+            "title": _as_clean_string(item.get("title")),
+            "level_name": _as_clean_string(item.get("level_name")),
+            "sequence_number": _as_clean_string(item.get("sequence_number")),
+            "sanskrit": "",
+            "transliteration": "",
+            "english": "",
+            "text": "",
+        }
 
     content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
     basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
@@ -176,6 +716,7 @@ def _extract_render_content(source_node: ContentNode | None) -> dict:
         or content_data.get("text_english")
         or content_data.get("english")
         or content_data.get("translation")
+        or source_node.title_english
         or ""
     )
     fallback_text = (
@@ -185,19 +726,171 @@ def _extract_render_content(source_node: ContentNode | None) -> dict:
         or ""
     )
 
-    def _as_clean_string(value: object) -> str:
-        if isinstance(value, str):
-            return value.strip()
-        return ""
+    title_value = _as_clean_string(source_node.title_english) or _as_clean_string(item.get("title"))
 
     return {
-        "level_name": source_node.level_name,
-        "sequence_number": source_node.sequence_number,
+        "title": title_value,
+        "level_name": _as_clean_string(source_node.level_name),
+        "sequence_number": _as_clean_string(source_node.sequence_number),
         "sanskrit": _as_clean_string(sanskrit_text),
         "transliteration": _as_clean_string(transliteration_text),
         "english": _as_clean_string(english_text),
         "text": _as_clean_string(fallback_text),
     }
+
+
+def _normalize_template_field_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"title", "sanskrit", "transliteration", "english", "text"}:
+        return normalized
+    return None
+
+
+def _resolve_default_template_fields(
+    section_name: str,
+    level_name: str | None,
+    resolved_metadata: dict | None = None,
+) -> list[str]:
+    if isinstance(resolved_metadata, dict):
+        metadata_fields = resolved_metadata.get("template_fields")
+        if not isinstance(metadata_fields, list):
+            metadata_fields = resolved_metadata.get("render_fields")
+        if isinstance(metadata_fields, list):
+            normalized_fields = [
+                field_name
+                for field_name in (_normalize_template_field_name(item) for item in metadata_fields)
+                if field_name
+            ]
+            if normalized_fields:
+                return normalized_fields
+
+    normalized_level = level_name.strip().lower() if isinstance(level_name, str) and level_name.strip() else ""
+    if normalized_level and normalized_level in _DEFAULT_TEMPLATE_FIELDS_BY_LEVEL:
+        return list(_DEFAULT_TEMPLATE_FIELDS_BY_LEVEL[normalized_level])
+    return list(_DEFAULT_TEMPLATE_FIELDS_BY_SECTION.get(section_name, ["english", "text"]))
+
+
+def _resolve_default_template_labels(resolved_metadata: dict | None) -> dict[str, str]:
+    labels = dict(_DEFAULT_TEMPLATE_FIELD_LABELS)
+    if not isinstance(resolved_metadata, dict):
+        return labels
+
+    metadata_labels = resolved_metadata.get("template_field_labels")
+    if not isinstance(metadata_labels, dict):
+        metadata_labels = resolved_metadata.get("render_field_labels")
+    if not isinstance(metadata_labels, dict):
+        return labels
+
+    for key, value in metadata_labels.items():
+        field_name = _normalize_template_field_name(key)
+        label_text = _as_clean_string(value)
+        if field_name and label_text:
+            labels[field_name] = label_text
+
+    return labels
+
+
+def _build_default_liquid_template_from_fields(fields: list[str], labels: dict[str, str] | None = None) -> str:
+    resolved_labels = labels or _DEFAULT_TEMPLATE_FIELD_LABELS
+    lines: list[str] = []
+    for field_name in fields:
+        label = resolved_labels.get(field_name, field_name.title())
+        lines.append(f"{{% if {field_name} %}}{label}: {{{{ {field_name} }}}}\n{{% endif %}}")
+    return "".join(lines)
+
+
+def _resolve_liquid_template_source(
+    template_key: str,
+    section_name: str,
+    level_name: str | None,
+    resolved_metadata: dict | None = None,
+) -> str:
+    registered = _DEFAULT_LIQUID_TEMPLATES.get(template_key)
+    if isinstance(registered, str) and registered:
+        return registered
+
+    fallback_fields = _resolve_default_template_fields(section_name, level_name, resolved_metadata)
+    fallback_labels = _resolve_default_template_labels(resolved_metadata)
+    return _build_default_liquid_template_from_fields(fallback_fields, fallback_labels)
+
+
+def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, str]]:
+    rendered = Template(template_source).render(**context)
+    lines: list[dict[str, str]] = []
+
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+
+        label, value = line.split(":", 1)
+        resolved_label = _as_clean_string(label)
+        resolved_value = _as_clean_string(value)
+        if not resolved_label or not resolved_value:
+            continue
+
+        field_name = _DEFAULT_TEMPLATE_LABEL_TO_FIELD.get(resolved_label.lower(), resolved_label.lower())
+        lines.append(
+            {
+                "field": field_name,
+                "label": resolved_label,
+                "value": resolved_value,
+            }
+        )
+
+    return lines
+
+
+def _render_block_content_with_template(
+    section_name: str,
+    template_key: str,
+    source_node: ContentNode | None,
+    item: dict,
+    resolved_metadata: dict | None = None,
+) -> tuple[dict, str]:
+    context = _build_template_context(source_node, item)
+    template_source = _resolve_liquid_template_source(
+        template_key,
+        section_name,
+        context.get("level_name"),
+        resolved_metadata,
+    )
+    try:
+        rendered_lines = _render_liquid_lines(template_source, context)
+    except Exception:
+        fallback_fields = _resolve_default_template_fields(
+            section_name,
+            context.get("level_name"),
+            resolved_metadata,
+        )
+        fallback_labels = _resolve_default_template_labels(resolved_metadata)
+        rendered_lines = []
+        for field_name in fallback_fields:
+            value = _as_clean_string(context.get(field_name))
+            if not value:
+                continue
+            rendered_lines.append(
+                {
+                    "field": field_name,
+                    "label": fallback_labels.get(field_name, field_name.title()),
+                    "value": value,
+                }
+            )
+
+    content: dict = {
+        "level_name": context.get("level_name"),
+        "sequence_number": context.get("sequence_number"),
+        "title": context.get("title"),
+        "template_key": template_key,
+        "rendered_lines": rendered_lines,
+    }
+
+    for field_name in ("sanskrit", "transliteration", "english", "text"):
+        content[field_name] = _as_clean_string(context.get(field_name))
+
+    return content, template_source
 
 
 def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettings:
@@ -226,6 +919,34 @@ def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettin
 
 def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
+    rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
+
+    if rendered_lines:
+        visible_by_key: dict[str, bool] = {
+            "sanskrit": render_settings.show_sanskrit,
+            "transliteration": render_settings.show_transliteration,
+            "english": render_settings.show_english,
+            "text": True,
+        }
+        lines: list[tuple[str, str]] = []
+        for line in rendered_lines:
+            if not isinstance(line, dict):
+                continue
+
+            field_name = _as_clean_string(line.get("field")).lower()
+            label = _as_clean_string(line.get("label")) or _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
+            value = _as_clean_string(line.get("value"))
+            if not value:
+                continue
+
+            if field_name in visible_by_key and not visible_by_key.get(field_name, False):
+                continue
+
+            lines.append((label, value))
+
+        if lines:
+            return lines
+
     visible_by_key: dict[str, bool] = {
         "sanskrit": render_settings.show_sanskrit,
         "transliteration": render_settings.show_transliteration,
@@ -267,6 +988,8 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
     section_names = ("front", "body", "back")
     section_blocks: dict[str, list[SnapshotRenderBlock]] = {"front": [], "body": [], "back": []}
     source_node_ids: set[int] = set()
+    template_bindings = _extract_template_bindings(resolved_data)
+    metadata_bindings = _extract_metadata_bindings(resolved_data)
 
     for section_name in section_names:
         raw_section = resolved_data.get(section_name)
@@ -274,6 +997,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             continue
 
         candidates: list[tuple[tuple[int, int, int, str, int], dict]] = []
+        source_nodes_by_book_id: dict[int, list[ContentNode]] = {}
         for index, raw_item in enumerate(raw_section):
             if not isinstance(raw_item, dict):
                 continue
@@ -282,6 +1006,53 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             sequence_number = _safe_int(raw_item.get("sequence_number"))
             source_node_id = _safe_int(raw_item.get("node_id"))
             source_book_id = _safe_int(raw_item.get("source_book_id"))
+
+            if _is_book_body_reference_item(
+                section_name=section_name,
+                raw_item=raw_item,
+                source_node_id=source_node_id,
+                source_book_id=source_book_id,
+            ):
+                if source_book_id not in source_nodes_by_book_id:
+                    source_nodes_by_book_id[source_book_id] = (
+                        db.query(ContentNode)
+                        .filter(ContentNode.book_id == source_book_id)
+                        .order_by(
+                            ContentNode.level_order.asc(),
+                            ContentNode.sequence_number.asc(),
+                            ContentNode.id.asc(),
+                        )
+                        .all()
+                    )
+
+                expanded_nodes = source_nodes_by_book_id[source_book_id]
+                for expanded_index, node in enumerate(expanded_nodes):
+                    expanded_sequence = _safe_int(node.sequence_number)
+                    expanded_title = _book_title_for_preview(node)
+                    expanded_sort_key = (
+                        explicit_order if explicit_order is not None else 10**9,
+                        node.level_order if isinstance(node.level_order, int) else 10**9,
+                        expanded_sequence if expanded_sequence is not None else 10**9,
+                        expanded_title.lower(),
+                        (index * 10**4) + expanded_index,
+                    )
+
+                    candidates.append(
+                        (
+                            expanded_sort_key,
+                            {
+                                "source_node_id": node.id,
+                                "source_book_id": source_book_id,
+                                "level_name": node.level_name,
+                                "metadata": raw_item.get("metadata") if isinstance(raw_item.get("metadata"), dict) else None,
+                                "metadata_overrides": raw_item.get("metadata_overrides") if isinstance(raw_item.get("metadata_overrides"), dict) else None,
+                                "title": expanded_title,
+                            },
+                        )
+                    )
+                    source_node_ids.add(node.id)
+
+                continue
 
             title_value = raw_item.get("title")
             title = title_value.strip() if isinstance(title_value, str) and title_value.strip() else "Untitled"
@@ -300,6 +1071,9 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                     {
                         "source_node_id": source_node_id,
                         "source_book_id": source_book_id,
+                        "level_name": raw_item.get("level_name") if isinstance(raw_item.get("level_name"), str) else None,
+                        "metadata": raw_item.get("metadata") if isinstance(raw_item.get("metadata"), dict) else None,
+                        "metadata_overrides": raw_item.get("metadata_overrides") if isinstance(raw_item.get("metadata_overrides"), dict) else None,
                         "title": title,
                     },
                 )
@@ -318,16 +1092,36 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         materialized_blocks: list[SnapshotRenderBlock] = []
         for block_index, (_, item) in enumerate(candidates, start=1):
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
+            template_key = _resolve_block_template_key(
+                section_name=section_name,
+                item=item,
+                source_node=source_node,
+                template_bindings=template_bindings,
+            )
+            resolved_metadata = _resolve_block_metadata(
+                item=item,
+                source_node=source_node,
+                metadata_bindings=metadata_bindings,
+            )
+            block_content, resolved_template_source = _render_block_content_with_template(
+                section_name=section_name,
+                template_key=template_key,
+                source_node=source_node,
+                item=item,
+                resolved_metadata=resolved_metadata,
+            )
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,
                     order=block_index,
                     block_type="content_item",
-                    template_key=f"default.{section_name}.content_item.v1",
+                    template_key=template_key,
+                    resolved_template_source=resolved_template_source,
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],
-                    content=_extract_render_content(source_node),
+                    resolved_metadata=resolved_metadata,
+                    content=block_content,
                 )
             )
 
@@ -572,6 +1366,58 @@ def _create_snapshot_for_draft(
     return snapshot
 
 
+def _build_draft_revision_events(draft: DraftBook, db: Session) -> list[DraftRevisionEventPublic]:
+    snapshots = (
+        db.query(EditionSnapshot)
+        .filter(EditionSnapshot.draft_book_id == draft.id)
+        .order_by(EditionSnapshot.created_at.asc(), EditionSnapshot.id.asc())
+        .all()
+    )
+
+    events: list[DraftRevisionEventPublic] = [
+        DraftRevisionEventPublic(
+            sequence=1,
+            event_type="draft.created",
+            entity_type="draft_book",
+            entity_id=draft.id,
+            draft_book_id=draft.id,
+            actor_user_id=draft.owner_id,
+            occurred_at=draft.created_at,
+            metadata={"status": draft.status},
+        )
+    ]
+
+    for snapshot in snapshots:
+        fingerprint = (
+            snapshot.snapshot_data.get("snapshot_fingerprint")
+            if isinstance(snapshot.snapshot_data, dict)
+            else {}
+        )
+        metadata: dict = {}
+        if isinstance(fingerprint, dict):
+            combined_hash = fingerprint.get("combined_hash")
+            if isinstance(combined_hash, str) and combined_hash:
+                metadata["combined_hash"] = combined_hash
+
+        events.append(
+            DraftRevisionEventPublic(
+                sequence=len(events) + 1,
+                event_type="snapshot.created",
+                entity_type="edition_snapshot",
+                entity_id=snapshot.id,
+                draft_book_id=draft.id,
+                actor_user_id=snapshot.owner_id,
+                occurred_at=snapshot.created_at,
+                snapshot_id=snapshot.id,
+                snapshot_version=snapshot.version,
+                immutable=snapshot.immutable,
+                metadata=metadata,
+            )
+        )
+
+    return events
+
+
 def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
     appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
     appendix_entries = []
@@ -705,6 +1551,34 @@ def create_draft_book(
     return DraftBookPublic.model_validate(draft)
 
 
+@router.post(
+    "/draft-books/admin/create-clean",
+    response_model=DraftBookPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def admin_create_clean_draft_book(
+    payload: AdminDraftBookCreate,
+    current_user: User = Depends(require_permission("can_admin")),
+    db: Session = Depends(get_db),
+):
+    owner_id = payload.owner_id or current_user.id
+    owner = db.query(User).filter(User.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner user not found")
+
+    draft = DraftBook(
+        owner_id=owner_id,
+        title=(payload.title or "Admin Test Draft").strip() or "Admin Test Draft",
+        description=payload.description,
+        section_structure=payload.section_structure or _default_sections(),
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return DraftBookPublic.model_validate(draft)
+
+
 @router.get("/draft-books/my", response_model=list[DraftBookPublic])
 def list_my_drafts(
     current_user: User = Depends(get_current_user),
@@ -729,6 +1603,23 @@ def get_draft_book(
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
     return DraftBookPublic.model_validate(draft)
+
+
+@router.get("/draft-books/{draft_id}/history", response_model=DraftRevisionFeedPublic)
+def get_draft_history(
+    draft_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
+    if not draft or draft.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    events = _build_draft_revision_events(draft, db)
+    return DraftRevisionFeedPublic(
+        draft_book_id=draft.id,
+        events=events,
+    )
 
 
 @router.patch("/draft-books/{draft_id}", response_model=DraftBookPublic)
@@ -763,6 +1654,18 @@ def delete_draft_book(
     draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    has_snapshots = (
+        db.query(EditionSnapshot.id)
+        .filter(EditionSnapshot.draft_book_id == draft.id)
+        .first()
+        is not None
+    )
+    if draft.status == "published" or has_snapshots:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete published drafts or drafts with snapshots",
+        )
 
     db.delete(draft)
     db.commit()
@@ -823,6 +1726,7 @@ def create_edition_snapshot(
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
     _apply_template_metadata(snapshot_payload)
+    _apply_snapshot_fingerprint(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,
@@ -877,10 +1781,28 @@ def publish_draft_book(
             ),
         )
 
+    template_binding_errors = _validate_template_bindings(resolved_snapshot_data)
+    if template_binding_errors:
+        _audit_event(
+            "publish.template_validation_failed",
+            current_user.id,
+            draft_id=draft_id,
+            error_count=len(template_binding_errors),
+            template_errors=template_binding_errors,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Publish blocked by template validation.",
+                "errors": template_binding_errors,
+            },
+        )
+
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
     _apply_template_metadata(snapshot_payload)
+    _apply_snapshot_fingerprint(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,
@@ -957,6 +1879,105 @@ def get_snapshot_render_artifact(
         sections=sections,
         render_settings=render_settings,
         template_metadata=template_metadata,
+    )
+
+
+@router.post(
+    "/draft-books/{draft_id}/preview/render",
+    response_model=DraftPreviewRenderArtifactPublic,
+)
+def preview_draft_render(
+    draft_id: int,
+    payload: DraftPreviewRenderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
+    if not draft or draft.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    resolved_snapshot_data = payload.snapshot_data or draft.section_structure or _default_sections()
+    preview_payload = dict(resolved_snapshot_data)
+    _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    template_warnings = _validate_template_bindings(preview_payload)
+    _apply_template_metadata(preview_payload)
+
+    sections = _materialize_snapshot_render_sections(preview_payload, db)
+    render_settings = _extract_render_settings(preview_payload)
+    template_metadata = _extract_template_metadata(preview_payload)
+
+    return DraftPreviewRenderArtifactPublic(
+        draft_book_id=draft.id,
+        sections=sections,
+        render_settings=render_settings,
+        template_metadata=template_metadata,
+        preview_mode="session" if payload.session_template_bindings else "draft",
+        warnings=template_warnings,
+    )
+
+
+@router.post(
+    "/books/{book_id}/preview/render",
+    response_model=BookPreviewRenderArtifactPublic,
+)
+def preview_book_render(
+    book_id: int,
+    payload: BookPreviewRenderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    can_view = _book_owner_id(book) == current_user.id or _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC
+    if not can_view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    source_nodes = (
+        db.query(ContentNode)
+        .filter(ContentNode.book_id == book.id)
+        .order_by(ContentNode.level_order.asc(), ContentNode.sequence_number.asc(), ContentNode.id.asc())
+        .all()
+    )
+
+    body_items = [
+        {
+            "node_id": node.id,
+            "source_book_id": book.id,
+            "level_name": node.level_name,
+            "title": _book_title_for_preview(node),
+            "order": index,
+        }
+        for index, node in enumerate(source_nodes, start=1)
+    ]
+
+    preview_payload: dict = {
+        "front": [],
+        "body": body_items,
+        "back": [],
+    }
+    if isinstance(payload.render_settings, dict):
+        preview_payload["render_settings"] = payload.render_settings
+    if isinstance(payload.metadata_bindings, dict):
+        preview_payload["metadata_bindings"] = payload.metadata_bindings
+
+    _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    template_warnings = _validate_template_bindings(preview_payload)
+    _apply_template_metadata(preview_payload)
+
+    sections = _materialize_snapshot_render_sections(preview_payload, db)
+    render_settings = _extract_render_settings(preview_payload)
+    template_metadata = _extract_template_metadata(preview_payload)
+
+    return BookPreviewRenderArtifactPublic(
+        book_id=book.id,
+        book_name=book.book_name,
+        sections={"body": sections.body},
+        render_settings=render_settings,
+        template_metadata=template_metadata,
+        preview_mode="book",
+        warnings=template_warnings,
     )
 
 

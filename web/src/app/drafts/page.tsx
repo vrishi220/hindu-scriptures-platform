@@ -558,6 +558,50 @@ function DraftsPageContent() {
     }
   };
 
+  const handleDeleteDraft = async (draft: DraftBook) => {
+    const confirmed = window.confirm(
+      `Delete draft \"${draft.title}\"? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyDraftId(draft.id);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/draft-books/${draft.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const payload = (await response.json().catch(() => null)) as { detail?: string; message?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to delete draft");
+      }
+
+      setDrafts((prev) => prev.filter((item) => item.id !== draft.id));
+      setEditorState((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
+      setSnapshotsByDraft((prev) => {
+        const next = { ...prev };
+        delete next[draft.id];
+        return next;
+      });
+      if (expandedDraftId === draft.id) {
+        setExpandedDraftId(null);
+      }
+      setMessage("✓ Draft deleted.");
+    } catch (err) {
+      setMessage(`✗ ${err instanceof Error ? err.message : "Failed to delete draft"}`);
+    } finally {
+      setBusyDraftId(null);
+    }
+  };
+
   const toggleExpand = async (draft: DraftBook) => {
     const next = expandedDraftId === draft.id ? null : draft.id;
     setExpandedDraftId(next);
@@ -754,6 +798,14 @@ function DraftsPageContent() {
                               className="rounded-lg border border-[color:var(--deep)]/30 bg-[color:var(--deep)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               Publish
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteDraft(draft)}
+                              disabled={isBusy}
+                              className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Delete Draft
                             </button>
                           </div>
 

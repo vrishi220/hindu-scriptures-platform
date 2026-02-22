@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from api.users import get_current_user
 from models.book import Book
 from models.collection_cart import CollectionCart, CollectionCartItem
+from models.draft_book import DraftBook
 from models.user import User
 from models.schemas import (
     CollectionCartPublic,
@@ -24,6 +25,10 @@ from models.schemas import (
     CollectionCartUpdate,
     CollectionCartItemCreate,
     CollectionCartItemPublic,
+    CartDraftBodyReference,
+    CartDraftComposeBodyPublic,
+    CartCreateDraftRequest,
+    DraftBookPublic,
 )
 from services import get_db
 
@@ -46,6 +51,39 @@ def _to_item_public(item: CollectionCartItem) -> CollectionCartItemPublic:
         added_at=item.added_at,
         updated_at=item.updated_at,
     )
+
+
+def _compose_cart_items_into_draft_body(items: list[CollectionCartItem], db: Session) -> tuple[list[dict], list[CartDraftBodyReference], int]:
+    ordered_book_ids: list[int] = []
+    seen_book_ids: set[int] = set()
+    skipped_item_count = 0
+    for item in items:
+        if item.source_book_id is None or item.source_book_id <= 0:
+            skipped_item_count += 1
+            continue
+        if item.source_book_id in seen_book_ids:
+            continue
+        seen_book_ids.add(item.source_book_id)
+        ordered_book_ids.append(item.source_book_id)
+
+    books = db.query(Book).filter(Book.id.in_(ordered_book_ids)).all() if ordered_book_ids else []
+    books_by_id = {book.id: book for book in books}
+
+    body_references: list[CartDraftBodyReference] = []
+    body_items: list[dict] = []
+    for index, source_book_id in enumerate(ordered_book_ids, start=1):
+        source_book = books_by_id.get(source_book_id)
+        title = source_book.book_name if source_book and source_book.book_name else f"Book {source_book_id}"
+        reference = CartDraftBodyReference(
+            source_book_id=source_book_id,
+            source_scope="book",
+            order=index,
+            title=title,
+        )
+        body_references.append(reference)
+        body_items.append(reference.model_dump())
+
+    return body_items, body_references, skipped_item_count
 
 
 # === Cart Management ===
@@ -160,6 +198,79 @@ def clear_my_cart(
 
     db.query(CollectionCartItem).filter(CollectionCartItem.cart_id == cart.id).delete()
     db.commit()
+
+
+@router.post("/me/compose-draft-body", response_model=CartDraftComposeBodyPublic)
+def compose_my_cart_as_draft_body(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Compose cart items into a draft-ready body structure using whole-book references."""
+    cart = db.query(CollectionCart).filter(
+        CollectionCart.owner_id == current_user.id
+    ).first()
+
+    if not cart:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart not found")
+
+    items = db.query(CollectionCartItem).filter(
+        CollectionCartItem.cart_id == cart.id
+    ).order_by(CollectionCartItem.order.asc(), CollectionCartItem.id.asc()).all()
+    body_items, body_references, skipped_item_count = _compose_cart_items_into_draft_body(items, db)
+
+    section_structure = {
+        "front": [],
+        "body": body_items,
+        "back": [],
+    }
+
+    return CartDraftComposeBodyPublic(
+        cart_id=cart.id,
+        section_structure=section_structure,
+        body_references=body_references,
+        skipped_item_count=skipped_item_count,
+    )
+
+
+@router.post("/me/create-draft", response_model=DraftBookPublic, status_code=status.HTTP_201_CREATED)
+def create_draft_from_my_cart(
+    payload: CartCreateDraftRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a draft directly from cart items using whole-book body references."""
+    cart = db.query(CollectionCart).filter(
+        CollectionCart.owner_id == current_user.id
+    ).first()
+
+    if not cart:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart not found")
+
+    items = db.query(CollectionCartItem).filter(
+        CollectionCartItem.cart_id == cart.id
+    ).order_by(CollectionCartItem.order.asc(), CollectionCartItem.id.asc()).all()
+    body_items, _, _ = _compose_cart_items_into_draft_body(items, db)
+
+    draft = DraftBook(
+        owner_id=current_user.id,
+        title=payload.title,
+        description=payload.description,
+        section_structure={
+            "front": [],
+            "body": body_items,
+            "back": [],
+        },
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+
+    if payload.clear_cart_after_create:
+        db.query(CollectionCartItem).filter(CollectionCartItem.cart_id == cart.id).delete()
+        db.commit()
+
+    return DraftBookPublic.model_validate(draft)
 
 
 # === Cart Items Management ===

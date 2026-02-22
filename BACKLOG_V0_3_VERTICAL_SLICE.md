@@ -4,6 +4,13 @@ Status: Draft (execution-ready)
 Scope: Editor assembles mixed-source draft and publishes immutable edition with provenance-backed PDF export.
 Source of truth: DESIGN_RFC.md (v0.3), Section 19.
 
+## Decision Update (2026-02-22)
+- Basket is treated as an intake/selection surface to compose candidate book structure.
+- Draft is the canonical printable/publishable assembly surface.
+- Rendering is template-driven from draft snapshot payloads (not basket state).
+- Draft body may reference an entire source book explicitly (`source_scope: "book"`) and expand to renderable body blocks.
+- Book preview/render contracts are body-only; front/back finishing layers remain draft concerns.
+
 ## Board Model
 - Backlog
 - Ready
@@ -284,3 +291,61 @@ Rationale: lock PDF engine decision first, then implement renderer core, then sh
 2. N-01 (renderer parity and published snapshot render artifact endpoint)
 3. N-03 (viewer-facing published edition reading experience)
 4. N-04 (E2E coverage for publish/export and authorization boundaries)
+
+## Coverage Sprint (Backend API Hardening)
+
+Baseline (2026-02-22): API package line coverage is 61%.
+
+### COV-01: Content API high-risk path coverage
+- Priority: p0
+- Estimate: 3 days
+- Labels: area:backend, area:testing, area:security
+- Scope: `api/content.py`
+- Target:
+  - Increase `api/content.py` coverage from 48% to >=65%.
+  - Add regression tests for ownership boundaries, invalid hierarchy transitions, node update edge-cases, and reference insertion conflicts.
+- Definition of Done:
+  - New tests cover both success and failure branches for create/update/delete/reference operations.
+  - Coverage report shows `api/content.py` >=65%.
+
+### COV-02: Users/Admin permissions coverage
+- Priority: p0
+- Estimate: 1.5 days
+- Labels: area:backend, area:security, role:admin
+- Scope: `api/users.py`
+- Target:
+  - Increase `api/users.py` coverage from 50% to >=75%.
+  - Add tests for admin create/update/deactivate/list user flows, plus forbidden checks for non-admin callers.
+- Definition of Done:
+  - Permission matrix assertions are explicit for `can_admin` protected routes.
+  - Coverage report shows `api/users.py` >=75%.
+
+### COV-03: Auth + search branch completion
+- Priority: p1
+- Estimate: 1.5 days
+- Labels: area:backend, area:testing
+- Scope: `api/auth.py`, `api/search.py`
+- Target:
+  - Raise `api/auth.py` from 64% to >=75%.
+  - Raise `api/search.py` from 63% to >=75%.
+  - Add tests for refresh/logout invalid-token paths, inactive-user behavior, and search parameter edge handling.
+- Definition of Done:
+  - Token refresh/logout failure branches are exercised.
+  - Coverage report shows both files >=75%.
+
+### COV-04: Import pipeline contract tests
+- Priority: p1
+- Estimate: 2 days
+- Labels: area:backend, area:data, area:testing
+- Scope: `api/import_parser.py`, `api/json_importer.py`, `api/pdf_importer.py`
+- Target:
+  - Add contract-level tests for parse failures, malformed payloads, and minimal successful imports.
+  - Raise each file to >=50% line coverage.
+- Definition of Done:
+  - Import endpoints fail with deterministic, user-facing error messages on malformed input.
+  - Coverage report shows each import module >=50%.
+
+## Coverage Sprint Exit Criteria
+- API package line coverage >=70%.
+- No regression in `api/draft_books.py` (remain >=80%) and `api/collection_cart.py` (remain >=85%).
+- CI includes coverage report artifact and per-file gates for `api/content.py` and `api/users.py`.

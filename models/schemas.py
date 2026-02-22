@@ -355,6 +355,15 @@ class DraftBookCreate(DraftBookBase):
     pass
 
 
+class AdminDraftBookCreate(BaseModel):
+    owner_id: int | None = None
+    title: str = "Admin Test Draft"
+    description: str | None = "Created by admin for testing"
+    section_structure: dict = Field(
+        default_factory=lambda: {"front": [], "body": [], "back": []}
+    )
+
+
 class DraftBookUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -425,14 +434,35 @@ class DraftPublishPublic(BaseModel):
     provenance_appendix: DraftProvenanceAppendix
 
 
+class DraftRevisionEventPublic(BaseModel):
+    sequence: int
+    event_type: Literal["draft.created", "snapshot.created"]
+    entity_type: Literal["draft_book", "edition_snapshot"]
+    entity_id: int
+    draft_book_id: int
+    actor_user_id: int | None = None
+    occurred_at: datetime
+    snapshot_id: int | None = None
+    snapshot_version: int | None = None
+    immutable: bool | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class DraftRevisionFeedPublic(BaseModel):
+    draft_book_id: int
+    events: list[DraftRevisionEventPublic] = Field(default_factory=list)
+
+
 class SnapshotRenderBlock(BaseModel):
     section: Literal["front", "body", "back"]
     order: int
     block_type: str
     template_key: str
+    resolved_template_source: str | None = None
     source_node_id: int | None = None
     source_book_id: int | None = None
     title: str
+    resolved_metadata: dict = Field(default_factory=dict)
     content: dict = Field(default_factory=dict)
 
 
@@ -470,6 +500,44 @@ class SnapshotRenderArtifactPublic(BaseModel):
     sections: SnapshotRenderSections
     render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
+
+
+class DraftPreviewRenderRequest(BaseModel):
+    snapshot_data: dict | None = None
+    session_template_bindings: dict | None = None
+
+
+class DraftPreviewRenderArtifactPublic(BaseModel):
+    draft_book_id: int
+    section_order: list[Literal["front", "body", "back"]] = Field(
+        default_factory=lambda: ["front", "body", "back"]
+    )
+    sections: SnapshotRenderSections
+    render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
+    template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
+    preview_mode: Literal["session", "draft"] = "session"
+    warnings: list[str] = Field(default_factory=list)
+
+
+class BookPreviewRenderRequest(BaseModel):
+    session_template_bindings: dict | None = None
+    render_settings: dict | None = None
+    metadata_bindings: dict | None = None
+
+
+class BookPreviewRenderSections(BaseModel):
+    body: list[SnapshotRenderBlock] = Field(default_factory=list)
+
+
+class BookPreviewRenderArtifactPublic(BaseModel):
+    book_id: int
+    book_name: str
+    section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
+    sections: BookPreviewRenderSections
+    render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
+    template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
+    preview_mode: Literal["book"] = "book"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ProvenanceRecordPublic(BaseModel):
@@ -536,3 +604,25 @@ class CollectionCartPublic(CollectionCartBase):
     created_at: datetime
     updated_at: datetime
     items: list[CollectionCartItemPublic] = Field(default_factory=list)
+
+
+class CartDraftBodyReference(BaseModel):
+    source_book_id: int
+    source_scope: Literal["book"] = "book"
+    order: int
+    title: str
+
+
+class CartDraftComposeBodyPublic(BaseModel):
+    cart_id: int
+    section_structure: dict = Field(
+        default_factory=lambda: {"front": [], "body": [], "back": []}
+    )
+    body_references: list[CartDraftBodyReference] = Field(default_factory=list)
+    skipped_item_count: int = 0
+
+
+class CartCreateDraftRequest(BaseModel):
+    title: str
+    description: str | None = None
+    clear_cart_after_create: bool = False

@@ -15,6 +15,7 @@ from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import ContentNodeCreate
 from models.scripture_schema import ScriptureSchema
+from models.user import User
 import pytest
 
 
@@ -55,6 +56,29 @@ def _register_user(client):
     register_response = client.post("/api/auth/register", json=register_payload)
     assert register_response.status_code == status.HTTP_201_CREATED
     return email, password
+
+
+def _register_and_login_as_admin(client):
+    headers = _register_and_login(client)
+    me_response = client.get("/api/users/me", headers=headers)
+    assert me_response.status_code == status.HTTP_200_OK
+    user_id = me_response.json()["id"]
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        assert user is not None
+        user.role = "admin"
+        user.permissions = {
+            "can_view": True,
+            "can_contribute": True,
+            "can_edit": True,
+            "can_moderate": True,
+            "can_admin": True,
+        }
+        db.commit()
+    finally:
+        db.close()
+    return headers
 
 
 class TestPasswordResetIntegration:
@@ -778,6 +802,94 @@ class TestHierarchyInsertionRegression:
 
 
 class TestDraftBookAndEditionSnapshotIntegration:
+    def test_delete_draft_returns_409_when_snapshot_exists(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Draft With Snapshot",
+                "description": "Delete guard test",
+                "section_structure": {"front": [], "body": [{"title": "Body"}], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+
+        delete_response = client.delete(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert delete_response.status_code == status.HTTP_409_CONFLICT
+        assert "cannot delete" in delete_response.json()["detail"].lower()
+
+    def test_delete_draft_returns_409_when_published(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Published Draft",
+                "description": "Delete guard test",
+                "section_structure": {"front": [], "body": [{"title": "Body"}], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+
+        delete_response = client.delete(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert delete_response.status_code == status.HTTP_409_CONFLICT
+        assert "cannot delete" in delete_response.json()["detail"].lower()
+
+    def test_admin_can_create_clean_draft_for_target_owner(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        owner_headers = _register_and_login(client)
+
+        me_response = client.get("/api/users/me", headers=owner_headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        owner_id = me_response.json()["id"]
+
+        create_response = client.post(
+            "/api/draft-books/admin/create-clean",
+            json={"owner_id": owner_id, "title": "Clean Admin Draft"},
+            headers=admin_headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        payload = create_response.json()
+        assert payload["owner_id"] == owner_id
+        assert payload["title"] == "Clean Admin Draft"
+        assert payload["status"] == "draft"
+        assert payload["section_structure"] == {"front": [], "body": [], "back": []}
+
+    def test_non_admin_cannot_create_clean_draft(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books/admin/create-clean",
+            json={"title": "Should Not Work"},
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_403_FORBIDDEN
+
     def test_draft_is_editable_and_snapshot_is_immutable(self, client):
         headers = _register_and_login(client)
 
@@ -841,6 +953,52 @@ class TestDraftBookAndEditionSnapshotIntegration:
         )
         assert draft_after_snapshot_patch.status_code == status.HTTP_200_OK
         assert draft_after_snapshot_patch.json()["description"] == "Still editable after snapshot"
+
+    def test_draft_history_returns_ordered_revision_events(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "History Draft",
+                "description": "Revision feed contract",
+                "section_structure": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Body", "order": 1}],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = snapshot_response.json()["id"]
+
+        history_response = client.get(
+            f"/api/draft-books/{draft_id}/history",
+            headers=headers,
+        )
+        assert history_response.status_code == status.HTTP_200_OK
+        payload = history_response.json()
+
+        assert payload["draft_book_id"] == draft_id
+        events = payload["events"]
+        assert len(events) == 2
+        assert [event["sequence"] for event in events] == [1, 2]
+        assert [event["event_type"] for event in events] == ["draft.created", "snapshot.created"]
+        assert events[0]["entity_type"] == "draft_book"
+        assert events[1]["entity_type"] == "edition_snapshot"
+        assert events[1]["snapshot_id"] == snapshot_id
+        assert events[1]["immutable"] is True
+        assert events[0]["occurred_at"] <= events[1]["occurred_at"]
+        assert "combined_hash" in events[1]["metadata"]
 
     def test_draft_license_policy_warns_and_blocks_snapshot(self, client):
         headers = _register_and_login(client)
@@ -1364,6 +1522,1181 @@ class TestDraftBookAndEditionSnapshotIntegration:
         canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
         assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
 
+    def test_snapshot_render_artifact_resolves_template_precedence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Template Precedence Schema {uuid4().hex[:8]}",
+                "description": "Schema for template precedence",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Template Source {uuid4().hex[:6]}",
+                "book_code": f"tpl-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Template Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Template Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Template verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Template Precedence Draft",
+                "description": "Validate node > level > book > global",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Node-level override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                        },
+                        {
+                            "title": "Level-level override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Book-level override block",
+                            "source_book_id": source_book_id,
+                            "order": 3,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 4,
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Node-level override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                        },
+                        {
+                            "title": "Level-level override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Book-level override block",
+                            "source_book_id": source_book_id,
+                            "order": 3,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 4,
+                        },
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "global_template_key": "template.global.content_item.v1",
+                        "book_template_key": "template.book.content_item.v1",
+                        "level_template_keys": {
+                            "verse": "template.level.verse.content_item.v1"
+                        },
+                        "node_template_keys": {
+                            str(chapter_node_id): "template.node.chapter.content_item.v1"
+                        },
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        payload = render_response.json()
+
+        body_blocks = payload["sections"]["body"]
+        assert [block["title"] for block in body_blocks] == [
+            "Node-level override block",
+            "Level-level override block",
+            "Book-level override block",
+            "Global fallback block",
+        ]
+        assert [block["template_key"] for block in body_blocks] == [
+            "template.node.chapter.content_item.v1",
+            "template.level.verse.content_item.v1",
+            "template.book.content_item.v1",
+            "template.global.content_item.v1",
+        ]
+
+    def test_snapshot_render_artifact_uses_default_templates_for_level_fields(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Default Template Levels {uuid4().hex[:8]}",
+                "description": "Default template field rendering by level",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Default Template Source {uuid4().hex[:6]}",
+                "book_code": f"default-tpl-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter One",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse One",
+                "has_content": True,
+                "content_data": {
+                    "basic": {
+                        "sanskrit": "ॐ",
+                        "transliteration": "om",
+                        "translation": "Sacred syllable",
+                        "text": "Fallback verse text",
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Default Template Draft",
+                "description": "Use built-in default templates for level fields",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Chapter block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                        },
+                        {
+                            "title": "Verse block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        body_blocks = render_response.json()["sections"]["body"]
+
+        chapter_lines = body_blocks[0]["content"].get("rendered_lines", [])
+        verse_lines = body_blocks[1]["content"].get("rendered_lines", [])
+
+        assert body_blocks[0]["template_key"] == "default.body.chapter.content_item.v1"
+        assert body_blocks[1]["template_key"] == "default.body.verse.content_item.v1"
+        assert "{{ english }}" in body_blocks[0]["resolved_template_source"]
+        assert "{{ sanskrit }}" in body_blocks[1]["resolved_template_source"]
+        assert [line["field"] for line in chapter_lines] == ["english"]
+        assert [line["field"] for line in verse_lines] == [
+            "sanskrit",
+            "transliteration",
+            "english",
+            "text",
+        ]
+
+    def test_snapshot_render_artifact_resolves_metadata_precedence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Metadata Precedence Schema {uuid4().hex[:8]}",
+                "description": "Schema for metadata precedence",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Metadata Source {uuid4().hex[:6]}",
+                "book_code": f"meta-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Metadata Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Metadata Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Metadata verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Metadata Precedence Draft",
+                "description": "Validate field > node > level > book > global",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Field override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                            "metadata_overrides": {"audience": "field", "tier": "field"},
+                        },
+                        {
+                            "title": "Node override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Level override block",
+                            "source_book_id": source_book_id,
+                            "level_name": "Verse",
+                            "order": 3,
+                        },
+                        {
+                            "title": "Book override block",
+                            "source_book_id": source_book_id,
+                            "order": 4,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 5,
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Field override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                            "metadata_overrides": {"audience": "field", "tier": "field"},
+                        },
+                        {
+                            "title": "Node override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Level override block",
+                            "source_book_id": source_book_id,
+                            "level_name": "Verse",
+                            "order": 3,
+                        },
+                        {
+                            "title": "Book override block",
+                            "source_book_id": source_book_id,
+                            "order": 4,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 5,
+                        },
+                    ],
+                    "back": [],
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "global", "tier": "global"},
+                        "book_metadata": {"audience": "book", "book_only": True},
+                        "level_metadata": {
+                            "verse": {"audience": "level", "level_only": "verse"}
+                        },
+                        "node_metadata": {
+                            str(chapter_node_id): {"audience": "node-chapter", "node_only": "chapter"},
+                            str(verse_node_id): {"audience": "node-verse", "node_only": "verse"},
+                        },
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+
+        body_blocks = render_response.json()["sections"]["body"]
+        resolved = [
+            block.get("resolved_metadata", {})
+            for block in body_blocks
+        ]
+
+        assert resolved[0] == {
+            "audience": "field",
+            "tier": "field",
+            "book_only": True,
+            "node_only": "chapter",
+        }
+        assert resolved[1] == {
+            "audience": "node-verse",
+            "tier": "global",
+            "book_only": True,
+            "level_only": "verse",
+            "node_only": "verse",
+        }
+        assert resolved[2] == {
+            "audience": "level",
+            "tier": "global",
+            "book_only": True,
+            "level_only": "verse",
+        }
+        assert resolved[3] == {
+            "audience": "book",
+            "tier": "global",
+            "book_only": True,
+        }
+        assert resolved[4] == {
+            "audience": "global",
+            "tier": "global",
+        }
+
+    def test_snapshot_render_artifact_handles_missing_bindings_with_deterministic_output(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Missing Bindings Draft",
+                "description": "Fallback and determinism coverage",
+                "section_structure": {
+                    "front": [{"title": "Intro", "order": 1}],
+                    "body": [
+                        {"title": "Verse Item", "level_name": "Verse", "order": 1},
+                        {"title": "Generic Item", "order": 2},
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [{"title": "Intro", "order": 1}],
+                    "body": [
+                        {"title": "Verse Item", "level_name": "Verse", "order": 1},
+                        {"title": "Generic Item", "order": 2},
+                    ],
+                    "back": [],
+                    "template_bindings": {},
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "all"}
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        assert "snapshot_fingerprint" in snapshot_payload["snapshot_data"]
+
+        render_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        render_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_1.status_code == status.HTTP_200_OK
+        assert render_response_2.status_code == status.HTTP_200_OK
+
+        payload_1 = render_response_1.json()
+        payload_2 = render_response_2.json()
+
+        body_blocks = payload_1["sections"]["body"]
+        assert [block["template_key"] for block in body_blocks] == [
+            "default.body.verse.content_item.v1",
+            "default.body.content_item.v1",
+        ]
+        assert [block.get("resolved_metadata") for block in body_blocks] == [
+            {"audience": "all"},
+            {"audience": "all"},
+        ]
+
+        canonical_1 = json.dumps(payload_1, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
+
+    def test_snapshot_render_artifact_uses_metadata_driven_template_fields_for_unknown_level(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Metadata Driven Template Fields Draft",
+                "description": "Unknown level should use metadata-driven default fields",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Commentary Block",
+                            "level_name": "Commentary",
+                            "order": 1,
+                            "metadata": {
+                                "template_fields": ["english"],
+                                "template_field_labels": {"english": "Commentary"},
+                            },
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Commentary Block",
+                            "level_name": "Commentary",
+                            "order": 1,
+                            "metadata": {
+                                "template_fields": ["english"],
+                                "template_field_labels": {"english": "Commentary"},
+                            },
+                        },
+                    ],
+                    "back": [],
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        body_block = render_response.json()["sections"]["body"][0]
+
+        assert body_block["template_key"] == "default.body.commentary.content_item.v1"
+        assert body_block["resolved_template_source"].startswith("{% if english %}Commentary:")
+        assert body_block["content"]["rendered_lines"] == []
+
+    def test_book_preview_render_allows_public_library_preview_for_non_owner(self, client):
+        owner_headers = _register_and_login(client)
+        viewer_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Public Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for public book preview",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Understanding Dharma {uuid4().hex[:6]}",
+                "book_code": f"preview-public-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter One",
+                "has_content": False,
+            },
+            headers=owner_headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse One",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Dharma verse"}},
+            },
+            headers=owner_headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+
+        publish_visibility_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=owner_headers,
+        )
+        assert publish_visibility_response.status_code == status.HTTP_200_OK
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={},
+            headers=viewer_headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+
+        assert payload["book_id"] == book_id
+        assert payload["preview_mode"] == "book"
+        assert payload["book_name"].startswith("Understanding Dharma")
+        assert payload["section_order"] == ["body"]
+        assert "front" not in payload["sections"]
+        assert "back" not in payload["sections"]
+        assert len(payload["sections"]["body"]) >= 1
+        assert payload["sections"]["body"][0]["template_key"].startswith("default.body.")
+
+    def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Whole Book Draft Schema {uuid4().hex[:8]}",
+                "description": "Schema for whole-book draft body references",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Source Library Book {uuid4().hex[:6]}",
+                "book_code": f"source-lib-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter One",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse One",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Whole Book In Draft",
+                "description": "Draft body expands from source book",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Imported Book Body",
+                            "source_book_id": source_book_id,
+                            "source_scope": "book",
+                            "order": 1,
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        body_blocks = render_response.json()["sections"]["body"]
+
+        assert len(body_blocks) >= 2
+        assert all(block["source_book_id"] == source_book_id for block in body_blocks)
+        assert all(block["source_node_id"] is not None for block in body_blocks)
+        assert "Chapter One" in [block["title"] for block in body_blocks]
+        assert "Verse One" in [block["title"] for block in body_blocks]
+
+    def test_snapshot_render_artifact_collision_matrix_prefers_highest_precedence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Collision Matrix Schema {uuid4().hex[:8]}",
+                "description": "Collision precedence coverage",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Collision Source {uuid4().hex[:6]}",
+                "book_code": f"collision-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Collision Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Collision Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Collision verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Collision Matrix Draft",
+                "description": "Node/level/book/global collisions",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Node collision", "node_id": verse_node_id, "source_book_id": source_book_id, "order": 1},
+                        {"title": "Level collision", "source_book_id": source_book_id, "level_name": "Verse", "order": 2},
+                        {"title": "Book collision", "source_book_id": source_book_id, "order": 3},
+                        {"title": "Global collision", "order": 4},
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {"title": "Node collision", "node_id": verse_node_id, "source_book_id": source_book_id, "order": 1},
+                        {"title": "Level collision", "source_book_id": source_book_id, "level_name": "Verse", "order": 2},
+                        {"title": "Book collision", "source_book_id": source_book_id, "order": 3},
+                        {"title": "Global collision", "order": 4},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "global_template_key": "template.global.content_item.v1",
+                        "book_template_key": "template.book.content_item.v1",
+                        "level_template_keys": {
+                            "verse": "template.level.content_item.v1"
+                        },
+                        "node_template_keys": {
+                            str(verse_node_id): "template.node.content_item.v1"
+                        },
+                    },
+                    "metadata_bindings": {
+                        "global_metadata": {"collision": "global"},
+                        "book_metadata": {"collision": "book"},
+                        "level_metadata": {"verse": {"collision": "level"}},
+                        "node_metadata": {str(verse_node_id): {"collision": "node"}},
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        assert "snapshot_fingerprint" in snapshot_payload["snapshot_data"]
+
+        render_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        render_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_1.status_code == status.HTTP_200_OK
+        assert render_response_2.status_code == status.HTTP_200_OK
+
+        payload_1 = render_response_1.json()
+        payload_2 = render_response_2.json()
+        body_blocks = payload_1["sections"]["body"]
+
+        assert [block["template_key"] for block in body_blocks] == [
+            "template.node.content_item.v1",
+            "template.level.content_item.v1",
+            "template.book.content_item.v1",
+            "template.global.content_item.v1",
+        ]
+        assert [block["resolved_metadata"]["collision"] for block in body_blocks] == [
+            "node",
+            "level",
+            "book",
+            "global",
+        ]
+
+        canonical_1 = json.dumps(payload_1, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
+
+    def test_snapshot_contains_deterministic_fingerprint(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Fingerprint Draft",
+                "description": "Snapshot fingerprint coverage",
+                "section_structure": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Chapter 1", "order": 1}],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Chapter 1", "order": 1}],
+                    "back": [],
+                    "render_settings": {
+                        "show_metadata": True,
+                        "text_order": ["sanskrit", "english", "text"],
+                    },
+                    "template_bindings": {
+                        "global_template_key": "template.global.content_item.v1"
+                    },
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "all"}
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        snapshot_data = snapshot_payload["snapshot_data"]
+
+        fingerprint = snapshot_data.get("snapshot_fingerprint")
+        assert isinstance(fingerprint, dict)
+        assert fingerprint.get("version") == "v1"
+        assert fingerprint.get("algorithm") == "sha256"
+
+        for key in ("content_hash", "template_hash", "render_hash", "combined_hash"):
+            value = fingerprint.get(key)
+            assert isinstance(value, str)
+            assert len(value) == 64
+
+        expected_combined = hashlib.sha256(
+            json.dumps(
+                {
+                    "content_hash": fingerprint["content_hash"],
+                    "template_hash": fingerprint["template_hash"],
+                    "render_hash": fingerprint["render_hash"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        assert fingerprint["combined_hash"] == expected_combined
+
+        snapshot_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}",
+            headers=headers,
+        )
+        assert snapshot_response_1.status_code == status.HTTP_200_OK
+        snapshot_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}",
+            headers=headers,
+        )
+        assert snapshot_response_2.status_code == status.HTTP_200_OK
+
+        fingerprint_1 = snapshot_response_1.json()["snapshot_data"].get("snapshot_fingerprint")
+        fingerprint_2 = snapshot_response_2.json()["snapshot_data"].get("snapshot_fingerprint")
+        assert fingerprint_1 == fingerprint_2
+
+    def test_draft_preview_render_applies_session_template_overrides(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Preview Override Draft",
+                "description": "Session override preview coverage",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                        {"title": "Verse 2", "level_name": "Verse", "order": 2},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.base.content_item.v1"
+                        }
+                    },
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/draft-books/{draft_id}/preview/render",
+            json={
+                "session_template_bindings": {
+                    "level_template_keys": {
+                        "verse": "template.level.session.content_item.v1"
+                    }
+                }
+            },
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        preview_payload = preview_response.json()
+
+        assert preview_payload["preview_mode"] == "session"
+        body_blocks = preview_payload["sections"]["body"]
+        assert len(body_blocks) == 2
+        assert {block["template_key"] for block in body_blocks} == {
+            "template.level.session.content_item.v1"
+        }
+
+        draft_after_preview = client.get(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert draft_after_preview.status_code == status.HTTP_200_OK
+        persisted_bindings = (
+            draft_after_preview.json().get("section_structure", {}).get("template_bindings", {})
+        )
+        assert persisted_bindings.get("level_template_keys", {}).get("verse") == "template.level.base.content_item.v1"
+
+    def test_preview_warns_and_publish_blocks_on_invalid_template_bindings(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Invalid Template Binding Draft",
+                "description": "Template validation gate coverage",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.invalid"
+                        }
+                    },
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/draft-books/{draft_id}/preview/render",
+            json={},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        preview_payload = preview_response.json()
+
+        assert preview_payload["preview_mode"] == "draft"
+        assert len(preview_payload["warnings"]) == 1
+        assert "level_template_keys.verse" in preview_payload["warnings"][0]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.invalid"
+                        }
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = publish_response.json()["detail"]
+        assert detail["message"] == "Publish blocked by template validation."
+        assert len(detail["errors"]) == 1
+        assert "level_template_keys.verse" in detail["errors"][0]
+
     def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
         headers = _register_and_login(client)
         caplog.set_level("INFO", logger="api.draft_books")
@@ -1541,3 +2874,533 @@ class TestCollectLicensePolicyIntegration:
         assert report["warning_issues"][0]["license_type"] == "CC-BY-NC-4.0"
         assert report["blocked_issues"][0]["source_node_id"] == blocked_node_id
         assert report["blocked_issues"][0]["license_type"] == "ALL-RIGHTS-RESERVED"
+
+
+class TestContentCoverageSprintCOV01:
+    def test_update_book_rejects_invalid_status_and_visibility(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Status Schema {uuid4().hex[:8]}",
+                "description": "Schema for update-book validation coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Status Book {uuid4().hex[:6]}",
+                "book_code": f"cov-status-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        invalid_status_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "archived"},
+            headers=headers,
+        )
+        assert invalid_status_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+        invalid_visibility_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"visibility": "internal"},
+            headers=headers,
+        )
+        assert invalid_visibility_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def test_book_share_rejects_owner_email(self, client):
+        headers = _register_and_login(client)
+
+        me_response = client.get("/api/users/me", headers=headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        owner_email = me_response.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for share-owner guard coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": owner_email, "permission": "viewer"},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "owner cannot be shared" in share_response.json()["detail"].lower()
+
+    def test_insert_references_validates_schema_and_parent(self, client):
+        headers = _register_and_login(client)
+
+        target_no_schema_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": None,
+                "book_name": f"COV No Schema Target {uuid4().hex[:6]}",
+                "book_code": f"cov-noschema-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_no_schema_response.status_code == status.HTTP_201_CREATED
+        target_no_schema_id = target_no_schema_response.json()["id"]
+
+        no_schema_insert_response = client.post(
+            f"/api/content/books/{target_no_schema_id}/insert-references",
+            json={"node_ids": []},
+            headers=headers,
+        )
+        assert no_schema_insert_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "book has no schema" in no_schema_insert_response.json()["detail"].lower()
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Ref Schema {uuid4().hex[:8]}",
+                "description": "Schema for insert-reference parent validation",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        target_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Target {uuid4().hex[:6]}",
+                "book_code": f"cov-target-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_response.status_code == status.HTTP_201_CREATED
+        target_book_id = target_response.json()["id"]
+
+        bad_parent_response = client.post(
+            f"/api/content/books/{target_book_id}/insert-references",
+            json={"node_ids": [], "parent_node_id": 999999},
+            headers=headers,
+        )
+        assert bad_parent_response.status_code == status.HTTP_404_NOT_FOUND
+        assert "parent node not found" in bad_parent_response.json()["detail"].lower()
+
+    def test_delete_book_requires_edit_access(self, client):
+        owner_headers = _register_and_login(client)
+        other_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Delete Schema {uuid4().hex[:8]}",
+                "description": "Schema for delete-book access coverage",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Delete Book {uuid4().hex[:6]}",
+                "book_code": f"cov-delete-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        forbidden_delete_response = client.delete(
+            f"/api/content/books/{book_id}",
+            headers=other_headers,
+        )
+        assert forbidden_delete_response.status_code == status.HTTP_403_FORBIDDEN
+
+        owner_delete_response = client.delete(
+            f"/api/content/books/{book_id}",
+            headers=owner_headers,
+        )
+        assert owner_delete_response.status_code == status.HTTP_200_OK
+        assert owner_delete_response.json()["message"] == "Deleted"
+
+        get_deleted_response = client.get(
+            f"/api/content/books/{book_id}",
+            headers=owner_headers,
+        )
+        assert get_deleted_response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestContentCoverageSprintCOV02:
+    def test_shared_editor_cannot_change_book_status_or_visibility(self, client):
+        owner_headers = _register_and_login(client)
+        editor_headers = _register_and_login(client)
+
+        editor_me = client.get("/api/users/me", headers=editor_headers)
+        assert editor_me.status_code == status.HTTP_200_OK
+        editor_email = editor_me.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV OwnerOnly Schema {uuid4().hex[:8]}",
+                "description": "Schema for owner-only publish/visibility branch",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV OwnerOnly Book {uuid4().hex[:6]}",
+                "book_code": f"cov-owner-only-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": editor_email, "permission": "editor"},
+            headers=owner_headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+
+        editor_title_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"book_name": "Editor Updated Title"},
+            headers=editor_headers,
+        )
+        assert editor_title_patch.status_code == status.HTTP_200_OK
+
+        editor_status_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published"},
+            headers=editor_headers,
+        )
+        assert editor_status_patch.status_code == status.HTTP_403_FORBIDDEN
+        assert "only the book owner" in editor_status_patch.json()["detail"].lower()
+
+        editor_visibility_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"visibility": "public"},
+            headers=editor_headers,
+        )
+        assert editor_visibility_patch.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_create_share_rejects_unknown_user_email(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Unknown Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for unknown share user branch",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Unknown Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-unknown-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": f"missing_{uuid4().hex[:8]}@example.com", "permission": "viewer"},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_404_NOT_FOUND
+        assert "user not found" in share_response.json()["detail"].lower()
+
+    def test_update_and_delete_share_return_404_when_share_missing(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Missing Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for missing share branch coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Missing Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-missing-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        patch_missing_share = client.patch(
+            f"/api/content/books/{book_id}/shares/999999",
+            json={"permission": "editor"},
+            headers=headers,
+        )
+        assert patch_missing_share.status_code == status.HTTP_404_NOT_FOUND
+        assert "share not found" in patch_missing_share.json()["detail"].lower()
+
+        delete_missing_share = client.delete(
+            f"/api/content/books/{book_id}/shares/999999",
+            headers=headers,
+        )
+        assert delete_missing_share.status_code == status.HTTP_404_NOT_FOUND
+        assert "share not found" in delete_missing_share.json()["detail"].lower()
+
+    def test_list_nodes_book_filter_returns_404_for_missing_book(self, client):
+        headers = _register_and_login(client)
+
+        list_nodes_response = client.get(
+            "/api/content/nodes?book_id=999999",
+            headers=headers,
+        )
+        assert list_nodes_response.status_code == status.HTTP_404_NOT_FOUND
+        assert list_nodes_response.json()["detail"] == "Not found"
+
+    def test_list_node_media_returns_404_for_missing_node(self, client):
+        headers = _register_and_login(client)
+
+        media_response = client.get("/api/content/nodes/999999/media", headers=headers)
+        assert media_response.status_code == status.HTTP_404_NOT_FOUND
+        assert media_response.json()["detail"] == "Not found"
+
+
+class TestUsersCoverageSprintCOV03:
+    def test_non_admin_cannot_access_admin_user_endpoints(self, client):
+        headers = _register_and_login(client)
+
+        list_response = client.get("/api/users", headers=headers)
+        assert list_response.status_code == status.HTTP_403_FORBIDDEN
+
+        create_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_user_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_user_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_create_user_and_list_users(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+
+        create_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_admin_create_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_admin_create_{uuid4().hex[:8]}",
+                "full_name": "Coverage Admin Created",
+                "role": "editor",
+                "permissions": {"can_moderate": True},
+            },
+            headers=admin_headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        created = create_response.json()
+        assert created["role"] == "editor"
+        assert created["permissions"]["can_edit"] is True
+        assert created["permissions"]["can_moderate"] is True
+
+        list_response = client.get("/api/users", headers=admin_headers)
+        assert list_response.status_code == status.HTTP_200_OK
+        ids = {item["id"] for item in list_response.json()}
+        assert created["id"] in ids
+
+    def test_admin_create_user_rejects_duplicate_email_and_username(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        user_headers = _register_and_login(client)
+        user_me = client.get("/api/users/me", headers=user_headers)
+        assert user_me.status_code == status.HTTP_200_OK
+        existing_email = user_me.json()["email"]
+        existing_username = user_me.json()["username"]
+
+        duplicate_email = client.post(
+            "/api/users",
+            json={
+                "email": existing_email,
+                "password": "StrongPass123",
+                "username": f"cov_unique_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert duplicate_email.status_code == status.HTTP_400_BAD_REQUEST
+        assert duplicate_email.json()["detail"] == "Email in use"
+
+        duplicate_username = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_dup_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": existing_username,
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert duplicate_username.status_code == status.HTTP_400_BAD_REQUEST
+        assert duplicate_username.json()["detail"] == "Username in use"
+
+    def test_admin_can_update_permissions_and_status(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+
+        created_user_response = client.post(
+            "/api/users",
+            json={
+                "email": f"cov_update_{uuid4().hex[:8]}@example.com",
+                "password": "StrongPass123",
+                "username": f"cov_update_{uuid4().hex[:8]}",
+                "role": "viewer",
+            },
+            headers=admin_headers,
+        )
+        assert created_user_response.status_code == status.HTTP_201_CREATED
+        target_user_id = created_user_response.json()["id"]
+
+        permissions_response = client.patch(
+            f"/api/users/{target_user_id}/permissions",
+            json={"can_edit": True, "role": "editor"},
+            headers=admin_headers,
+        )
+        assert permissions_response.status_code == status.HTTP_200_OK
+        permissions_payload = permissions_response.json()
+        assert permissions_payload["role"] == "editor"
+        assert permissions_payload["permissions"]["can_edit"] is True
+
+        deactivate_response = client.patch(
+            f"/api/users/{target_user_id}/status?is_active=false",
+            headers=admin_headers,
+        )
+        assert deactivate_response.status_code == status.HTTP_200_OK
+        assert deactivate_response.json()["is_active"] is False
+
+        not_found_permissions = client.patch(
+            "/api/users/999999/permissions",
+            json={"can_edit": True},
+            headers=admin_headers,
+        )
+        assert not_found_permissions.status_code == status.HTTP_404_NOT_FOUND
+
+        not_found_status = client.patch(
+            "/api/users/999999/status?is_active=false",
+            headers=admin_headers,
+        )
+        assert not_found_status.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_admin_delete_user_respects_contribution_guard(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        contributor_headers = _register_and_login(client)
+
+        contributor_me = client.get("/api/users/me", headers=contributor_headers)
+        assert contributor_me.status_code == status.HTTP_200_OK
+        contributor_id = contributor_me.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Delete Guard Schema {uuid4().hex[:8]}",
+                "description": "Schema for delete-user contribution guard coverage",
+                "levels": ["Chapter"],
+            },
+            headers=contributor_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Delete Guard Book {uuid4().hex[:6]}",
+                "book_code": f"cov-delete-guard-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=contributor_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Contributor Node",
+                "has_content": False,
+            },
+            headers=contributor_headers,
+        )
+        assert node_response.status_code == status.HTTP_201_CREATED
+
+        delete_with_contrib = client.delete(f"/api/users/{contributor_id}", headers=admin_headers)
+        assert delete_with_contrib.status_code == status.HTTP_400_BAD_REQUEST
+        assert "cannot delete user with existing contributions" in delete_with_contrib.json()["detail"].lower()
+
+        non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
+        assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
