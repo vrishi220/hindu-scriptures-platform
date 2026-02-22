@@ -1,8 +1,19 @@
 name: Deploy Frontend (Vercel)
 
+# Deployment policy:
+# - Trigger production deploys from this workflow only (push/workflow_dispatch).
+# - Keep Vercel Git auto-deploy disabled (or use an ignored build step) to avoid duplicate deploy paths.
+# - Do not set a static NEXT_PUBLIC_BUILD_NUMBER in Vercel project env; this workflow injects it from GITHUB_RUN_NUMBER.
+
 on:
   push:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch, tag, or SHA) to deploy"
+        required: false
+        default: "main"
 
 concurrency:
   group: deploy-vercel-main
@@ -18,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: Validate Vercel secrets
         run: |
