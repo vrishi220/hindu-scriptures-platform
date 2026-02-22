@@ -6,6 +6,7 @@ from uuid import uuid4
 from types import SimpleNamespace
 
 import api.content as content_api
+import api.draft_books as draft_books_api
 from api.content import create_node
 from fastapi import HTTPException
 from fastapi import status
@@ -1813,6 +1814,20 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "transliteration",
             "english",
             "text",
+        ]
+
+    def test_render_liquid_lines_supports_inline_unlabeled_text(self, client):
+        rendered_lines = draft_books_api._render_liquid_lines(
+            "{{ english }} of Krishna",
+            {"english": "Govinda"},
+        )
+
+        assert rendered_lines == [
+            {
+                "field": "text",
+                "label": "",
+                "value": "Govinda of Krishna",
+            }
         ]
 
     def test_snapshot_render_artifact_resolves_metadata_precedence(self, client):

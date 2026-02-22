@@ -116,6 +116,11 @@ type BookPreviewBlock = {
     transliteration?: string;
     english?: string;
     text?: string;
+    rendered_lines?: Array<{
+      field?: string;
+      label?: string;
+      value?: string;
+    }>;
   };
 };
 
@@ -313,7 +318,41 @@ function ScripturesContent() {
       text: true,
     };
 
+    const lineClassNameForField = (fieldName: string) =>
+      fieldName === "sanskrit"
+        ? "text-base text-[color:var(--deep)]"
+        : fieldName === "transliteration"
+          ? "text-sm italic text-zinc-700"
+          : "text-sm text-zinc-700";
+
     const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
+    const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
+    if (renderedLines.length > 0) {
+      for (let index = 0; index < renderedLines.length; index += 1) {
+        const line = renderedLines[index];
+        const value = (line?.value || "").trim();
+        if (!value) {
+          continue;
+        }
+
+        const fieldName = (line?.field || "text").trim().toLowerCase();
+        if (fieldName in visibleByKey && !visibleByKey[fieldName]) {
+          continue;
+        }
+
+        lines.push({
+          key: `${fieldName || "line"}-${index}`,
+          label: (line?.label || "").trim(),
+          value,
+          className: lineClassNameForField(fieldName),
+        });
+      }
+
+      if (lines.length > 0) {
+        return lines;
+      }
+    }
+
     for (const key of resolvedSettings.text_order) {
       const value = (block.content[key] || "").trim();
       if (!value || !visibleByKey[key]) {
@@ -329,12 +368,7 @@ function ScripturesContent() {
               ? "English"
               : "Text";
 
-      const className =
-        key === "sanskrit"
-          ? "text-base text-[color:var(--deep)]"
-          : key === "transliteration"
-            ? "text-sm italic text-zinc-700"
-            : "text-sm text-zinc-700";
+      const className = lineClassNameForField(key);
 
       lines.push({ key, label, value, className });
     }
@@ -2605,7 +2639,9 @@ function ScripturesContent() {
                           ) : (
                             contentLines.map((line) => (
                               <div key={`${line.key}-${line.value.slice(0, 24)}`}>
-                                <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                                {line.label && (
+                                  <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                                )}
                                 <p className={line.className}>{line.value}</p>
                               </div>
                             ))

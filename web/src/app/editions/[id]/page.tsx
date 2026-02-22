@@ -30,6 +30,11 @@ type SnapshotRenderBlock = {
     transliteration?: string;
     english?: string;
     text?: string;
+    rendered_lines?: Array<{
+      field?: string;
+      label?: string;
+      value?: string;
+    }>;
   };
 };
 
@@ -193,7 +198,41 @@ export default function PublishedEditionPage() {
       text: true,
     };
 
+    const lineClassNameForField = (fieldName: string) =>
+      fieldName === "sanskrit"
+        ? "text-base text-[color:var(--deep)]"
+        : fieldName === "transliteration"
+        ? "text-sm italic text-zinc-700"
+        : "text-sm text-zinc-700";
+
     const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
+    const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
+    if (renderedLines.length > 0) {
+      for (let index = 0; index < renderedLines.length; index += 1) {
+        const line = renderedLines[index];
+        const value = (line?.value || "").trim();
+        if (!value) {
+          continue;
+        }
+
+        const fieldName = (line?.field || "text").trim().toLowerCase();
+        if (fieldName in visibleByKey && !visibleByKey[fieldName]) {
+          continue;
+        }
+
+        lines.push({
+          key: `${fieldName || "line"}-${index}`,
+          label: (line?.label || "").trim(),
+          value,
+          className: lineClassNameForField(fieldName),
+        });
+      }
+
+      if (lines.length > 0) {
+        return lines;
+      }
+    }
+
     for (const key of resolvedSettings.text_order) {
       const value = (block.content[key] || "").trim();
       if (!value || !visibleByKey[key]) {
@@ -209,12 +248,7 @@ export default function PublishedEditionPage() {
           ? "English"
           : "Text";
 
-      const className =
-        key === "sanskrit"
-          ? "text-base text-[color:var(--deep)]"
-          : key === "transliteration"
-          ? "text-sm italic text-zinc-700"
-          : "text-sm text-zinc-700";
+      const className = lineClassNameForField(key);
 
       lines.push({ key, label, value, className });
     }
@@ -330,7 +364,7 @@ export default function PublishedEditionPage() {
                             <div className="mt-2 space-y-2">
                               {resolveContentLines(block, artifact.render_settings).map((line) => (
                                 <div key={`${block.order}-${line.key}`}>
-                                  <div className="text-[11px] uppercase tracking-wider text-zinc-500">{line.label}</div>
+                                  {line.label && <div className="text-[11px] uppercase tracking-wider text-zinc-500">{line.label}</div>}
                                   <div className={`whitespace-pre-wrap ${line.className}`}>{line.value}</div>
                                 </div>
                               ))}

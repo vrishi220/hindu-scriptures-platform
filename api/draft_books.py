@@ -898,7 +898,17 @@ def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, 
 
     for raw_line in rendered.splitlines():
         line = raw_line.strip()
-        if not line or ":" not in line:
+        if not line:
+            continue
+
+        if ":" not in line:
+            lines.append(
+                {
+                    "field": "text",
+                    "label": "",
+                    "value": line,
+                }
+            )
             continue
 
         label, value = line.split(":", 1)
@@ -1010,7 +1020,8 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
                 continue
 
             field_name = _as_clean_string(line.get("field")).lower()
-            label = _as_clean_string(line.get("label")) or _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
+            raw_label = _as_clean_string(line.get("label"))
+            label = raw_label if raw_label else _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
             value = _as_clean_string(line.get("value"))
             if not value:
                 continue
@@ -1018,7 +1029,10 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             if field_name in visible_by_key and not visible_by_key.get(field_name, False):
                 continue
 
-            lines.append((label, value))
+            if not raw_label and field_name == "text":
+                lines.append(("", value))
+            else:
+                lines.append((label, value))
 
         if lines:
             return lines
@@ -1605,11 +1619,8 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, d
                 wrapped = textwrap.wrap(value, width=110) or [value]
                 is_sanskrit = label.lower() == "sanskrit"
                 if wrapped:
-                    write_line(
-                        f"   {label}: {wrapped[0]}",
-                        font_size=11 if is_sanskrit else 10,
-                        use_devanagari=is_sanskrit,
-                    )
+                    first_line_text = f"   {wrapped[0]}" if not label else f"   {label}: {wrapped[0]}"
+                    write_line(first_line_text, font_size=11 if is_sanskrit else 10, use_devanagari=is_sanskrit)
                     for continuation in wrapped[1:]:
                         write_line(
                             f"   {continuation}",
