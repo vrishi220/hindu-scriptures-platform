@@ -516,13 +516,15 @@ class BookPreviewRenderRequest(BaseModel):
     metadata_bindings: dict | None = None
 
 
+class BookPreviewRenderSections(BaseModel):
+    body: list[SnapshotRenderBlock] = Field(default_factory=list)
+
+
 class BookPreviewRenderArtifactPublic(BaseModel):
     book_id: int
     book_name: str
-    section_order: list[Literal["front", "body", "back"]] = Field(
-        default_factory=lambda: ["front", "body", "back"]
-    )
-    sections: SnapshotRenderSections
+    section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
+    sections: BookPreviewRenderSections
     render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
     preview_mode: Literal["book"] = "book"

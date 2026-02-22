@@ -2120,6 +2120,9 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert payload["book_id"] == book_id
         assert payload["preview_mode"] == "book"
         assert payload["book_name"].startswith("Understanding Dharma")
+        assert payload["section_order"] == ["body"]
+        assert "front" not in payload["sections"]
+        assert "back" not in payload["sections"]
         assert len(payload["sections"]["body"]) >= 1
         assert payload["sections"]["body"][0]["template_key"].startswith("default.body.")
 

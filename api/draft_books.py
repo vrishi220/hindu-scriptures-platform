@@ -1856,7 +1856,7 @@ def preview_book_render(
     return BookPreviewRenderArtifactPublic(
         book_id=book.id,
         book_name=book.book_name,
-        sections=sections,
+        sections={"body": sections.body},
         render_settings=render_settings,
         template_metadata=template_metadata,
         preview_mode="book",
