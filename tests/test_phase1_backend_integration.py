@@ -1698,7 +1698,7 @@ class TestDraftBookAndEditionSnapshotIntegration:
 
         body_blocks = render_response.json()["sections"]["body"]
         resolved = [
-            block.get("content", {}).get("resolved_metadata", {})
+            block.get("resolved_metadata", {})
             for block in body_blocks
         ]
 

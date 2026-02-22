@@ -548,8 +548,6 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 metadata_bindings=metadata_bindings,
             )
             block_content = _extract_render_content(source_node)
-            if resolved_metadata:
-                block_content["resolved_metadata"] = resolved_metadata
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,
@@ -559,6 +557,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],
+                    resolved_metadata=resolved_metadata,
                     content=block_content,
                 )
             )

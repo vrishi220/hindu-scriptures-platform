@@ -433,6 +433,7 @@ class SnapshotRenderBlock(BaseModel):
     source_node_id: int | None = None
     source_book_id: int | None = None
     title: str
+    resolved_metadata: dict = Field(default_factory=dict)
     content: dict = Field(default_factory=dict)
 
 
