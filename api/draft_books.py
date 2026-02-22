@@ -168,10 +168,16 @@ def _build_draft_license_policy_report(
     )
     licenses_by_node_id = {row.id: row.license_type for row in rows}
 
+    # Only evaluate nodes that resolve to actual content records.
+    # Draft structure may include placeholders/manual entries with non-existent node_id values.
+    resolved_source_node_ids = sorted(licenses_by_node_id.keys())
+    if not resolved_source_node_ids:
+        return DraftLicensePolicyReport(status="pass")
+
     warning_issues: list[DraftLicensePolicyIssue] = []
     blocked_issues: list[DraftLicensePolicyIssue] = []
 
-    for source_node_id in sorted(source_node_ids):
+    for source_node_id in resolved_source_node_ids:
         license_type = normalize_license(licenses_by_node_id.get(source_node_id))
         action = classify_license_action(license_type)
         if action == "allow":
