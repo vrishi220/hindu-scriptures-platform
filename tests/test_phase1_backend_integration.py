@@ -3063,3 +3063,163 @@ class TestContentCoverageSprintCOV01:
             headers=owner_headers,
         )
         assert get_deleted_response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestContentCoverageSprintCOV02:
+    def test_shared_editor_cannot_change_book_status_or_visibility(self, client):
+        owner_headers = _register_and_login(client)
+        editor_headers = _register_and_login(client)
+
+        editor_me = client.get("/api/users/me", headers=editor_headers)
+        assert editor_me.status_code == status.HTTP_200_OK
+        editor_email = editor_me.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV OwnerOnly Schema {uuid4().hex[:8]}",
+                "description": "Schema for owner-only publish/visibility branch",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV OwnerOnly Book {uuid4().hex[:6]}",
+                "book_code": f"cov-owner-only-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": editor_email, "permission": "editor"},
+            headers=owner_headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+
+        editor_title_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"book_name": "Editor Updated Title"},
+            headers=editor_headers,
+        )
+        assert editor_title_patch.status_code == status.HTTP_200_OK
+
+        editor_status_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published"},
+            headers=editor_headers,
+        )
+        assert editor_status_patch.status_code == status.HTTP_403_FORBIDDEN
+        assert "only the book owner" in editor_status_patch.json()["detail"].lower()
+
+        editor_visibility_patch = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"visibility": "public"},
+            headers=editor_headers,
+        )
+        assert editor_visibility_patch.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_create_share_rejects_unknown_user_email(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Unknown Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for unknown share user branch",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Unknown Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-unknown-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": f"missing_{uuid4().hex[:8]}@example.com", "permission": "viewer"},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_404_NOT_FOUND
+        assert "user not found" in share_response.json()["detail"].lower()
+
+    def test_update_and_delete_share_return_404_when_share_missing(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Missing Share Schema {uuid4().hex[:8]}",
+                "description": "Schema for missing share branch coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Missing Share Book {uuid4().hex[:6]}",
+                "book_code": f"cov-missing-share-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        patch_missing_share = client.patch(
+            f"/api/content/books/{book_id}/shares/999999",
+            json={"permission": "editor"},
+            headers=headers,
+        )
+        assert patch_missing_share.status_code == status.HTTP_404_NOT_FOUND
+        assert "share not found" in patch_missing_share.json()["detail"].lower()
+
+        delete_missing_share = client.delete(
+            f"/api/content/books/{book_id}/shares/999999",
+            headers=headers,
+        )
+        assert delete_missing_share.status_code == status.HTTP_404_NOT_FOUND
+        assert "share not found" in delete_missing_share.json()["detail"].lower()
+
+    def test_list_nodes_book_filter_returns_404_for_missing_book(self, client):
+        headers = _register_and_login(client)
+
+        list_nodes_response = client.get(
+            "/api/content/nodes?book_id=999999",
+            headers=headers,
+        )
+        assert list_nodes_response.status_code == status.HTTP_404_NOT_FOUND
+        assert list_nodes_response.json()["detail"] == "Not found"
+
+    def test_list_node_media_returns_404_for_missing_node(self, client):
+        headers = _register_and_login(client)
+
+        media_response = client.get("/api/content/nodes/999999/media", headers=headers)
+        assert media_response.status_code == status.HTTP_404_NOT_FOUND
+        assert media_response.json()["detail"] == "Not found"
