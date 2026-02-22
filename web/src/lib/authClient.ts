@@ -9,7 +9,8 @@ export type MeResponse = {
   } | null;
 };
 
-const CACHE_TTL_MS = 10_000;
+const AUTH_CACHE_TTL_MS = 10_000;
+const UNAUTH_CACHE_TTL_MS = 1_000;
 const DEBUG_AUTH = process.env.NEXT_PUBLIC_AUTH_DEBUG === "1";
 
 let cachedMe: MeResponse | null | undefined;
@@ -29,8 +30,9 @@ export const invalidateMeCache = () => {
 
 export const getMe = async (options?: { force?: boolean }): Promise<MeResponse | null> => {
   const force = Boolean(options?.force);
+  const cacheTtlMs = cachedMe === null ? UNAUTH_CACHE_TTL_MS : AUTH_CACHE_TTL_MS;
 
-  if (!force && cachedMe !== undefined && Date.now() - cachedAt < CACHE_TTL_MS) {
+  if (!force && cachedMe !== undefined && Date.now() - cachedAt < cacheTtlMs) {
     debugLog("cache hit", { ageMs: Date.now() - cachedAt });
     return cachedMe;
   }

@@ -575,7 +575,7 @@ function DraftsPageContent() {
           <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
             <p className="mb-4 text-zinc-600">Please sign in to manage draft books.</p>
             <button
-              onClick={() => router.push("/signin")}
+              onClick={() => router.push("/signin?returnTo=/drafts")}
               className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-6 py-3 font-medium text-white transition hover:shadow-lg"
             >
               Sign In
