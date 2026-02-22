@@ -328,6 +328,7 @@ function ScripturesContent() {
     const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
     const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
     if (renderedLines.length > 0) {
+      let previousFieldName = "";
       for (let index = 0; index < renderedLines.length; index += 1) {
         const line = renderedLines[index];
         const value = (line?.value || "").trim();
@@ -340,12 +341,17 @@ function ScripturesContent() {
           continue;
         }
 
+        const rawLabel = (line?.label || "").trim();
+        const label = fieldName === previousFieldName ? "" : rawLabel;
+
         lines.push({
           key: `${fieldName || "line"}-${index}`,
-          label: (line?.label || "").trim(),
+          label,
           value,
           className: lineClassNameForField(fieldName),
         });
+
+        previousFieldName = fieldName;
       }
 
       if (lines.length > 0) {
@@ -1937,7 +1943,7 @@ function ScripturesContent() {
                   disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
                   title="Add this book as body to your basket"
                   aria-label="Add book as body"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-50 text-base text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-50 text-lg text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {bookBodyAddLoading ? "⏳" : "🧺"}
                 </button>
@@ -1949,7 +1955,7 @@ function ScripturesContent() {
                   disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
                   title="Create a new draft from this book body"
                   aria-label="Create draft from book"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-base text-zinc-700 transition hover:bg-zinc-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-lg text-zinc-700 transition hover:bg-zinc-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {bookBodyCreateDraftLoading ? "⏳" : "📝"}
                 </button>
@@ -1961,7 +1967,7 @@ function ScripturesContent() {
                   disabled={bookPreviewLoading}
                   title="Preview this book"
                   aria-label="Preview book"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-base text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-lg text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {bookPreviewLoading ? "⏳" : "👁"}
                 </button>
@@ -1979,7 +1985,7 @@ function ScripturesContent() {
                   }}
                   title="Copy link to this book"
                   aria-label="Copy book link"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50/50 text-base text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50/50 text-lg text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
                 >
                   🔗
                 </button>
@@ -2017,7 +2023,7 @@ function ScripturesContent() {
                     ? "Unpublish book"
                     : "Publish book"
                 }
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/30 bg-indigo-50 text-base text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/30 bg-indigo-50 text-lg text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {bookVisibilitySubmitting
                   ? "⏳"
@@ -2034,7 +2040,7 @@ function ScripturesContent() {
                 }}
                 title="Manage book sharing"
                 aria-label="Manage shares"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-50 text-base text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-50 text-lg text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
               >
                 👥
               </button>
