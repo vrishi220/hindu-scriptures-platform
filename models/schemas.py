@@ -355,6 +355,15 @@ class DraftBookCreate(DraftBookBase):
     pass
 
 
+class AdminDraftBookCreate(BaseModel):
+    owner_id: int | None = None
+    title: str = "Admin Test Draft"
+    description: str | None = "Created by admin for testing"
+    section_structure: dict = Field(
+        default_factory=lambda: {"front": [], "body": [], "back": []}
+    )
+
+
 class DraftBookUpdate(BaseModel):
     title: str | None = None
     description: str | None = None

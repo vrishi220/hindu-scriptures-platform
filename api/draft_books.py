@@ -15,12 +15,13 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
-from api.users import get_current_user
+from api.users import get_current_user, require_permission
 from models.book import Book
 from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    AdminDraftBookCreate,
     BookPreviewRenderArtifactPublic,
     BookPreviewRenderRequest,
     DraftPreviewRenderArtifactPublic,
@@ -1550,6 +1551,34 @@ def create_draft_book(
     return DraftBookPublic.model_validate(draft)
 
 
+@router.post(
+    "/draft-books/admin/create-clean",
+    response_model=DraftBookPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def admin_create_clean_draft_book(
+    payload: AdminDraftBookCreate,
+    current_user: User = Depends(require_permission("can_admin")),
+    db: Session = Depends(get_db),
+):
+    owner_id = payload.owner_id or current_user.id
+    owner = db.query(User).filter(User.id == owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner user not found")
+
+    draft = DraftBook(
+        owner_id=owner_id,
+        title=(payload.title or "Admin Test Draft").strip() or "Admin Test Draft",
+        description=payload.description,
+        section_structure=payload.section_structure or _default_sections(),
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return DraftBookPublic.model_validate(draft)
+
+
 @router.get("/draft-books/my", response_model=list[DraftBookPublic])
 def list_my_drafts(
     current_user: User = Depends(get_current_user),
@@ -1625,6 +1654,18 @@ def delete_draft_book(
     draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    has_snapshots = (
+        db.query(EditionSnapshot.id)
+        .filter(EditionSnapshot.draft_book_id == draft.id)
+        .first()
+        is not None
+    )
+    if draft.status == "published" or has_snapshots:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete published drafts or drafts with snapshots",
+        )
 
     db.delete(draft)
     db.commit()

@@ -15,6 +15,7 @@ from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import ContentNodeCreate
 from models.scripture_schema import ScriptureSchema
+from models.user import User
 import pytest
 
 
@@ -55,6 +56,29 @@ def _register_user(client):
     register_response = client.post("/api/auth/register", json=register_payload)
     assert register_response.status_code == status.HTTP_201_CREATED
     return email, password
+
+
+def _register_and_login_as_admin(client):
+    headers = _register_and_login(client)
+    me_response = client.get("/api/users/me", headers=headers)
+    assert me_response.status_code == status.HTTP_200_OK
+    user_id = me_response.json()["id"]
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        assert user is not None
+        user.role = "admin"
+        user.permissions = {
+            "can_view": True,
+            "can_contribute": True,
+            "can_edit": True,
+            "can_moderate": True,
+            "can_admin": True,
+        }
+        db.commit()
+    finally:
+        db.close()
+    return headers
 
 
 class TestPasswordResetIntegration:
@@ -778,6 +802,94 @@ class TestHierarchyInsertionRegression:
 
 
 class TestDraftBookAndEditionSnapshotIntegration:
+    def test_delete_draft_returns_409_when_snapshot_exists(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Draft With Snapshot",
+                "description": "Delete guard test",
+                "section_structure": {"front": [], "body": [{"title": "Body"}], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+
+        delete_response = client.delete(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert delete_response.status_code == status.HTTP_409_CONFLICT
+        assert "cannot delete" in delete_response.json()["detail"].lower()
+
+    def test_delete_draft_returns_409_when_published(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Published Draft",
+                "description": "Delete guard test",
+                "section_structure": {"front": [], "body": [{"title": "Body"}], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+
+        delete_response = client.delete(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert delete_response.status_code == status.HTTP_409_CONFLICT
+        assert "cannot delete" in delete_response.json()["detail"].lower()
+
+    def test_admin_can_create_clean_draft_for_target_owner(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        owner_headers = _register_and_login(client)
+
+        me_response = client.get("/api/users/me", headers=owner_headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        owner_id = me_response.json()["id"]
+
+        create_response = client.post(
+            "/api/draft-books/admin/create-clean",
+            json={"owner_id": owner_id, "title": "Clean Admin Draft"},
+            headers=admin_headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        payload = create_response.json()
+        assert payload["owner_id"] == owner_id
+        assert payload["title"] == "Clean Admin Draft"
+        assert payload["status"] == "draft"
+        assert payload["section_structure"] == {"front": [], "body": [], "back": []}
+
+    def test_non_admin_cannot_create_clean_draft(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books/admin/create-clean",
+            json={"title": "Should Not Work"},
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_403_FORBIDDEN
+
     def test_draft_is_editable_and_snapshot_is_immutable(self, client):
         headers = _register_and_login(client)
 
