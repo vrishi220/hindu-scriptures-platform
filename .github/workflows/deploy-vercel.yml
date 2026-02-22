@@ -1,13 +1,11 @@
 name: Deploy Frontend (Vercel)
 
 # Deployment policy:
-# - Trigger production deploys from this workflow only (push/workflow_dispatch).
+# - Trigger production deploys from this workflow only (workflow_dispatch).
 # - Keep Vercel Git auto-deploy disabled (or use an ignored build step) to avoid duplicate deploy paths.
 # - Do not set a static NEXT_PUBLIC_BUILD_NUMBER in Vercel project env; this workflow injects it from GITHUB_RUN_NUMBER.
 
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
     inputs:
       ref:
