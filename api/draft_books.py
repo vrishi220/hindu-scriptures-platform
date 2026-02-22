@@ -54,6 +54,27 @@ _SNAPSHOT_RENDERER = "edition_snapshot_renderer"
 _SNAPSHOT_OUTPUT_PROFILE = "reader_pdf_parity_v1"
 _TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*\.content_item\.v1$")
 
+_DEFAULT_TEMPLATE_FIELDS_BY_LEVEL = {
+    "chapter": ["english", "text"],
+    "section": ["english", "text"],
+    "verse": ["sanskrit", "transliteration", "english", "text"],
+    "shloka": ["sanskrit", "transliteration", "english", "text"],
+}
+
+_DEFAULT_TEMPLATE_FIELDS_BY_SECTION = {
+    "front": ["english", "text"],
+    "body": ["sanskrit", "transliteration", "english", "text"],
+    "back": ["english", "text"],
+}
+
+_DEFAULT_TEMPLATE_FIELD_LABELS = {
+    "title": "Title",
+    "sanskrit": "Sanskrit",
+    "transliteration": "Transliteration",
+    "english": "English",
+    "text": "Text",
+}
+
 
 def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> str | None:
     for index, candidate in enumerate(candidates):
@@ -504,9 +525,23 @@ def _safe_int(value: object) -> int | None:
     return parsed
 
 
-def _extract_render_content(source_node: ContentNode | None) -> dict:
+def _as_clean_string(value: object) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _build_template_context(source_node: ContentNode | None, item: dict) -> dict:
     if source_node is None:
-        return {}
+        return {
+            "title": _as_clean_string(item.get("title")),
+            "level_name": _as_clean_string(item.get("level_name")),
+            "sequence_number": _as_clean_string(item.get("sequence_number")),
+            "sanskrit": "",
+            "transliteration": "",
+            "english": "",
+            "text": "",
+        }
 
     content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
     basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
@@ -533,6 +568,7 @@ def _extract_render_content(source_node: ContentNode | None) -> dict:
         or content_data.get("text_english")
         or content_data.get("english")
         or content_data.get("translation")
+        or source_node.title_english
         or ""
     )
     fallback_text = (
@@ -542,19 +578,60 @@ def _extract_render_content(source_node: ContentNode | None) -> dict:
         or ""
     )
 
-    def _as_clean_string(value: object) -> str:
-        if isinstance(value, str):
-            return value.strip()
-        return ""
+    title_value = _as_clean_string(source_node.title_english) or _as_clean_string(item.get("title"))
 
     return {
-        "level_name": source_node.level_name,
-        "sequence_number": source_node.sequence_number,
+        "title": title_value,
+        "level_name": _as_clean_string(source_node.level_name),
+        "sequence_number": _as_clean_string(source_node.sequence_number),
         "sanskrit": _as_clean_string(sanskrit_text),
         "transliteration": _as_clean_string(transliteration_text),
         "english": _as_clean_string(english_text),
         "text": _as_clean_string(fallback_text),
     }
+
+
+def _resolve_default_template_fields(section_name: str, level_name: str | None) -> list[str]:
+    normalized_level = level_name.strip().lower() if isinstance(level_name, str) and level_name.strip() else ""
+    if normalized_level and normalized_level in _DEFAULT_TEMPLATE_FIELDS_BY_LEVEL:
+        return list(_DEFAULT_TEMPLATE_FIELDS_BY_LEVEL[normalized_level])
+    return list(_DEFAULT_TEMPLATE_FIELDS_BY_SECTION.get(section_name, ["english", "text"]))
+
+
+def _render_block_content_with_template(
+    section_name: str,
+    template_key: str,
+    source_node: ContentNode | None,
+    item: dict,
+) -> dict:
+    context = _build_template_context(source_node, item)
+    selected_fields = _resolve_default_template_fields(section_name, context.get("level_name"))
+
+    rendered_lines: list[dict[str, str]] = []
+    for field_name in selected_fields:
+        value = _as_clean_string(context.get(field_name))
+        if not value:
+            continue
+        rendered_lines.append(
+            {
+                "field": field_name,
+                "label": _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title()),
+                "value": value,
+            }
+        )
+
+    content: dict = {
+        "level_name": context.get("level_name"),
+        "sequence_number": context.get("sequence_number"),
+        "title": context.get("title"),
+        "template_key": template_key,
+        "rendered_lines": rendered_lines,
+    }
+
+    for field_name in ("sanskrit", "transliteration", "english", "text"):
+        content[field_name] = _as_clean_string(context.get(field_name))
+
+    return content
 
 
 def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettings:
@@ -583,6 +660,34 @@ def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettin
 
 def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
+    rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
+
+    if rendered_lines:
+        visible_by_key: dict[str, bool] = {
+            "sanskrit": render_settings.show_sanskrit,
+            "transliteration": render_settings.show_transliteration,
+            "english": render_settings.show_english,
+            "text": True,
+        }
+        lines: list[tuple[str, str]] = []
+        for line in rendered_lines:
+            if not isinstance(line, dict):
+                continue
+
+            field_name = _as_clean_string(line.get("field")).lower()
+            label = _as_clean_string(line.get("label")) or _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
+            value = _as_clean_string(line.get("value"))
+            if not value:
+                continue
+
+            if field_name in visible_by_key and not visible_by_key.get(field_name, False):
+                continue
+
+            lines.append((label, value))
+
+        if lines:
+            return lines
+
     visible_by_key: dict[str, bool] = {
         "sanskrit": render_settings.show_sanskrit,
         "transliteration": render_settings.show_transliteration,
@@ -691,7 +796,12 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 source_node=source_node,
                 metadata_bindings=metadata_bindings,
             )
-            block_content = _extract_render_content(source_node)
+            block_content = _render_block_content_with_template(
+                section_name=section_name,
+                template_key=template_key,
+                source_node=source_node,
+                item=item,
+            )
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,

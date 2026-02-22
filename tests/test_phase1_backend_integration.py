@@ -1576,6 +1576,131 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "template.global.content_item.v1",
         ]
 
+    def test_snapshot_render_artifact_uses_default_templates_for_level_fields(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Default Template Levels {uuid4().hex[:8]}",
+                "description": "Default template field rendering by level",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Default Template Source {uuid4().hex[:6]}",
+                "book_code": f"default-tpl-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter One",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse One",
+                "has_content": True,
+                "content_data": {
+                    "basic": {
+                        "sanskrit": "ॐ",
+                        "transliteration": "om",
+                        "translation": "Sacred syllable",
+                        "text": "Fallback verse text",
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Default Template Draft",
+                "description": "Use built-in default templates for level fields",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Chapter block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                        },
+                        {
+                            "title": "Verse block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        body_blocks = render_response.json()["sections"]["body"]
+
+        chapter_lines = body_blocks[0]["content"].get("rendered_lines", [])
+        verse_lines = body_blocks[1]["content"].get("rendered_lines", [])
+
+        assert body_blocks[0]["template_key"] == "default.body.content_item.v1"
+        assert body_blocks[1]["template_key"] == "default.body.content_item.v1"
+        assert [line["field"] for line in chapter_lines] == ["english"]
+        assert [line["field"] for line in verse_lines] == [
+            "sanskrit",
+            "transliteration",
+            "english",
+            "text",
+        ]
+
     def test_snapshot_render_artifact_resolves_metadata_precedence(self, client):
         headers = _register_and_login(client)
 
