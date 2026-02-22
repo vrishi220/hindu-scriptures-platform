@@ -1225,9 +1225,9 @@ class TestDraftBookAndEditionSnapshotIntegration:
                         {"title": "Title Page", "order": 1},
                     ],
                     "body": [
-                        {"title": "Chapter 3", "order": 3, "node_id": 33},
-                        {"title": "Chapter 1", "order": 1, "node_id": 11},
-                        {"title": "Chapter 2", "order": 2, "node_id": 22},
+                        {"title": "Chapter 3", "order": 3},
+                        {"title": "Chapter 1", "order": 1},
+                        {"title": "Chapter 2", "order": 2},
                     ],
                     "back": [
                         {"title": "Appendix", "sequence_number": "2"},
