@@ -738,7 +738,7 @@ def _render_block_content_with_template(
     template_key: str,
     source_node: ContentNode | None,
     item: dict,
-) -> dict:
+) -> tuple[dict, str]:
     context = _build_template_context(source_node, item)
     template_source = _resolve_liquid_template_source(template_key, section_name, context.get("level_name"))
     try:
@@ -769,7 +769,7 @@ def _render_block_content_with_template(
     for field_name in ("sanskrit", "transliteration", "english", "text"):
         content[field_name] = _as_clean_string(context.get(field_name))
 
-    return content
+    return content, template_source
 
 
 def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettings:
@@ -934,7 +934,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 source_node=source_node,
                 metadata_bindings=metadata_bindings,
             )
-            block_content = _render_block_content_with_template(
+            block_content, resolved_template_source = _render_block_content_with_template(
                 section_name=section_name,
                 template_key=template_key,
                 source_node=source_node,
@@ -946,6 +946,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                     order=block_index,
                     block_type="content_item",
                     template_key=template_key,
+                    resolved_template_source=resolved_template_source,
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],

@@ -449,6 +449,7 @@ class SnapshotRenderBlock(BaseModel):
     order: int
     block_type: str
     template_key: str
+    resolved_template_source: str | None = None
     source_node_id: int | None = None
     source_book_id: int | None = None
     title: str
