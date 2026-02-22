@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { invalidateMeCache } from "../../lib/authClient";
 
 export default function SignInPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -30,8 +32,11 @@ export default function SignInPage() {
       setAuthMessage("Logged in. Redirecting...");
       setEmail("");
       setPassword("");
+      invalidateMeCache();
+      const returnTo = searchParams.get("returnTo") || "/";
       setTimeout(() => {
-        router.push("/");
+        router.replace(returnTo);
+        router.refresh();
       }, 500);
     } catch (err) {
       setAuthMessage(err instanceof Error ? err.message : "Login failed");
