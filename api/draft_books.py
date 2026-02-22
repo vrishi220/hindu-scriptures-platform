@@ -18,6 +18,8 @@ from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    DraftPreviewRenderArtifactPublic,
+    DraftPreviewRenderRequest,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
     DraftProvenanceAppendix,
@@ -360,6 +362,37 @@ def _extract_template_bindings(snapshot_data: dict | None) -> dict:
         "level_template_keys": level_bindings,
         "node_template_keys": node_bindings,
     }
+
+
+def _apply_session_template_bindings(snapshot_payload: dict, session_template_bindings: dict | None) -> None:
+    if not isinstance(snapshot_payload, dict) or not isinstance(session_template_bindings, dict):
+        return
+
+    base_bindings = _extract_template_bindings(snapshot_payload)
+    session_bindings = _extract_template_bindings({"template_bindings": session_template_bindings})
+
+    merged_global = session_bindings.get("global_template_key") or base_bindings.get("global_template_key")
+    merged_book = session_bindings.get("book_template_key") or base_bindings.get("book_template_key")
+
+    base_level = base_bindings.get("level_template_keys") if isinstance(base_bindings.get("level_template_keys"), dict) else {}
+    session_level = session_bindings.get("level_template_keys") if isinstance(session_bindings.get("level_template_keys"), dict) else {}
+    merged_level = {**base_level, **session_level}
+
+    base_node = base_bindings.get("node_template_keys") if isinstance(base_bindings.get("node_template_keys"), dict) else {}
+    session_node = session_bindings.get("node_template_keys") if isinstance(session_bindings.get("node_template_keys"), dict) else {}
+    merged_node = {**base_node, **session_node}
+
+    serialized_bindings: dict = {}
+    if merged_global:
+        serialized_bindings["global_template_key"] = merged_global
+    if merged_book:
+        serialized_bindings["book_template_key"] = merged_book
+    if merged_level:
+        serialized_bindings["level_template_keys"] = merged_level
+    if merged_node:
+        serialized_bindings["node_template_keys"] = {str(key): value for key, value in merged_node.items()}
+
+    snapshot_payload["template_bindings"] = serialized_bindings
 
 
 def _resolve_block_template_key(
@@ -1239,6 +1272,38 @@ def get_snapshot_render_artifact(
         sections=sections,
         render_settings=render_settings,
         template_metadata=template_metadata,
+    )
+
+
+@router.post(
+    "/draft-books/{draft_id}/preview/render",
+    response_model=DraftPreviewRenderArtifactPublic,
+)
+def preview_draft_render(
+    draft_id: int,
+    payload: DraftPreviewRenderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
+    if not draft or draft.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    resolved_snapshot_data = payload.snapshot_data or draft.section_structure or _default_sections()
+    preview_payload = dict(resolved_snapshot_data)
+    _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    _apply_template_metadata(preview_payload)
+
+    sections = _materialize_snapshot_render_sections(preview_payload, db)
+    render_settings = _extract_render_settings(preview_payload)
+    template_metadata = _extract_template_metadata(preview_payload)
+
+    return DraftPreviewRenderArtifactPublic(
+        draft_book_id=draft.id,
+        sections=sections,
+        render_settings=render_settings,
+        template_metadata=template_metadata,
+        preview_mode="session" if payload.session_template_bindings else "draft",
     )
 
 

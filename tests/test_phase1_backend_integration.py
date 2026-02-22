@@ -1815,6 +1815,64 @@ class TestDraftBookAndEditionSnapshotIntegration:
         fingerprint_2 = snapshot_response_2.json()["snapshot_data"].get("snapshot_fingerprint")
         assert fingerprint_1 == fingerprint_2
 
+    def test_draft_preview_render_applies_session_template_overrides(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Preview Override Draft",
+                "description": "Session override preview coverage",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                        {"title": "Verse 2", "level_name": "Verse", "order": 2},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.base.content_item.v1"
+                        }
+                    },
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/draft-books/{draft_id}/preview/render",
+            json={
+                "session_template_bindings": {
+                    "level_template_keys": {
+                        "verse": "template.level.session.content_item.v1"
+                    }
+                }
+            },
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        preview_payload = preview_response.json()
+
+        assert preview_payload["preview_mode"] == "session"
+        body_blocks = preview_payload["sections"]["body"]
+        assert len(body_blocks) == 2
+        assert {block["template_key"] for block in body_blocks} == {
+            "template.level.session.content_item.v1"
+        }
+
+        draft_after_preview = client.get(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert draft_after_preview.status_code == status.HTTP_200_OK
+        persisted_bindings = (
+            draft_after_preview.json().get("section_structure", {}).get("template_bindings", {})
+        )
+        assert persisted_bindings.get("level_template_keys", {}).get("verse") == "template.level.base.content_item.v1"
+
     def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
         headers = _register_and_login(client)
         caplog.set_level("INFO", logger="api.draft_books")

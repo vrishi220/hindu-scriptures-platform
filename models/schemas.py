@@ -473,6 +473,22 @@ class SnapshotRenderArtifactPublic(BaseModel):
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
 
 
+class DraftPreviewRenderRequest(BaseModel):
+    snapshot_data: dict | None = None
+    session_template_bindings: dict | None = None
+
+
+class DraftPreviewRenderArtifactPublic(BaseModel):
+    draft_book_id: int
+    section_order: list[Literal["front", "body", "back"]] = Field(
+        default_factory=lambda: ["front", "body", "back"]
+    )
+    sections: SnapshotRenderSections
+    render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
+    template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
+    preview_mode: Literal["session", "draft"] = "session"
+
+
 class ProvenanceRecordPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
