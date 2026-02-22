@@ -101,6 +101,43 @@ type UserPreferences = {
   show_roman_transliteration: boolean;
 };
 
+type BookPreviewBlock = {
+  section: "body";
+  order: number;
+  block_type: string;
+  template_key: string;
+  source_node_id: number | null;
+  source_book_id: number | null;
+  title: string;
+  content: {
+    level_name?: string;
+    sequence_number?: number | null;
+    sanskrit?: string;
+    transliteration?: string;
+    english?: string;
+    text?: string;
+  };
+};
+
+type BookPreviewRenderSettings = {
+  show_sanskrit: boolean;
+  show_transliteration: boolean;
+  show_english: boolean;
+  show_metadata: boolean;
+  text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
+};
+
+type BookPreviewArtifact = {
+  book_id: number;
+  book_name: string;
+  section_order: Array<"body">;
+  sections: {
+    body: BookPreviewBlock[];
+  };
+  render_settings: BookPreviewRenderSettings;
+  warnings?: string[];
+};
+
 type BasketItem = {
   cart_item_id?: number;
   node_id: number;
@@ -220,6 +257,12 @@ function ScripturesContent() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
+  const [showBookPreview, setShowBookPreview] = useState(false);
+  const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
+  const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
+  const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
+  const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
+  const [bookBodyAddMessage, setBookBodyAddMessage] = useState<string | null>(null);
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
@@ -242,6 +285,62 @@ function ScripturesContent() {
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+
+  const resolvePreviewContentLines = (
+    block: BookPreviewBlock,
+    settings?: BookPreviewRenderSettings
+  ) => {
+    const resolvedSettings: BookPreviewRenderSettings =
+      settings || {
+        show_sanskrit: true,
+        show_transliteration: true,
+        show_english: true,
+        show_metadata: true,
+        text_order: ["sanskrit", "transliteration", "english", "text"],
+      };
+
+    const visibleByKey: Record<string, boolean> = {
+      sanskrit: resolvedSettings.show_sanskrit,
+      transliteration: resolvedSettings.show_transliteration,
+      english: resolvedSettings.show_english,
+      text: true,
+    };
+
+    const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
+    for (const key of resolvedSettings.text_order) {
+      const value = (block.content[key] || "").trim();
+      if (!value || !visibleByKey[key]) {
+        continue;
+      }
+
+      const label =
+        key === "sanskrit"
+          ? "Sanskrit"
+          : key === "transliteration"
+            ? "Transliteration"
+            : key === "english"
+              ? "English"
+              : "Text";
+
+      const className =
+        key === "sanskrit"
+          ? "text-base text-[color:var(--deep)]"
+          : key === "transliteration"
+            ? "text-sm italic text-zinc-700"
+            : "text-sm text-zinc-700";
+
+      lines.push({ key, label, value, className });
+    }
+
+    if (lines.length === 0) {
+      const fallback = (block.content.text || "").trim();
+      if (fallback) {
+        lines.push({ key: "text", label: "Text", value: fallback, className: "text-sm text-zinc-700" });
+      }
+    }
+
+    return lines;
+  };
 
   const loadBasket = async () => {
     try {
@@ -989,6 +1088,78 @@ function ScripturesContent() {
     await loadBookShares();
   };
 
+  const handlePreviewBook = async () => {
+    if (!bookId) return;
+
+    setBookPreviewLoading(true);
+    setBookPreviewError(null);
+
+    try {
+      const response = await fetch(`/api/books/${bookId}/preview/render`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookPreviewArtifact
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        setBookPreviewArtifact(null);
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to render book preview");
+      }
+
+      setBookPreviewArtifact(payload as BookPreviewArtifact);
+      setShowBookPreview(true);
+    } catch (err) {
+      setShowBookPreview(false);
+      setBookPreviewError(err instanceof Error ? err.message : "Failed to render book preview");
+    } finally {
+      setBookPreviewLoading(false);
+    }
+  };
+
+  const handleAddBookAsDraftBody = async () => {
+    if (!bookId || bookBodyAddLoading) return;
+
+    setBookBodyAddLoading(true);
+    setBookBodyAddMessage(null);
+
+    try {
+      const selectedBookId = Number(bookId);
+      const response = await fetch("/api/cart/items", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_id: -selectedBookId,
+          item_type: "library_node",
+          source_book_id: selectedBookId,
+          metadata: {
+            title: currentBook?.book_name || `Book ${selectedBookId}`,
+            book_name: currentBook?.book_name || `Book ${selectedBookId}`,
+            level_name: "book",
+          },
+        }),
+      });
+
+      if (response.status !== 409 && !response.ok) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Failed to add book to draft body cart");
+      }
+
+      await loadBasket();
+      setBookBodyAddMessage("Book added as body source. Use Create Draft in Basket.");
+      setTimeout(() => setBookBodyAddMessage(null), 2500);
+    } catch (err) {
+      setBookBodyAddMessage(err instanceof Error ? err.message : "Failed to add book to draft body cart");
+    } finally {
+      setBookBodyAddLoading(false);
+    }
+  };
+
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookId || !shareEmail.trim()) return;
@@ -1657,6 +1828,26 @@ function ScripturesContent() {
                 <button
                   type="button"
                   onClick={() => {
+                    void handleAddBookAsDraftBody();
+                  }}
+                  disabled={bookBodyAddLoading}
+                  className="rounded-full border border-amber-500/30 bg-amber-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:opacity-50"
+                >
+                  {bookBodyAddLoading ? "Adding..." : "Add Book as Body"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handlePreviewBook();
+                  }}
+                  disabled={bookPreviewLoading}
+                  className="rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:opacity-50"
+                >
+                  {bookPreviewLoading ? "Previewing..." : "Preview Book"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     const url = `${window.location.origin}/scriptures?book=${bookId}`;
                     navigator.clipboard.writeText(url);
                     setAuthMessage("Link copied.");
@@ -1723,6 +1914,18 @@ function ScripturesContent() {
               </span>
             )}
           </div>
+
+          {bookPreviewError && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {bookPreviewError}
+            </div>
+          )}
+
+          {bookBodyAddMessage && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {bookBodyAddMessage}
+            </div>
+          )}
 
           <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500 lg:hidden">
             <button
@@ -2263,6 +2466,64 @@ function ScripturesContent() {
             </div>
           </div>
         </section>
+
+        {showBookPreview && bookPreviewArtifact && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+            <div className="w-full max-w-4xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    Book Preview
+                  </h2>
+                  <p className="text-sm text-zinc-600">{bookPreviewArtifact.book_name}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBookPreview(false)}
+                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  {bookPreviewArtifact.warnings.join(" ")}
+                </div>
+              )}
+
+              <div className="max-h-[65vh] space-y-2 overflow-y-auto rounded-2xl border border-black/10 bg-white/80 p-3">
+                {bookPreviewArtifact.sections.body.length === 0 ? (
+                  <p className="text-sm text-zinc-500">No previewable content found for this book.</p>
+                ) : (
+                  bookPreviewArtifact.sections.body.map((block) => {
+                    const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
+                    return (
+                      <article
+                        key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
+                        className="rounded-xl border border-black/10 bg-white p-3"
+                      >
+                        <div className="text-sm font-semibold text-[color:var(--deep)]">{block.title}</div>
+                        <div className="mt-2 space-y-1">
+                          {contentLines.length === 0 ? (
+                            <p className="text-sm text-zinc-500">No textual content in this block.</p>
+                          ) : (
+                            contentLines.map((line) => (
+                              <div key={`${line.key}-${line.value.slice(0, 24)}`}>
+                                <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                                <p className={line.className}>{line.value}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Share Manager Modal */}
         {showShareManager && (
