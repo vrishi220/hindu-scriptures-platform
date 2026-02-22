@@ -2341,6 +2341,194 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert payload["book_template"]["template_key"] == "default.book.content_item.v1"
         assert payload["book_template"]["child_count"] == len(payload["sections"]["body"])
 
+    def test_book_preview_render_allows_legacy_book_without_owner_metadata(self, client):
+        owner_headers = _register_and_login(client)
+        viewer_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Legacy Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for legacy metadata preview visibility",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Legacy Metadata Book {uuid4().hex[:6]}",
+                "book_code": f"preview-legacy-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Legacy Chapter",
+                "has_content": False,
+            },
+            headers=owner_headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+
+        db = SessionLocal()
+        try:
+            book_record = db.query(Book).filter(Book.id == book_id).first()
+            assert book_record is not None
+            book_record.metadata_json = {}
+            db.commit()
+        finally:
+            db.close()
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={},
+            headers=viewer_headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["book_id"] == book_id
+        assert payload["preview_mode"] == "book"
+
+    def test_book_preview_render_preserves_hierarchy_and_sibling_order(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Hierarchy Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for hierarchical preview ordering",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Hierarchy Preview Book {uuid4().hex[:6]}",
+                "book_code": f"preview-hierarchy-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_one_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_one_response.status_code == status.HTTP_201_CREATED
+        chapter_one_id = chapter_one_response.json()["id"]
+
+        chapter_two_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "2",
+                "title_english": "Chapter 2",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_two_response.status_code == status.HTTP_201_CREATED
+        chapter_two_id = chapter_two_response.json()["id"]
+
+        verse_one_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_one_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Chapter 1 Verse 1",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "C1V1"}},
+            },
+            headers=headers,
+        )
+        assert verse_one_response.status_code == status.HTTP_201_CREATED
+
+        verse_two_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_one_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "2",
+                "title_english": "Chapter 1 Verse 2",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "C1V2"}},
+            },
+            headers=headers,
+        )
+        assert verse_two_response.status_code == status.HTTP_201_CREATED
+
+        verse_three_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_two_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Chapter 2 Verse 1",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "C2V1"}},
+            },
+            headers=headers,
+        )
+        assert verse_three_response.status_code == status.HTTP_201_CREATED
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+
+        payload = preview_response.json()
+        titles = [block["title"] for block in payload["sections"]["body"][:5]]
+        assert titles == [
+            "Chapter 1",
+            "Chapter 1 Verse 1",
+            "Chapter 1 Verse 2",
+            "Chapter 2",
+            "Chapter 2 Verse 1",
+        ]
+
     def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
         headers = _register_and_login(client)
 
