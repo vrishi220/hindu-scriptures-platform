@@ -5,6 +5,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
+const SNAPSHOT_PDF_CACHE = new Map<string, Uint8Array>();
 
 const buildAuthHeader = (token?: string): Record<string, string> =>
   token ? { Authorization: `Bearer ${token}` } : {};
@@ -248,6 +249,18 @@ export async function GET(
     return NextResponse.json(payload || { detail: "Failed to export snapshot PDF" }, { status: response.status });
   }
 
+  const cachedPdf = SNAPSHOT_PDF_CACHE.get(id);
+  if (cachedPdf) {
+    return new NextResponse(new Uint8Array(cachedPdf), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="edition-${id}.pdf"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   // Prefer browser-based PDF for better Indic script shaping. Fallback to backend PDF on any failure.
   try {
     const tokenForJson = store.get(ACCESS_TOKEN_COOKIE)?.value || accessToken;
@@ -267,8 +280,10 @@ export async function GET(
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "networkidle" });
         const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        const pdfBytes = new Uint8Array(pdfBuffer);
+        SNAPSHOT_PDF_CACHE.set(id, pdfBytes);
 
-        return new NextResponse(new Uint8Array(pdfBuffer), {
+        return new NextResponse(new Uint8Array(pdfBytes), {
           status: 200,
           headers: {
             "Content-Type": "application/pdf",
@@ -285,9 +300,11 @@ export async function GET(
   }
 
   const arrayBuffer = await response.arrayBuffer();
+  const pdfBytes = new Uint8Array(arrayBuffer);
+  SNAPSHOT_PDF_CACHE.set(id, pdfBytes);
   const contentDisposition = response.headers.get("content-disposition") || `attachment; filename="edition-${id}.pdf"`;
 
-  return new NextResponse(arrayBuffer, {
+  return new NextResponse(new Uint8Array(pdfBytes), {
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
