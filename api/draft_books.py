@@ -698,6 +698,29 @@ def _as_clean_string(value: object) -> str:
     return ""
 
 
+def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> ContentNode | None:
+    if node is None:
+        return None
+
+    resolved = node
+    visited_ids: set[int] = set()
+    while resolved.referenced_node_id:
+        if resolved.id in visited_ids:
+            break
+        visited_ids.add(resolved.id)
+
+        next_source = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == resolved.referenced_node_id)
+            .first()
+        )
+        if not next_source:
+            break
+        resolved = next_source
+
+    return resolved
+
+
 def _build_template_context(source_node: ContentNode | None, item: dict) -> dict:
     if source_node is None:
         return {
@@ -711,30 +734,55 @@ def _build_template_context(source_node: ContentNode | None, item: dict) -> dict
         }
 
     content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
+    summary_data = source_node.summary_data if isinstance(source_node.summary_data, dict) else {}
     basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
     translations_data = (
         content_data.get("translations") if isinstance(content_data.get("translations"), dict) else {}
     )
+    summary_basic = summary_data.get("basic") if isinstance(summary_data.get("basic"), dict) else {}
+    summary_translations = (
+        summary_data.get("translations") if isinstance(summary_data.get("translations"), dict) else {}
+    )
 
     sanskrit_text = (
         basic_data.get("sanskrit")
+        or basic_data.get("text_sanskrit")
         or content_data.get("sanskrit")
+        or content_data.get("text_sanskrit")
+        or summary_basic.get("sanskrit")
+        or summary_data.get("sanskrit")
         or source_node.title_sanskrit
         or ""
     )
     transliteration_text = (
         basic_data.get("transliteration")
+        or basic_data.get("iast")
         or content_data.get("transliteration")
+        or content_data.get("iast")
         or content_data.get("text_transliteration")
+        or summary_basic.get("transliteration")
+        or summary_basic.get("iast")
+        or summary_data.get("transliteration")
         or source_node.title_transliteration
         or ""
     )
     english_text = (
         translations_data.get("english")
+        or translations_data.get("en")
+        or summary_translations.get("english")
+        or summary_translations.get("en")
+        or basic_data.get("english")
         or basic_data.get("translation")
         or content_data.get("text_english")
         or content_data.get("english")
+        or content_data.get("en")
         or content_data.get("translation")
+        or summary_basic.get("english")
+        or summary_basic.get("translation")
+        or summary_data.get("text_english")
+        or summary_data.get("english")
+        or summary_data.get("en")
+        or summary_data.get("translation")
         or source_node.title_english
         or ""
     )
@@ -742,6 +790,9 @@ def _build_template_context(source_node: ContentNode | None, item: dict) -> dict
         basic_data.get("text")
         or content_data.get("text")
         or content_data.get("content")
+        or summary_basic.get("text")
+        or summary_data.get("text")
+        or summary_data.get("content")
         or ""
     )
 
@@ -1111,6 +1162,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         materialized_blocks: list[SnapshotRenderBlock] = []
         for block_index, (_, item) in enumerate(candidates, start=1):
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
+            source_node = _resolve_referenced_source_node(db, source_node)
             template_key = _resolve_block_template_key(
                 section_name=section_name,
                 item=item,
