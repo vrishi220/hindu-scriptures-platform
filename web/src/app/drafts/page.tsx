@@ -93,6 +93,15 @@ type DraftEditorState = {
   sectionStructureText: string;
 };
 
+type CartComposeBodyResponse = {
+  section_structure: {
+    front?: unknown[];
+    body?: Array<Record<string, unknown>>;
+    back?: unknown[];
+  };
+  skipped_item_count?: number;
+};
+
 const formatDate = (dateString: string) => {
   try {
     return new Date(dateString).toLocaleString("en-US", {
@@ -468,6 +477,130 @@ function DraftsPageContent() {
     }
   };
 
+  const handleAddCartBodyToDraft = async (draft: DraftBook) => {
+    const state = editorState[draft.id];
+    if (!state) {
+      setMessage("✗ Open and initialize this draft first.");
+      return;
+    }
+
+    let parsedStructure: Record<string, unknown>;
+    try {
+      parsedStructure = JSON.parse(state.sectionStructureText) as Record<string, unknown>;
+    } catch {
+      setMessage("✗ Section structure must be valid JSON before adding cart body.");
+      return;
+    }
+
+    setBusyDraftId(draft.id);
+    setMessage(null);
+
+    try {
+      const composeResponse = await fetch("/api/cart/me/compose-draft-body", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const composePayload = (await composeResponse.json().catch(() => null)) as
+        | CartComposeBodyResponse
+        | { detail?: string }
+        | null;
+
+      if (!composeResponse.ok) {
+        throw new Error((composePayload as { detail?: string } | null)?.detail || "Failed to compose cart body");
+      }
+
+      const composedBody =
+        composePayload &&
+        typeof composePayload === "object" &&
+        "section_structure" in composePayload &&
+        Array.isArray(composePayload.section_structure?.body)
+          ? composePayload.section_structure.body
+        : [];
+
+      if (composedBody.length === 0) {
+        setMessage("✗ Cart has no whole-book body items to add.");
+        return;
+      }
+
+      const currentBody = Array.isArray(parsedStructure.body)
+        ? (parsedStructure.body as Array<Record<string, unknown>>)
+        : [];
+
+      const existingBookIds = new Set(
+        currentBody
+          .map((item) => Number(item.source_book_id))
+          .filter((bookId) => Number.isInteger(bookId) && bookId > 0)
+      );
+
+      const mergedBody = [...currentBody];
+      let addedCount = 0;
+      for (const item of composedBody) {
+        const sourceBookId = Number(item.source_book_id);
+        if (!Number.isInteger(sourceBookId) || sourceBookId <= 0) {
+          continue;
+        }
+        if (existingBookIds.has(sourceBookId)) {
+          continue;
+        }
+        existingBookIds.add(sourceBookId);
+        mergedBody.push({ ...item, order: mergedBody.length + 1 });
+        addedCount += 1;
+      }
+
+      if (addedCount === 0) {
+        setMessage("✓ Cart body already exists in this draft. Nothing new to add.");
+        return;
+      }
+
+      const nextStructure: Record<string, unknown> = {
+        front: Array.isArray(parsedStructure.front) ? parsedStructure.front : [],
+        body: mergedBody,
+        back: Array.isArray(parsedStructure.back) ? parsedStructure.back : [],
+      };
+
+      const patchResponse = await fetch(`/api/draft-books/${draft.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: state.title.trim() || undefined,
+          description: state.description.trim() || null,
+          section_structure: nextStructure,
+        }),
+      });
+
+      const patchPayload = (await patchResponse.json().catch(() => null)) as DraftBook | { detail?: string } | null;
+      if (!patchResponse.ok) {
+        throw new Error((patchPayload as { detail?: string } | null)?.detail || "Failed to update draft");
+      }
+
+      const updated = patchPayload as DraftBook;
+      setDrafts((prev) => prev.map((item) => (item.id === draft.id ? updated : item)));
+      setEditorState((prev) => ({
+        ...prev,
+        [draft.id]: {
+          title: updated.title,
+          description: updated.description || "",
+          sectionStructureText: JSON.stringify(updated.section_structure || { front: [], body: [], back: [] }, null, 2),
+        },
+      }));
+
+      const skippedCount =
+        composePayload &&
+        typeof composePayload === "object" &&
+        "skipped_item_count" in composePayload
+          ? Number(composePayload.skipped_item_count || 0)
+          : 0;
+      const skippedSuffix = skippedCount > 0 ? ` (${skippedCount} cart item(s) skipped: not whole-book refs)` : "";
+      setMessage(`✓ Added ${addedCount} book body reference(s) to draft.${skippedSuffix}`);
+    } catch (err) {
+      setMessage(`✗ ${err instanceof Error ? err.message : "Failed to add cart body to draft"}`);
+    } finally {
+      setBusyDraftId(null);
+    }
+  };
+
   const handleCreateSnapshot = async (draft: DraftBook) => {
     const state = editorState[draft.id];
     let snapshotData: Record<string, unknown> | undefined;
@@ -782,6 +915,14 @@ function DraftsPageContent() {
                               className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               Save Draft
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleAddCartBodyToDraft(draft)}
+                              disabled={isBusy}
+                              className="rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Add Cart Body
                             </button>
                             <button
                               type="button"
