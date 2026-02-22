@@ -85,13 +85,73 @@ _DEFAULT_LIQUID_TEMPLATES = {
         "{% if english %}English: {{ english }}\n{% endif %}"
         "{% if text %}Text: {{ text }}\n{% endif %}"
     ),
+    "default.front.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.front.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
     "default.body.content_item.v1": (
         "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
         "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
         "{% if english %}English: {{ english }}\n{% endif %}"
         "{% if text %}Text: {{ text }}\n{% endif %}"
     ),
+    "default.body.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.body.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
     "default.back.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.chapter.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.section.content_item.v1": (
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.verse.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
+        "{% if english %}English: {{ english }}\n{% endif %}"
+        "{% if text %}Text: {{ text }}\n{% endif %}"
+    ),
+    "default.back.shloka.content_item.v1": (
+        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
+        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
         "{% if english %}English: {{ english }}\n{% endif %}"
         "{% if text %}Text: {{ text }}\n{% endif %}"
     ),
@@ -507,6 +567,13 @@ def _resolve_block_template_key(
     template_bindings: dict,
 ) -> str:
     default_template = f"default.{section_name}.content_item.v1"
+    level_name = source_node.level_name if source_node else item.get("level_name")
+    level_fallback_template = None
+    if isinstance(level_name, str) and level_name.strip():
+        normalized_level = level_name.strip().lower()
+        candidate_level_template = f"default.{section_name}.{normalized_level}.content_item.v1"
+        if candidate_level_template in _DEFAULT_LIQUID_TEMPLATES:
+            level_fallback_template = candidate_level_template
 
     node_bindings = template_bindings.get("node_template_keys")
     if isinstance(node_bindings, dict):
@@ -518,7 +585,6 @@ def _resolve_block_template_key(
 
     level_bindings = template_bindings.get("level_template_keys")
     if isinstance(level_bindings, dict):
-        level_name = source_node.level_name if source_node else item.get("level_name")
         if isinstance(level_name, str) and level_name.strip():
             level_template = _read_template_key(level_bindings.get(level_name.strip().lower()))
             if level_template:
@@ -533,6 +599,9 @@ def _resolve_block_template_key(
     global_template = _read_template_key(template_bindings.get("global_template_key"))
     if global_template:
         return global_template
+
+    if level_fallback_template:
+        return level_fallback_template
 
     return default_template
 

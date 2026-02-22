@@ -1691,8 +1691,8 @@ class TestDraftBookAndEditionSnapshotIntegration:
         chapter_lines = body_blocks[0]["content"].get("rendered_lines", [])
         verse_lines = body_blocks[1]["content"].get("rendered_lines", [])
 
-        assert body_blocks[0]["template_key"] == "default.body.content_item.v1"
-        assert body_blocks[1]["template_key"] == "default.body.content_item.v1"
+        assert body_blocks[0]["template_key"] == "default.body.chapter.content_item.v1"
+        assert body_blocks[1]["template_key"] == "default.body.verse.content_item.v1"
         assert [line["field"] for line in chapter_lines] == ["english"]
         assert [line["field"] for line in verse_lines] == [
             "sanskrit",
@@ -1963,7 +1963,7 @@ class TestDraftBookAndEditionSnapshotIntegration:
 
         body_blocks = payload_1["sections"]["body"]
         assert [block["template_key"] for block in body_blocks] == [
-            "default.body.content_item.v1",
+            "default.body.verse.content_item.v1",
             "default.body.content_item.v1",
         ]
         assert [block.get("resolved_metadata") for block in body_blocks] == [
