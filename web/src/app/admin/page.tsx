@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getMe } from "../../lib/authClient";
 
 type User = {
   id: number;
@@ -139,12 +140,8 @@ export default function AdminPage() {
 
   const loadAuth = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (response.ok) {
-        const data = (await response.json()) as {
-          email?: string;
-          role?: string;
-        };
+      const data = await getMe();
+      if (data) {
         setAuthEmail(data.email || null);
       }
     } catch {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye } from "lucide-react";
+import { getMe } from "../../lib/authClient";
 
 type CompilationItem = {
   node_id: number;
@@ -46,12 +47,11 @@ export default function CompilationsPage() {
   useEffect(() => {
     const loadAuth = async () => {
       try {
-        const response = await fetch("/api/me", { credentials: "include" });
-        if (!response.ok) {
+        const data = await getMe();
+        if (!data) {
           setAuthEmail(null);
           return;
         }
-        const data = (await response.json()) as { email?: string };
         setAuthEmail(data.email || null);
       } catch {
         setAuthEmail(null);

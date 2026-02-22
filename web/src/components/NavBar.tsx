@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { getMe, invalidateMeCache } from "@/lib/authClient";
 
 export default function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -10,34 +11,22 @@ export default function NavBar() {
   const pathname = usePathname();
 
   useEffect(() => {
-    const loadAuth = async () => {
-      try {
-        const response = await fetch("/api/me", { credentials: "include" });
-        if (!response.ok) {
-          setAuthEmail(null);
-          setCanAdmin(false);
-          return;
-        }
-        const data = (await response.json()) as {
-          email?: string;
-          role?: string;
-          permissions?: {
-            can_admin?: boolean;
-            can_contribute?: boolean;
-            can_edit?: boolean;
-          } | null;
-        };
-        setAuthEmail(data.email || null);
-        setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
-      } catch {
+    const loadAuth = async (force = false) => {
+      const data = await getMe({ force });
+      if (!data) {
         setAuthEmail(null);
         setCanAdmin(false);
+        return;
       }
+      setAuthEmail(data.email || null);
+      setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
     };
-    loadAuth();
+    void loadAuth();
 
     // Re-check auth when window regains focus
-    const handleFocus = () => loadAuth();
+    const handleFocus = () => {
+      void loadAuth(true);
+    };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
   }, [pathname]);
@@ -51,6 +40,7 @@ export default function NavBar() {
     } catch {
       // Ignore errors
     }
+    invalidateMeCache();
     setAuthEmail(null);
     setCanAdmin(false);
     setMobileMenuOpen(false);
@@ -117,6 +107,18 @@ export default function NavBar() {
               }`}
             >
               Compilations
+            </a>
+          )}
+          {authEmail && (
+            <a
+              href="/drafts"
+              className={`hover:text-[color:var(--accent)] ${
+                isActive("/drafts")
+                  ? "font-semibold text-[color:var(--deep)]"
+                  : ""
+              }`}
+            >
+              Drafts
             </a>
           )}
           <a
@@ -211,6 +213,19 @@ export default function NavBar() {
                 }`}
               >
                 Compilations
+              </a>
+            )}
+            {authEmail && (
+              <a
+                href="/drafts"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                  isActive("/drafts")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : "text-zinc-600 hover:text-[color:var(--accent)]"
+                }`}
+              >
+                Drafts
               </a>
             )}
             <a

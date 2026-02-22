@@ -84,6 +84,8 @@ npx playwright show-report       # View HTML report
 - Tests run across: Chromium, Firefox, WebKit, iPhone 12, Pixel 5
 - Auto-starts dev server on `npm run dev`
 - Runs 60 tests total (10 tests × 6 projects)
+- Playwright starts an isolated API on port 8001 and points the UI at it
+- Uses `PLAYWRIGHT_DATABASE_URL` (or `DATABASE_URL`) and refuses non-test DBs
 
 ### Test Output Example
 ```

@@ -15,6 +15,14 @@ from models.database import Base
 
 
 class Compilation(Base):
+    """Draft Book model — formal assembly of items into a structured composition.
+    
+    v0.3 Workflow: User creates Draft from CollectionCart items, adds schema/structure,
+    metadata, and provenance. Can be edited until published (published editions are frozen).
+    
+    Status progression: 'draft' → 'published' (immutable after publish).
+    """
+
     __tablename__ = "compilations"
 
     id = Column(Integer, primary_key=True)

@@ -2,8 +2,10 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ShoppingBasket } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
+import { getMe, invalidateMeCache } from "../../lib/authClient";
 
 type BookOption = {
   id: number;
@@ -63,6 +65,7 @@ type TreeNode = {
   level_order?: number;
   sequence_number?: string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   children?: TreeNode[];
@@ -74,6 +77,7 @@ type NodeContent = {
   level_order?: number;
   sequence_number?: string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   has_content: boolean;
@@ -98,12 +102,12 @@ type UserPreferences = {
 };
 
 type BasketItem = {
+  cart_item_id?: number;
   node_id: number;
-  label: string;
+  title?: string;
   order: number;
   book_name?: string;
   level_name?: string;
-  added_at: string;
 };
 
 const formatValue = (value: unknown) => {
@@ -147,6 +151,20 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
   return parsed.toString();
 };
 
+const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
+  const normalized = (value || "").trim().toLowerCase();
+  if (normalized === "en" || normalized === "eng" || normalized === "english") {
+    return "english";
+  }
+  if (normalized === "sa" || normalized === "sanskrit") {
+    return "sanskrit";
+  }
+  if (normalized === "hi" || normalized === "hindi") {
+    return "hindi";
+  }
+  return "english";
+};
+
 function ScripturesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -167,6 +185,7 @@ function ScripturesContent() {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
@@ -221,12 +240,50 @@ function ScripturesContent() {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+
+  const loadBasket = async () => {
+    try {
+      const response = await fetch("/api/cart/me", { credentials: "include" });
+      if (!response.ok) {
+        setBasketItems([]);
+        return;
+      }
+      const data = (await response.json()) as {
+        items?: Array<{
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        }>;
+      };
+
+      const mappedItems = (data.items || [])
+        .map((item) => ({
+          cart_item_id: item.id,
+          node_id: item.item_id,
+          title: item.metadata?.title,
+          book_name: item.metadata?.book_name,
+          level_name: item.metadata?.level_name,
+          order: item.order,
+        }))
+        .sort((a, b) => a.order - b.order);
+
+      setBasketItems(mappedItems);
+    } catch {
+      setBasketItems([]);
+    }
+  };
 
   const loadAuth = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (!response.ok) {
+      const data = await getMe();
+      if (!data) {
         setAuthEmail(null);
         setAuthUserId(null);
         setAuthStatus("Not authenticated");
@@ -235,16 +292,6 @@ function ScripturesContent() {
         setCanEdit(false);
         return;
       }
-      const data = (await response.json()) as {
-        id?: number;
-        email?: string;
-        role?: string;
-        permissions?: {
-          can_admin?: boolean;
-          can_contribute?: boolean;
-          can_edit?: boolean;
-        } | null;
-      };
       setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
@@ -252,11 +299,14 @@ function ScripturesContent() {
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
     } catch {
+      setAuthEmail(null);
       setAuthUserId(null);
       setAuthStatus("Auth check failed");
       setCanAdmin(false);
       setCanContribute(false);
       setCanEdit(false);
+    } finally {
+      setAuthResolved(true);
     }
   };
 
@@ -326,21 +376,14 @@ function ScripturesContent() {
   };
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("scriptle-basket");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as BasketItem[];
-      if (Array.isArray(parsed)) {
-        setBasketItems(parsed);
-      }
-    } catch {
-      setBasketItems([]);
-    }
-  }, []);
+    if (!authResolved) return;
 
-  useEffect(() => {
-    window.localStorage.setItem("scriptle-basket", JSON.stringify(basketItems));
-  }, [basketItems]);
+    if (!authEmail) {
+      setBasketItems([]);
+      return;
+    }
+    void loadBasket();
+  }, [authResolved, authEmail]);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -352,7 +395,10 @@ function ScripturesContent() {
         const response = await fetch("/api/preferences", { credentials: "include" });
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
-        setPreferences(data);
+        setPreferences({
+          ...data,
+          source_language: normalizeSourceLanguage(data.source_language),
+        });
       } catch {
         setPreferences(null);
       }
@@ -363,36 +409,159 @@ function ScripturesContent() {
 
   const addCurrentToBasket = () => {
     if (!nodeContent) return;
-    const seq = formatSequenceDisplay(
-      nodeContent.sequence_number ?? nodeContent.id,
-      Boolean(nodeContent.has_content)
-    ) || nodeContent.id;
-    const label = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
 
-    setBasketItems((prev) => {
-      if (prev.some((item) => item.node_id === nodeContent.id)) {
-        return prev;
+    void (async () => {
+      if (basketItems.some((item) => item.node_id === nodeContent.id)) {
+        return;
       }
-      return [
-        ...prev,
-        {
-          node_id: nodeContent.id,
-          label,
-          order: prev.length + 1,
-          book_name: currentBook?.book_name,
-          level_name: nodeContent.level_name,
-          added_at: new Date().toISOString(),
-        },
-      ];
-    });
+
+      const seq = formatSequenceDisplay(
+        nodeContent.sequence_number ?? nodeContent.id,
+        Boolean(nodeContent.has_content)
+      ) || nodeContent.id;
+      const title = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
+
+      try {
+        const response = await fetch("/api/cart/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            item_id: nodeContent.id,
+            item_type: "library_node",
+            metadata: {
+              title,
+              book_name: currentBook?.book_name,
+              level_name: nodeContent.level_name,
+            },
+          }),
+        });
+
+        if (response.status === 409) {
+          await loadBasket();
+          return;
+        }
+
+        if (!response.ok) {
+          return;
+        }
+
+        const item = (await response.json()) as {
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        };
+
+        setBasketItems((prev) =>
+          [
+            ...prev,
+            {
+              cart_item_id: item.id,
+              node_id: item.item_id,
+              title: item.metadata?.title || title,
+              book_name: item.metadata?.book_name || currentBook?.book_name,
+              level_name: item.metadata?.level_name || nodeContent.level_name,
+              order: item.order,
+            },
+          ].sort((a, b) => a.order - b.order)
+        );
+      } catch {
+        // ignore basket add failures for now
+      }
+    })();
   };
 
   const removeFromBasket = (nodeId: number) => {
-    setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+    void (async () => {
+      const target = basketItems.find((item) => item.node_id === nodeId);
+      if (!target?.cart_item_id) {
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/cart/items/${target.cart_item_id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!response.ok && response.status !== 404) {
+          return;
+        }
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+      } catch {
+        // ignore basket remove failures for now
+      }
+    })();
+  };
+
+  const moveBasketItem = (nodeId: number, direction: "up" | "down") => {
+    void (async () => {
+      if (isReorderingBasket) return;
+
+      setIsReorderingBasket(true);
+      const current = [...basketItems].sort((a, b) => a.order - b.order);
+      const index = current.findIndex((item) => item.node_id === nodeId);
+      if (index === -1) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const [moved] = current.splice(index, 1);
+      current.splice(targetIndex, 0, moved);
+
+      const reordered = current.map((item, idx) => ({ ...item, order: idx }));
+      setBasketItems(reordered);
+
+      const itemOrder = reordered
+        .map((item) => item.cart_item_id)
+        .filter((id): id is number => typeof id === "number");
+
+      if (itemOrder.length !== reordered.length) {
+        await loadBasket();
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/cart/items/reorder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ item_order: itemOrder }),
+        });
+
+        if (!response.ok) {
+          await loadBasket();
+        }
+      } catch {
+        await loadBasket();
+      } finally {
+        setIsReorderingBasket(false);
+      }
+    })();
   };
 
   const clearBasket = () => {
-    setBasketItems([]);
+    void (async () => {
+      try {
+        await fetch("/api/cart/me", {
+          method: "DELETE",
+          credentials: "include",
+        });
+      } finally {
+        setBasketItems([]);
+      }
+    })();
   };
 
   const savePreferences = async () => {
@@ -417,6 +586,37 @@ function ScripturesContent() {
       setPreferencesSaving(false);
       setTimeout(() => setPreferencesMessage(null), 2000);
     }
+  };
+
+  const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
+  const transliterationEnabled = preferences?.transliteration_enabled ?? true;
+  const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
+  const showTransliteration =
+    transliterationEnabled && showRomanTransliteration;
+
+  const getPreferredTitle = (node: TreeNode | NodeContent): string => {
+    if (sourceLanguage === "sanskrit") {
+      return (
+        formatValue(node.title_sanskrit) ||
+        formatValue(node.title_english) ||
+        formatValue(node.title_hindi) ||
+        (showTransliteration ? formatValue(node.title_transliteration) : "")
+      );
+    }
+    if (sourceLanguage === "hindi") {
+      return (
+        formatValue(node.title_hindi) ||
+        formatValue(node.title_english) ||
+        formatValue(node.title_sanskrit) ||
+        (showTransliteration ? formatValue(node.title_transliteration) : "")
+      );
+    }
+    return (
+      formatValue(node.title_english) ||
+      formatValue(node.title_hindi) ||
+      formatValue(node.title_sanskrit) ||
+      (showTransliteration ? formatValue(node.title_transliteration) : "")
+    );
   };
 
   useEffect(() => {
@@ -1348,6 +1548,8 @@ function ScripturesContent() {
   };
 
   const handleSignOut = async () => {
+    setBasketItems([]);
+    invalidateMeCache();
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
@@ -1381,6 +1583,7 @@ function ScripturesContent() {
       setEmail("");
       setPassword("");
       setShowLogin(false);
+      invalidateMeCache();
       await loadAuth();
       // Re-initialize from URL after successful login
       setUrlInitialized(false);
@@ -1758,10 +1961,12 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={addCurrentToBasket}
-                            title="Add to basket"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md"
+                            disabled={basketItems.some((item) => item.node_id === nodeContent.id)}
+                            title={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
+                            aria-label={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md disabled:opacity-50"
                           >
-                            +
+                            <ShoppingBasket size={14} />
                           </button>
                           <button
                             type="button"
@@ -1878,7 +2083,8 @@ function ScripturesContent() {
                                   transliteration_script: event.target.value,
                                 })
                               }
-                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                              disabled={!transliterationEnabled || !showRomanTransliteration}
+                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <option value="iast">IAST</option>
                               <option value="harvard_kyoto">Harvard-Kyoto</option>
@@ -1888,7 +2094,7 @@ function ScripturesContent() {
                           <label className="flex items-center gap-2 text-sm text-zinc-700">
                             <input
                               type="checkbox"
-                              checked={preferences.transliteration_enabled}
+                              checked={transliterationEnabled}
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
@@ -1901,7 +2107,8 @@ function ScripturesContent() {
                           <label className="flex items-center gap-2 text-sm text-zinc-700">
                             <input
                               type="checkbox"
-                              checked={preferences.show_roman_transliteration}
+                              checked={showRomanTransliteration}
+                              disabled={!transliterationEnabled}
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
@@ -1933,61 +2140,93 @@ function ScripturesContent() {
                     {/* Titles (hide for verses) */}
                     {!nodeContent.has_content && (
                       <div className="flex flex-col gap-2">
-                        {nodeContent.title_sanskrit && (
+                        {getPreferredTitle(nodeContent) && (
                           <div className="text-xl font-medium text-zinc-900">
-                            {formatValue(nodeContent.title_sanskrit)}
+                            {getPreferredTitle(nodeContent)}
                           </div>
                         )}
-                        {nodeContent.title_transliteration && (
-                          <div className="text-lg italic text-zinc-700">
-                            {formatValue(nodeContent.title_transliteration)}
-                          </div>
-                        )}
-                        {nodeContent.title_english && (
-                          <div className="text-lg text-zinc-700">
-                            {formatValue(nodeContent.title_english)}
-                          </div>
-                        )}
+                        {showTransliteration &&
+                          nodeContent.title_transliteration &&
+                          nodeContent.title_transliteration !== getPreferredTitle(nodeContent) && (
+                            <div className="text-lg italic text-zinc-700">
+                              {formatValue(nodeContent.title_transliteration)}
+                            </div>
+                          )}
                       </div>
                     )}
 
                     {/* Content Data */}
                     {nodeContent.has_content && nodeContent.content_data && (
                       <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                        {nodeContent.content_data.basic?.sanskrit && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Sanskrit
-                            </div>
-                            <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
-                              {formatValue(nodeContent.content_data.basic.sanskrit)}
-                            </div>
-                          </div>
-                        )}
-                        {nodeContent.content_data.basic?.transliteration && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Transliteration
-                            </div>
-                            <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
-                              {formatValue(nodeContent.content_data.basic.transliteration)}
-                            </div>
-                          </div>
-                        )}
-                        {(nodeContent.content_data.translations?.english ||
-                          nodeContent.content_data.basic?.translation) && (
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              English Translation
-                            </div>
-                            <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                              {formatValue(
-                                nodeContent.content_data.translations?.english ||
-                                  nodeContent.content_data.basic?.translation
+                        {(() => {
+                          const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
+                          const transliteration = formatValue(
+                            nodeContent.content_data?.basic?.transliteration
+                          );
+                          const english = formatValue(
+                            nodeContent.content_data?.translations?.english ||
+                              nodeContent.content_data?.basic?.translation
+                          );
+
+                          const primaryContent =
+                            sourceLanguage === "sanskrit"
+                              ? sanskrit || english
+                              : sourceLanguage === "hindi"
+                              ? english || sanskrit
+                              : english || sanskrit;
+
+                          const primaryLabel =
+                            sourceLanguage === "sanskrit"
+                              ? "Sanskrit"
+                              : sourceLanguage === "hindi"
+                              ? "Hindi/Translation"
+                              : "English Translation";
+
+                          return (
+                            <>
+                              {primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    {primaryLabel}
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
+                                    {primaryContent}
+                                  </div>
+                                </div>
                               )}
-                            </div>
-                          </div>
-                        )}
+                              {showTransliteration && transliteration && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    Transliteration ({preferences?.transliteration_script || "iast"})
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
+                                    {transliteration}
+                                  </div>
+                                </div>
+                              )}
+                              {sourceLanguage !== "sanskrit" && sanskrit && sanskrit !== primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    Sanskrit
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                    {sanskrit}
+                                  </div>
+                                </div>
+                              )}
+                              {sourceLanguage !== "english" && english && english !== primaryContent && (
+                                <div>
+                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    English Translation
+                                  </div>
+                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                    {english}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
 
@@ -2526,11 +2765,13 @@ function ScripturesContent() {
         items={basketItems.map(item => ({
           node_id: item.node_id,
           order: item.order,
-          title: item.label,
+          title: item.title,
           book_name: item.book_name,
           level_name: item.level_name,
         }))}
         onRemoveItem={removeFromBasket}
+        onMoveItem={moveBasketItem}
+        reorderLoading={isReorderingBasket}
         onClearBasket={clearBasket}
         onItemsAdded={() => {
           // Optionally refresh the tree if needed

@@ -1,4 +1,5 @@
 import os
+from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 
 from jose import jwt
@@ -10,6 +11,9 @@ JWT_SECRET = os.getenv("JWT_SECRET", "change_me")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(
+    os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30")
+)
 
 
 def hash_password(password: str) -> str:
@@ -53,3 +57,28 @@ def get_token_subject(token: str) -> int:
     if subject is None:
         raise JWTError("Missing subject")
     return int(subject)
+
+
+def password_hash_signature(password_hash: str) -> str:
+    return sha256(password_hash.encode("utf-8")).hexdigest()
+
+
+def create_password_reset_token(user_id: int, password_hash: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": "password_reset",
+        "pwd": password_hash_signature(password_hash),
+        "exp": now + timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
+        "iat": now,
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_password_reset_token(token: str) -> dict:
+    payload = decode_token(token)
+    if payload.get("type") != "password_reset":
+        raise JWTError("Invalid token type")
+    if not payload.get("pwd"):
+        raise JWTError("Invalid token payload")
+    return payload

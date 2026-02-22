@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, ShoppingBasket } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
+import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
 
 type SearchNode = {
@@ -97,7 +98,9 @@ function HomeContent() {
     node_id?: number;
   } | null>(null);
   const [verseMode, setVerseMode] = useState<"daily" | "random">("daily");
+  const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<Array<{
+    cart_item_id?: number;
     node_id: number;
     title?: string;
     book_name?: string;
@@ -105,49 +108,187 @@ function HomeContent() {
     order: number;
   }>>([]);
 
-  // Load basket from localStorage
-  useEffect(() => {
+  const loadBasket = async () => {
     try {
-      const raw = window.localStorage.getItem("scriptle-basket");
-      const parsed = JSON.parse(raw || "[]") as typeof basketItems;
-      if (Array.isArray(parsed)) {
-        setBasketItems(parsed);
+      const response = await fetch("/api/cart/me", { credentials: "include" });
+      if (!response.ok) {
+        setBasketItems([]);
+        return;
       }
+      const data = (await response.json()) as {
+        items?: Array<{
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        }>;
+      };
+
+      const mappedItems = (data.items || [])
+        .map((item) => ({
+          cart_item_id: item.id,
+          node_id: item.item_id,
+          title: item.metadata?.title,
+          book_name: item.metadata?.book_name,
+          level_name: item.metadata?.level_name,
+          order: item.order,
+        }))
+        .sort((a, b) => a.order - b.order);
+
+      setBasketItems(mappedItems);
     } catch {
       setBasketItems([]);
     }
-  }, []);
-
-  // Save basket to localStorage
-  useEffect(() => {
-    window.localStorage.setItem("scriptle-basket", JSON.stringify(basketItems));
-  }, [basketItems]);
+  };
 
   const addToBasket = (nodeId: number, title: string, bookName?: string, levelName?: string) => {
-    setBasketItems((prev) => {
-      // Avoid duplicates
-      if (prev.some((item) => item.node_id === nodeId)) {
-        return prev;
+    void (async () => {
+      if (basketItems.some((item) => item.node_id === nodeId)) {
+        return;
       }
-      return [
-        ...prev,
-        {
-          node_id: nodeId,
-          title,
-          book_name: bookName,
-          level_name: levelName,
-          order: prev.length + 1,
-        },
-      ];
-    });
+
+      try {
+        const response = await fetch("/api/cart/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            item_id: nodeId,
+            item_type: "library_node",
+            metadata: {
+              title,
+              book_name: bookName,
+              level_name: levelName,
+            },
+          }),
+        });
+
+        if (response.status === 409) {
+          await loadBasket();
+          return;
+        }
+
+        if (!response.ok) {
+          return;
+        }
+
+        const item = (await response.json()) as {
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        };
+
+        setBasketItems((prev) =>
+          [...prev, {
+            cart_item_id: item.id,
+            node_id: item.item_id,
+            title: item.metadata?.title || title,
+            book_name: item.metadata?.book_name || bookName,
+            level_name: item.metadata?.level_name || levelName,
+            order: item.order,
+          }].sort((a, b) => a.order - b.order)
+        );
+      } catch {
+        // ignore basket add failures for now
+      }
+    })();
   };
 
   const removeFromBasket = (nodeId: number) => {
-    setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+    void (async () => {
+      const target = basketItems.find((item) => item.node_id === nodeId);
+      if (!target?.cart_item_id) {
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/cart/items/${target.cart_item_id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!response.ok && response.status !== 404) {
+          return;
+        }
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+      } catch {
+        // ignore basket remove failures for now
+      }
+    })();
   };
 
   const clearBasket = () => {
-    setBasketItems([]);
+    void (async () => {
+      try {
+        await fetch("/api/cart/me", {
+          method: "DELETE",
+          credentials: "include",
+        });
+      } finally {
+        setBasketItems([]);
+      }
+    })();
+  };
+
+  const moveBasketItem = (nodeId: number, direction: "up" | "down") => {
+    void (async () => {
+      if (isReorderingBasket) return;
+
+      setIsReorderingBasket(true);
+      const current = [...basketItems].sort((a, b) => a.order - b.order);
+      const index = current.findIndex((item) => item.node_id === nodeId);
+      if (index === -1) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const [moved] = current.splice(index, 1);
+      current.splice(targetIndex, 0, moved);
+
+      const reordered = current.map((item, idx) => ({ ...item, order: idx }));
+      setBasketItems(reordered);
+
+      const itemOrder = reordered
+        .map((item) => item.cart_item_id)
+        .filter((id): id is number => typeof id === "number");
+
+      if (itemOrder.length !== reordered.length) {
+        await loadBasket();
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/cart/items/reorder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ item_order: itemOrder }),
+        });
+
+        if (!response.ok) {
+          await loadBasket();
+        }
+      } catch {
+        await loadBasket();
+      } finally {
+        setIsReorderingBasket(false);
+      }
+    })();
   };
 
   const loadBooks = async () => {
@@ -212,27 +353,15 @@ function HomeContent() {
 
   const loadAuthStatus = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (!response.ok) {
-        const detail = (await response.json().catch(() => null)) as {
-          detail?: string;
-        } | null;
-        setAuthStatus(detail?.detail || "Not authenticated");
+      const data = await getMe();
+      if (!data) {
+        setAuthStatus("Not authenticated");
         setAuthEmail(null);
         setCanAdmin(false);
         setCanContribute(false);
         setCanEdit(false);
         return;
       }
-      const data = (await response.json()) as {
-        email?: string;
-        role?: string;
-        permissions?: {
-          can_admin?: boolean;
-          can_contribute?: boolean;
-          can_edit?: boolean;
-        } | null;
-      };
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
@@ -253,6 +382,7 @@ function HomeContent() {
       await Promise.all([
         loadBooks(),
         loadAuthStatus(),
+        loadBasket(),
         loadStats(),
         loadDailyVerse("daily"),
       ]);
@@ -386,8 +516,10 @@ function HomeContent() {
       setEmail("");
       setPassword("");
       setShowLogin(false);
+      invalidateMeCache();
       await loadBooks();
       await loadAuthStatus();
+      await loadBasket();
     } catch (err) {
       setAuthMessage(err instanceof Error ? err.message : "Login failed");
     }
@@ -640,6 +772,8 @@ function HomeContent() {
         credentials: "include",
       });
     } finally {
+      invalidateMeCache();
+      setBasketItems([]);
       await loadAuthStatus();
       await loadBooks();
     }
@@ -786,6 +920,7 @@ function HomeContent() {
                         
                         const destinationUrl = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&from=search&searchContext=${encodeURIComponent(searchContext.toString())}`;
                         const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
+                        const isInBasket = basketItems.some((item) => item.node_id === result.node.id);
                         
                         return (
                         <div
@@ -802,17 +937,19 @@ function HomeContent() {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
-                                  addToBasket(
+                                  void addToBasket(
                                     result.node.id,
                                     result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
                                     bookName,
                                     result.node.level_name
                                   );
                                 }}
-                                title="Add to basket"
-                                className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-2 py-2 text-emerald-700 transition hover:bg-emerald-100"
+                                disabled={isInBasket}
+                                title={isInBasket ? "Already in basket" : "Add to basket"}
+                                aria-label={isInBasket ? "Already in basket" : "Add to basket"}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
                               >
-                                <ShoppingBasket size={16} />
+                                <ShoppingBasket size={14} />
                               </button>
                               <a
                                 href={destinationUrl}
@@ -965,6 +1102,8 @@ function HomeContent() {
       <BasketPanel
         items={basketItems}
         onRemoveItem={removeFromBasket}
+        onMoveItem={moveBasketItem}
+        reorderLoading={isReorderingBasket}
         onClearBasket={clearBasket}
         onItemsAdded={() => {
           // Refresh or handle after items are added to book

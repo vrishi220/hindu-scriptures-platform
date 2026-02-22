@@ -70,13 +70,14 @@ export default defineConfig({
   /* Run backend + frontend servers before starting tests */
   webServer: [
     {
-      command: 'python3 -m uvicorn main:app --app-dir .. --host 127.0.0.1 --port 8000',
-      url: 'http://127.0.0.1:8000/health',
-      reuseExistingServer: !process.env.CI,
+      command:
+        'PLAYWRIGHT_DATABASE_URL=${PLAYWRIGHT_DATABASE_URL:-${DATABASE_URL:-postgresql+psycopg2://${USER}@localhost/test_scriptures}}; if ! printf "%s" "$PLAYWRIGHT_DATABASE_URL" | grep -qi "test"; then echo "Refusing Playwright run against non-test DB: $PLAYWRIGHT_DATABASE_URL"; exit 1; fi; DATABASE_URL="$PLAYWRIGHT_DATABASE_URL" ${PYTHON:-python3} -m uvicorn main:app --app-dir .. --host 127.0.0.1 --port 8001',
+      url: 'http://127.0.0.1:8001/health',
+      reuseExistingServer: false,
       timeout: 120 * 1000,
     },
     {
-      command: 'npm run dev',
+      command: 'API_BASE_URL=http://127.0.0.1:8001 npm run dev',
       url: 'http://localhost:3000',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,

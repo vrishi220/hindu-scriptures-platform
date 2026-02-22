@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { contentPath } from "../../../lib/apiPaths";
+import { getMe } from "../../../lib/authClient";
 
 type Schema = {
   id: number;
@@ -70,19 +71,13 @@ export default function SchemaBuilderPage() {
 
   const loadAuth = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      const raw = await response.text();
-      if (!response.ok) {
+      const data = await getMe();
+      if (!data) {
         setCanEdit(false);
         setCanAdmin(false);
         setAccessDenied(true);
         return;
       }
-      const data = (parsePayload(raw) as {
-        email?: string;
-        role?: string;
-        permissions?: { can_edit?: boolean; can_admin?: boolean } | null;
-      }) || {};
       setAuthEmail(data.email || null);
       const allowEdit = Boolean(
         data.permissions?.can_edit || data.role === "editor" || data.role === "admin"

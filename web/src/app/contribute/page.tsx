@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { contentPath } from "../../lib/apiPaths";
+import { getMe } from "../../lib/authClient";
 
 type BookOption = {
   id: number;
@@ -46,18 +47,9 @@ export default function ContributePage() {
   useEffect(() => {
     const loadAuth = async () => {
       try {
-        const response = await fetch("/api/me", { credentials: "include" });
+        const data = await getMe();
 
-        if (response.ok) {
-          const data = (await response.json()) as {
-            email?: string;
-            role?: string;
-            permissions?: {
-              can_contribute?: boolean;
-              can_edit?: boolean;
-              can_admin?: boolean;
-            } | null;
-          };
+        if (data) {
           setAuthEmail(data.email || null);
           setCanContribute(
             Boolean(
@@ -69,7 +61,6 @@ export default function ContributePage() {
             )
           );
           setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
-        } else {
         }
       } catch (err) {
         console.error("Auth check error:", err);

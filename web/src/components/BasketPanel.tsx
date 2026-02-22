@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { getMe } from "../lib/authClient";
 
 type BasketItem = {
   node_id: number;
@@ -46,11 +47,16 @@ type BookTreeNode = {
   children: BookTreeNode[];
 };
 
-type MeResponse = {
-  permissions?: {
-    can_edit?: boolean;
-    can_admin?: boolean;
-  } | null;
+type LicensePolicyIssue = {
+  source_node_id: number;
+  license_type: string;
+  policy_action: "warn" | "block";
+};
+
+type LicensePolicyReport = {
+  status: "pass" | "warn" | "block";
+  warning_issues: LicensePolicyIssue[];
+  blocked_issues: LicensePolicyIssue[];
 };
 
 const parseSequenceNumber = (value: unknown): number | null => {
@@ -83,6 +89,8 @@ const getBookTreeNodeLabel = (node: BookTreeNode): string => {
 type BasketPanelProps = {
   items: BasketItem[];
   onRemoveItem: (nodeId: number) => void;
+  onMoveItem?: (nodeId: number, direction: "up" | "down") => void;
+  reorderLoading?: boolean;
   onClearBasket: () => void;
   onItemsAdded?: () => void;
 };
@@ -90,6 +98,8 @@ type BasketPanelProps = {
 export default function BasketPanel({
   items,
   onRemoveItem,
+  onMoveItem,
+  reorderLoading = false,
   onClearBasket,
   onItemsAdded,
 }: BasketPanelProps) {
@@ -115,6 +125,71 @@ export default function BasketPanel({
   const [selectedParentNodeId, setSelectedParentNodeId] = useState<number | null>(null);
   const [selectedParentLevel, setSelectedParentLevel] = useState<string>("");
   const [selectedNodeInfo, setSelectedNodeInfo] = useState<{ id: number; level: string; parentId: number | null; isLeaf: boolean; label: string } | null>(null);
+  const [licensePolicyReport, setLicensePolicyReport] = useState<LicensePolicyReport | null>(null);
+  const [licensePolicyLoading, setLicensePolicyLoading] = useState(false);
+  const [licensePolicyError, setLicensePolicyError] = useState<string | null>(null);
+  const [highlightedBasketNodeId, setHighlightedBasketNodeId] = useState<number | null>(null);
+  const basketItemRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  const scrollToBasketItem = (nodeId: number) => {
+    const target = basketItemRefs.current[nodeId];
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setHighlightedBasketNodeId(nodeId);
+    window.setTimeout(() => {
+      setHighlightedBasketNodeId((current) => (current === nodeId ? null : current));
+    }, 1400);
+  };
+
+  useEffect(() => {
+    if (items.length === 0) {
+      setLicensePolicyReport(null);
+      setLicensePolicyError(null);
+      setLicensePolicyLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const evaluate = async () => {
+      setLicensePolicyLoading(true);
+      setLicensePolicyError(null);
+
+      try {
+        const response = await fetch("/api/content/license-policy-check", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node_ids: items.map((item) => item.node_id) }),
+          signal: controller.signal,
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | LicensePolicyReport
+          | { detail?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error((payload as { detail?: string } | null)?.detail || "Failed to evaluate licenses");
+        }
+
+        setLicensePolicyReport(payload as LicensePolicyReport);
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          return;
+        }
+        setLicensePolicyError(error instanceof Error ? error.message : "Failed to evaluate licenses");
+        setLicensePolicyReport(null);
+      } finally {
+        if (!controller.signal.aborted) {
+          setLicensePolicyLoading(false);
+        }
+      }
+    };
+
+    void evaluate();
+    return () => controller.abort();
+  }, [items]);
 
   const loadSchemas = async () => {
     try {
@@ -147,14 +222,12 @@ export default function BasketPanel({
     await Promise.all([loadSchemas(), loadBooks()]);
 
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (!response.ok) {
+      const me = await getMe();
+      if (!me) {
         setCanCopyExistingContent(false);
         setInsertMode("reference");
         return;
       }
-
-      const me = (await response.json()) as MeResponse;
       const perms = me.permissions || {};
       const allowCopy = Boolean(perms.can_edit || perms.can_admin);
       setCanCopyExistingContent(allowCopy);
@@ -623,10 +696,6 @@ export default function BasketPanel({
     return createdCount;
   };
 
-  if (items.length === 0 && !isExpanded) {
-    return null;
-  }
-
   return (
     <>
       {/* Floating Basket Button */}
@@ -666,10 +735,75 @@ export default function BasketPanel({
               </p>
             ) : (
               <div className="flex flex-col gap-2">
-                {items.map((item) => (
+                {licensePolicyLoading && (
+                  <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600">
+                    Checking license policy…
+                  </div>
+                )}
+                {licensePolicyError && (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    {licensePolicyError}
+                  </div>
+                )}
+                {licensePolicyReport && licensePolicyReport.status !== "pass" && (
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-xs ${
+                      licensePolicyReport.status === "block"
+                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                        : "border-amber-200 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    <div>
+                      {licensePolicyReport.status === "block"
+                        ? `${licensePolicyReport.blocked_issues.length} blocked source license(s) in basket. Snapshot publish will be blocked.`
+                        : `${licensePolicyReport.warning_issues.length} source license warning(s) in basket. Review before publish.`}
+                    </div>
+                    <div className="mt-1 space-y-1">
+                      {licensePolicyReport.warning_issues.map((issue) => {
+                        const item = items.find((candidate) => candidate.node_id === issue.source_node_id);
+                        const label = item?.title || `Node ${issue.source_node_id}`;
+                        return (
+                          <button
+                            key={`warn-${issue.source_node_id}-${issue.license_type}`}
+                            type="button"
+                            onClick={() => scrollToBasketItem(issue.source_node_id)}
+                            className="block text-left underline decoration-dotted underline-offset-2"
+                          >
+                            ⚠ {label} — {issue.license_type}
+                          </button>
+                        );
+                      })}
+                      {licensePolicyReport.blocked_issues.map((issue) => {
+                        const item = items.find((candidate) => candidate.node_id === issue.source_node_id);
+                        const label = item?.title || `Node ${issue.source_node_id}`;
+                        return (
+                          <button
+                            key={`block-${issue.source_node_id}-${issue.license_type}`}
+                            type="button"
+                            onClick={() => scrollToBasketItem(issue.source_node_id)}
+                            className="block text-left underline decoration-dotted underline-offset-2"
+                          >
+                            ✗ {label} — {issue.license_type}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {items
+                  .slice()
+                  .sort((a, b) => a.order - b.order)
+                  .map((item, index, arr) => (
                   <div
                     key={item.node_id}
-                    className="flex items-start justify-between gap-2 rounded-lg border border-black/10 bg-white/80 p-3"
+                    ref={(element) => {
+                      basketItemRefs.current[item.node_id] = element;
+                    }}
+                    className={`flex items-start justify-between gap-2 rounded-lg border bg-white/80 p-3 transition-all ${
+                      highlightedBasketNodeId === item.node_id
+                        ? "border-emerald-300 ring-2 ring-emerald-200"
+                        : "border-black/10"
+                    }`}
                   >
                     <div className="flex-1">
                       <div className="text-sm font-medium text-[color:var(--deep)]">
@@ -682,12 +816,43 @@ export default function BasketPanel({
                         </div>
                       )}
                     </div>
-                    <button
-                      onClick={() => onRemoveItem(item.node_id)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      ✕
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {onMoveItem && (
+                        <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
+                          {index + 1}
+                        </span>
+                      )}
+                      {onMoveItem && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onMoveItem(item.node_id, "up")}
+                            disabled={reorderLoading || index === 0}
+                            className="rounded border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40"
+                            aria-label="Move up"
+                            title="Move up"
+                          >
+                            ↑ Up
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onMoveItem(item.node_id, "down")}
+                            disabled={reorderLoading || index === arr.length - 1}
+                            className="rounded border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40"
+                            aria-label="Move down"
+                            title="Move down"
+                          >
+                            ↓ Down
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => onRemoveItem(item.node_id)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
