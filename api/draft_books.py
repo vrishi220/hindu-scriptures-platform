@@ -137,6 +137,104 @@ def _apply_template_metadata(snapshot_payload: dict) -> None:
     snapshot_payload["template_metadata"] = _extract_template_metadata(snapshot_payload).model_dump()
 
 
+def _read_template_key(value: object) -> str | None:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _extract_template_bindings(snapshot_data: dict | None) -> dict:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("template_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+
+    global_template_key = _read_template_key(
+        bindings.get("global")
+        or bindings.get("global_template_key")
+    )
+    book_template_key = _read_template_key(
+        bindings.get("book")
+        or bindings.get("book_template_key")
+    )
+
+    raw_level_bindings = (
+        bindings.get("levels")
+        if isinstance(bindings.get("levels"), dict)
+        else bindings.get("level_template_keys")
+    )
+    level_bindings: dict[str, str] = {}
+    if isinstance(raw_level_bindings, dict):
+        for key, value in raw_level_bindings.items():
+            if not isinstance(key, str):
+                continue
+            template_key = _read_template_key(value)
+            if template_key:
+                level_bindings[key.strip().lower()] = template_key
+
+    raw_node_bindings = (
+        bindings.get("nodes")
+        if isinstance(bindings.get("nodes"), dict)
+        else bindings.get("node_template_keys")
+    )
+    node_bindings: dict[int, str] = {}
+    if isinstance(raw_node_bindings, dict):
+        for key, value in raw_node_bindings.items():
+            template_key = _read_template_key(value)
+            if not template_key:
+                continue
+
+            parsed_node_id = _safe_int(key)
+            if parsed_node_id is None:
+                continue
+            node_bindings[parsed_node_id] = template_key
+
+    return {
+        "global_template_key": global_template_key,
+        "book_template_key": book_template_key,
+        "level_template_keys": level_bindings,
+        "node_template_keys": node_bindings,
+    }
+
+
+def _resolve_block_template_key(
+    section_name: str,
+    item: dict,
+    source_node: ContentNode | None,
+    template_bindings: dict,
+) -> str:
+    default_template = f"default.{section_name}.content_item.v1"
+
+    node_bindings = template_bindings.get("node_template_keys")
+    if isinstance(node_bindings, dict):
+        source_node_id = item.get("source_node_id")
+        if isinstance(source_node_id, int) and source_node_id > 0:
+            node_template = _read_template_key(node_bindings.get(source_node_id))
+            if node_template:
+                return node_template
+
+    level_bindings = template_bindings.get("level_template_keys")
+    if isinstance(level_bindings, dict):
+        level_name = source_node.level_name if source_node else item.get("level_name")
+        if isinstance(level_name, str) and level_name.strip():
+            level_template = _read_template_key(level_bindings.get(level_name.strip().lower()))
+            if level_template:
+                return level_template
+
+    source_book_id = item.get("source_book_id")
+    if isinstance(source_book_id, int) and source_book_id > 0:
+        book_template = _read_template_key(template_bindings.get("book_template_key"))
+        if book_template:
+            return book_template
+
+    global_template = _read_template_key(template_bindings.get("global_template_key"))
+    if global_template:
+        return global_template
+
+    return default_template
+
+
 def _safe_int(value: object) -> int | None:
     try:
         parsed = int(value)
@@ -267,6 +365,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
     section_names = ("front", "body", "back")
     section_blocks: dict[str, list[SnapshotRenderBlock]] = {"front": [], "body": [], "back": []}
     source_node_ids: set[int] = set()
+    template_bindings = _extract_template_bindings(resolved_data)
 
     for section_name in section_names:
         raw_section = resolved_data.get(section_name)
@@ -300,6 +399,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                     {
                         "source_node_id": source_node_id,
                         "source_book_id": source_book_id,
+                        "level_name": raw_item.get("level_name") if isinstance(raw_item.get("level_name"), str) else None,
                         "title": title,
                     },
                 )
@@ -318,12 +418,18 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         materialized_blocks: list[SnapshotRenderBlock] = []
         for block_index, (_, item) in enumerate(candidates, start=1):
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
+            template_key = _resolve_block_template_key(
+                section_name=section_name,
+                item=item,
+                source_node=source_node,
+                template_bindings=template_bindings,
+            )
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,
                     order=block_index,
                     block_type="content_item",
-                    template_key=f"default.{section_name}.content_item.v1",
+                    template_key=template_key,
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],
