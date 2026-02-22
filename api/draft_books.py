@@ -1,5 +1,7 @@
 import logging
 import textwrap
+import hashlib
+import json
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -135,6 +137,53 @@ def _extract_template_metadata(snapshot_data: dict | None) -> SnapshotTemplateMe
 
 def _apply_template_metadata(snapshot_payload: dict) -> None:
     snapshot_payload["template_metadata"] = _extract_template_metadata(snapshot_payload).model_dump()
+
+
+def _canonical_hash(value: object) -> str:
+    payload = value if value is not None else {}
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _compute_snapshot_fingerprint(snapshot_payload: dict) -> dict:
+    resolved = snapshot_payload if isinstance(snapshot_payload, dict) else {}
+    content_basis = {
+        "front": resolved.get("front") if isinstance(resolved.get("front"), list) else [],
+        "body": resolved.get("body") if isinstance(resolved.get("body"), list) else [],
+        "back": resolved.get("back") if isinstance(resolved.get("back"), list) else [],
+    }
+    template_basis = {
+        "template_metadata": _extract_template_metadata(resolved).model_dump(),
+        "template_bindings": _extract_template_bindings(resolved),
+    }
+    render_basis = {
+        "render_settings": _extract_render_settings(resolved).model_dump(),
+        "output_profile": _extract_template_metadata(resolved).output_profile,
+    }
+
+    content_hash = _canonical_hash(content_basis)
+    template_hash = _canonical_hash(template_basis)
+    render_hash = _canonical_hash(render_basis)
+    combined_hash = _canonical_hash(
+        {
+            "content_hash": content_hash,
+            "template_hash": template_hash,
+            "render_hash": render_hash,
+        }
+    )
+
+    return {
+        "version": "v1",
+        "algorithm": "sha256",
+        "content_hash": content_hash,
+        "template_hash": template_hash,
+        "render_hash": render_hash,
+        "combined_hash": combined_hash,
+    }
+
+
+def _apply_snapshot_fingerprint(snapshot_payload: dict) -> None:
+    snapshot_payload["snapshot_fingerprint"] = _compute_snapshot_fingerprint(snapshot_payload)
 
 
 def _read_metadata_dict(value: object) -> dict:
@@ -1054,6 +1103,7 @@ def create_edition_snapshot(
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
     _apply_template_metadata(snapshot_payload)
+    _apply_snapshot_fingerprint(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,
@@ -1112,6 +1162,7 @@ def publish_draft_book(
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
     _apply_template_metadata(snapshot_payload)
+    _apply_snapshot_fingerprint(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,

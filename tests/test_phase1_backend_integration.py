@@ -1731,6 +1731,90 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "tier": "global",
         }
 
+    def test_snapshot_contains_deterministic_fingerprint(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Fingerprint Draft",
+                "description": "Snapshot fingerprint coverage",
+                "section_structure": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Chapter 1", "order": 1}],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Chapter 1", "order": 1}],
+                    "back": [],
+                    "render_settings": {
+                        "show_metadata": True,
+                        "text_order": ["sanskrit", "english", "text"],
+                    },
+                    "template_bindings": {
+                        "global_template_key": "template.global.content_item.v1"
+                    },
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "all"}
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        snapshot_data = snapshot_payload["snapshot_data"]
+
+        fingerprint = snapshot_data.get("snapshot_fingerprint")
+        assert isinstance(fingerprint, dict)
+        assert fingerprint.get("version") == "v1"
+        assert fingerprint.get("algorithm") == "sha256"
+
+        for key in ("content_hash", "template_hash", "render_hash", "combined_hash"):
+            value = fingerprint.get(key)
+            assert isinstance(value, str)
+            assert len(value) == 64
+
+        expected_combined = hashlib.sha256(
+            json.dumps(
+                {
+                    "content_hash": fingerprint["content_hash"],
+                    "template_hash": fingerprint["template_hash"],
+                    "render_hash": fingerprint["render_hash"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        assert fingerprint["combined_hash"] == expected_combined
+
+        snapshot_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}",
+            headers=headers,
+        )
+        assert snapshot_response_1.status_code == status.HTTP_200_OK
+        snapshot_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}",
+            headers=headers,
+        )
+        assert snapshot_response_2.status_code == status.HTTP_200_OK
+
+        fingerprint_1 = snapshot_response_1.json()["snapshot_data"].get("snapshot_fingerprint")
+        fingerprint_2 = snapshot_response_2.json()["snapshot_data"].get("snapshot_fingerprint")
+        assert fingerprint_1 == fingerprint_2
+
     def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
         headers = _register_and_login(client)
         caplog.set_level("INFO", logger="api.draft_books")
