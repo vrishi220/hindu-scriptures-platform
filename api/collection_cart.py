@@ -266,6 +266,10 @@ def create_draft_from_my_cart(
     db.commit()
     db.refresh(draft)
 
+    if payload.clear_cart_after_create:
+        db.query(CollectionCartItem).filter(CollectionCartItem.cart_id == cart.id).delete()
+        db.commit()
+
     return DraftBookPublic.model_validate(draft)
 
 

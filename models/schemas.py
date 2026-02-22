@@ -616,3 +616,4 @@ class CartDraftComposeBodyPublic(BaseModel):
 class CartCreateDraftRequest(BaseModel):
     title: str
     description: str | None = None
+    clear_cart_after_create: bool = False

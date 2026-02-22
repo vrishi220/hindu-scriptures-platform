@@ -565,3 +565,54 @@ class TestCollectionCartDraftBodyCompose:
         cart_after = client.get("/api/cart/me", headers=headers)
         assert cart_after.status_code == status.HTTP_200_OK
         assert len(cart_after.json()["items"]) == 1
+
+    def test_create_draft_from_cart_can_clear_cart_when_requested(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Cart Clear Schema {uuid4().hex[:8]}",
+                "description": "Schema for clear-cart-on-create flow",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Clear Source Book {uuid4().hex[:6]}",
+                "book_code": f"clear-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        client.get("/api/cart/me", headers=headers)
+        add_response = client.post(
+            "/api/cart/items",
+            json={"item_id": 4001, "item_type": "library_node", "source_book_id": source_book_id},
+            headers=headers,
+        )
+        assert add_response.status_code == status.HTTP_201_CREATED
+
+        create_draft_response = client.post(
+            "/api/cart/me/create-draft",
+            json={
+                "title": "Draft From Cart With Clear",
+                "description": "Clear basket after create",
+                "clear_cart_after_create": True,
+            },
+            headers=headers,
+        )
+        assert create_draft_response.status_code == status.HTTP_201_CREATED
+
+        cart_after = client.get("/api/cart/me", headers=headers)
+        assert cart_after.status_code == status.HTTP_200_OK
+        assert cart_after.json()["items"] == []
