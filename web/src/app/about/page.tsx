@@ -9,16 +9,20 @@ const getVersionParts = (version: string) => {
   return { major, minor };
 };
 
-const getBuildNumber = () => {
-  const raw = (
-    process.env.NEXT_PUBLIC_BUILD_NUMBER ||
-    process.env.GITHUB_RUN_NUMBER ||
-    process.env.VERCEL_BUILD_ID ||
-    "0"
-  );
+const getBuildInfo = () => {
+  const source =
+    process.env.NEXT_PUBLIC_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER;
 
-  const digitsOnly = raw.replace(/\D/g, "");
-  return digitsOnly || "1";
+  if (!source) {
+    return { build: "0", isFallback: true };
+  }
+
+  const digitsOnly = source.replace(/\D/g, "");
+  if (!digitsOnly) {
+    return { build: "0", isFallback: true };
+  }
+
+  return { build: digitsOnly, isFallback: false };
 };
 
 const getCommitSha = () => {
@@ -38,7 +42,7 @@ const formatVersion = () => {
     packageJson.version ||
     "0.1.0";
   const { major, minor } = getVersionParts(rawVersion);
-  const build = getBuildNumber();
+  const { build } = getBuildInfo();
   const sha = getCommitSha();
   const shortSha = sha === "local" ? "local" : sha.slice(0, 7);
 
@@ -51,11 +55,11 @@ const getVersionDetails = () => {
     packageJson.version ||
     "0.1.0";
   const { major, minor } = getVersionParts(rawVersion);
-  const build = getBuildNumber();
+  const { build, isFallback } = getBuildInfo();
   const sha = getCommitSha();
   const shortSha = sha === "local" ? "local" : sha.slice(0, 7);
 
-  return { major, minor, build, shortSha };
+  return { major, minor, build, shortSha, isFallback };
 };
 
 export default function AboutPage() {
@@ -65,7 +69,7 @@ export default function AboutPage() {
   const contactPhone = process.env.NEXT_PUBLIC_CONTACT_PHONE || "Not set";
   const contactAddress = process.env.NEXT_PUBLIC_CONTACT_ADDRESS || "Not set";
   const version = formatVersion();
-  const { major, minor, build, shortSha } = getVersionDetails();
+  const { major, minor, build, shortSha, isFallback } = getVersionDetails();
   const year = new Date().getFullYear();
 
   return (
@@ -119,7 +123,10 @@ export default function AboutPage() {
               <span className="text-xs uppercase tracking-wide text-zinc-400">
                 Full Version
               </span>
-              <span className="font-mono text-base font-semibold text-[color:var(--deep)]">
+              <span
+                className="font-mono text-base font-semibold text-[color:var(--deep)]"
+                title={isFallback ? "Build metadata unavailable (fallback)" : undefined}
+              >
                 {version}
               </span>
             </div>
@@ -136,9 +143,28 @@ export default function AboutPage() {
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
                   Build #
                 </span>
-                <span className="font-mono text-[color:var(--deep)]">
-                  {build}
+                <span className="flex items-center gap-1">
+                  <span
+                    className="font-mono text-[color:var(--deep)]"
+                    title={isFallback ? "Build metadata unavailable (fallback)" : undefined}
+                  >
+                    {build}
+                  </span>
+                  {isFallback ? (
+                    <span
+                      aria-label="Build metadata fallback"
+                      className="text-zinc-500"
+                      title="Build metadata unavailable (fallback)"
+                    >
+                      ⚠
+                    </span>
+                  ) : null}
                 </span>
+                {isFallback ? (
+                  <span className="mt-1 text-xs text-zinc-500">
+                    Build metadata unavailable (fallback)
+                  </span>
+                ) : null}
               </div>
               <div className="col-span-2 flex flex-col">
                 <span className="text-xs uppercase tracking-wide text-zinc-400">
