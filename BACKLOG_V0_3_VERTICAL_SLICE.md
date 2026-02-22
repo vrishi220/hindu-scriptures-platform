@@ -4,6 +4,13 @@ Status: Draft (execution-ready)
 Scope: Editor assembles mixed-source draft and publishes immutable edition with provenance-backed PDF export.
 Source of truth: DESIGN_RFC.md (v0.3), Section 19.
 
+## Decision Update (2026-02-22)
+- Basket is treated as an intake/selection surface to compose candidate book structure.
+- Draft is the canonical printable/publishable assembly surface.
+- Rendering is template-driven from draft snapshot payloads (not basket state).
+- Draft body may reference an entire source book explicitly (`source_scope: "book"`) and expand to renderable body blocks.
+- Book preview/render contracts are body-only; front/back finishing layers remain draft concerns.
+
 ## Board Model
 - Backlog
 - Ready

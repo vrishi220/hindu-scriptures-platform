@@ -241,6 +241,34 @@ def _book_title_for_preview(node: ContentNode) -> str:
     )
 
 
+def _is_book_body_reference_item(
+    section_name: str,
+    raw_item: dict,
+    source_node_id: int | None,
+    source_book_id: int | None,
+) -> bool:
+    if section_name != "body":
+        return False
+    if source_node_id is not None and source_node_id > 0:
+        return False
+    if source_book_id is None or source_book_id <= 0:
+        return False
+
+    source_scope = _as_clean_string(raw_item.get("source_scope")).lower()
+    if source_scope in {"book", "entire_book", "book_body"}:
+        return True
+
+    include_whole_book = raw_item.get("include_whole_book")
+    if isinstance(include_whole_book, bool):
+        return include_whole_book
+
+    expand_book_body = raw_item.get("expand_book_body")
+    if isinstance(expand_book_body, bool):
+        return expand_book_body
+
+    return False
+
+
 def _default_template_metadata() -> SnapshotTemplateMetadata:
     return SnapshotTemplateMetadata(
         template_family=_SNAPSHOT_TEMPLATE_FAMILY,
@@ -968,6 +996,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             continue
 
         candidates: list[tuple[tuple[int, int, int, str, int], dict]] = []
+        source_nodes_by_book_id: dict[int, list[ContentNode]] = {}
         for index, raw_item in enumerate(raw_section):
             if not isinstance(raw_item, dict):
                 continue
@@ -976,6 +1005,53 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             sequence_number = _safe_int(raw_item.get("sequence_number"))
             source_node_id = _safe_int(raw_item.get("node_id"))
             source_book_id = _safe_int(raw_item.get("source_book_id"))
+
+            if _is_book_body_reference_item(
+                section_name=section_name,
+                raw_item=raw_item,
+                source_node_id=source_node_id,
+                source_book_id=source_book_id,
+            ):
+                if source_book_id not in source_nodes_by_book_id:
+                    source_nodes_by_book_id[source_book_id] = (
+                        db.query(ContentNode)
+                        .filter(ContentNode.book_id == source_book_id)
+                        .order_by(
+                            ContentNode.level_order.asc(),
+                            ContentNode.sequence_number.asc(),
+                            ContentNode.id.asc(),
+                        )
+                        .all()
+                    )
+
+                expanded_nodes = source_nodes_by_book_id[source_book_id]
+                for expanded_index, node in enumerate(expanded_nodes):
+                    expanded_sequence = _safe_int(node.sequence_number)
+                    expanded_title = _book_title_for_preview(node)
+                    expanded_sort_key = (
+                        explicit_order if explicit_order is not None else 10**9,
+                        node.level_order if isinstance(node.level_order, int) else 10**9,
+                        expanded_sequence if expanded_sequence is not None else 10**9,
+                        expanded_title.lower(),
+                        (index * 10**4) + expanded_index,
+                    )
+
+                    candidates.append(
+                        (
+                            expanded_sort_key,
+                            {
+                                "source_node_id": node.id,
+                                "source_book_id": source_book_id,
+                                "level_name": node.level_name,
+                                "metadata": raw_item.get("metadata") if isinstance(raw_item.get("metadata"), dict) else None,
+                                "metadata_overrides": raw_item.get("metadata_overrides") if isinstance(raw_item.get("metadata_overrides"), dict) else None,
+                                "title": expanded_title,
+                            },
+                        )
+                    )
+                    source_node_ids.add(node.id)
+
+                continue
 
             title_value = raw_item.get("title")
             title = title_value.strip() if isinstance(title_value, str) and title_value.strip() else "Untitled"
