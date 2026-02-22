@@ -86,6 +86,9 @@ export default function ExplorerPage() {
   const [insertLoading, setInsertLoading] = useState(false);
   const [insertMessage, setInsertMessage] = useState<string | null>(null);
   const [insertMessageType, setInsertMessageType] = useState<"success" | "error" | null>(null);
+  const [draftSyncLoading, setDraftSyncLoading] = useState(false);
+  const [draftSyncMessage, setDraftSyncMessage] = useState<string | null>(null);
+  const [draftSyncMessageType, setDraftSyncMessageType] = useState<"success" | "error" | null>(null);
   const [linkedDraftId, setLinkedDraftId] = useState<number | null>(null);
   const [lastSyncedDraftId, setLastSyncedDraftId] = useState<number | null>(null);
   const [collectPolicyReport, setCollectPolicyReport] = useState<LicensePolicyReport | null>(null);
@@ -612,6 +615,34 @@ export default function ExplorerPage() {
     }
   };
 
+  const handleSyncToDraft = async () => {
+    if (pickedNodes.length === 0) {
+      setDraftSyncMessage("Pick at least one item first.");
+      setDraftSyncMessageType("error");
+      return;
+    }
+
+    setDraftSyncLoading(true);
+    setDraftSyncMessage(null);
+    setDraftSyncMessageType(null);
+
+    try {
+      const syncedDraftId = await syncPickedNodesToDraft(pickedNodes, pickedSections);
+      setLastSyncedDraftId(syncedDraftId);
+      setDraftSyncMessage(
+        syncedDraftId
+          ? `Synced ${pickedNodes.length} item(s) to Draft #${syncedDraftId}`
+          : `Synced ${pickedNodes.length} item(s) to draft`
+      );
+      setDraftSyncMessageType("success");
+    } catch (error) {
+      setDraftSyncMessage(error instanceof Error ? error.message : "Failed to sync to draft");
+      setDraftSyncMessageType("error");
+    } finally {
+      setDraftSyncLoading(false);
+    }
+  };
+
 
   const countDescendants = (node: ContentNode): number => {
     if (!node.children || node.children.length === 0) {
@@ -1087,22 +1118,27 @@ export default function ExplorerPage() {
             )}
 
             {/* Picked Nodes Panel */}
-            {pickedNodes.length > 0 && (
-              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/50 p-4">
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/50 p-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">
-                    Picked Items ({pickedNodes.length})
+                    Basket / Picked Items ({pickedNodes.length})
                   </h3>
                   <button
                     onClick={() => {
                       setPickedNodes([]);
                       setPickedSections({});
                     }}
+                    disabled={pickedNodes.length === 0}
                     className="text-xs text-emerald-600 hover:text-emerald-800"
                   >
                     Clear all
                   </button>
                 </div>
+                {pickedNodes.length === 0 ? (
+                  <p className="mt-3 text-sm text-zinc-600">
+                    Add items from the tree or search results, then insert into a book or sync directly to Drafts.
+                  </p>
+                ) : (
                 <div className="mt-3 flex flex-col gap-2">
                   {collectPolicyLoading && (
                     <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600">
@@ -1242,14 +1278,50 @@ export default function ExplorerPage() {
                     </div>
                   ))}
                 </div>
-                <button
+                )}
+
+                {draftSyncMessage && (
+                  <div
+                    className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
+                      draftSyncMessageType === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-rose-200 bg-rose-50 text-rose-700"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {draftSyncMessageType === "success" ? <Check size={14} /> : <X size={14} />}
+                      <span>{draftSyncMessage}</span>
+                    </div>
+                    {draftSyncMessageType === "success" && lastSyncedDraftId && (
+                      <div className="mt-2">
+                        <a
+                          href={`/drafts?draftId=${lastSyncedDraftId}`}
+                          className="inline-flex rounded-lg border border-emerald-300 bg-white px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                        >
+                          Open Draft #{lastSyncedDraftId}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <button
+                    onClick={handleSyncToDraft}
+                    disabled={pickedNodes.length === 0 || draftSyncLoading}
+                    className="w-full rounded-xl border border-emerald-600 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    {draftSyncLoading ? "Syncing..." : "Sync to Draft"}
+                  </button>
+                  <button
                   onClick={() => setShowInsertModal(true)}
+                  disabled={pickedNodes.length === 0}
                   className="mt-4 w-full rounded-xl border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                 >
                   Insert into Book
-                </button>
+                  </button>
+                </div>
               </div>
-            )}
 
             {!selectedSchemaId && (
               <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-8 text-center">

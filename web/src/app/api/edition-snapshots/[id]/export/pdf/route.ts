@@ -30,6 +30,160 @@ const refreshAccessToken = async (refreshToken: string) => {
     | null;
 };
 
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+type SnapshotRenderBlock = {
+  order: number;
+  title: string;
+  template_key: string;
+  source_node_id: number | null;
+  content: Record<string, unknown>;
+};
+
+type SnapshotRenderArtifact = {
+  draft_book_id: number;
+  sections: {
+    front: SnapshotRenderBlock[];
+    body: SnapshotRenderBlock[];
+    back: SnapshotRenderBlock[];
+  };
+  render_settings: {
+    show_sanskrit: boolean;
+    show_transliteration: boolean;
+    show_english: boolean;
+    show_metadata: boolean;
+    text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
+  };
+  template_metadata?: {
+    template_family: string;
+    template_version: string;
+    block_template_pattern: string;
+    renderer: string;
+    output_profile: string;
+  };
+};
+
+type EditionSnapshot = {
+  id: number;
+  version: number;
+  created_at: string;
+};
+
+const labelForKey = (key: string): string => {
+  if (key === "sanskrit") return "Sanskrit";
+  if (key === "transliteration") return "Transliteration";
+  if (key === "english") return "English";
+  return "Text";
+};
+
+const buildHtml = (
+  snapshot: EditionSnapshot,
+  artifact: SnapshotRenderArtifact,
+  draftTitle: string
+) => {
+  const renderSettings = artifact.render_settings || {
+    show_sanskrit: true,
+    show_transliteration: true,
+    show_english: true,
+    show_metadata: true,
+    text_order: ["sanskrit", "transliteration", "english", "text"],
+  };
+  const templateMetadata = artifact.template_metadata;
+
+  const shouldShow = (key: string): boolean => {
+    if (key === "sanskrit") return renderSettings.show_sanskrit;
+    if (key === "transliteration") return renderSettings.show_transliteration;
+    if (key === "english") return renderSettings.show_english;
+    return true;
+  };
+
+  const sectionOrder: Array<"front" | "body" | "back"> = ["front", "body", "back"];
+  const sectionHtml = sectionOrder
+    .map((section) => {
+      const blocks = artifact.sections?.[section] || [];
+      const sectionLabel = section[0].toUpperCase() + section.slice(1);
+
+      const blockHtml =
+        blocks.length === 0
+          ? `<p class=\"muted\">No items in this section.</p>`
+          : blocks
+              .map((block) => {
+                const content = (block.content || {}) as Record<string, unknown>;
+                const lines = (renderSettings.text_order || ["sanskrit", "transliteration", "english", "text"])
+                  .filter((key) => shouldShow(key))
+                  .map((key) => {
+                    const raw = content[key];
+                    const value = typeof raw === "string" ? raw.trim() : "";
+                    if (!value) return "";
+                    const lineClass = key === "sanskrit" ? "line sanskrit" : "line";
+                    return `<div class=\"${lineClass}\"><strong>${labelForKey(key)}:</strong> ${escapeHtml(value)}</div>`;
+                  })
+                  .filter(Boolean)
+                  .join("");
+
+                const metadata = renderSettings.show_metadata
+                  ? `<div class=\"meta\">template=${escapeHtml(block.template_key)}${
+                      typeof block.source_node_id === "number" ? ` • source_node=${block.source_node_id}` : ""
+                    }</div>`
+                  : "";
+
+                return `
+                  <div class=\"block\">
+                    <h3>${block.order}. ${escapeHtml(block.title)}</h3>
+                    ${lines}
+                    ${metadata}
+                  </div>
+                `;
+              })
+              .join("");
+
+      return `
+        <section>
+          <h2>${sectionLabel} (${blocks.length})</h2>
+          ${blockHtml}
+        </section>
+      `;
+    })
+    .join("");
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset=\"utf-8\" />
+        <style>
+          @page { size: A4; margin: 22mm 16mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", "Devanagari Sangam MN", sans-serif; color: #111; }
+          h1 { font-size: 24px; margin: 0 0 6px 0; }
+          h2 { font-size: 20px; margin: 22px 0 10px; }
+          h3 { font-size: 16px; margin: 0 0 8px; }
+          .meta-top { margin-bottom: 16px; color: #333; }
+          .block { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; break-inside: avoid; }
+          .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
+          .line.sanskrit { font-family: "Noto Sans Devanagari", "Devanagari Sangam MN", "Devanagari MT", sans-serif; font-size: 18px; line-height: 1.75; }
+          .meta { margin-top: 8px; color: #555; font-size: 12px; }
+          .muted { color: #666; }
+        </style>
+      </head>
+      <body>
+        <h1>Edition Snapshot Export — ${escapeHtml(draftTitle)}</h1>
+        <div class="meta-top">Version: v${snapshot.version}<br/>Snapshot ID: ${snapshot.id}<br/>Created At: ${escapeHtml(snapshot.created_at)}${
+          templateMetadata
+            ? `<br/>Template: ${escapeHtml(templateMetadata.template_family)}.${escapeHtml(templateMetadata.template_version)} (${escapeHtml(templateMetadata.output_profile)})`
+            : ""
+        }</div>
+        ${sectionHtml}
+      </body>
+    </html>
+  `;
+};
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -39,7 +193,7 @@ export async function GET(
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
 
-  const doGet = (token?: string) =>
+  const doGetPdf = (token?: string) =>
     fetch(`${API_BASE_URL}/api/edition-snapshots/${id}/export/pdf`, {
       headers: {
         Accept: "application/pdf",
@@ -48,9 +202,18 @@ export async function GET(
       cache: "no-store",
     });
 
+  const doGetJson = (path: string, token?: string) =>
+    fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        Accept: "application/json",
+        ...buildAuthHeader(token),
+      },
+      cache: "no-store",
+    });
+
   let response: Response;
   try {
-    response = await doGet(accessToken);
+    response = await doGetPdf(accessToken);
   } catch {
     return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
   }
@@ -73,7 +236,7 @@ export async function GET(
       });
 
       try {
-        response = await doGet(access_token);
+        response = await doGetPdf(access_token);
       } catch {
         return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
       }
@@ -83,6 +246,42 @@ export async function GET(
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     return NextResponse.json(payload || { detail: "Failed to export snapshot PDF" }, { status: response.status });
+  }
+
+  // Prefer browser-based PDF for better Indic script shaping. Fallback to backend PDF on any failure.
+  try {
+    const tokenForJson = store.get(ACCESS_TOKEN_COOKIE)?.value || accessToken;
+    const [snapshotResp, artifactResp] = await Promise.all([
+      doGetJson(`/api/edition-snapshots/${id}`, tokenForJson),
+      doGetJson(`/api/edition-snapshots/${id}/render-artifact`, tokenForJson),
+    ]);
+
+    if (snapshotResp.ok && artifactResp.ok) {
+      const snapshot = (await snapshotResp.json()) as EditionSnapshot;
+      const artifact = (await artifactResp.json()) as SnapshotRenderArtifact;
+      const html = buildHtml(snapshot, artifact, `Draft ${artifact.draft_book_id}`);
+
+      const pw = await import("@playwright/test");
+      const browser = await pw.chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+
+        return new NextResponse(new Uint8Array(pdfBuffer), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename="edition-${id}.pdf"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      } finally {
+        await browser.close();
+      }
+    }
+  } catch {
+    // Fall through to backend-generated PDF.
   }
 
   const arrayBuffer = await response.arrayBuffer();

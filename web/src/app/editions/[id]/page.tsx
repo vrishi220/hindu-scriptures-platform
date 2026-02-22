@@ -23,7 +23,22 @@ type SnapshotRenderBlock = {
   source_node_id: number | null;
   source_book_id: number | null;
   title: string;
-  content: Record<string, unknown>;
+  content: {
+    level_name?: string;
+    sequence_number?: number | null;
+    sanskrit?: string;
+    transliteration?: string;
+    english?: string;
+    text?: string;
+  };
+};
+
+type SnapshotRenderSettings = {
+  show_sanskrit: boolean;
+  show_transliteration: boolean;
+  show_english: boolean;
+  show_metadata: boolean;
+  text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
 };
 
 type SnapshotRenderArtifact = {
@@ -35,6 +50,14 @@ type SnapshotRenderArtifact = {
     front: SnapshotRenderBlock[];
     body: SnapshotRenderBlock[];
     back: SnapshotRenderBlock[];
+  };
+  render_settings: SnapshotRenderSettings;
+  template_metadata?: {
+    template_family: string;
+    template_version: string;
+    block_template_pattern: string;
+    renderer: string;
+    output_profile: string;
   };
 };
 
@@ -153,6 +176,59 @@ export default function PublishedEditionPage() {
     sectionRefs.current[section]?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const resolveContentLines = (block: SnapshotRenderBlock, settings?: SnapshotRenderSettings) => {
+    const resolvedSettings: SnapshotRenderSettings =
+      settings || {
+        show_sanskrit: true,
+        show_transliteration: true,
+        show_english: true,
+        show_metadata: true,
+        text_order: ["sanskrit", "transliteration", "english", "text"],
+      };
+
+    const visibleByKey: Record<string, boolean> = {
+      sanskrit: resolvedSettings.show_sanskrit,
+      transliteration: resolvedSettings.show_transliteration,
+      english: resolvedSettings.show_english,
+      text: true,
+    };
+
+    const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
+    for (const key of resolvedSettings.text_order) {
+      const value = (block.content[key] || "").trim();
+      if (!value || !visibleByKey[key]) {
+        continue;
+      }
+
+      const label =
+        key === "sanskrit"
+          ? "Sanskrit"
+          : key === "transliteration"
+          ? "Transliteration"
+          : key === "english"
+          ? "English"
+          : "Text";
+
+      const className =
+        key === "sanskrit"
+          ? "text-base text-[color:var(--deep)]"
+          : key === "transliteration"
+          ? "text-sm italic text-zinc-700"
+          : "text-sm text-zinc-700";
+
+      lines.push({ key, label, value, className });
+    }
+
+    if (lines.length === 0) {
+      const fallback = (block.content.text || "").trim();
+      if (fallback) {
+        lines.push({ key: "text", label: "Text", value: fallback, className: "text-sm text-zinc-700" });
+      }
+    }
+
+    return lines;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
@@ -162,6 +238,11 @@ export default function PublishedEditionPage() {
             {snapshot && (
               <p className="mt-2 text-sm text-zinc-600">
                 Snapshot v{snapshot.version} • Created {formatDate(snapshot.created_at)}
+              </p>
+            )}
+            {artifact?.template_metadata && (
+              <p className="mt-1 text-xs text-zinc-500">
+                Template {artifact.template_metadata.template_family}.{artifact.template_metadata.template_version} • {artifact.template_metadata.output_profile}
               </p>
             )}
           </div>
@@ -244,10 +325,27 @@ export default function PublishedEditionPage() {
                             </span>
                             <span className="text-sm font-medium text-zinc-800">{block.title}</span>
                           </div>
-                          <div className="mt-1 text-xs text-zinc-500">
-                            template: {block.template_key}
-                            {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
-                          </div>
+
+                          {resolveContentLines(block, artifact.render_settings).length > 0 && (
+                            <div className="mt-2 space-y-2">
+                              {resolveContentLines(block, artifact.render_settings).map((line) => (
+                                <div key={`${block.order}-${line.key}`}>
+                                  <div className="text-[11px] uppercase tracking-wider text-zinc-500">{line.label}</div>
+                                  <div className={`whitespace-pre-wrap ${line.className}`}>{line.value}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {artifact.render_settings.show_metadata && (
+                            <div className="mt-2 text-xs text-zinc-500">
+                              template: {block.template_key}
+                              {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
+                              {typeof block.content.sequence_number === "number"
+                                ? ` • seq ${block.content.sequence_number}`
+                                : ""}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
