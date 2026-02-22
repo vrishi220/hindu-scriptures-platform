@@ -5,6 +5,7 @@ import json
 from uuid import uuid4
 from types import SimpleNamespace
 
+import api.content as content_api
 from api.content import create_node
 from fastapi import HTTPException
 from fastapi import status
@@ -430,6 +431,87 @@ class TestBookPrivacyAndPublishToggle:
 
         get_other_after = client.get(f"/api/content/books/{book_id}", headers=headers_other)
         assert get_other_after.status_code == status.HTTP_200_OK
+
+
+class TestDailyVerseVisibilityRegression:
+    def test_daily_verse_uses_user_visible_books(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Daily Verse Schema {uuid4().hex[:8]}",
+                "description": "Schema for daily verse visibility regression",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Daily Verse Private {uuid4().hex[:6]}",
+                "book_code": f"daily-private-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        marker = f"daily-marker-{uuid4().hex}"
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Shloka 1",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": marker},
+                },
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+
+        original_visibility = content_api._book_is_visible_to_user
+
+        def only_target_book_visible(db, book, current_user):
+            return book.id == book_id
+
+        monkeypatch.setattr(content_api, "_book_is_visible_to_user", only_target_book_visible)
+        try:
+            response = client.get("/api/content/daily-verse?mode=daily", headers=headers)
+            assert response.status_code == status.HTTP_200_OK
+            payload = response.json()
+            assert payload is not None
+            assert payload["book_id"] == book_id
+            assert marker in payload["content"]
+        finally:
+            monkeypatch.setattr(content_api, "_book_is_visible_to_user", original_visibility)
 
 
 class TestBookSharesPhase2:
