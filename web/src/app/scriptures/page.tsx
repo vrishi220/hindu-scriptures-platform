@@ -134,6 +134,12 @@ type BookPreviewArtifact = {
   sections: {
     body: BookPreviewBlock[];
   };
+  book_template?: {
+    template_key: string;
+    resolved_template_source: string;
+    rendered_text: string;
+    child_count: number;
+  };
   render_settings: BookPreviewRenderSettings;
   warnings?: string[];
 };
@@ -2563,6 +2569,21 @@ function ScripturesContent() {
               {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
                 <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
                   {bookPreviewArtifact.warnings.join(" ")}
+                </div>
+              )}
+
+              {bookPreviewArtifact.book_template && (
+                <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Template</div>
+                  <div className="mt-1 text-sm font-semibold text-[color:var(--deep)]">
+                    {bookPreviewArtifact.book_template.template_key}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    Children rendered: {bookPreviewArtifact.book_template.child_count}
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
+                    {bookPreviewArtifact.book_template.rendered_text || "No rendered book-level summary."}
+                  </p>
                 </div>
               )}
 

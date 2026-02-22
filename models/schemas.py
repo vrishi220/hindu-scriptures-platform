@@ -529,11 +529,19 @@ class BookPreviewRenderSections(BaseModel):
     body: list[SnapshotRenderBlock] = Field(default_factory=list)
 
 
+class BookPreviewTemplatePublic(BaseModel):
+    template_key: str
+    resolved_template_source: str
+    rendered_text: str
+    child_count: int
+
+
 class BookPreviewRenderArtifactPublic(BaseModel):
     book_id: int
     book_name: str
     section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
     sections: BookPreviewRenderSections
+    book_template: BookPreviewTemplatePublic | None = None
     render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
     preview_mode: Literal["book"] = "book"

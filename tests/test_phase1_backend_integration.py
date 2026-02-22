@@ -2237,6 +2237,9 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert "back" not in payload["sections"]
         assert len(payload["sections"]["body"]) >= 1
         assert payload["sections"]["body"][0]["template_key"].startswith("default.body.")
+        assert payload["book_template"]["template_key"] == "default.book.content_item.v1"
+        assert payload["book_template"]["child_count"] == len(payload["sections"]["body"])
+        assert payload["book_template"]["rendered_text"]
 
     def test_book_preview_render_allows_shared_private_book_for_viewer(self, client):
         owner_headers = _register_and_login(client)
@@ -2320,6 +2323,8 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert payload["book_id"] == book_id
         assert payload["preview_mode"] == "book"
         assert len(payload["sections"]["body"]) >= 1
+        assert payload["book_template"]["template_key"] == "default.book.content_item.v1"
+        assert payload["book_template"]["child_count"] == len(payload["sections"]["body"])
 
     def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
         headers = _register_and_login(client)

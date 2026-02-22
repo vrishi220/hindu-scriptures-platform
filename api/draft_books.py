@@ -25,6 +25,7 @@ from models.schemas import (
     AdminDraftBookCreate,
     BookPreviewRenderArtifactPublic,
     BookPreviewRenderRequest,
+    BookPreviewTemplatePublic,
     DraftPreviewRenderArtifactPublic,
     DraftPreviewRenderRequest,
     DraftRevisionEventPublic,
@@ -88,6 +89,11 @@ _DEFAULT_TEMPLATE_LABEL_TO_FIELD = {
 _BOOK_VISIBILITY_PUBLIC = "public"
 
 _DEFAULT_LIQUID_TEMPLATES = {
+    "default.book.content_item.v1": (
+        "{% if title %}Book: {{ title }}\n{% endif %}"
+        "{% if child_count %}Child Count: {{ child_count }}\n{% endif %}"
+        "{% if children %}Children: {{ children }}\n{% endif %}"
+    ),
     "default.front.content_item.v1": (
         "{% if english %}English: {{ english }}\n{% endif %}"
         "{% if text %}Text: {{ text }}\n{% endif %}"
@@ -1051,6 +1057,52 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             lines.append(("Text", fallback.strip()))
 
     return lines
+
+
+def _render_book_preview_template(
+    preview_payload: dict,
+    book: Book,
+    sections: SnapshotRenderSections,
+) -> BookPreviewTemplatePublic:
+    template_bindings = _extract_template_bindings(preview_payload)
+    configured_template = _read_template_key(template_bindings.get("book_template_key"))
+    template_key = configured_template or "default.book.content_item.v1"
+    template_source = _resolve_liquid_template_source(
+        template_key=template_key,
+        section_name="body",
+        level_name="book",
+        resolved_metadata=None,
+    )
+
+    child_snippets: list[str] = []
+    for block in sections.body:
+        rendered_lines = block.content.get("rendered_lines") if isinstance(block.content, dict) else None
+        if not isinstance(rendered_lines, list):
+            continue
+
+        line_values: list[str] = []
+        for line in rendered_lines:
+            if not isinstance(line, dict):
+                continue
+            value = _as_clean_string(line.get("value"))
+            if value:
+                line_values.append(value)
+        if line_values:
+            child_snippets.append(f"{block.title}: {' | '.join(line_values)}")
+
+    context = {
+        "title": _as_clean_string(book.book_name),
+        "child_count": str(len(sections.body)),
+        "children": " || ".join(child_snippets),
+    }
+    rendered_text = Template(template_source).render(**context).strip()
+
+    return BookPreviewTemplatePublic(
+        template_key=template_key,
+        resolved_template_source=template_source,
+        rendered_text=rendered_text,
+        child_count=len(sections.body),
+    )
 
 
 def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Session) -> SnapshotRenderSections:
@@ -2039,11 +2091,13 @@ def preview_book_render(
     sections = _materialize_snapshot_render_sections(preview_payload, db)
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
+    book_template = _render_book_preview_template(preview_payload, book, sections)
 
     return BookPreviewRenderArtifactPublic(
         book_id=book.id,
         book_name=book.book_name,
         sections={"body": sections.body},
+        book_template=book_template,
         render_settings=render_settings,
         template_metadata=template_metadata,
         preview_mode="book",
