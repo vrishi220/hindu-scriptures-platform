@@ -1777,6 +1777,230 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "tier": "global",
         }
 
+    def test_snapshot_render_artifact_handles_missing_bindings_with_deterministic_output(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Missing Bindings Draft",
+                "description": "Fallback and determinism coverage",
+                "section_structure": {
+                    "front": [{"title": "Intro", "order": 1}],
+                    "body": [
+                        {"title": "Verse Item", "level_name": "Verse", "order": 1},
+                        {"title": "Generic Item", "order": 2},
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [{"title": "Intro", "order": 1}],
+                    "body": [
+                        {"title": "Verse Item", "level_name": "Verse", "order": 1},
+                        {"title": "Generic Item", "order": 2},
+                    ],
+                    "back": [],
+                    "template_bindings": {},
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "all"}
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        assert "snapshot_fingerprint" in snapshot_payload["snapshot_data"]
+
+        render_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        render_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_1.status_code == status.HTTP_200_OK
+        assert render_response_2.status_code == status.HTTP_200_OK
+
+        payload_1 = render_response_1.json()
+        payload_2 = render_response_2.json()
+
+        body_blocks = payload_1["sections"]["body"]
+        assert [block["template_key"] for block in body_blocks] == [
+            "default.body.content_item.v1",
+            "default.body.content_item.v1",
+        ]
+        assert [block.get("resolved_metadata") for block in body_blocks] == [
+            {"audience": "all"},
+            {"audience": "all"},
+        ]
+
+        canonical_1 = json.dumps(payload_1, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
+
+    def test_snapshot_render_artifact_collision_matrix_prefers_highest_precedence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Collision Matrix Schema {uuid4().hex[:8]}",
+                "description": "Collision precedence coverage",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Collision Source {uuid4().hex[:6]}",
+                "book_code": f"collision-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Collision Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Collision Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Collision verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Collision Matrix Draft",
+                "description": "Node/level/book/global collisions",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Node collision", "node_id": verse_node_id, "source_book_id": source_book_id, "order": 1},
+                        {"title": "Level collision", "source_book_id": source_book_id, "level_name": "Verse", "order": 2},
+                        {"title": "Book collision", "source_book_id": source_book_id, "order": 3},
+                        {"title": "Global collision", "order": 4},
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {"title": "Node collision", "node_id": verse_node_id, "source_book_id": source_book_id, "order": 1},
+                        {"title": "Level collision", "source_book_id": source_book_id, "level_name": "Verse", "order": 2},
+                        {"title": "Book collision", "source_book_id": source_book_id, "order": 3},
+                        {"title": "Global collision", "order": 4},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "global_template_key": "template.global.content_item.v1",
+                        "book_template_key": "template.book.content_item.v1",
+                        "level_template_keys": {
+                            "verse": "template.level.content_item.v1"
+                        },
+                        "node_template_keys": {
+                            str(verse_node_id): "template.node.content_item.v1"
+                        },
+                    },
+                    "metadata_bindings": {
+                        "global_metadata": {"collision": "global"},
+                        "book_metadata": {"collision": "book"},
+                        "level_metadata": {"verse": {"collision": "level"}},
+                        "node_metadata": {str(verse_node_id): {"collision": "node"}},
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_payload = publish_response.json()["snapshot"]
+        snapshot_id = snapshot_payload["id"]
+        assert "snapshot_fingerprint" in snapshot_payload["snapshot_data"]
+
+        render_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        render_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_1.status_code == status.HTTP_200_OK
+        assert render_response_2.status_code == status.HTTP_200_OK
+
+        payload_1 = render_response_1.json()
+        payload_2 = render_response_2.json()
+        body_blocks = payload_1["sections"]["body"]
+
+        assert [block["template_key"] for block in body_blocks] == [
+            "template.node.content_item.v1",
+            "template.level.content_item.v1",
+            "template.book.content_item.v1",
+            "template.global.content_item.v1",
+        ]
+        assert [block["resolved_metadata"]["collision"] for block in body_blocks] == [
+            "node",
+            "level",
+            "book",
+            "global",
+        ]
+
+        canonical_1 = json.dumps(payload_1, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
+
     def test_snapshot_contains_deterministic_fingerprint(self, client):
         headers = _register_and_login(client)
 
