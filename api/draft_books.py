@@ -137,6 +137,121 @@ def _apply_template_metadata(snapshot_payload: dict) -> None:
     snapshot_payload["template_metadata"] = _extract_template_metadata(snapshot_payload).model_dump()
 
 
+def _read_metadata_dict(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+
+    resolved: dict = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if raw_value is None:
+            continue
+        resolved[key.strip()] = raw_value
+    return resolved
+
+
+def _extract_metadata_bindings(snapshot_data: dict | None) -> dict:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("metadata_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+
+    global_metadata = _read_metadata_dict(
+        bindings.get("global")
+        or bindings.get("global_metadata")
+    )
+    book_metadata = _read_metadata_dict(
+        bindings.get("book")
+        or bindings.get("book_metadata")
+    )
+
+    raw_level_bindings = (
+        bindings.get("levels")
+        if isinstance(bindings.get("levels"), dict)
+        else bindings.get("level_metadata")
+    )
+    level_bindings: dict[str, dict] = {}
+    if isinstance(raw_level_bindings, dict):
+        for key, value in raw_level_bindings.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            normalized = _read_metadata_dict(value)
+            if normalized:
+                level_bindings[key.strip().lower()] = normalized
+
+    raw_node_bindings = (
+        bindings.get("nodes")
+        if isinstance(bindings.get("nodes"), dict)
+        else bindings.get("node_metadata")
+    )
+    node_bindings: dict[int, dict] = {}
+    if isinstance(raw_node_bindings, dict):
+        for key, value in raw_node_bindings.items():
+            parsed_node_id = _safe_int(key)
+            if parsed_node_id is None:
+                continue
+            normalized = _read_metadata_dict(value)
+            if normalized:
+                node_bindings[parsed_node_id] = normalized
+
+    return {
+        "global_metadata": global_metadata,
+        "book_metadata": book_metadata,
+        "level_metadata": level_bindings,
+        "node_metadata": node_bindings,
+    }
+
+
+def _merge_metadata_layers(*layers: dict) -> dict:
+    merged: dict = {}
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        for key, value in layer.items():
+            if value is None:
+                continue
+            merged[key] = value
+    return merged
+
+
+def _resolve_block_metadata(
+    item: dict,
+    source_node: ContentNode | None,
+    metadata_bindings: dict,
+) -> dict:
+    node_scope: dict = {}
+    node_binding_map = metadata_bindings.get("node_metadata")
+    if isinstance(node_binding_map, dict):
+        source_node_id = item.get("source_node_id")
+        if isinstance(source_node_id, int) and source_node_id > 0:
+            node_scope = _read_metadata_dict(node_binding_map.get(source_node_id))
+
+    level_scope: dict = {}
+    level_binding_map = metadata_bindings.get("level_metadata")
+    if isinstance(level_binding_map, dict):
+        level_name = source_node.level_name if source_node else item.get("level_name")
+        if isinstance(level_name, str) and level_name.strip():
+            level_scope = _read_metadata_dict(level_binding_map.get(level_name.strip().lower()))
+
+    book_scope: dict = {}
+    source_book_id = item.get("source_book_id")
+    if isinstance(source_book_id, int) and source_book_id > 0:
+        book_scope = _read_metadata_dict(metadata_bindings.get("book_metadata"))
+
+    global_scope = _read_metadata_dict(metadata_bindings.get("global_metadata"))
+    field_scope = _read_metadata_dict(item.get("metadata_overrides"))
+    if not field_scope:
+        field_scope = _read_metadata_dict(item.get("metadata"))
+
+    return _merge_metadata_layers(
+        global_scope,
+        book_scope,
+        level_scope,
+        node_scope,
+        field_scope,
+    )
+
+
 def _read_template_key(value: object) -> str | None:
     if isinstance(value, str):
         cleaned = value.strip()
@@ -366,6 +481,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
     section_blocks: dict[str, list[SnapshotRenderBlock]] = {"front": [], "body": [], "back": []}
     source_node_ids: set[int] = set()
     template_bindings = _extract_template_bindings(resolved_data)
+    metadata_bindings = _extract_metadata_bindings(resolved_data)
 
     for section_name in section_names:
         raw_section = resolved_data.get(section_name)
@@ -400,6 +516,8 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                         "source_node_id": source_node_id,
                         "source_book_id": source_book_id,
                         "level_name": raw_item.get("level_name") if isinstance(raw_item.get("level_name"), str) else None,
+                        "metadata": raw_item.get("metadata") if isinstance(raw_item.get("metadata"), dict) else None,
+                        "metadata_overrides": raw_item.get("metadata_overrides") if isinstance(raw_item.get("metadata_overrides"), dict) else None,
                         "title": title,
                     },
                 )
@@ -424,6 +542,14 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 source_node=source_node,
                 template_bindings=template_bindings,
             )
+            resolved_metadata = _resolve_block_metadata(
+                item=item,
+                source_node=source_node,
+                metadata_bindings=metadata_bindings,
+            )
+            block_content = _extract_render_content(source_node)
+            if resolved_metadata:
+                block_content["resolved_metadata"] = resolved_metadata
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,
@@ -433,7 +559,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],
-                    content=_extract_render_content(source_node),
+                    content=block_content,
                 )
             )
 

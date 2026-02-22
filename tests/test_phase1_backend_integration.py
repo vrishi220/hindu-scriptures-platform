@@ -1530,6 +1530,207 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "template.global.content_item.v1",
         ]
 
+    def test_snapshot_render_artifact_resolves_metadata_precedence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Metadata Precedence Schema {uuid4().hex[:8]}",
+                "description": "Schema for metadata precedence",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Metadata Source {uuid4().hex[:6]}",
+                "book_code": f"meta-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Metadata Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Metadata Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Metadata verse content"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_node_id = verse_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Metadata Precedence Draft",
+                "description": "Validate field > node > level > book > global",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Field override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                            "metadata_overrides": {"audience": "field", "tier": "field"},
+                        },
+                        {
+                            "title": "Node override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Level override block",
+                            "source_book_id": source_book_id,
+                            "level_name": "Verse",
+                            "order": 3,
+                        },
+                        {
+                            "title": "Book override block",
+                            "source_book_id": source_book_id,
+                            "order": 4,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 5,
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Field override block",
+                            "node_id": chapter_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 1,
+                            "metadata_overrides": {"audience": "field", "tier": "field"},
+                        },
+                        {
+                            "title": "Node override block",
+                            "node_id": verse_node_id,
+                            "source_book_id": source_book_id,
+                            "order": 2,
+                        },
+                        {
+                            "title": "Level override block",
+                            "source_book_id": source_book_id,
+                            "level_name": "Verse",
+                            "order": 3,
+                        },
+                        {
+                            "title": "Book override block",
+                            "source_book_id": source_book_id,
+                            "order": 4,
+                        },
+                        {
+                            "title": "Global fallback block",
+                            "order": 5,
+                        },
+                    ],
+                    "back": [],
+                    "metadata_bindings": {
+                        "global_metadata": {"audience": "global", "tier": "global"},
+                        "book_metadata": {"audience": "book", "book_only": True},
+                        "level_metadata": {
+                            "verse": {"audience": "level", "level_only": "verse"}
+                        },
+                        "node_metadata": {
+                            str(chapter_node_id): {"audience": "node-chapter", "node_only": "chapter"},
+                            str(verse_node_id): {"audience": "node-verse", "node_only": "verse"},
+                        },
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+
+        body_blocks = render_response.json()["sections"]["body"]
+        resolved = [
+            block.get("content", {}).get("resolved_metadata", {})
+            for block in body_blocks
+        ]
+
+        assert resolved[0] == {
+            "audience": "field",
+            "tier": "field",
+            "book_only": True,
+            "node_only": "chapter",
+        }
+        assert resolved[1] == {
+            "audience": "node-verse",
+            "tier": "global",
+            "book_only": True,
+            "level_only": "verse",
+            "node_only": "verse",
+        }
+        assert resolved[2] == {
+            "audience": "level",
+            "tier": "global",
+            "book_only": True,
+            "level_only": "verse",
+        }
+        assert resolved[3] == {
+            "audience": "book",
+            "tier": "global",
+            "book_only": True,
+        }
+        assert resolved[4] == {
+            "audience": "global",
+            "tier": "global",
+        }
+
     def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
         headers = _register_and_login(client)
         caplog.set_level("INFO", logger="api.draft_books")
