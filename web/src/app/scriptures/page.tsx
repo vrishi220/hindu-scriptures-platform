@@ -2,8 +2,10 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ShoppingBasket } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
+import { getMe, invalidateMeCache } from "../../lib/authClient";
 
 type BookOption = {
   id: number;
@@ -100,12 +102,12 @@ type UserPreferences = {
 };
 
 type BasketItem = {
+  cart_item_id?: number;
   node_id: number;
-  label: string;
+  title?: string;
   order: number;
   book_name?: string;
   level_name?: string;
-  added_at: string;
 };
 
 const formatValue = (value: unknown) => {
@@ -183,6 +185,7 @@ function ScripturesContent() {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
@@ -237,12 +240,50 @@ function ScripturesContent() {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+
+  const loadBasket = async () => {
+    try {
+      const response = await fetch("/api/cart/me", { credentials: "include" });
+      if (!response.ok) {
+        setBasketItems([]);
+        return;
+      }
+      const data = (await response.json()) as {
+        items?: Array<{
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        }>;
+      };
+
+      const mappedItems = (data.items || [])
+        .map((item) => ({
+          cart_item_id: item.id,
+          node_id: item.item_id,
+          title: item.metadata?.title,
+          book_name: item.metadata?.book_name,
+          level_name: item.metadata?.level_name,
+          order: item.order,
+        }))
+        .sort((a, b) => a.order - b.order);
+
+      setBasketItems(mappedItems);
+    } catch {
+      setBasketItems([]);
+    }
+  };
 
   const loadAuth = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (!response.ok) {
+      const data = await getMe();
+      if (!data) {
         setAuthEmail(null);
         setAuthUserId(null);
         setAuthStatus("Not authenticated");
@@ -251,16 +292,6 @@ function ScripturesContent() {
         setCanEdit(false);
         return;
       }
-      const data = (await response.json()) as {
-        id?: number;
-        email?: string;
-        role?: string;
-        permissions?: {
-          can_admin?: boolean;
-          can_contribute?: boolean;
-          can_edit?: boolean;
-        } | null;
-      };
       setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
@@ -268,11 +299,14 @@ function ScripturesContent() {
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
     } catch {
+      setAuthEmail(null);
       setAuthUserId(null);
       setAuthStatus("Auth check failed");
       setCanAdmin(false);
       setCanContribute(false);
       setCanEdit(false);
+    } finally {
+      setAuthResolved(true);
     }
   };
 
@@ -342,21 +376,14 @@ function ScripturesContent() {
   };
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem("scriptle-basket");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as BasketItem[];
-      if (Array.isArray(parsed)) {
-        setBasketItems(parsed);
-      }
-    } catch {
-      setBasketItems([]);
-    }
-  }, []);
+    if (!authResolved) return;
 
-  useEffect(() => {
-    window.localStorage.setItem("scriptle-basket", JSON.stringify(basketItems));
-  }, [basketItems]);
+    if (!authEmail) {
+      setBasketItems([]);
+      return;
+    }
+    void loadBasket();
+  }, [authResolved, authEmail]);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -382,36 +409,159 @@ function ScripturesContent() {
 
   const addCurrentToBasket = () => {
     if (!nodeContent) return;
-    const seq = formatSequenceDisplay(
-      nodeContent.sequence_number ?? nodeContent.id,
-      Boolean(nodeContent.has_content)
-    ) || nodeContent.id;
-    const label = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
 
-    setBasketItems((prev) => {
-      if (prev.some((item) => item.node_id === nodeContent.id)) {
-        return prev;
+    void (async () => {
+      if (basketItems.some((item) => item.node_id === nodeContent.id)) {
+        return;
       }
-      return [
-        ...prev,
-        {
-          node_id: nodeContent.id,
-          label,
-          order: prev.length + 1,
-          book_name: currentBook?.book_name,
-          level_name: nodeContent.level_name,
-          added_at: new Date().toISOString(),
-        },
-      ];
-    });
+
+      const seq = formatSequenceDisplay(
+        nodeContent.sequence_number ?? nodeContent.id,
+        Boolean(nodeContent.has_content)
+      ) || nodeContent.id;
+      const title = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
+
+      try {
+        const response = await fetch("/api/cart/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            item_id: nodeContent.id,
+            item_type: "library_node",
+            metadata: {
+              title,
+              book_name: currentBook?.book_name,
+              level_name: nodeContent.level_name,
+            },
+          }),
+        });
+
+        if (response.status === 409) {
+          await loadBasket();
+          return;
+        }
+
+        if (!response.ok) {
+          return;
+        }
+
+        const item = (await response.json()) as {
+          id: number;
+          item_id: number;
+          order: number;
+          metadata?: {
+            title?: string;
+            book_name?: string;
+            level_name?: string;
+          };
+        };
+
+        setBasketItems((prev) =>
+          [
+            ...prev,
+            {
+              cart_item_id: item.id,
+              node_id: item.item_id,
+              title: item.metadata?.title || title,
+              book_name: item.metadata?.book_name || currentBook?.book_name,
+              level_name: item.metadata?.level_name || nodeContent.level_name,
+              order: item.order,
+            },
+          ].sort((a, b) => a.order - b.order)
+        );
+      } catch {
+        // ignore basket add failures for now
+      }
+    })();
   };
 
   const removeFromBasket = (nodeId: number) => {
-    setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+    void (async () => {
+      const target = basketItems.find((item) => item.node_id === nodeId);
+      if (!target?.cart_item_id) {
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/cart/items/${target.cart_item_id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        if (!response.ok && response.status !== 404) {
+          return;
+        }
+        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+      } catch {
+        // ignore basket remove failures for now
+      }
+    })();
+  };
+
+  const moveBasketItem = (nodeId: number, direction: "up" | "down") => {
+    void (async () => {
+      if (isReorderingBasket) return;
+
+      setIsReorderingBasket(true);
+      const current = [...basketItems].sort((a, b) => a.order - b.order);
+      const index = current.findIndex((item) => item.node_id === nodeId);
+      if (index === -1) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= current.length) {
+        setIsReorderingBasket(false);
+        return;
+      }
+
+      const [moved] = current.splice(index, 1);
+      current.splice(targetIndex, 0, moved);
+
+      const reordered = current.map((item, idx) => ({ ...item, order: idx }));
+      setBasketItems(reordered);
+
+      const itemOrder = reordered
+        .map((item) => item.cart_item_id)
+        .filter((id): id is number => typeof id === "number");
+
+      if (itemOrder.length !== reordered.length) {
+        await loadBasket();
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/cart/items/reorder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ item_order: itemOrder }),
+        });
+
+        if (!response.ok) {
+          await loadBasket();
+        }
+      } catch {
+        await loadBasket();
+      } finally {
+        setIsReorderingBasket(false);
+      }
+    })();
   };
 
   const clearBasket = () => {
-    setBasketItems([]);
+    void (async () => {
+      try {
+        await fetch("/api/cart/me", {
+          method: "DELETE",
+          credentials: "include",
+        });
+      } finally {
+        setBasketItems([]);
+      }
+    })();
   };
 
   const savePreferences = async () => {
@@ -1398,6 +1548,8 @@ function ScripturesContent() {
   };
 
   const handleSignOut = async () => {
+    setBasketItems([]);
+    invalidateMeCache();
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
@@ -1431,6 +1583,7 @@ function ScripturesContent() {
       setEmail("");
       setPassword("");
       setShowLogin(false);
+      invalidateMeCache();
       await loadAuth();
       // Re-initialize from URL after successful login
       setUrlInitialized(false);
@@ -1808,10 +1961,12 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={addCurrentToBasket}
-                            title="Add to basket"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md"
+                            disabled={basketItems.some((item) => item.node_id === nodeContent.id)}
+                            title={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
+                            aria-label={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md disabled:opacity-50"
                           >
-                            +
+                            <ShoppingBasket size={14} />
                           </button>
                           <button
                             type="button"
@@ -2610,11 +2765,13 @@ function ScripturesContent() {
         items={basketItems.map(item => ({
           node_id: item.node_id,
           order: item.order,
-          title: item.label,
+          title: item.title,
           book_name: item.book_name,
           level_name: item.level_name,
         }))}
         onRemoveItem={removeFromBasket}
+        onMoveItem={moveBasketItem}
+        reorderLoading={isReorderingBasket}
         onClearBasket={clearBasket}
         onItemsAdded={() => {
           // Optionally refresh the tree if needed

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -160,7 +160,11 @@ class BookPublic(BookBase):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
-    schema: ScriptureSchemaPublic | None = None
+    schema_: ScriptureSchemaPublic | None = Field(
+        default=None,
+        validation_alias=AliasChoices("schema", "schema_"),
+        serialization_alias="schema",
+    )
 
 
 class BookShareCreate(BaseModel):
@@ -337,3 +341,178 @@ class CompilationPublic(CompilationBase):
     is_public: bool
     created_at: datetime
     updated_at: datetime
+
+
+class DraftBookBase(BaseModel):
+    title: str
+    description: str | None = None
+    section_structure: dict = Field(
+        default_factory=lambda: {"front": [], "body": [], "back": []}
+    )
+
+
+class DraftBookCreate(DraftBookBase):
+    pass
+
+
+class DraftBookUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    section_structure: dict | None = None
+
+
+class DraftBookPublic(DraftBookBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    owner_id: int
+    status: Literal["draft", "published"]
+    created_at: datetime
+    updated_at: datetime
+
+
+class EditionSnapshotCreate(BaseModel):
+    version: int | None = None
+    snapshot_data: dict | None = None
+
+
+class DraftPublishCreate(BaseModel):
+    version: int | None = None
+    snapshot_data: dict | None = None
+
+
+class EditionSnapshotPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    draft_book_id: int
+    owner_id: int
+    version: int
+    snapshot_data: dict
+    immutable: bool
+    created_at: datetime
+
+
+class DraftLicensePolicyIssue(BaseModel):
+    source_node_id: int
+    license_type: str
+    policy_action: Literal["warn", "block"]
+
+
+class DraftLicensePolicyReport(BaseModel):
+    status: Literal["pass", "warn", "block"]
+    warning_issues: list[DraftLicensePolicyIssue] = Field(default_factory=list)
+    blocked_issues: list[DraftLicensePolicyIssue] = Field(default_factory=list)
+
+
+class DraftProvenanceAppendixEntry(BaseModel):
+    section: Literal["front", "body", "back"]
+    source_node_id: int
+    source_book_id: int | None = None
+    title: str
+    source_author: str | None = None
+    license_type: str
+    source_version: str
+
+
+class DraftProvenanceAppendix(BaseModel):
+    entries: list[DraftProvenanceAppendixEntry] = Field(default_factory=list)
+
+
+class DraftPublishPublic(BaseModel):
+    snapshot: EditionSnapshotPublic
+    license_policy: DraftLicensePolicyReport
+    provenance_appendix: DraftProvenanceAppendix
+
+
+class SnapshotRenderBlock(BaseModel):
+    section: Literal["front", "body", "back"]
+    order: int
+    block_type: str
+    template_key: str
+    source_node_id: int | None = None
+    source_book_id: int | None = None
+    title: str
+    content: dict = Field(default_factory=dict)
+
+
+class SnapshotRenderSections(BaseModel):
+    front: list[SnapshotRenderBlock] = Field(default_factory=list)
+    body: list[SnapshotRenderBlock] = Field(default_factory=list)
+    back: list[SnapshotRenderBlock] = Field(default_factory=list)
+
+
+class SnapshotRenderArtifactPublic(BaseModel):
+    snapshot_id: int
+    draft_book_id: int
+    version: int
+    section_order: list[Literal["front", "body", "back"]] = Field(
+        default_factory=lambda: ["front", "body", "back"]
+    )
+    sections: SnapshotRenderSections
+
+
+class ProvenanceRecordPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    target_book_id: int
+    target_node_id: int
+    source_book_id: int | None = None
+    source_node_id: int | None = None
+    source_type: str
+    source_author: str | None = None
+    license_type: str
+    source_version: str
+    inserted_by: int | None = None
+    draft_section: str
+    created_at: datetime
+
+
+# === Phase 0.3: Collection Cart (Editor's Shopping Basket) ===
+class CollectionCartItemBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    item_id: int
+    item_type: Literal["library_node", "user_content"]
+    source_book_id: int | None = None
+    order: int = 0
+    metadata: dict | None = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "item_metadata"),
+    )
+
+
+class CollectionCartItemCreate(CollectionCartItemBase):
+    pass
+
+
+class CollectionCartItemPublic(CollectionCartItemBase):
+    id: int
+    cart_id: int
+    added_at: datetime
+    updated_at: datetime
+
+
+class CollectionCartBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str = "My Collection"
+    description: str | None = None
+
+
+class CollectionCartCreate(CollectionCartBase):
+    pass
+
+
+class CollectionCartUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+
+
+class CollectionCartPublic(CollectionCartBase):
+    id: int
+    owner_id: int
+    created_at: datetime
+    updated_at: datetime
+    items: list[CollectionCartItemPublic] = Field(default_factory=list)

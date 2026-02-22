@@ -1,5 +1,7 @@
 """Strict integration tests for Phase 1 backend APIs."""
 
+import hashlib
+import json
 from uuid import uuid4
 from types import SimpleNamespace
 
@@ -9,6 +11,7 @@ from fastapi import status
 from models.book import Book
 from models.content_node import ContentNode
 from models.database import SessionLocal
+from models.provenance_record import ProvenanceRecord
 from models.schemas import ContentNodeCreate
 from models.scripture_schema import ScriptureSchema
 import pytest
@@ -212,6 +215,54 @@ class TestViewerOwnershipAndReferences:
         payload = insert_refs_response.json()
         assert payload["created_ids"]
         assert len(payload["created_ids"]) == 1
+        created_ref_id = payload["created_ids"][0]
+
+        provenance_list_response = client.get(
+            f"/api/content/books/{book_b_id}/provenance",
+            headers=headers_b,
+        )
+        assert provenance_list_response.status_code == status.HTTP_200_OK
+        provenance_items = provenance_list_response.json()
+        assert len(provenance_items) >= 1
+        assert provenance_items[0]["target_book_id"] == book_b_id
+
+        node_provenance_response = client.get(
+            f"/api/content/nodes/{created_ref_id}/provenance",
+            headers=headers_b,
+        )
+        assert node_provenance_response.status_code == status.HTTP_200_OK
+        node_provenance_items = node_provenance_response.json()
+        assert len(node_provenance_items) == 1
+        assert node_provenance_items[0]["target_node_id"] == created_ref_id
+
+        cross_user_provenance_read = client.get(
+            f"/api/content/books/{book_b_id}/provenance",
+            headers=headers_a,
+        )
+        assert cross_user_provenance_read.status_code == status.HTTP_200_OK
+        cross_user_items = cross_user_provenance_read.json()
+        assert len(cross_user_items) >= 1
+        assert cross_user_items[0]["target_book_id"] == book_b_id
+
+        db = SessionLocal()
+        try:
+            records = (
+                db.query(ProvenanceRecord)
+                .filter(
+                    ProvenanceRecord.target_book_id == book_b_id,
+                    ProvenanceRecord.target_node_id == created_ref_id,
+                )
+                .all()
+            )
+            assert len(records) == 1
+            record = records[0]
+            assert record.source_node_id == node_a_id
+            assert record.source_book_id == book_a_id
+            assert record.source_type == "library_reference"
+            assert record.license_type
+            assert record.source_version
+        finally:
+            db.close()
 
     def test_viewer_cannot_copy_existing_content_as_independent_node(self, client):
         headers_a = _register_and_login(client)
@@ -642,3 +693,769 @@ class TestHierarchyInsertionRegression:
             assert len(persisted_nodes) == 3
         finally:
             db.close()
+
+
+class TestDraftBookAndEditionSnapshotIntegration:
+    def test_draft_is_editable_and_snapshot_is_immutable(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "My Draft Book",
+                "description": "Draft for A-02 integration",
+                "section_structure": {
+                    "front": [{"title": "Preface"}],
+                    "body": [{"title": "Chapter 1"}],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft = create_response.json()
+        draft_id = draft["id"]
+        assert draft["status"] == "draft"
+
+        patch_response = client.patch(
+            f"/api/draft-books/{draft_id}",
+            json={
+                "title": "Updated Draft Title",
+                "section_structure": {
+                    "front": [{"title": "Foreword"}],
+                    "body": [{"title": "Chapter 1"}, {"title": "Chapter 2"}],
+                    "back": [{"title": "Appendix"}],
+                },
+            },
+            headers=headers,
+        )
+        assert patch_response.status_code == status.HTTP_200_OK
+        updated_draft = patch_response.json()
+        assert updated_draft["title"] == "Updated Draft Title"
+        assert len(updated_draft["section_structure"]["body"]) == 2
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+        snapshot = snapshot_response.json()
+        snapshot_id = snapshot["id"]
+        assert snapshot["immutable"] is True
+
+        forbidden_snapshot_patch = client.patch(
+            f"/api/edition-snapshots/{snapshot_id}",
+            json={"snapshot_data": {"body": []}},
+            headers=headers,
+        )
+        assert forbidden_snapshot_patch.status_code == status.HTTP_409_CONFLICT
+        assert "immutable" in forbidden_snapshot_patch.json()["detail"].lower()
+
+        draft_after_snapshot_patch = client.patch(
+            f"/api/draft-books/{draft_id}",
+            json={"description": "Still editable after snapshot"},
+            headers=headers,
+        )
+        assert draft_after_snapshot_patch.status_code == status.HTTP_200_OK
+        assert draft_after_snapshot_patch.json()["description"] == "Still editable after snapshot"
+
+    def test_draft_license_policy_warns_and_blocks_snapshot(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Draft License Schema {uuid4().hex[:8]}",
+                "description": "Schema for draft license policy tests",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Policy Source {uuid4().hex[:6]}",
+                "book_code": f"policy-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        warn_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Warn License Node",
+                "has_content": False,
+                "license_type": "CC-BY-NC-4.0",
+            },
+            headers=headers,
+        )
+        assert warn_node_response.status_code == status.HTTP_201_CREATED
+        warn_node_id = warn_node_response.json()["id"]
+
+        blocked_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "2",
+                "title_english": "Blocked License Node",
+                "has_content": False,
+                "license_type": "ALL-RIGHTS-RESERVED",
+            },
+            headers=headers,
+        )
+        assert blocked_node_response.status_code == status.HTTP_201_CREATED
+        blocked_node_id = blocked_node_response.json()["id"]
+
+        warn_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Warn Draft",
+                "description": "Contains non-commercial source",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "node_id": warn_node_id,
+                            "source_type": "library_reference",
+                            "source_book_id": source_book_id,
+                            "title": "Warn Node",
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert warn_draft_response.status_code == status.HTTP_201_CREATED
+        warn_draft_id = warn_draft_response.json()["id"]
+
+        warn_policy_response = client.get(
+            f"/api/draft-books/{warn_draft_id}/license-policy",
+            headers=headers,
+        )
+        assert warn_policy_response.status_code == status.HTTP_200_OK
+        warn_policy = warn_policy_response.json()
+        assert warn_policy["status"] == "warn"
+        assert len(warn_policy["warning_issues"]) == 1
+        assert warn_policy["warning_issues"][0]["source_node_id"] == warn_node_id
+        assert warn_policy["warning_issues"][0]["license_type"] == "CC-BY-NC-4.0"
+        assert warn_policy["blocked_issues"] == []
+
+        warn_snapshot_response = client.post(
+            f"/api/draft-books/{warn_draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert warn_snapshot_response.status_code == status.HTTP_201_CREATED
+        warn_snapshot_payload = warn_snapshot_response.json()
+        assert "provenance_appendix" in warn_snapshot_payload["snapshot_data"]
+        assert len(warn_snapshot_payload["snapshot_data"]["provenance_appendix"]["entries"]) == 1
+
+        blocked_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Blocked Draft",
+                "description": "Contains disallowed source",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "node_id": blocked_node_id,
+                            "source_type": "library_reference",
+                            "source_book_id": source_book_id,
+                            "title": "Blocked Node",
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert blocked_draft_response.status_code == status.HTTP_201_CREATED
+        blocked_draft_id = blocked_draft_response.json()["id"]
+
+        blocked_policy_response = client.get(
+            f"/api/draft-books/{blocked_draft_id}/license-policy",
+            headers=headers,
+        )
+        assert blocked_policy_response.status_code == status.HTTP_200_OK
+        blocked_policy = blocked_policy_response.json()
+        assert blocked_policy["status"] == "block"
+        assert len(blocked_policy["blocked_issues"]) == 1
+        assert blocked_policy["blocked_issues"][0]["source_node_id"] == blocked_node_id
+        assert blocked_policy["blocked_issues"][0]["license_type"] == "ALL-RIGHTS-RESERVED"
+
+        blocked_snapshot_response = client.post(
+            f"/api/draft-books/{blocked_draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert blocked_snapshot_response.status_code == status.HTTP_409_CONFLICT
+        assert "license policy" in blocked_snapshot_response.json()["detail"].lower()
+
+    def test_publish_endpoint_returns_snapshot_and_policy_and_blocks_disallowed(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Publish License Schema {uuid4().hex[:8]}",
+                "description": "Schema for publish endpoint policy tests",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Publish Source {uuid4().hex[:6]}",
+                "book_code": f"publish-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        warn_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Warn Publish Node",
+                "has_content": False,
+                "license_type": "CC-BY-NC-4.0",
+            },
+            headers=headers,
+        )
+        assert warn_node_response.status_code == status.HTTP_201_CREATED
+        warn_node_id = warn_node_response.json()["id"]
+
+        blocked_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "2",
+                "title_english": "Blocked Publish Node",
+                "has_content": False,
+                "license_type": "ALL-RIGHTS-RESERVED",
+            },
+            headers=headers,
+        )
+        assert blocked_node_response.status_code == status.HTTP_201_CREATED
+        blocked_node_id = blocked_node_response.json()["id"]
+
+        warn_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Warn Publish Draft",
+                "description": "Contains warn-only license",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "node_id": warn_node_id,
+                            "source_type": "library_reference",
+                            "source_book_id": source_book_id,
+                            "title": "Warn Publish Item",
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert warn_draft_response.status_code == status.HTTP_201_CREATED
+        warn_draft_id = warn_draft_response.json()["id"]
+
+        warn_publish_response = client.post(
+            f"/api/draft-books/{warn_draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert warn_publish_response.status_code == status.HTTP_201_CREATED
+        warn_publish_payload = warn_publish_response.json()
+        assert "snapshot" in warn_publish_payload
+        assert "license_policy" in warn_publish_payload
+        assert "provenance_appendix" in warn_publish_payload
+        assert warn_publish_payload["snapshot"]["draft_book_id"] == warn_draft_id
+        assert warn_publish_payload["snapshot"]["immutable"] is True
+        assert warn_publish_payload["license_policy"]["status"] == "warn"
+        assert len(warn_publish_payload["license_policy"]["warning_issues"]) == 1
+        assert warn_publish_payload["license_policy"]["blocked_issues"] == []
+        assert len(warn_publish_payload["provenance_appendix"]["entries"]) == 1
+        assert warn_publish_payload["provenance_appendix"]["entries"][0]["source_node_id"] == warn_node_id
+        assert "provenance_appendix" in warn_publish_payload["snapshot"]["snapshot_data"]
+
+        blocked_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Blocked Publish Draft",
+                "description": "Contains disallowed license",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "node_id": blocked_node_id,
+                            "source_type": "library_reference",
+                            "source_book_id": source_book_id,
+                            "title": "Blocked Publish Item",
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert blocked_draft_response.status_code == status.HTTP_201_CREATED
+        blocked_draft_id = blocked_draft_response.json()["id"]
+
+        blocked_publish_response = client.post(
+            f"/api/draft-books/{blocked_draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert blocked_publish_response.status_code == status.HTTP_409_CONFLICT
+        assert "publish blocked by license policy" in blocked_publish_response.json()["detail"].lower()
+
+    def test_draft_rbac_matrix_for_critical_actions(self, client):
+        headers_owner = _register_and_login(client)
+        headers_non_owner = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "RBAC Draft",
+                "description": "Ownership matrix check",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+            headers=headers_owner,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        owner_get_response = client.get(
+            f"/api/draft-books/{draft_id}",
+            headers=headers_owner,
+        )
+        assert owner_get_response.status_code == status.HTTP_200_OK
+
+        owner_patch_response = client.patch(
+            f"/api/draft-books/{draft_id}",
+            json={"description": "Owner updated draft"},
+            headers=headers_owner,
+        )
+        assert owner_patch_response.status_code == status.HTTP_200_OK
+
+        owner_policy_response = client.get(
+            f"/api/draft-books/{draft_id}/license-policy",
+            headers=headers_owner,
+        )
+        assert owner_policy_response.status_code == status.HTTP_200_OK
+
+        owner_publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers_owner,
+        )
+        assert owner_publish_response.status_code == status.HTTP_201_CREATED
+
+        owner_snapshots_response = client.get(
+            f"/api/draft-books/{draft_id}/snapshots",
+            headers=headers_owner,
+        )
+        assert owner_snapshots_response.status_code == status.HTTP_200_OK
+        assert len(owner_snapshots_response.json()) >= 1
+
+        non_owner_get_response = client.get(
+            f"/api/draft-books/{draft_id}",
+            headers=headers_non_owner,
+        )
+        assert non_owner_get_response.status_code == status.HTTP_404_NOT_FOUND
+
+        non_owner_patch_response = client.patch(
+            f"/api/draft-books/{draft_id}",
+            json={"description": "Unauthorized update"},
+            headers=headers_non_owner,
+        )
+        assert non_owner_patch_response.status_code == status.HTTP_404_NOT_FOUND
+
+        non_owner_policy_response = client.get(
+            f"/api/draft-books/{draft_id}/license-policy",
+            headers=headers_non_owner,
+        )
+        assert non_owner_policy_response.status_code == status.HTTP_404_NOT_FOUND
+
+        non_owner_snapshots_response = client.get(
+            f"/api/draft-books/{draft_id}/snapshots",
+            headers=headers_non_owner,
+        )
+        assert non_owner_snapshots_response.status_code == status.HTTP_404_NOT_FOUND
+
+        non_owner_publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers_non_owner,
+        )
+        assert non_owner_publish_response.status_code == status.HTTP_404_NOT_FOUND
+
+        anonymous_get_response = client.get(f"/api/draft-books/{draft_id}")
+        assert anonymous_get_response.status_code == status.HTTP_404_NOT_FOUND
+
+        anonymous_publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+        )
+        assert anonymous_publish_response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_snapshot_pdf_export_contains_pdf_content_and_honors_ownership(self, client):
+        headers_owner = _register_and_login(client)
+        headers_non_owner = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "PDF Export Draft",
+                "description": "Snapshot PDF export coverage",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+            headers=headers_owner,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers_owner,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        export_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers_owner,
+        )
+        assert export_response.status_code == status.HTTP_200_OK
+        assert export_response.headers.get("content-type", "").startswith("application/pdf")
+        assert export_response.content.startswith(b"%PDF")
+
+        forbidden_export_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers_non_owner,
+        )
+        assert forbidden_export_response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_snapshot_pdf_export_is_deterministic_for_same_snapshot(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Deterministic PDF Draft",
+                "description": "Determinism check",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        export_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers,
+        )
+        assert export_response_1.status_code == status.HTTP_200_OK
+        export_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers,
+        )
+        assert export_response_2.status_code == status.HTTP_200_OK
+
+        hash_1 = hashlib.sha256(export_response_1.content).hexdigest()
+        hash_2 = hashlib.sha256(export_response_2.content).hexdigest()
+        assert hash_1 == hash_2
+
+    def test_snapshot_render_artifact_is_section_ordered_and_deterministic(self, client):
+        headers = _register_and_login(client)
+        headers_non_owner = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Render Artifact Draft",
+                "description": "N-01 render artifact coverage",
+                "section_structure": {
+                    "front": [
+                        {"title": "Foreword", "order": 2},
+                        {"title": "Title Page", "order": 1},
+                    ],
+                    "body": [
+                        {"title": "Chapter 3", "order": 3, "node_id": 33},
+                        {"title": "Chapter 1", "order": 1, "node_id": 11},
+                        {"title": "Chapter 2", "order": 2, "node_id": 22},
+                    ],
+                    "back": [
+                        {"title": "Appendix", "sequence_number": "2"},
+                        {"title": "Glossary", "sequence_number": "1"},
+                    ],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response_1 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_1.status_code == status.HTTP_200_OK
+
+        render_response_2 = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response_2.status_code == status.HTTP_200_OK
+
+        forbidden_render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers_non_owner,
+        )
+        assert forbidden_render_response.status_code == status.HTTP_404_NOT_FOUND
+
+        payload_1 = render_response_1.json()
+        payload_2 = render_response_2.json()
+
+        assert payload_1["section_order"] == ["front", "body", "back"]
+        assert [block["title"] for block in payload_1["sections"]["front"]] == ["Title Page", "Foreword"]
+        assert [block["title"] for block in payload_1["sections"]["body"]] == ["Chapter 1", "Chapter 2", "Chapter 3"]
+        assert [block["title"] for block in payload_1["sections"]["back"]] == ["Glossary", "Appendix"]
+
+        for index, block in enumerate(payload_1["sections"]["body"], start=1):
+            assert block["order"] == index
+            assert block["template_key"] == "default.body.content_item.v1"
+
+        canonical_1 = json.dumps(payload_1, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
+
+    def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
+        headers = _register_and_login(client)
+        caplog.set_level("INFO", logger="api.draft_books")
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Audit Schema {uuid4().hex[:8]}",
+                "description": "Schema for audit event test",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Audit Source {uuid4().hex[:6]}",
+                "book_code": f"audit-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        blocked_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Blocked Audit Node",
+                "has_content": False,
+                "license_type": "ALL-RIGHTS-RESERVED",
+            },
+            headers=headers,
+        )
+        assert blocked_node_response.status_code == status.HTTP_201_CREATED
+        blocked_node_id = blocked_node_response.json()["id"]
+
+        blocked_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Audit Blocked Draft",
+                "description": "Blocked policy path",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "node_id": blocked_node_id,
+                            "source_type": "library_reference",
+                            "source_book_id": source_book_id,
+                            "title": "Blocked Item",
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert blocked_draft_response.status_code == status.HTTP_201_CREATED
+        blocked_draft_id = blocked_draft_response.json()["id"]
+
+        blocked_publish_response = client.post(
+            f"/api/draft-books/{blocked_draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert blocked_publish_response.status_code == status.HTTP_409_CONFLICT
+
+        allowed_draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Audit Allowed Draft",
+                "description": "Success publish path",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+            headers=headers,
+        )
+        assert allowed_draft_response.status_code == status.HTTP_201_CREATED
+        allowed_draft_id = allowed_draft_response.json()["id"]
+
+        allowed_publish_response = client.post(
+            f"/api/draft-books/{allowed_draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert allowed_publish_response.status_code == status.HTTP_201_CREATED
+
+        joined_messages = "\n".join(record.getMessage() for record in caplog.records)
+        assert "publish.policy_blocked" in joined_messages
+        assert "publish.succeeded" in joined_messages
+
+
+class TestCollectLicensePolicyIntegration:
+    def test_collect_license_policy_check_reports_warn_and_block(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Collect License Schema {uuid4().hex[:8]}",
+                "description": "Schema for collect-time license checks",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        source_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Collect Source {uuid4().hex[:6]}",
+                "book_code": f"collect-src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_response.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_response.json()["id"]
+
+        warn_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Warn Node",
+                "has_content": False,
+                "license_type": "CC-BY-NC-4.0",
+            },
+            headers=headers,
+        )
+        assert warn_node_response.status_code == status.HTTP_201_CREATED
+        warn_node_id = warn_node_response.json()["id"]
+
+        blocked_node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "2",
+                "title_english": "Blocked Node",
+                "has_content": False,
+                "license_type": "ALL-RIGHTS-RESERVED",
+            },
+            headers=headers,
+        )
+        assert blocked_node_response.status_code == status.HTTP_201_CREATED
+        blocked_node_id = blocked_node_response.json()["id"]
+
+        check_response = client.post(
+            "/api/content/license-policy-check",
+            json={"node_ids": [warn_node_id, blocked_node_id]},
+            headers=headers,
+        )
+        assert check_response.status_code == status.HTTP_200_OK
+        report = check_response.json()
+        assert report["status"] == "block"
+        assert len(report["warning_issues"]) == 1
+        assert len(report["blocked_issues"]) == 1
+        assert report["warning_issues"][0]["source_node_id"] == warn_node_id
+        assert report["warning_issues"][0]["license_type"] == "CC-BY-NC-4.0"
+        assert report["blocked_issues"][0]["source_node_id"] == blocked_node_id
+        assert report["blocked_issues"][0]["license_type"] == "ALL-RIGHTS-RESERVED"

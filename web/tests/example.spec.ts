@@ -82,7 +82,7 @@ test.describe('Navigation', () => {
 
   test('page should not have 404 errors', async ({ page }) => {
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     // Check that response was successful
     const responses = await page.context().storageState().catch(() => ({}));
@@ -94,7 +94,7 @@ test.describe('Navigation', () => {
 test.describe('Scripture Browser', () => {
   test('should navigate to scriptures section', async ({ page }) => {
     await page.goto('http://localhost:3000/scriptures');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     // Check that we're on a valid page
     const main = page.locator('main, [role="main"]').first();
@@ -104,7 +104,7 @@ test.describe('Scripture Browser', () => {
 
   test('should display content or loading state', async ({ page }) => {
     await page.goto('http://localhost:3000/scriptures');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     const body = page.locator('body');
     await expect(body).toBeVisible();
@@ -143,13 +143,13 @@ test.describe('Logout Regression', () => {
     await page.setViewportSize({ width: 1366, height: 900 });
 
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     const signOutDesktop = page.getByRole('button', { name: 'Sign out' }).first();
     await expect(signOutDesktop).toBeVisible();
     await signOutDesktop.click();
 
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
   });
 
@@ -158,7 +158,7 @@ test.describe('Logout Regression', () => {
     await page.setViewportSize({ width: 390, height: 844 });
 
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await openMobileMenu(page);
     const mobileSignOut = page.getByRole('button', { name: 'Sign out' }).last();
@@ -166,7 +166,7 @@ test.describe('Logout Regression', () => {
     await mobileSignOut.click();
 
     await page.waitForURL('**/');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     await openMobileMenu(page);
     await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
@@ -190,7 +190,7 @@ test.describe('Page Layout', () => {
     });
     
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     
     // Should not have critical errors
     expect(errors.length).toBeLessThan(5);
@@ -207,7 +207,7 @@ test.describe('Page Layout', () => {
       await firstLink.click().catch(() => {
         // Navigation might have issues, but page should still exist
       });
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForLoadState('domcontentloaded').catch(() => {});
     }
     
     const body = page.locator('body');

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronUp, ShoppingBasket, X } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
+import { getMe, invalidateMeCache } from "../../lib/authClient";
 
 type Schema = {
   id: number;
@@ -43,7 +45,27 @@ type LevelFilter = {
   nodes: Array<{ id: number; title: string }>;
 };
 
+type DraftBook = {
+  id: number;
+  title: string;
+  description?: string | null;
+  section_structure: Record<string, unknown>;
+};
+
+type LicensePolicyIssue = {
+  source_node_id: number;
+  license_type: string;
+  policy_action: "warn" | "block";
+};
+
+type LicensePolicyReport = {
+  status: "pass" | "warn" | "block";
+  warning_issues: LicensePolicyIssue[];
+  blocked_issues: LicensePolicyIssue[];
+};
+
 export default function ExplorerPage() {
+  type DraftSection = "front" | "body" | "back";
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [selectedSchemaId, setSelectedSchemaId] = useState<number | null>(null);
   const [allBooks, setAllBooks] = useState<Book[]>([]);
@@ -56,12 +78,21 @@ export default function ExplorerPage() {
   const [searchResults, setSearchResults] = useState<{node: ContentNode, snippet: string}[]>([]);
   const [loading, setLoading] = useState(false);
   const [pickedNodes, setPickedNodes] = useState<ContentNode[]>([]);
+  const [pickedSections, setPickedSections] = useState<Record<number, DraftSection>>({});
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [showInsertModal, setShowInsertModal] = useState(false);
   const [targetBookId, setTargetBookId] = useState<number | null>(null);
   const [targetParentId, setTargetParentId] = useState<number | null>(null);
   const [insertLoading, setInsertLoading] = useState(false);
   const [insertMessage, setInsertMessage] = useState<string | null>(null);
+  const [insertMessageType, setInsertMessageType] = useState<"success" | "error" | null>(null);
+  const [linkedDraftId, setLinkedDraftId] = useState<number | null>(null);
+  const [lastSyncedDraftId, setLastSyncedDraftId] = useState<number | null>(null);
+  const [collectPolicyReport, setCollectPolicyReport] = useState<LicensePolicyReport | null>(null);
+  const [collectPolicyLoading, setCollectPolicyLoading] = useState(false);
+  const [collectPolicyError, setCollectPolicyError] = useState<string | null>(null);
+  const [highlightedPickedNodeId, setHighlightedPickedNodeId] = useState<number | null>(null);
+  const pickedNodeRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [email, setEmail] = useState("");
@@ -73,18 +104,13 @@ export default function ExplorerPage() {
 
   const loadAuthStatus = async () => {
     try {
-      const response = await fetch("/api/me", { credentials: "include" });
-      if (!response.ok) {
+      const data = await getMe();
+      if (!data) {
         setAuthEmail(null);
         setAuthStatus("Not authenticated");
         setCanAdmin(false);
         return;
       }
-      const data = (await response.json()) as {
-        email?: string;
-        role?: string;
-        permissions?: { can_admin?: boolean } | null;
-      };
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
@@ -116,6 +142,7 @@ export default function ExplorerPage() {
       setEmail("");
       setPassword("");
       setShowLogin(false);
+      invalidateMeCache();
       await loadAuthStatus();
     } catch (err) {
       setAuthMessage(err instanceof Error ? err.message : "Login failed");
@@ -133,6 +160,7 @@ export default function ExplorerPage() {
         credentials: "include",
       });
     } finally {
+      invalidateMeCache();
       await loadAuthStatus();
     }
   };
@@ -231,6 +259,55 @@ export default function ExplorerPage() {
     }
   }, [selectedBookId]);
 
+  useEffect(() => {
+    if (pickedNodes.length === 0) {
+      setCollectPolicyReport(null);
+      setCollectPolicyError(null);
+      setCollectPolicyLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const evaluateCollectPolicy = async () => {
+      setCollectPolicyLoading(true);
+      setCollectPolicyError(null);
+
+      try {
+        const response = await fetch("/api/content/license-policy-check", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node_ids: pickedNodes.map((node) => node.id) }),
+          signal: controller.signal,
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | LicensePolicyReport
+          | { detail?: string }
+          | null;
+
+        if (!response.ok) {
+          throw new Error((payload as { detail?: string } | null)?.detail || "Failed to evaluate licenses");
+        }
+
+        setCollectPolicyReport(payload as LicensePolicyReport);
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          return;
+        }
+        setCollectPolicyError(error instanceof Error ? error.message : "Failed to evaluate licenses");
+        setCollectPolicyReport(null);
+      } finally {
+        if (!controller.signal.aborted) {
+          setCollectPolicyLoading(false);
+        }
+      }
+    };
+
+    void evaluateCollectPolicy();
+    return () => controller.abort();
+  }, [pickedNodes]);
+
   const initializeLevelFilters = (nodes: ContentNode[]) => {
     const schema = schemas.find((s) => s.id === selectedSchemaId);
     if (!schema) return;
@@ -324,11 +401,159 @@ export default function ExplorerPage() {
   const handlePickNode = (node: ContentNode) => {
     if (!pickedNodes.find((n) => n.id === node.id)) {
       setPickedNodes([...pickedNodes, node]);
+      setPickedSections((prev) => ({ ...prev, [node.id]: "body" }));
     }
   };
 
   const handleRemovePicked = (nodeId: number) => {
     setPickedNodes(pickedNodes.filter((n) => n.id !== nodeId));
+    setPickedSections((prev) => {
+      const next = { ...prev };
+      delete next[nodeId];
+      return next;
+    });
+  };
+
+  const handlePickedSectionChange = (nodeId: number, section: DraftSection) => {
+    setPickedSections((prev) => ({ ...prev, [nodeId]: section }));
+  };
+
+  const handleMovePicked = (nodeId: number, direction: "up" | "down") => {
+    setPickedNodes((prev) => {
+      const index = prev.findIndex((node) => node.id === nodeId);
+      if (index < 0) return prev;
+
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+
+      const next = [...prev];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      return next;
+    });
+  };
+
+  const scrollToPickedNode = (nodeId: number) => {
+    const target = pickedNodeRefs.current[nodeId];
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setHighlightedPickedNodeId(nodeId);
+    window.setTimeout(() => {
+      setHighlightedPickedNodeId((current) => (current === nodeId ? null : current));
+    }, 1400);
+  };
+
+  const getNodeTitle = (node: ContentNode): string =>
+    node.title_english ||
+    node.title_sanskrit ||
+    node.title_hindi ||
+    node.title_transliteration ||
+    node.title_tamil ||
+    `${node.level_name} ${node.sequence_number || ""}`.trim();
+
+  const normalizeSectionStructure = (raw: Record<string, unknown> | null | undefined) => {
+    const parsed = raw && typeof raw === "object" ? raw : {};
+    return {
+      front: Array.isArray(parsed.front) ? [...parsed.front] : [],
+      body: Array.isArray(parsed.body) ? [...parsed.body] : [],
+      back: Array.isArray(parsed.back) ? [...parsed.back] : [],
+    };
+  };
+
+  const syncPickedNodesToDraft = async (
+    nodes: ContentNode[],
+    sections: Record<number, DraftSection>
+  ): Promise<number | null> => {
+    const now = new Date().toISOString();
+
+    const createDraftPayload = {
+      title: `Explorer Draft${selectedBook ? ` — ${selectedBook.book_name}` : ""}`,
+      description: "Auto-synced from Explorer picked references",
+      section_structure: {
+        front: [] as Array<Record<string, unknown>>,
+        body: [] as Array<Record<string, unknown>>,
+        back: [] as Array<Record<string, unknown>>,
+      },
+    };
+
+    const buildEntry = (node: ContentNode, order: number) => ({
+      node_id: node.id,
+      source_type: "library_reference",
+      source_book_id: node.book_id,
+      level_name: node.level_name,
+      title: getNodeTitle(node),
+      order,
+      added_at: now,
+    });
+
+    let draftId = linkedDraftId;
+    let existingDraft: DraftBook | null = null;
+
+    if (draftId) {
+      const existingResponse = await fetch(`/api/draft-books/${draftId}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (existingResponse.ok) {
+        existingDraft = (await existingResponse.json()) as DraftBook;
+      } else {
+        draftId = null;
+      }
+    }
+
+    if (!draftId) {
+      nodes.forEach((node, index) => {
+        const section = sections[node.id] || "body";
+        createDraftPayload.section_structure[section].push(buildEntry(node, index + 1));
+      });
+
+      const createResponse = await fetch("/api/draft-books", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(createDraftPayload),
+      });
+
+      if (!createResponse.ok) {
+        const payload = (await createResponse.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Failed to create draft sync");
+      }
+
+      const created = (await createResponse.json()) as DraftBook;
+      setLinkedDraftId(created.id);
+      return created.id;
+    }
+
+    const normalized = normalizeSectionStructure(existingDraft?.section_structure);
+
+    nodes.forEach((node) => {
+      const section = sections[node.id] || "body";
+      const sectionItems = normalized[section];
+      const alreadyExists = sectionItems.some((item) => {
+        if (!item || typeof item !== "object") return false;
+        const candidate = item as { node_id?: unknown; source_book_id?: unknown };
+        return candidate.node_id === node.id && candidate.source_book_id === node.book_id;
+      });
+
+      if (!alreadyExists) {
+        sectionItems.push(buildEntry(node, sectionItems.length + 1));
+      }
+    });
+
+    const patchResponse = await fetch(`/api/draft-books/${draftId}`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section_structure: normalized }),
+    });
+
+    if (!patchResponse.ok) {
+      const payload = (await patchResponse.json().catch(() => null)) as { detail?: string } | null;
+      throw new Error(payload?.detail || "Failed to update draft sync");
+    }
+
+    return draftId;
   };
 
   const handleInsertReferences = async () => {
@@ -336,6 +561,7 @@ export default function ExplorerPage() {
     
     setInsertLoading(true);
     setInsertMessage(null);
+    setInsertMessageType(null);
     
     try {
       const response = await fetch(`/api/books/${targetBookId}/insert-references`, {
@@ -345,6 +571,10 @@ export default function ExplorerPage() {
         body: JSON.stringify({
           parent_node_id: targetParentId,
           node_ids: pickedNodes.map((n) => n.id),
+          section_assignments: pickedNodes.reduce<Record<string, DraftSection>>((acc, node) => {
+            acc[String(node.id)] = pickedSections[node.id] || "body";
+            return acc;
+          }, {}),
         }),
       });
       
@@ -353,19 +583,30 @@ export default function ExplorerPage() {
       if (!response.ok) {
         throw new Error(data.detail || "Insert failed");
       }
+
+      const syncedDraftId = await syncPickedNodesToDraft(pickedNodes, pickedSections);
+      setLastSyncedDraftId(syncedDraftId);
       
-      setInsertMessage(`✓ Successfully inserted ${pickedNodes.length} reference(s)`);
+      setInsertMessage(
+        syncedDraftId
+          ? `Successfully inserted ${pickedNodes.length} reference(s) and synced to Draft #${syncedDraftId}`
+          : `Successfully inserted ${pickedNodes.length} reference(s)`
+      );
+      setInsertMessageType("success");
       setPickedNodes([]);
+      setPickedSections({});
       setTimeout(() => {
         setShowInsertModal(false);
         setInsertMessage(null);
+        setInsertMessageType(null);
         setTargetBookId(null);
         setTargetParentId(null);
       }, 2000);
     } catch (error) {
       setInsertMessage(
-        `✗ ${error instanceof Error ? error.message : "Insert failed"}`
+        error instanceof Error ? error.message : "Insert failed"
       );
+      setInsertMessageType("error");
     } finally {
       setInsertLoading(false);
     }
@@ -566,10 +807,11 @@ export default function ExplorerPage() {
           <button
             onClick={() => handlePickNode(node)}
             disabled={isPicked}
-            className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-            title={`Pick ${node.level_name}: ${getNodeSummary(node)}`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+            title={isPicked ? "Already in basket" : "Add to basket"}
+            aria-label={isPicked ? "Already in basket" : "Add to basket"}
           >
-            {isPicked ? "✓" : "+"}
+            {isPicked ? <Check size={14} /> : <ShoppingBasket size={14} />}
           </button>
         </div>
 
@@ -771,12 +1013,21 @@ export default function ExplorerPage() {
                   <button
                     onClick={() => handlePickNode(selectedNode)}
                     disabled={pickedNodes.find((n) => n.id === selectedNode.id) !== undefined}
-                    className="ml-4 rounded-xl border border-emerald-500/30 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                    title={`Pick this ${selectedNode.level_name}`}
+                    className="ml-4 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                    title={
+                      pickedNodes.find((n) => n.id === selectedNode.id)
+                        ? "Already in basket"
+                        : "Add to basket"
+                    }
+                    aria-label={
+                      pickedNodes.find((n) => n.id === selectedNode.id)
+                        ? "Already in basket"
+                        : "Add to basket"
+                    }
                   >
                     {pickedNodes.find((n) => n.id === selectedNode.id)
-                      ? "✓ Picked"
-                      : `+ Pick ${selectedNode.level_name}`}
+                      ? <Check size={14} />
+                      : <ShoppingBasket size={14} />}
                   </button>
                 </div>
               </div>
@@ -813,9 +1064,19 @@ export default function ExplorerPage() {
                             disabled={
                               pickedNodes.find((n) => n.id === node.id) !== undefined
                             }
-                            className="ml-4 rounded-xl border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                            className="ml-4 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                            title={
+                              pickedNodes.find((n) => n.id === node.id)
+                                ? "Already in basket"
+                                : "Add to basket"
+                            }
+                            aria-label={
+                              pickedNodes.find((n) => n.id === node.id)
+                                ? "Already in basket"
+                                : "Add to basket"
+                            }
                           >
-                            {pickedNodes.find((n) => n.id === node.id) ? "Picked" : "+ Pick"}
+                            {pickedNodes.find((n) => n.id === node.id) ? <Check size={14} /> : <ShoppingBasket size={14} />}
                           </button>
                         </div>
                       </div>
@@ -833,20 +1094,100 @@ export default function ExplorerPage() {
                     Picked Items ({pickedNodes.length})
                   </h3>
                   <button
-                    onClick={() => setPickedNodes([])}
+                    onClick={() => {
+                      setPickedNodes([]);
+                      setPickedSections({});
+                    }}
                     className="text-xs text-emerald-600 hover:text-emerald-800"
                   >
                     Clear all
                   </button>
                 </div>
                 <div className="mt-3 flex flex-col gap-2">
-                  {pickedNodes.map((node) => (
+                  {collectPolicyLoading && (
+                    <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600">
+                      Checking license policy…
+                    </div>
+                  )}
+                  {collectPolicyError && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                      {collectPolicyError}
+                    </div>
+                  )}
+                  {collectPolicyReport && collectPolicyReport.status !== "pass" && (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-xs ${
+                        collectPolicyReport.status === "block"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700"
+                      }`}
+                    >
+                      <div>
+                        {collectPolicyReport.status === "block"
+                          ? `${collectPolicyReport.blocked_issues.length} blocked source license(s). Snapshot publishing will be blocked.`
+                          : `${collectPolicyReport.warning_issues.length} source license warning(s). Review before publishing.`}
+                      </div>
+                      <div className="mt-1 space-y-1">
+                        {collectPolicyReport.warning_issues.map((issue) => {
+                          const node = pickedNodes.find((candidate) => candidate.id === issue.source_node_id);
+                          const label =
+                            node?.title_english ||
+                            node?.title_sanskrit ||
+                            node?.title_hindi ||
+                            node?.title_transliteration ||
+                            node?.title_tamil ||
+                            `Node ${issue.source_node_id}`;
+                          return (
+                            <button
+                              key={`warn-${issue.source_node_id}-${issue.license_type}`}
+                              type="button"
+                              onClick={() => scrollToPickedNode(issue.source_node_id)}
+                              className="block text-left underline decoration-dotted underline-offset-2"
+                            >
+                              ⚠ {label} — {issue.license_type}
+                            </button>
+                          );
+                        })}
+                        {collectPolicyReport.blocked_issues.map((issue) => {
+                          const node = pickedNodes.find((candidate) => candidate.id === issue.source_node_id);
+                          const label =
+                            node?.title_english ||
+                            node?.title_sanskrit ||
+                            node?.title_hindi ||
+                            node?.title_transliteration ||
+                            node?.title_tamil ||
+                            `Node ${issue.source_node_id}`;
+                          return (
+                            <button
+                              key={`block-${issue.source_node_id}-${issue.license_type}`}
+                              type="button"
+                              onClick={() => scrollToPickedNode(issue.source_node_id)}
+                              className="block text-left underline decoration-dotted underline-offset-2"
+                            >
+                              ✗ {label} — {issue.license_type}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {pickedNodes.map((node, index) => (
                     <div
                       key={node.id}
-                      className="flex items-start justify-between rounded-xl border border-emerald-200 bg-white p-3"
+                      ref={(element) => {
+                        pickedNodeRefs.current[node.id] = element;
+                      }}
+                      className={`flex items-start justify-between rounded-xl border bg-white p-3 transition-all ${
+                        highlightedPickedNodeId === node.id
+                          ? "border-emerald-400 ring-2 ring-emerald-200"
+                          : "border-emerald-200"
+                      }`}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
+                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                            {index + 1}
+                          </span>
                           <span className="rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
                             {node.level_name}
                           </span>
@@ -857,13 +1198,47 @@ export default function ExplorerPage() {
                         <div className="mt-1 text-xs text-zinc-500">
                           {getNodeSummary(node)}
                         </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs font-medium text-zinc-600">Section</label>
+                          <select
+                            value={pickedSections[node.id] || "body"}
+                            onChange={(e) => handlePickedSectionChange(node.id, e.target.value as DraftSection)}
+                            className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs text-zinc-700"
+                          >
+                            <option value="front">Front</option>
+                            <option value="body">Body</option>
+                            <option value="back">Back</option>
+                          </select>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleRemovePicked(node.id)}
-                        className="ml-2 text-sm text-rose-600 hover:text-rose-800"
-                      >
-                        ✕
-                      </button>
+                      <div className="ml-2 flex items-center gap-1">
+                        <button
+                          onClick={() => handleMovePicked(node.id, "up")}
+                          disabled={index === 0}
+                          title="Move up"
+                          aria-label="Move up"
+                          className="rounded border border-emerald-200 p-1 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-40"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleMovePicked(node.id, "down")}
+                          disabled={index === pickedNodes.length - 1}
+                          title="Move down"
+                          aria-label="Move down"
+                          className="rounded border border-emerald-200 p-1 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-40"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleRemovePicked(node.id)}
+                          className="rounded p-1 text-rose-600 transition hover:bg-rose-50 hover:text-rose-800"
+                          title="Remove"
+                          aria-label="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -904,6 +1279,7 @@ export default function ExplorerPage() {
                   onClick={() => {
                     setShowInsertModal(false);
                     setInsertMessage(null);
+                    setInsertMessageType(null);
                   }}
                   className="text-2xl text-zinc-400 hover:text-zinc-600"
                 >
@@ -981,15 +1357,86 @@ export default function ExplorerPage() {
                   </div>
                 </div>
 
+                {collectPolicyReport && collectPolicyReport.status !== "pass" && (
+                  <div
+                    className={`rounded-xl border px-3 py-2 text-xs ${
+                      collectPolicyReport.status === "block"
+                        ? "border-rose-200 bg-rose-50 text-rose-700"
+                        : "border-amber-200 bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    <div>
+                      {collectPolicyReport.status === "block"
+                        ? "This selection includes blocked licenses and cannot publish as a snapshot until resolved."
+                        : "This selection includes license warnings; publishing remains allowed but review is recommended."}
+                    </div>
+                    <div className="mt-1 space-y-1">
+                      {collectPolicyReport.warning_issues.map((issue) => {
+                        const node = pickedNodes.find((candidate) => candidate.id === issue.source_node_id);
+                        const label =
+                          node?.title_english ||
+                          node?.title_sanskrit ||
+                          node?.title_hindi ||
+                          node?.title_transliteration ||
+                          node?.title_tamil ||
+                          `Node ${issue.source_node_id}`;
+                        return (
+                          <button
+                            key={`modal-warn-${issue.source_node_id}-${issue.license_type}`}
+                            type="button"
+                            onClick={() => scrollToPickedNode(issue.source_node_id)}
+                            className="block text-left underline decoration-dotted underline-offset-2"
+                          >
+                            ⚠ {label} — {issue.license_type}
+                          </button>
+                        );
+                      })}
+                      {collectPolicyReport.blocked_issues.map((issue) => {
+                        const node = pickedNodes.find((candidate) => candidate.id === issue.source_node_id);
+                        const label =
+                          node?.title_english ||
+                          node?.title_sanskrit ||
+                          node?.title_hindi ||
+                          node?.title_transliteration ||
+                          node?.title_tamil ||
+                          `Node ${issue.source_node_id}`;
+                        return (
+                          <button
+                            key={`modal-block-${issue.source_node_id}-${issue.license_type}`}
+                            type="button"
+                            onClick={() => scrollToPickedNode(issue.source_node_id)}
+                            className="block text-left underline decoration-dotted underline-offset-2"
+                          >
+                            ✗ {label} — {issue.license_type}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {insertMessage && (
                   <div
                     className={`rounded-xl border px-3 py-2 text-sm ${
-                      insertMessage.startsWith("✓")
+                      insertMessageType === "success"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                         : "border-rose-200 bg-rose-50 text-rose-700"
                     }`}
                   >
-                    {insertMessage}
+                    <div className="flex items-center gap-2">
+                      {insertMessageType === "success" ? <Check size={14} /> : <X size={14} />}
+                      <span>{insertMessage}</span>
+                    </div>
+                    {insertMessageType === "success" && lastSyncedDraftId && (
+                      <div className="mt-2">
+                        <a
+                          href={`/drafts?draftId=${lastSyncedDraftId}`}
+                          className="inline-flex rounded-lg border border-emerald-300 bg-white px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                        >
+                          Open Draft #{lastSyncedDraftId}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -998,6 +1445,7 @@ export default function ExplorerPage() {
                     onClick={() => {
                       setShowInsertModal(false);
                       setInsertMessage(null);
+                      setInsertMessageType(null);
                     }}
                     disabled={insertLoading}
                     className="flex-1 rounded-xl border border-black/10 bg-white/80 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"

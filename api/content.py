@@ -17,6 +17,7 @@ from models.book import Book
 from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.media_file import MediaFile
+from models.provenance_record import ProvenanceRecord
 from models.schemas import (
     BookCreate,
     BookPublic,
@@ -28,7 +29,10 @@ from models.schemas import (
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeUpdate,
+    DraftLicensePolicyIssue,
+    DraftLicensePolicyReport,
     MediaFilePublic,
+    ProvenanceRecordPublic,
     ScriptureSchemaCreate,
     ScriptureSchemaPublic,
     ScriptureSchemaUpdate,
@@ -36,6 +40,7 @@ from models.schemas import (
 from models.scripture_schema import ScriptureSchema
 from models.user import User
 from services import get_db
+from services.license_policy import classify_license_action, normalize_license
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -66,6 +71,68 @@ class ImportResponse(BaseModel):
 class InsertReferencesPayload(BaseModel):
     parent_node_id: int | None = None
     node_ids: list[int]
+    section_assignments: dict[str, str] | None = None
+
+
+class LicensePolicyCheckPayload(BaseModel):
+    node_ids: list[int]
+
+
+def _build_license_policy_report_for_node_ids(
+    node_ids: list[int],
+    db: Session,
+) -> DraftLicensePolicyReport:
+    normalized_values: set[int] = set()
+    for node_id in node_ids:
+        try:
+            parsed = int(node_id)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            normalized_values.add(parsed)
+
+    normalized_ids = sorted(normalized_values)
+    if not normalized_ids:
+        return DraftLicensePolicyReport(status="pass")
+
+    rows = (
+        db.query(ContentNode.id, ContentNode.license_type)
+        .filter(ContentNode.id.in_(normalized_ids))
+        .all()
+    )
+    licenses_by_node_id = {row.id: row.license_type for row in rows}
+
+    warning_issues: list[DraftLicensePolicyIssue] = []
+    blocked_issues: list[DraftLicensePolicyIssue] = []
+
+    for source_node_id in normalized_ids:
+        license_type = normalize_license(licenses_by_node_id.get(source_node_id))
+        action = classify_license_action(license_type)
+        if action == "allow":
+            continue
+
+        issue = DraftLicensePolicyIssue(
+            source_node_id=source_node_id,
+            license_type=license_type,
+            policy_action=action,
+        )
+        if action == "block":
+            blocked_issues.append(issue)
+        else:
+            warning_issues.append(issue)
+
+    if blocked_issues:
+        status_value = "block"
+    elif warning_issues:
+        status_value = "warn"
+    else:
+        status_value = "pass"
+
+    return DraftLicensePolicyReport(
+        status=status_value,
+        warning_issues=warning_issues,
+        blocked_issues=blocked_issues,
+    )
 
 
 def require_view_permission(
@@ -399,6 +466,52 @@ def get_book(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _ensure_book_view_access(db, book, current_user)
     return _book_public_model(book)
+
+
+@router.get("/books/{book_id}/provenance", response_model=list[ProvenanceRecordPublic])
+def list_book_provenance(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[ProvenanceRecordPublic]:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_view_access(db, book, current_user)
+
+    records = (
+        db.query(ProvenanceRecord)
+        .filter(ProvenanceRecord.target_book_id == book_id)
+        .order_by(ProvenanceRecord.id.desc())
+        .all()
+    )
+    return [ProvenanceRecordPublic.model_validate(item) for item in records]
+
+
+@router.get("/nodes/{node_id}/provenance", response_model=list[ProvenanceRecordPublic])
+def list_node_provenance(
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[ProvenanceRecordPublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_view_access(db, book, current_user)
+
+    records = (
+        db.query(ProvenanceRecord)
+        .filter(ProvenanceRecord.target_node_id == node_id)
+        .order_by(ProvenanceRecord.id.desc())
+        .all()
+    )
+    return [ProvenanceRecordPublic.model_validate(item) for item in records]
 
 
 @router.patch("/books/{book_id}", response_model=BookPublic)
@@ -1690,6 +1803,16 @@ def delete_node_media(
     return {"message": "Deleted"}
 
 
+@router.post("/license-policy-check", response_model=DraftLicensePolicyReport)
+def check_license_policy_for_nodes(
+    payload: LicensePolicyCheckPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DraftLicensePolicyReport:
+    _ensure_can_contribute(current_user)
+    return _build_license_policy_report_for_node_ids(payload.node_ids, db)
+
+
 @router.post("/books/{book_id}/insert-references", response_model=dict)
 def insert_references(
     book_id: int,
@@ -1703,6 +1826,7 @@ def insert_references(
     """
     parent_node_id = payload.parent_node_id
     node_ids = payload.node_ids
+    section_assignments = payload.section_assignments or {}
 
     # Verify target book exists
     target_book = db.query(Book).filter(Book.id == book_id).first()
@@ -1737,6 +1861,10 @@ def insert_references(
         if not source_node:
             continue
 
+        assigned_section = section_assignments.get(str(node_id), "body").strip().lower()
+        if assigned_section not in {"front", "body", "back"}:
+            assigned_section = "body"
+
         # Calculate sequence number (max + 1)
         max_seq = (
             db.query(func.max(ContentNode.sequence_number))
@@ -1763,11 +1891,33 @@ def insert_references(
             title_hindi=source_node.title_hindi,
             title_tamil=source_node.title_tamil,
             has_content=False,  # References don't store content directly
+            metadata_json={
+                "source_type": "library_reference",
+                "draft_section": assigned_section,
+                "source_node_id": source_node.id,
+                "source_book_id": source_node.book_id,
+            },
             created_by=current_user.id,
             last_modified_by=current_user.id,
         )
         db.add(ref_node)
         db.flush()
+
+        provenance = ProvenanceRecord(
+            target_book_id=book_id,
+            target_node_id=ref_node.id,
+            source_book_id=source_node.book_id,
+            source_node_id=source_node.id,
+            source_type="library_reference",
+            source_author=source_node.source_attribution,
+            license_type=source_node.license_type or "CC-BY-SA-4.0",
+            source_version=(
+                source_node.updated_at.isoformat() if getattr(source_node, "updated_at", None) else "unknown"
+            ),
+            inserted_by=current_user.id,
+            draft_section=assigned_section,
+        )
+        db.add(provenance)
         created_refs.append(ref_node.id)
 
     db.commit()

@@ -50,6 +50,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'compilation_status') THEN
     CREATE TYPE compilation_status AS ENUM ('draft', 'published');
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'draft_book_status') THEN
+    CREATE TYPE draft_book_status AS ENUM ('draft', 'published');
+  END IF;
 END $$;
 
 CREATE TABLE IF NOT EXISTS compilations (
@@ -68,6 +71,51 @@ CREATE TABLE IF NOT EXISTS compilations (
 
 CREATE INDEX IF NOT EXISTS idx_compilations_creator ON compilations(creator_id);
 CREATE INDEX IF NOT EXISTS idx_compilations_status ON compilations(status);
+
+CREATE TABLE IF NOT EXISTS draft_books (
+  id SERIAL PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  section_structure JSONB NOT NULL DEFAULT '{"front": [], "body": [], "back": []}'::jsonb,
+  status draft_book_status NOT NULL DEFAULT 'draft',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS edition_snapshots (
+  id SERIAL PRIMARY KEY,
+  draft_book_id INTEGER NOT NULL REFERENCES draft_books(id) ON DELETE CASCADE,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL DEFAULT 1,
+  snapshot_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  immutable BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_draft_books_owner_id ON draft_books(owner_id);
+CREATE INDEX IF NOT EXISTS idx_draft_books_status ON draft_books(status);
+CREATE INDEX IF NOT EXISTS idx_edition_snapshots_draft_book_id ON edition_snapshots(draft_book_id);
+CREATE INDEX IF NOT EXISTS idx_edition_snapshots_owner_id ON edition_snapshots(owner_id);
+
+CREATE TABLE IF NOT EXISTS provenance_records (
+  id SERIAL PRIMARY KEY,
+  target_book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+  target_node_id INTEGER NOT NULL REFERENCES content_nodes(id) ON DELETE CASCADE,
+  source_book_id INTEGER REFERENCES books(id) ON DELETE SET NULL,
+  source_node_id INTEGER REFERENCES content_nodes(id) ON DELETE SET NULL,
+  source_type VARCHAR(50) NOT NULL DEFAULT 'library_reference',
+  source_author TEXT,
+  license_type VARCHAR(100) NOT NULL DEFAULT 'CC-BY-SA-4.0',
+  source_version VARCHAR(120) NOT NULL DEFAULT 'unknown',
+  inserted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  draft_section VARCHAR(20) NOT NULL DEFAULT 'body',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provenance_target_book_id ON provenance_records(target_book_id);
+CREATE INDEX IF NOT EXISTS idx_provenance_target_node_id ON provenance_records(target_node_id);
+CREATE INDEX IF NOT EXISTS idx_provenance_source_book_id ON provenance_records(source_book_id);
 
 -- Scripture schema templates
 CREATE TABLE IF NOT EXISTS scripture_schemas (
@@ -217,3 +265,31 @@ USING GIN (to_tsvector('english', content_data->'basic'->>'transliteration'));
 
 CREATE INDEX IF NOT EXISTS idx_translation_search ON content_nodes
 USING GIN (to_tsvector('english', content_data->'translations'->>'english'));
+
+-- Collection Cart (v0.3: Editor's shopping basket for items before assembly)
+CREATE TABLE IF NOT EXISTS collection_carts (
+  id SERIAL PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(255) DEFAULT 'My Collection',
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_carts_owner ON collection_carts(owner_id);
+
+-- Collection Cart Items
+CREATE TABLE IF NOT EXISTS collection_cart_items (
+  id SERIAL PRIMARY KEY,
+  cart_id INTEGER NOT NULL REFERENCES collection_carts(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL,
+  item_type VARCHAR(50) NOT NULL,
+  source_book_id INTEGER REFERENCES books(id) ON DELETE SET NULL,
+  "order" INTEGER DEFAULT 0,
+  item_metadata JSONB,
+  added_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_cart_items_cart ON collection_cart_items(cart_id);
+CREATE INDEX IF NOT EXISTS idx_collection_cart_items_item ON collection_cart_items(item_id, item_type);
