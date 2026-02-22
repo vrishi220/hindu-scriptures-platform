@@ -442,6 +442,24 @@ class SnapshotRenderSections(BaseModel):
     back: list[SnapshotRenderBlock] = Field(default_factory=list)
 
 
+class SnapshotRenderSettings(BaseModel):
+    show_sanskrit: bool = True
+    show_transliteration: bool = True
+    show_english: bool = True
+    show_metadata: bool = True
+    text_order: list[Literal["sanskrit", "transliteration", "english", "text"]] = Field(
+        default_factory=lambda: ["sanskrit", "transliteration", "english", "text"]
+    )
+
+
+class SnapshotTemplateMetadata(BaseModel):
+    template_family: str = "default.content_item"
+    template_version: str = "v1"
+    block_template_pattern: str = "default.{section}.content_item.v1"
+    renderer: str = "edition_snapshot_renderer"
+    output_profile: str = "reader_pdf_parity_v1"
+
+
 class SnapshotRenderArtifactPublic(BaseModel):
     snapshot_id: int
     draft_book_id: int
@@ -450,6 +468,8 @@ class SnapshotRenderArtifactPublic(BaseModel):
         default_factory=lambda: ["front", "body", "back"]
     )
     sections: SnapshotRenderSections
+    render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
+    template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
 
 
 class ProvenanceRecordPublic(BaseModel):

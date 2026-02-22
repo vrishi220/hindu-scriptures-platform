@@ -1,9 +1,13 @@
 import logging
+import textwrap
 from io import BytesIO
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from reportlab.lib.pagesizes import letter
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
@@ -25,6 +29,8 @@ from models.schemas import (
     EditionSnapshotPublic,
     SnapshotRenderArtifactPublic,
     SnapshotRenderBlock,
+    SnapshotRenderSettings,
+    SnapshotTemplateMetadata,
     SnapshotRenderSections,
 )
 from models.user import User
@@ -33,6 +39,51 @@ from services.license_policy import classify_license_action, normalize_license
 
 router = APIRouter(tags=["draft_books"])
 logger = logging.getLogger(__name__)
+
+_SNAPSHOT_TEMPLATE_FAMILY = "default.content_item"
+_SNAPSHOT_TEMPLATE_VERSION = "v1"
+_SNAPSHOT_TEMPLATE_PATTERN = "default.{section}.content_item.v1"
+_SNAPSHOT_RENDERER = "edition_snapshot_renderer"
+_SNAPSHOT_OUTPUT_PROFILE = "reader_pdf_parity_v1"
+
+
+def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> str | None:
+    for index, candidate in enumerate(candidates):
+        font_path = Path(candidate)
+        if not font_path.exists():
+            continue
+
+        font_name = f"{prefix}{index}"
+        try:
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+            return font_name
+        except Exception:
+            continue
+
+    return None
+
+
+def _resolve_pdf_font_name() -> str:
+    unicode_candidates = [
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]
+
+    resolved = _register_pdf_font_from_candidates(unicode_candidates, "SnapshotUnicode")
+    return resolved or "Helvetica"
+
+
+def _resolve_pdf_devanagari_font_name() -> str:
+    devanagari_candidates = [
+        "/System/Library/Fonts/Supplemental/DevanagariMT.ttc",
+        "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc",
+        "/System/Library/Fonts/Supplemental/ITFDevanagari.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]
+    resolved = _register_pdf_font_from_candidates(devanagari_candidates, "SnapshotDevanagari")
+    return resolved or _resolve_pdf_font_name()
 
 
 def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
@@ -49,6 +100,43 @@ def _default_sections() -> dict:
     return {"front": [], "body": [], "back": []}
 
 
+def _default_template_metadata() -> SnapshotTemplateMetadata:
+    return SnapshotTemplateMetadata(
+        template_family=_SNAPSHOT_TEMPLATE_FAMILY,
+        template_version=_SNAPSHOT_TEMPLATE_VERSION,
+        block_template_pattern=_SNAPSHOT_TEMPLATE_PATTERN,
+        renderer=_SNAPSHOT_RENDERER,
+        output_profile=_SNAPSHOT_OUTPUT_PROFILE,
+    )
+
+
+def _extract_template_metadata(snapshot_data: dict | None) -> SnapshotTemplateMetadata:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_metadata = resolved_data.get("template_metadata")
+    if not isinstance(raw_metadata, dict):
+        return _default_template_metadata()
+
+    defaults = _default_template_metadata()
+
+    def _read_str(key: str, fallback: str) -> str:
+        value = raw_metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return fallback
+
+    return SnapshotTemplateMetadata(
+        template_family=_read_str("template_family", defaults.template_family),
+        template_version=_read_str("template_version", defaults.template_version),
+        block_template_pattern=_read_str("block_template_pattern", defaults.block_template_pattern),
+        renderer=_read_str("renderer", defaults.renderer),
+        output_profile=_read_str("output_profile", defaults.output_profile),
+    )
+
+
+def _apply_template_metadata(snapshot_payload: dict) -> None:
+    snapshot_payload["template_metadata"] = _extract_template_metadata(snapshot_payload).model_dump()
+
+
 def _safe_int(value: object) -> int | None:
     try:
         parsed = int(value)
@@ -59,10 +147,126 @@ def _safe_int(value: object) -> int | None:
     return parsed
 
 
-def _materialize_snapshot_render_sections(snapshot_data: dict | None) -> SnapshotRenderSections:
+def _extract_render_content(source_node: ContentNode | None) -> dict:
+    if source_node is None:
+        return {}
+
+    content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
+    basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
+    translations_data = (
+        content_data.get("translations") if isinstance(content_data.get("translations"), dict) else {}
+    )
+
+    sanskrit_text = (
+        basic_data.get("sanskrit")
+        or content_data.get("sanskrit")
+        or source_node.title_sanskrit
+        or ""
+    )
+    transliteration_text = (
+        basic_data.get("transliteration")
+        or content_data.get("transliteration")
+        or content_data.get("text_transliteration")
+        or source_node.title_transliteration
+        or ""
+    )
+    english_text = (
+        translations_data.get("english")
+        or basic_data.get("translation")
+        or content_data.get("text_english")
+        or content_data.get("english")
+        or content_data.get("translation")
+        or ""
+    )
+    fallback_text = (
+        basic_data.get("text")
+        or content_data.get("text")
+        or content_data.get("content")
+        or ""
+    )
+
+    def _as_clean_string(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return ""
+
+    return {
+        "level_name": source_node.level_name,
+        "sequence_number": source_node.sequence_number,
+        "sanskrit": _as_clean_string(sanskrit_text),
+        "transliteration": _as_clean_string(transliteration_text),
+        "english": _as_clean_string(english_text),
+        "text": _as_clean_string(fallback_text),
+    }
+
+
+def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettings:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_settings = resolved_data.get("render_settings")
+    if not isinstance(raw_settings, dict):
+        return SnapshotRenderSettings()
+
+    text_order = raw_settings.get("text_order")
+    parsed_order: list[str] = []
+    if isinstance(text_order, list):
+        parsed_order = [
+            item
+            for item in text_order
+            if isinstance(item, str) and item in {"sanskrit", "transliteration", "english", "text"}
+        ]
+
+    return SnapshotRenderSettings(
+        show_sanskrit=bool(raw_settings.get("show_sanskrit", True)),
+        show_transliteration=bool(raw_settings.get("show_transliteration", True)),
+        show_english=bool(raw_settings.get("show_english", True)),
+        show_metadata=bool(raw_settings.get("show_metadata", True)),
+        text_order=parsed_order or ["sanskrit", "transliteration", "english", "text"],
+    )
+
+
+def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
+    resolved_content = content if isinstance(content, dict) else {}
+    visible_by_key: dict[str, bool] = {
+        "sanskrit": render_settings.show_sanskrit,
+        "transliteration": render_settings.show_transliteration,
+        "english": render_settings.show_english,
+        "text": True,
+    }
+    labels: dict[str, str] = {
+        "sanskrit": "Sanskrit",
+        "transliteration": "Transliteration",
+        "english": "English",
+        "text": "Text",
+    }
+
+    lines: list[tuple[str, str]] = []
+    for key in render_settings.text_order:
+        if not visible_by_key.get(key, False):
+            continue
+
+        value = resolved_content.get(key)
+        if not isinstance(value, str):
+            continue
+
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+
+        lines.append((labels.get(key, key.title()), cleaned))
+
+    if not lines:
+        fallback = resolved_content.get("text")
+        if isinstance(fallback, str) and fallback.strip():
+            lines.append(("Text", fallback.strip()))
+
+    return lines
+
+
+def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Session) -> SnapshotRenderSections:
     resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     section_names = ("front", "body", "back")
     section_blocks: dict[str, list[SnapshotRenderBlock]] = {"front": [], "body": [], "back": []}
+    source_node_ids: set[int] = set()
 
     for section_name in section_names:
         raw_section = resolved_data.get(section_name)
@@ -101,10 +305,19 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None) -> Snapsho
                 )
             )
 
+            if source_node_id is not None and source_node_id > 0:
+                source_node_ids.add(source_node_id)
+
+        source_nodes_by_id: dict[int, ContentNode] = {}
+        if source_node_ids:
+            source_nodes = db.query(ContentNode).filter(ContentNode.id.in_(sorted(source_node_ids))).all()
+            source_nodes_by_id = {node.id: node for node in source_nodes}
+
         candidates.sort(key=lambda item: item[0])
 
         materialized_blocks: list[SnapshotRenderBlock] = []
         for block_index, (_, item) in enumerate(candidates, start=1):
+            source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
             materialized_blocks.append(
                 SnapshotRenderBlock(
                     section=section_name,
@@ -114,7 +327,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None) -> Snapsho
                     source_node_id=item["source_node_id"],
                     source_book_id=item["source_book_id"],
                     title=item["title"],
-                    content={},
+                    content=_extract_render_content(source_node),
                 )
             )
 
@@ -359,7 +572,7 @@ def _create_snapshot_for_draft(
     return snapshot
 
 
-def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None) -> bytes:
+def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
     appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
     appendix_entries = []
     if isinstance(appendix_raw, dict):
@@ -374,22 +587,78 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None) -
     left_margin = 48
     top_margin = 56
     line_height = 14
+    devanagari_line_height = 17
     y = page_height - top_margin
+    pdf_font_name = _resolve_pdf_font_name()
+    pdf_devanagari_font_name = _resolve_pdf_devanagari_font_name()
 
-    def write_line(text: str, font_name: str = "Helvetica", font_size: int = 10):
+    def write_line(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         nonlocal y
         if y < 56:
             pdf.showPage()
             y = page_height - top_margin
-        pdf.setFont(font_name, font_size)
-        pdf.drawString(left_margin, y, text[:180])
-        y -= line_height
+
+        resolved_font = font_name or (pdf_devanagari_font_name if use_devanagari else pdf_font_name)
+        if pdf_font_name != "Helvetica" and resolved_font.startswith("Helvetica"):
+            resolved_font = pdf_font_name
+
+        pdf.setFont(resolved_font, font_size)
+        pdf.drawString(left_margin, y, text)
+        y -= devanagari_line_height if use_devanagari else line_height
 
     effective_title = draft_title or f"Draft {snapshot.draft_book_id}"
     write_line(f"Edition Snapshot Export — {effective_title}", "Helvetica-Bold", 14)
     write_line(f"Version: v{snapshot.version}", "Helvetica", 10)
     write_line(f"Snapshot ID: {snapshot.id}", "Helvetica", 10)
     write_line(f"Created At: {snapshot.created_at.isoformat()}", "Helvetica", 10)
+    write_line("", "Helvetica", 10)
+
+    sections = _materialize_snapshot_render_sections(snapshot.snapshot_data, db)
+    render_settings = _extract_render_settings(snapshot.snapshot_data)
+
+    write_line("Rendered Content", "Helvetica-Bold", 12)
+    for section_name in ("front", "body", "back"):
+        blocks = getattr(sections, section_name, [])
+        section_label = section_name.title()
+        write_line(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
+
+        if not blocks:
+            write_line("No items in this section.")
+            write_line("", "Helvetica", 10)
+            continue
+
+        for block in blocks:
+            write_line(f"{block.order}. {block.title}", "Helvetica-Bold", 10)
+
+            block_content = block.content if isinstance(block.content, dict) else {}
+            content_lines = _resolve_pdf_content_lines(block_content, render_settings)
+            for label, value in content_lines:
+                wrapped = textwrap.wrap(value, width=110) or [value]
+                is_sanskrit = label.lower() == "sanskrit"
+                if wrapped:
+                    write_line(
+                        f"   {label}: {wrapped[0]}",
+                        font_size=11 if is_sanskrit else 10,
+                        use_devanagari=is_sanskrit,
+                    )
+                    for continuation in wrapped[1:]:
+                        write_line(
+                            f"   {continuation}",
+                            font_size=11 if is_sanskrit else 10,
+                            use_devanagari=is_sanskrit,
+                        )
+
+            if render_settings.show_metadata:
+                metadata_parts = [f"template={block.template_key}"]
+                if block.source_node_id is not None:
+                    metadata_parts.append(f"source_node={block.source_node_id}")
+                sequence_number = block_content.get("sequence_number")
+                if sequence_number is not None:
+                    metadata_parts.append(f"seq={sequence_number}")
+                write_line("   " + " • ".join(metadata_parts))
+
+            write_line("", "Helvetica", 10)
+
     write_line("", "Helvetica", 10)
 
     write_line("Provenance Appendix", "Helvetica-Bold", 12)
@@ -412,7 +681,6 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None) -
             write_line(f"   license={license_type} author={source_author} version={source_version}")
             write_line("", "Helvetica", 10)
 
-    pdf.showPage()
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
@@ -554,6 +822,7 @@ def create_edition_snapshot(
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
+    _apply_template_metadata(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,
@@ -611,6 +880,7 @@ def publish_draft_book(
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
+    _apply_template_metadata(snapshot_payload)
 
     snapshot = _create_snapshot_for_draft(
         draft=draft,
@@ -677,12 +947,16 @@ def get_snapshot_render_artifact(
     if not snapshot or snapshot.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
 
-    sections = _materialize_snapshot_render_sections(snapshot.snapshot_data)
+    sections = _materialize_snapshot_render_sections(snapshot.snapshot_data, db)
+    render_settings = _extract_render_settings(snapshot.snapshot_data)
+    template_metadata = _extract_template_metadata(snapshot.snapshot_data)
     return SnapshotRenderArtifactPublic(
         snapshot_id=snapshot.id,
         draft_book_id=snapshot.draft_book_id,
         version=snapshot.version,
         sections=sections,
+        render_settings=render_settings,
+        template_metadata=template_metadata,
     )
 
 
@@ -697,7 +971,7 @@ def export_snapshot_pdf(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
 
     draft = db.query(DraftBook).filter(DraftBook.id == snapshot.draft_book_id).first()
-    pdf_bytes = _generate_snapshot_pdf(snapshot, draft.title if draft else None)
+    pdf_bytes = _generate_snapshot_pdf(snapshot, draft.title if draft else None, db)
     filename = f"draft-{snapshot.draft_book_id}-edition-v{snapshot.version}.pdf"
     _audit_event(
         "snapshot.pdf_exported",

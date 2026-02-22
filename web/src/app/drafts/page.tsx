@@ -39,6 +39,14 @@ type DraftProvenanceAppendix = {
   entries: DraftProvenanceAppendixEntry[];
 };
 
+type SnapshotTemplateMetadata = {
+  template_family: string;
+  template_version: string;
+  block_template_pattern: string;
+  renderer: string;
+  output_profile: string;
+};
+
 type DraftLicensePolicyIssue = {
   source_node_id: number;
   license_type: string;
@@ -839,6 +847,20 @@ function DraftsPageContent() {
                                         Open Reader
                                       </a>
                                     </div>
+                                    {(() => {
+                                      const templateMetadata = (snapshot.snapshot_data?.template_metadata || null) as
+                                        | SnapshotTemplateMetadata
+                                        | null;
+                                      if (!templateMetadata?.template_family || !templateMetadata?.template_version) {
+                                        return null;
+                                      }
+
+                                      return (
+                                        <div className="mt-2 text-xs text-zinc-500">
+                                          Template {templateMetadata.template_family}.{templateMetadata.template_version} • {templateMetadata.output_profile}
+                                        </div>
+                                      );
+                                    })()}
                                     {(() => {
                                       const appendix = (snapshot.snapshot_data?.provenance_appendix || null) as
                                         | DraftProvenanceAppendix
