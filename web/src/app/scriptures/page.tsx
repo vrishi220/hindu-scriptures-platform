@@ -262,6 +262,7 @@ function ScripturesContent() {
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
+  const [bookBodyCreateDraftLoading, setBookBodyCreateDraftLoading] = useState(false);
   const [bookBodyAddMessage, setBookBodyAddMessage] = useState<string | null>(null);
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
@@ -1160,6 +1161,69 @@ function ScripturesContent() {
     }
   };
 
+  const handleCreateDraftFromBookBody = async () => {
+    if (!bookId || bookBodyCreateDraftLoading) return;
+
+    setBookBodyCreateDraftLoading(true);
+    setBookBodyAddMessage(null);
+
+    try {
+      const selectedBookId = Number(bookId);
+      const addResponse = await fetch("/api/cart/items", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item_id: -selectedBookId,
+          item_type: "library_node",
+          source_book_id: selectedBookId,
+          metadata: {
+            title: currentBook?.book_name || `Book ${selectedBookId}`,
+            book_name: currentBook?.book_name || `Book ${selectedBookId}`,
+            level_name: "book",
+          },
+        }),
+      });
+
+      if (addResponse.status !== 409 && !addResponse.ok) {
+        const addPayload = (await addResponse.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(addPayload?.detail || "Failed to add book to draft body cart");
+      }
+
+      const draftTitle = currentBook?.book_name
+        ? `Draft from ${currentBook.book_name}`
+        : "Draft from Book";
+      const createResponse = await fetch("/api/cart/me/create-draft", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: draftTitle,
+          clear_cart_after_create: true,
+        }),
+      });
+
+      const createPayload = (await createResponse.json().catch(() => null)) as
+        | { id?: number; detail?: string }
+        | null;
+
+      if (!createResponse.ok) {
+        throw new Error(createPayload?.detail || "Failed to create draft from book body");
+      }
+
+      if (typeof createPayload?.id === "number") {
+        window.location.href = `/drafts?draftId=${createPayload.id}`;
+        return;
+      }
+
+      throw new Error("Draft created, but response did not include an id");
+    } catch (err) {
+      setBookBodyAddMessage(err instanceof Error ? err.message : "Failed to create draft from book body");
+    } finally {
+      setBookBodyCreateDraftLoading(false);
+    }
+  };
+
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookId || !shareEmail.trim()) return;
@@ -1830,10 +1894,20 @@ function ScripturesContent() {
                   onClick={() => {
                     void handleAddBookAsDraftBody();
                   }}
-                  disabled={bookBodyAddLoading}
+                  disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
                   className="rounded-full border border-amber-500/30 bg-amber-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:opacity-50"
                 >
                   {bookBodyAddLoading ? "Adding..." : "Add Book as Body"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleCreateDraftFromBookBody();
+                  }}
+                  disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
+                  className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs uppercase tracking-[0.2em] text-white transition hover:shadow-sm disabled:opacity-50"
+                >
+                  {bookBodyCreateDraftLoading ? "Creating Draft..." : "Create Draft from Book"}
                 </button>
                 <button
                   type="button"
