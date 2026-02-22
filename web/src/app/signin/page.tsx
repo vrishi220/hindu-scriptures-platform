@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { invalidateMeCache } from "../../lib/authClient";
 
-export default function SignInPage() {
+function SignInPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
@@ -120,5 +120,23 @@ export default function SignInPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignInPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg text-sm text-zinc-600">
+              Loading sign in...
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <SignInPageContent />
+    </Suspense>
   );
 }
