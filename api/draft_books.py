@@ -1008,11 +1008,16 @@ def _resolve_liquid_template_source(
     return _build_default_liquid_template_from_fields(fallback_fields, fallback_labels)
 
 
-def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, str]]:
+def _render_liquid_lines(
+    template_source: str,
+    context: dict,
+    label_to_field: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
     rendered = Template(template_source).render(**context)
     lines: list[dict[str, str]] = []
     current_field: str | None = None
     current_label: str | None = None
+    resolved_label_to_field = label_to_field or _DEFAULT_TEMPLATE_LABEL_TO_FIELD
 
     for raw_line in rendered.splitlines():
         line = raw_line.strip()
@@ -1023,7 +1028,7 @@ def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, 
         if ":" in line:
             label_prefix = _as_clean_string(line.split(":", 1)[0]).lower()
 
-        should_parse_labeled_line = bool(label_prefix) and label_prefix in _DEFAULT_TEMPLATE_LABEL_TO_FIELD
+        should_parse_labeled_line = bool(label_prefix) and label_prefix in resolved_label_to_field
 
         if not should_parse_labeled_line:
             if current_field and current_label:
@@ -1051,7 +1056,7 @@ def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, 
         if not resolved_label or not resolved_value:
             continue
 
-        field_name = _DEFAULT_TEMPLATE_LABEL_TO_FIELD.get(resolved_label.lower(), resolved_label.lower())
+        field_name = resolved_label_to_field.get(resolved_label.lower(), resolved_label.lower())
         current_field = field_name
         current_label = resolved_label
         lines.append(
@@ -1073,6 +1078,12 @@ def _render_block_content_with_template(
     resolved_metadata: dict | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(source_node, item)
+    resolved_labels = _resolve_default_template_labels(resolved_metadata)
+    label_to_field = {
+        _as_clean_string(label).lower(): field_name
+        for field_name, label in resolved_labels.items()
+        if _as_clean_string(field_name) and _as_clean_string(label)
+    }
     template_source = _resolve_liquid_template_source(
         template_key,
         section_name,
@@ -1080,7 +1091,7 @@ def _render_block_content_with_template(
         resolved_metadata,
     )
     try:
-        rendered_lines = _render_liquid_lines(template_source, context)
+        rendered_lines = _render_liquid_lines(template_source, context, label_to_field)
     except Exception:
         fallback_fields = _resolve_default_template_fields(
             section_name,

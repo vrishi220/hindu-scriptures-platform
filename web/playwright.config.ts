@@ -71,7 +71,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        'PLAYWRIGHT_DATABASE_URL=${PLAYWRIGHT_DATABASE_URL:-${DATABASE_URL:-postgresql+psycopg2://${USER}@localhost/test_scriptures}}; PLAYWRIGHT_DB_NAME="${PLAYWRIGHT_DATABASE_URL##*/}"; PLAYWRIGHT_DB_NAME="${PLAYWRIGHT_DB_NAME%%\?*}"; if ! printf "%s" "$PLAYWRIGHT_DB_NAME" | grep -Eiq "^test"; then echo "Refusing Playwright run against non-test DB name: $PLAYWRIGHT_DB_NAME ($PLAYWRIGHT_DATABASE_URL)"; exit 1; fi; DATABASE_URL="$PLAYWRIGHT_DATABASE_URL" ${PYTHON:-python3} -m uvicorn main:app --app-dir .. --host 127.0.0.1 --port 8001',
+        'PLAYWRIGHT_DATABASE_URL=${PLAYWRIGHT_DATABASE_URL:-${DATABASE_URL:-postgresql+psycopg2://${USER}@localhost/test_scriptures}}; PLAYWRIGHT_DB_NAME="${PLAYWRIGHT_DATABASE_URL##*/}"; PLAYWRIGHT_DB_NAME="$(printf "%s" "$PLAYWRIGHT_DB_NAME" | cut -d"?" -f1)"; if ! printf "%s" "$PLAYWRIGHT_DB_NAME" | grep -Eiq "^test"; then echo "Refusing Playwright run against non-test DB name: $PLAYWRIGHT_DB_NAME ($PLAYWRIGHT_DATABASE_URL)"; exit 1; fi; PLAYWRIGHT_PYTHON="${PYTHON:-../venv/bin/python}"; if [ ! -x "$PLAYWRIGHT_PYTHON" ]; then PLAYWRIGHT_PYTHON="python3"; fi; DATABASE_URL="$PLAYWRIGHT_DATABASE_URL" "$PLAYWRIGHT_PYTHON" -m uvicorn main:app --app-dir .. --host 127.0.0.1 --port 8001',
       url: 'http://127.0.0.1:8001/health',
       reuseExistingServer: false,
       timeout: 120 * 1000,

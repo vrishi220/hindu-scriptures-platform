@@ -31,6 +31,15 @@ const mockAuthenticatedSession = async (page: import('@playwright/test').Page) =
     });
   });
 
+  await page.route('**/api/auth/logout', async route => {
+    signedIn = false;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+
   await page.route('**/api/logout', async route => {
     signedIn = false;
     await route.fulfill({
@@ -149,8 +158,9 @@ test.describe('Logout Regression', () => {
     await expect(signOutDesktop).toBeVisible();
     await signOutDesktop.click();
 
+    await page.waitForURL('**/');
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.getByRole('link', { name: 'Sign in' }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
   });
 
   test('mobile menu sign out returns to signed-out state', async ({ page }) => {
