@@ -842,6 +842,52 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert draft_after_snapshot_patch.status_code == status.HTTP_200_OK
         assert draft_after_snapshot_patch.json()["description"] == "Still editable after snapshot"
 
+    def test_draft_history_returns_ordered_revision_events(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "History Draft",
+                "description": "Revision feed contract",
+                "section_structure": {
+                    "front": [{"title": "Preface", "order": 1}],
+                    "body": [{"title": "Body", "order": 1}],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = snapshot_response.json()["id"]
+
+        history_response = client.get(
+            f"/api/draft-books/{draft_id}/history",
+            headers=headers,
+        )
+        assert history_response.status_code == status.HTTP_200_OK
+        payload = history_response.json()
+
+        assert payload["draft_book_id"] == draft_id
+        events = payload["events"]
+        assert len(events) == 2
+        assert [event["sequence"] for event in events] == [1, 2]
+        assert [event["event_type"] for event in events] == ["draft.created", "snapshot.created"]
+        assert events[0]["entity_type"] == "draft_book"
+        assert events[1]["entity_type"] == "edition_snapshot"
+        assert events[1]["snapshot_id"] == snapshot_id
+        assert events[1]["immutable"] is True
+        assert events[0]["occurred_at"] <= events[1]["occurred_at"]
+        assert "combined_hash" in events[1]["metadata"]
+
     def test_draft_license_policy_warns_and_blocks_snapshot(self, client):
         headers = _register_and_login(client)
 

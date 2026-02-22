@@ -21,6 +21,8 @@ from models.provenance_record import ProvenanceRecord
 from models.schemas import (
     DraftPreviewRenderArtifactPublic,
     DraftPreviewRenderRequest,
+    DraftRevisionEventPublic,
+    DraftRevisionFeedPublic,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
     DraftProvenanceAppendix,
@@ -945,6 +947,58 @@ def _create_snapshot_for_draft(
     return snapshot
 
 
+def _build_draft_revision_events(draft: DraftBook, db: Session) -> list[DraftRevisionEventPublic]:
+    snapshots = (
+        db.query(EditionSnapshot)
+        .filter(EditionSnapshot.draft_book_id == draft.id)
+        .order_by(EditionSnapshot.created_at.asc(), EditionSnapshot.id.asc())
+        .all()
+    )
+
+    events: list[DraftRevisionEventPublic] = [
+        DraftRevisionEventPublic(
+            sequence=1,
+            event_type="draft.created",
+            entity_type="draft_book",
+            entity_id=draft.id,
+            draft_book_id=draft.id,
+            actor_user_id=draft.owner_id,
+            occurred_at=draft.created_at,
+            metadata={"status": draft.status},
+        )
+    ]
+
+    for snapshot in snapshots:
+        fingerprint = (
+            snapshot.snapshot_data.get("snapshot_fingerprint")
+            if isinstance(snapshot.snapshot_data, dict)
+            else {}
+        )
+        metadata: dict = {}
+        if isinstance(fingerprint, dict):
+            combined_hash = fingerprint.get("combined_hash")
+            if isinstance(combined_hash, str) and combined_hash:
+                metadata["combined_hash"] = combined_hash
+
+        events.append(
+            DraftRevisionEventPublic(
+                sequence=len(events) + 1,
+                event_type="snapshot.created",
+                entity_type="edition_snapshot",
+                entity_id=snapshot.id,
+                draft_book_id=draft.id,
+                actor_user_id=snapshot.owner_id,
+                occurred_at=snapshot.created_at,
+                snapshot_id=snapshot.id,
+                snapshot_version=snapshot.version,
+                immutable=snapshot.immutable,
+                metadata=metadata,
+            )
+        )
+
+    return events
+
+
 def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
     appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
     appendix_entries = []
@@ -1102,6 +1156,23 @@ def get_draft_book(
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
     return DraftBookPublic.model_validate(draft)
+
+
+@router.get("/draft-books/{draft_id}/history", response_model=DraftRevisionFeedPublic)
+def get_draft_history(
+    draft_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    draft = db.query(DraftBook).filter(DraftBook.id == draft_id).first()
+    if not draft or draft.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+
+    events = _build_draft_revision_events(draft, db)
+    return DraftRevisionFeedPublic(
+        draft_book_id=draft.id,
+        events=events,
+    )
 
 
 @router.patch("/draft-books/{draft_id}", response_model=DraftBookPublic)

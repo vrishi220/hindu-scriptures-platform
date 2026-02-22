@@ -425,6 +425,25 @@ class DraftPublishPublic(BaseModel):
     provenance_appendix: DraftProvenanceAppendix
 
 
+class DraftRevisionEventPublic(BaseModel):
+    sequence: int
+    event_type: Literal["draft.created", "snapshot.created"]
+    entity_type: Literal["draft_book", "edition_snapshot"]
+    entity_id: int
+    draft_book_id: int
+    actor_user_id: int | None = None
+    occurred_at: datetime
+    snapshot_id: int | None = None
+    snapshot_version: int | None = None
+    immutable: bool | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class DraftRevisionFeedPublic(BaseModel):
+    draft_book_id: int
+    events: list[DraftRevisionEventPublic] = Field(default_factory=list)
+
+
 class SnapshotRenderBlock(BaseModel):
     section: Literal["front", "body", "back"]
     order: int
