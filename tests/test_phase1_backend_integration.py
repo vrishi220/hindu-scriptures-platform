@@ -1977,6 +1977,152 @@ class TestDraftBookAndEditionSnapshotIntegration:
         canonical_2 = json.dumps(payload_2, sort_keys=True, separators=(",", ":")).encode("utf-8")
         assert hashlib.sha256(canonical_1).hexdigest() == hashlib.sha256(canonical_2).hexdigest()
 
+    def test_snapshot_render_artifact_uses_metadata_driven_template_fields_for_unknown_level(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Metadata Driven Template Fields Draft",
+                "description": "Unknown level should use metadata-driven default fields",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Commentary Block",
+                            "level_name": "Commentary",
+                            "order": 1,
+                            "metadata": {
+                                "template_fields": ["english"],
+                                "template_field_labels": {"english": "Commentary"},
+                            },
+                        },
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Commentary Block",
+                            "level_name": "Commentary",
+                            "order": 1,
+                            "metadata": {
+                                "template_fields": ["english"],
+                                "template_field_labels": {"english": "Commentary"},
+                            },
+                        },
+                    ],
+                    "back": [],
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        render_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert render_response.status_code == status.HTTP_200_OK
+        body_block = render_response.json()["sections"]["body"][0]
+
+        assert body_block["template_key"] == "default.body.commentary.content_item.v1"
+        assert body_block["resolved_template_source"].startswith("{% if english %}Commentary:")
+        assert body_block["content"]["rendered_lines"] == []
+
+    def test_book_preview_render_allows_public_library_preview_for_non_owner(self, client):
+        owner_headers = _register_and_login(client)
+        viewer_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Public Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for public book preview",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Understanding Dharma {uuid4().hex[:6]}",
+                "book_code": f"preview-public-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter One",
+                "has_content": False,
+            },
+            headers=owner_headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse One",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Dharma verse"}},
+            },
+            headers=owner_headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+
+        publish_visibility_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=owner_headers,
+        )
+        assert publish_visibility_response.status_code == status.HTTP_200_OK
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={},
+            headers=viewer_headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+
+        assert payload["book_id"] == book_id
+        assert payload["preview_mode"] == "book"
+        assert payload["book_name"].startswith("Understanding Dharma")
+        assert len(payload["sections"]["body"]) >= 1
+        assert payload["sections"]["body"][0]["template_key"].startswith("default.body.")
+
     def test_snapshot_render_artifact_collision_matrix_prefers_highest_precedence(self, client):
         headers = _register_and_login(client)
 

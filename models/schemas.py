@@ -510,6 +510,25 @@ class DraftPreviewRenderArtifactPublic(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class BookPreviewRenderRequest(BaseModel):
+    session_template_bindings: dict | None = None
+    render_settings: dict | None = None
+    metadata_bindings: dict | None = None
+
+
+class BookPreviewRenderArtifactPublic(BaseModel):
+    book_id: int
+    book_name: str
+    section_order: list[Literal["front", "body", "back"]] = Field(
+        default_factory=lambda: ["front", "body", "back"]
+    )
+    sections: SnapshotRenderSections
+    render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
+    template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
+    preview_mode: Literal["book"] = "book"
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ProvenanceRecordPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

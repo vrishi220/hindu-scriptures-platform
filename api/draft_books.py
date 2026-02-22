@@ -16,10 +16,13 @@ from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user
+from models.book import Book
 from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    BookPreviewRenderArtifactPublic,
+    BookPreviewRenderRequest,
     DraftPreviewRenderArtifactPublic,
     DraftPreviewRenderRequest,
     DraftRevisionEventPublic,
@@ -79,6 +82,8 @@ _DEFAULT_TEMPLATE_FIELD_LABELS = {
 _DEFAULT_TEMPLATE_LABEL_TO_FIELD = {
     label.lower(): field_name for field_name, label in _DEFAULT_TEMPLATE_FIELD_LABELS.items()
 }
+
+_BOOK_VISIBILITY_PUBLIC = "public"
 
 _DEFAULT_LIQUID_TEMPLATES = {
     "default.front.content_item.v1": (
@@ -209,6 +214,31 @@ def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -
 
 def _default_sections() -> dict:
     return {"front": [], "body": [], "back": []}
+
+
+def _book_owner_id(book: Book) -> int | None:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    owner_id = metadata.get("owner_id")
+    try:
+        return int(owner_id) if owner_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _book_visibility(book: Book) -> str:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    raw_visibility = metadata.get("visibility")
+    visibility = str(raw_visibility).strip().lower() if raw_visibility is not None else ""
+    return visibility if visibility else "private"
+
+
+def _book_title_for_preview(node: ContentNode) -> str:
+    return (
+        _as_clean_string(node.title_english)
+        or _as_clean_string(node.title_transliteration)
+        or _as_clean_string(node.title_sanskrit)
+        or f"Node {node.id}"
+    )
 
 
 def _default_template_metadata() -> SnapshotTemplateMetadata:
@@ -571,9 +601,7 @@ def _resolve_block_template_key(
     level_fallback_template = None
     if isinstance(level_name, str) and level_name.strip():
         normalized_level = level_name.strip().lower()
-        candidate_level_template = f"default.{section_name}.{normalized_level}.content_item.v1"
-        if candidate_level_template in _DEFAULT_LIQUID_TEMPLATES:
-            level_fallback_template = candidate_level_template
+        level_fallback_template = f"default.{section_name}.{normalized_level}.content_item.v1"
 
     node_bindings = template_bindings.get("node_template_keys")
     if isinstance(node_bindings, dict):
@@ -682,28 +710,81 @@ def _build_template_context(source_node: ContentNode | None, item: dict) -> dict
     }
 
 
-def _resolve_default_template_fields(section_name: str, level_name: str | None) -> list[str]:
+def _normalize_template_field_name(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"title", "sanskrit", "transliteration", "english", "text"}:
+        return normalized
+    return None
+
+
+def _resolve_default_template_fields(
+    section_name: str,
+    level_name: str | None,
+    resolved_metadata: dict | None = None,
+) -> list[str]:
+    if isinstance(resolved_metadata, dict):
+        metadata_fields = resolved_metadata.get("template_fields")
+        if not isinstance(metadata_fields, list):
+            metadata_fields = resolved_metadata.get("render_fields")
+        if isinstance(metadata_fields, list):
+            normalized_fields = [
+                field_name
+                for field_name in (_normalize_template_field_name(item) for item in metadata_fields)
+                if field_name
+            ]
+            if normalized_fields:
+                return normalized_fields
+
     normalized_level = level_name.strip().lower() if isinstance(level_name, str) and level_name.strip() else ""
     if normalized_level and normalized_level in _DEFAULT_TEMPLATE_FIELDS_BY_LEVEL:
         return list(_DEFAULT_TEMPLATE_FIELDS_BY_LEVEL[normalized_level])
     return list(_DEFAULT_TEMPLATE_FIELDS_BY_SECTION.get(section_name, ["english", "text"]))
 
 
-def _build_default_liquid_template_from_fields(fields: list[str]) -> str:
+def _resolve_default_template_labels(resolved_metadata: dict | None) -> dict[str, str]:
+    labels = dict(_DEFAULT_TEMPLATE_FIELD_LABELS)
+    if not isinstance(resolved_metadata, dict):
+        return labels
+
+    metadata_labels = resolved_metadata.get("template_field_labels")
+    if not isinstance(metadata_labels, dict):
+        metadata_labels = resolved_metadata.get("render_field_labels")
+    if not isinstance(metadata_labels, dict):
+        return labels
+
+    for key, value in metadata_labels.items():
+        field_name = _normalize_template_field_name(key)
+        label_text = _as_clean_string(value)
+        if field_name and label_text:
+            labels[field_name] = label_text
+
+    return labels
+
+
+def _build_default_liquid_template_from_fields(fields: list[str], labels: dict[str, str] | None = None) -> str:
+    resolved_labels = labels or _DEFAULT_TEMPLATE_FIELD_LABELS
     lines: list[str] = []
     for field_name in fields:
-        label = _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
-        lines.append(f"{{% if {field_name} %}}{label}: {{{{ {field_name} }}}}\\n{{% endif %}}")
+        label = resolved_labels.get(field_name, field_name.title())
+        lines.append(f"{{% if {field_name} %}}{label}: {{{{ {field_name} }}}}\n{{% endif %}}")
     return "".join(lines)
 
 
-def _resolve_liquid_template_source(template_key: str, section_name: str, level_name: str | None) -> str:
+def _resolve_liquid_template_source(
+    template_key: str,
+    section_name: str,
+    level_name: str | None,
+    resolved_metadata: dict | None = None,
+) -> str:
     registered = _DEFAULT_LIQUID_TEMPLATES.get(template_key)
     if isinstance(registered, str) and registered:
         return registered
 
-    fallback_fields = _resolve_default_template_fields(section_name, level_name)
-    return _build_default_liquid_template_from_fields(fallback_fields)
+    fallback_fields = _resolve_default_template_fields(section_name, level_name, resolved_metadata)
+    fallback_labels = _resolve_default_template_labels(resolved_metadata)
+    return _build_default_liquid_template_from_fields(fallback_fields, fallback_labels)
 
 
 def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, str]]:
@@ -738,13 +819,24 @@ def _render_block_content_with_template(
     template_key: str,
     source_node: ContentNode | None,
     item: dict,
+    resolved_metadata: dict | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(source_node, item)
-    template_source = _resolve_liquid_template_source(template_key, section_name, context.get("level_name"))
+    template_source = _resolve_liquid_template_source(
+        template_key,
+        section_name,
+        context.get("level_name"),
+        resolved_metadata,
+    )
     try:
         rendered_lines = _render_liquid_lines(template_source, context)
     except Exception:
-        fallback_fields = _resolve_default_template_fields(section_name, context.get("level_name"))
+        fallback_fields = _resolve_default_template_fields(
+            section_name,
+            context.get("level_name"),
+            resolved_metadata,
+        )
+        fallback_labels = _resolve_default_template_labels(resolved_metadata)
         rendered_lines = []
         for field_name in fallback_fields:
             value = _as_clean_string(context.get(field_name))
@@ -753,7 +845,7 @@ def _render_block_content_with_template(
             rendered_lines.append(
                 {
                     "field": field_name,
-                    "label": _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title()),
+                    "label": fallback_labels.get(field_name, field_name.title()),
                     "value": value,
                 }
             )
@@ -939,6 +1031,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 template_key=template_key,
                 source_node=source_node,
                 item=item,
+                resolved_metadata=resolved_metadata,
             )
             materialized_blocks.append(
                 SnapshotRenderBlock(
@@ -1702,6 +1795,71 @@ def preview_draft_render(
         render_settings=render_settings,
         template_metadata=template_metadata,
         preview_mode="session" if payload.session_template_bindings else "draft",
+        warnings=template_warnings,
+    )
+
+
+@router.post(
+    "/books/{book_id}/preview/render",
+    response_model=BookPreviewRenderArtifactPublic,
+)
+def preview_book_render(
+    book_id: int,
+    payload: BookPreviewRenderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    can_view = _book_owner_id(book) == current_user.id or _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC
+    if not can_view:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    source_nodes = (
+        db.query(ContentNode)
+        .filter(ContentNode.book_id == book.id)
+        .order_by(ContentNode.level_order.asc(), ContentNode.sequence_number.asc(), ContentNode.id.asc())
+        .all()
+    )
+
+    body_items = [
+        {
+            "node_id": node.id,
+            "source_book_id": book.id,
+            "level_name": node.level_name,
+            "title": _book_title_for_preview(node),
+            "order": index,
+        }
+        for index, node in enumerate(source_nodes, start=1)
+    ]
+
+    preview_payload: dict = {
+        "front": [],
+        "body": body_items,
+        "back": [],
+    }
+    if isinstance(payload.render_settings, dict):
+        preview_payload["render_settings"] = payload.render_settings
+    if isinstance(payload.metadata_bindings, dict):
+        preview_payload["metadata_bindings"] = payload.metadata_bindings
+
+    _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    template_warnings = _validate_template_bindings(preview_payload)
+    _apply_template_metadata(preview_payload)
+
+    sections = _materialize_snapshot_render_sections(preview_payload, db)
+    render_settings = _extract_render_settings(preview_payload)
+    template_metadata = _extract_template_metadata(preview_payload)
+
+    return BookPreviewRenderArtifactPublic(
+        book_id=book.id,
+        book_name=book.book_name,
+        sections=sections,
+        render_settings=render_settings,
+        template_metadata=template_metadata,
+        preview_mode="book",
         warnings=template_warnings,
     )
 
