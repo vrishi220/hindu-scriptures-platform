@@ -751,26 +751,28 @@ def get_stats(
 def get_daily_verse(
     mode: str = "daily",
     db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ) -> dict | None:
     """
-    Public endpoint - no authentication required
+    Public endpoint - authentication optional
     mode: 'daily' for consistent daily verse (seeded by date), 'random' for truly random
     """
     try:
         from datetime import date
         
-        # Get all verses with content from public books only
-        public_book_ids = [
+        # Get all verses with content from books visible to the current user.
+        # Anonymous users only see public books.
+        visible_book_ids = [
             book.id
             for book in db.query(Book).all()
-            if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC
+            if _book_is_visible_to_user(db, book, current_user)
         ]
-        if not public_book_ids:
+        if not visible_book_ids:
             return None
 
         verses_query = db.query(ContentNode).filter(
             ContentNode.has_content == True,
-            ContentNode.book_id.in_(public_book_ids),
+            ContentNode.book_id.in_(visible_book_ids),
         )
         
         if mode == "daily":
