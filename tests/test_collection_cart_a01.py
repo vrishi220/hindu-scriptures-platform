@@ -410,3 +410,97 @@ class TestCollectionCartUnauthorized:
         headers = {"Authorization": "Bearer invalid_token_xyz"}
         response = client.get("/api/cart/me", headers=headers)
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestCollectionCartDraftBodyCompose:
+    def test_compose_cart_as_draft_body_groups_books_in_order(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Cart Compose Schema {uuid4().hex[:8]}",
+                "description": "Schema for cart compose tests",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_a_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Compose Source A {uuid4().hex[:6]}",
+                "book_code": f"compose-a-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_a_response.status_code == status.HTTP_201_CREATED
+        book_a_id = book_a_response.json()["id"]
+
+        book_b_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Compose Source B {uuid4().hex[:6]}",
+                "book_code": f"compose-b-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_b_response.status_code == status.HTTP_201_CREATED
+        book_b_id = book_b_response.json()["id"]
+
+        client.get("/api/cart/me", headers=headers)
+        add_item_a1 = client.post(
+            "/api/cart/items",
+            json={"item_id": 1001, "item_type": "library_node", "source_book_id": book_a_id},
+            headers=headers,
+        )
+        assert add_item_a1.status_code == status.HTTP_201_CREATED
+        add_item_b = client.post(
+            "/api/cart/items",
+            json={"item_id": 1002, "item_type": "library_node", "source_book_id": book_b_id},
+            headers=headers,
+        )
+        assert add_item_b.status_code == status.HTTP_201_CREATED
+        add_item_a2 = client.post(
+            "/api/cart/items",
+            json={"item_id": 1003, "item_type": "library_node", "source_book_id": book_a_id},
+            headers=headers,
+        )
+        assert add_item_a2.status_code == status.HTTP_201_CREATED
+
+        compose_response = client.post("/api/cart/me/compose-draft-body", headers=headers)
+        assert compose_response.status_code == status.HTTP_200_OK
+        payload = compose_response.json()
+
+        assert payload["section_structure"]["front"] == []
+        assert payload["section_structure"]["back"] == []
+        body_items = payload["section_structure"]["body"]
+        assert [item["source_book_id"] for item in body_items] == [book_a_id, book_b_id]
+        assert [item["source_scope"] for item in body_items] == ["book", "book"]
+        assert [item["order"] for item in body_items] == [1, 2]
+        assert payload["skipped_item_count"] == 0
+
+    def test_compose_cart_as_draft_body_counts_items_without_source_book(self, client):
+        headers = _register_and_login(client)
+        client.get("/api/cart/me", headers=headers)
+
+        add_response = client.post(
+            "/api/cart/items",
+            json={"item_id": 2001, "item_type": "library_node"},
+            headers=headers,
+        )
+        assert add_response.status_code == status.HTTP_201_CREATED
+
+        compose_response = client.post("/api/cart/me/compose-draft-body", headers=headers)
+        assert compose_response.status_code == status.HTTP_200_OK
+        payload = compose_response.json()
+
+        assert payload["section_structure"]["body"] == []
+        assert payload["body_references"] == []
+        assert payload["skipped_item_count"] == 1

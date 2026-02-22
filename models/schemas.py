@@ -595,3 +595,19 @@ class CollectionCartPublic(CollectionCartBase):
     created_at: datetime
     updated_at: datetime
     items: list[CollectionCartItemPublic] = Field(default_factory=list)
+
+
+class CartDraftBodyReference(BaseModel):
+    source_book_id: int
+    source_scope: Literal["book"] = "book"
+    order: int
+    title: str
+
+
+class CartDraftComposeBodyPublic(BaseModel):
+    cart_id: int
+    section_structure: dict = Field(
+        default_factory=lambda: {"front": [], "body": [], "back": []}
+    )
+    body_references: list[CartDraftBodyReference] = Field(default_factory=list)
+    skipped_item_count: int = 0
