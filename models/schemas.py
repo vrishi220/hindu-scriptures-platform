@@ -611,3 +611,8 @@ class CartDraftComposeBodyPublic(BaseModel):
     )
     body_references: list[CartDraftBodyReference] = Field(default_factory=list)
     skipped_item_count: int = 0
+
+
+class CartCreateDraftRequest(BaseModel):
+    title: str
+    description: str | None = None
