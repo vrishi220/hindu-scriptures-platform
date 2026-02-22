@@ -3,6 +3,7 @@ import os
 import pytest
 import getpass
 from sqlalchemy import text, create_engine
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import sessionmaker
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -16,14 +17,32 @@ else:
     current_user = getpass.getuser()
     TEST_DATABASE_URL = f"postgresql+psycopg2://{current_user}@localhost/test_scriptures"
 
+
+def _is_safe_test_database_url(database_url: str) -> bool:
+    lower_url = database_url.lower()
+
+    if lower_url.startswith("sqlite"):
+        if ":memory:" in lower_url:
+            return True
+        db_name = lower_url.rsplit("/", 1)[-1].split("?", 1)[0]
+        return db_name.startswith("test")
+
+    try:
+        parsed = make_url(database_url)
+    except Exception:
+        return False
+
+    db_name = (parsed.database or "").lower()
+    return db_name.startswith("test")
+
 # Safety guard: never allow tests to run against non-test databases by default.
 if (
-    "test" not in TEST_DATABASE_URL.lower()
+    not _is_safe_test_database_url(TEST_DATABASE_URL)
     and os.getenv("ALLOW_NON_TEST_DB_FOR_PYTEST") != "1"
 ):
     raise RuntimeError(
         f"Refusing to run tests against non-test database URL: {TEST_DATABASE_URL}. "
-        "Set TEST_DATABASE_URL to a test DB (e.g. test_scriptures). "
+        "Set TEST_DATABASE_URL to a database whose name starts with 'test' (e.g. test_scriptures). "
         "Override only if intentional with ALLOW_NON_TEST_DB_FOR_PYTEST=1."
     )
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL

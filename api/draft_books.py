@@ -751,6 +751,75 @@ def _as_clean_string(value: object) -> str:
     return ""
 
 
+_DEVANAGARI_CHAR_PATTERN = re.compile(r"[\u0900-\u097F]")
+_DEVANAGARI_TOKEN_PATTERN = re.compile(r"^[\u0900-\u097F]+$")
+_DANDA_ONLY_LINE_PATTERN = re.compile(r"^[।॥|]+$")
+
+
+def _normalize_devanagari_text(value: str) -> str:
+    if not value:
+        return ""
+
+    def _merge_fragmented_short_tokens(line: str) -> str:
+        tokens = [token for token in line.split() if token]
+        if not tokens:
+            return ""
+
+        merged_tokens: list[str] = []
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if not (_DEVANAGARI_TOKEN_PATTERN.fullmatch(token) and len(token) <= 2):
+                merged_tokens.append(token)
+                index += 1
+                continue
+
+            run_start = index
+            while (
+                index < len(tokens)
+                and _DEVANAGARI_TOKEN_PATTERN.fullmatch(tokens[index])
+                and len(tokens[index]) <= 2
+            ):
+                index += 1
+
+            run = tokens[run_start:index]
+            if len(run) >= 3:
+                merged_tokens.append("".join(run))
+            else:
+                merged_tokens.extend(run)
+
+        return " ".join(merged_tokens)
+
+    def _canonical_for_dedupe(line: str) -> str:
+        canonical = re.sub(r"\s+", "", line)
+        canonical = canonical.replace("|", "।")
+        return canonical
+
+    normalized_lines: list[str] = []
+    seen_canonical: set[str] = set()
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if _DEVANAGARI_CHAR_PATTERN.search(line):
+            line = _merge_fragmented_short_tokens(line)
+            line = re.sub(r"\s*([।॥|]+)\s*", r"\1", line)
+
+            canonical = _canonical_for_dedupe(line)
+            if canonical in seen_canonical:
+                continue
+            seen_canonical.add(canonical)
+
+        if _DANDA_ONLY_LINE_PATTERN.fullmatch(line) and normalized_lines:
+            normalized_lines[-1] = f"{normalized_lines[-1]} {line}"
+            continue
+
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines).strip()
+
+
 def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> ContentNode | None:
     if node is None:
         return None
@@ -855,7 +924,7 @@ def _build_template_context(source_node: ContentNode | None, item: dict) -> dict
         "title": title_value,
         "level_name": _as_clean_string(source_node.level_name),
         "sequence_number": _as_clean_string(source_node.sequence_number),
-        "sanskrit": _as_clean_string(sanskrit_text),
+        "sanskrit": _normalize_devanagari_text(_as_clean_string(sanskrit_text)),
         "transliteration": _as_clean_string(transliteration_text),
         "english": _as_clean_string(english_text),
         "text": _as_clean_string(fallback_text),
@@ -939,16 +1008,39 @@ def _resolve_liquid_template_source(
     return _build_default_liquid_template_from_fields(fallback_fields, fallback_labels)
 
 
-def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, str]]:
+def _render_liquid_lines(
+    template_source: str,
+    context: dict,
+    label_to_field: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
     rendered = Template(template_source).render(**context)
     lines: list[dict[str, str]] = []
+    current_field: str | None = None
+    current_label: str | None = None
+    resolved_label_to_field = label_to_field or _DEFAULT_TEMPLATE_LABEL_TO_FIELD
 
     for raw_line in rendered.splitlines():
         line = raw_line.strip()
         if not line:
             continue
 
-        if ":" not in line:
+        label_prefix = ""
+        if ":" in line:
+            label_prefix = _as_clean_string(line.split(":", 1)[0]).lower()
+
+        should_parse_labeled_line = bool(label_prefix) and label_prefix in resolved_label_to_field
+
+        if not should_parse_labeled_line:
+            if current_field and current_label:
+                lines.append(
+                    {
+                        "field": current_field,
+                        "label": current_label,
+                        "value": line,
+                    }
+                )
+                continue
+
             lines.append(
                 {
                     "field": "text",
@@ -964,7 +1056,9 @@ def _render_liquid_lines(template_source: str, context: dict) -> list[dict[str, 
         if not resolved_label or not resolved_value:
             continue
 
-        field_name = _DEFAULT_TEMPLATE_LABEL_TO_FIELD.get(resolved_label.lower(), resolved_label.lower())
+        field_name = resolved_label_to_field.get(resolved_label.lower(), resolved_label.lower())
+        current_field = field_name
+        current_label = resolved_label
         lines.append(
             {
                 "field": field_name,
@@ -984,6 +1078,12 @@ def _render_block_content_with_template(
     resolved_metadata: dict | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(source_node, item)
+    resolved_labels = _resolve_default_template_labels(resolved_metadata)
+    label_to_field = {
+        _as_clean_string(label).lower(): field_name
+        for field_name, label in resolved_labels.items()
+        if _as_clean_string(field_name) and _as_clean_string(label)
+    }
     template_source = _resolve_liquid_template_source(
         template_key,
         section_name,
@@ -991,7 +1091,7 @@ def _render_block_content_with_template(
         resolved_metadata,
     )
     try:
-        rendered_lines = _render_liquid_lines(template_source, context)
+        rendered_lines = _render_liquid_lines(template_source, context, label_to_field)
     except Exception:
         fallback_fields = _resolve_default_template_fields(
             section_name,
@@ -1062,6 +1162,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             "text": True,
         }
         lines: list[tuple[str, str]] = []
+        previous_field_name: str | None = None
         for line in rendered_lines:
             if not isinstance(line, dict):
                 continue
@@ -1079,7 +1180,12 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             if not raw_label and field_name == "text":
                 lines.append(("", value))
             else:
-                lines.append((label, value))
+                display_label = label
+                if field_name and field_name == previous_field_name:
+                    display_label = ""
+                lines.append((display_label, value))
+
+            previous_field_name = field_name or None
 
         if lines:
             return lines
