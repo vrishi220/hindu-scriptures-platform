@@ -832,6 +832,43 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert delete_response.status_code == status.HTTP_409_CONFLICT
         assert "cannot delete" in delete_response.json()["detail"].lower()
 
+    def test_force_delete_draft_with_snapshot_succeeds(self, client):
+        headers = _register_and_login(client)
+
+        create_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Draft Force Delete",
+                "description": "Force delete guard test",
+                "section_structure": {"front": [], "body": [{"title": "Body"}], "back": []},
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        draft_id = create_response.json()["id"]
+
+        snapshot_response = client.post(
+            f"/api/draft-books/{draft_id}/snapshots",
+            json={},
+            headers=headers,
+        )
+        assert snapshot_response.status_code == status.HTTP_201_CREATED
+
+        force_delete_response = client.delete(
+            f"/api/draft-books/{draft_id}?force=true",
+            headers=headers,
+        )
+        assert force_delete_response.status_code == status.HTTP_200_OK
+        force_payload = force_delete_response.json()
+        assert force_payload.get("forced") is True
+        assert force_payload.get("deleted_snapshot_count", 0) >= 1
+
+        get_response = client.get(
+            f"/api/draft-books/{draft_id}",
+            headers=headers,
+        )
+        assert get_response.status_code == status.HTTP_404_NOT_FOUND
+
     def test_delete_draft_returns_409_when_published(self, client):
         headers = _register_and_login(client)
 

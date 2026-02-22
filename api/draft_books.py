@@ -7,7 +7,7 @@ from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from liquid import Template
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
@@ -1826,6 +1826,7 @@ def update_draft_book(
 @router.delete("/draft-books/{draft_id}", response_model=dict)
 def delete_draft_book(
     draft_id: int,
+    force: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -1833,22 +1834,50 @@ def delete_draft_book(
     if not draft or draft.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
-    has_snapshots = (
-        db.query(EditionSnapshot.id)
+    snapshot_count = (
+        db.query(EditionSnapshot)
         .filter(EditionSnapshot.draft_book_id == draft.id)
-        .first()
-        is not None
+        .count()
     )
-    if draft.status == "published" or has_snapshots:
+    is_published = draft.status == "published"
+    has_snapshots = snapshot_count > 0
+    if (is_published or has_snapshots) and not force:
+        reasons: list[str] = []
+        if is_published:
+            reasons.append("draft is published")
+        if has_snapshots:
+            reasons.append(f"draft has {snapshot_count} immutable snapshot(s)")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete published drafts or drafts with snapshots",
+            detail=(
+                "Cannot delete draft because "
+                + " and ".join(reasons)
+                + ". Retry with ?force=true to permanently delete the draft and its snapshots."
+            ),
+        )
+
+    deleted_snapshot_count = 0
+    if has_snapshots:
+        deleted_snapshot_count = (
+            db.query(EditionSnapshot)
+            .filter(EditionSnapshot.draft_book_id == draft.id)
+            .delete(synchronize_session=False)
         )
 
     db.delete(draft)
     db.commit()
-    _audit_event("draft.deleted", current_user.id, draft_id=draft_id)
-    return {"message": "Deleted"}
+    _audit_event(
+        "draft.deleted",
+        current_user.id,
+        draft_id=draft_id,
+        forced=force,
+        deleted_snapshot_count=deleted_snapshot_count,
+    )
+    return {
+        "message": "Deleted",
+        "forced": force,
+        "deleted_snapshot_count": deleted_snapshot_count,
+    }
 
 
 @router.get("/draft-books/{draft_id}/license-policy", response_model=DraftLicensePolicyReport)

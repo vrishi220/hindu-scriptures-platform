@@ -102,6 +102,11 @@ type CartComposeBodyResponse = {
   skipped_item_count?: number;
 };
 
+type ApiErrorPayload = {
+  detail?: unknown;
+  message?: unknown;
+};
+
 const formatDate = (dateString: string) => {
   try {
     return new Date(dateString).toLocaleString("en-US", {
@@ -114,6 +119,26 @@ const formatDate = (dateString: string) => {
   } catch {
     return dateString;
   }
+};
+
+const extractApiErrorMessage = (payload: ApiErrorPayload | null, fallback: string): string => {
+  if (!payload) {
+    return fallback;
+  }
+  if (typeof payload.detail === "string" && payload.detail.trim()) {
+    return payload.detail;
+  }
+  if (typeof payload.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+  if (payload.detail && typeof payload.detail === "object") {
+    try {
+      return JSON.stringify(payload.detail);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
 };
 
 function DraftsPageContent() {
@@ -708,9 +733,32 @@ function DraftsPageContent() {
         credentials: "include",
       });
 
-      const payload = (await response.json().catch(() => null)) as { detail?: string; message?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to delete draft");
+      const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
+      if (response.status === 409) {
+        const reason = extractApiErrorMessage(payload, "Draft cannot be deleted in current state.");
+        setMessage(`✗ ${reason}`);
+        const forceConfirmed = window.confirm("Are you sure you want to delete?");
+        if (!forceConfirmed) {
+          return;
+        }
+
+        const forceResponse = await fetch(`/api/draft-books/${draft.id}?force=true`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        const forcePayload = (await forceResponse.json().catch(() => null)) as ApiErrorPayload | null;
+        if (!forceResponse.ok) {
+          throw new Error(
+            extractApiErrorMessage(
+              forcePayload,
+              `Failed to force delete draft (HTTP ${forceResponse.status})`
+            )
+          );
+        }
+      } else if (!response.ok) {
+        throw new Error(
+          extractApiErrorMessage(payload, `Failed to delete draft (HTTP ${response.status})`)
+        );
       }
 
       setDrafts((prev) => prev.filter((item) => item.id !== draft.id));

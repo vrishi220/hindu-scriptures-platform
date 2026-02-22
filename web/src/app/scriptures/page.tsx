@@ -1949,7 +1949,7 @@ function ScripturesContent() {
                   disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
                   title="Create a new draft from this book body"
                   aria-label="Create draft from book"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] text-base text-white transition hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-base text-zinc-700 transition hover:bg-zinc-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {bookBodyCreateDraftLoading ? "⏳" : "📝"}
                 </button>
@@ -2040,7 +2040,19 @@ function ScripturesContent() {
               </button>
             )}
             {bookId && currentBook && (
-              <span className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600">
+              <span
+                title={
+                  (currentBook.visibility || "private") === "public"
+                    ? "Visible to all users"
+                    : "Private draft: only you and users you explicitly share this book with can view it"
+                }
+                aria-label={
+                  (currentBook.visibility || "private") === "public"
+                    ? "Public visibility"
+                    : "Private draft visibility: only you and explicitly shared users can view"
+                }
+                className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
+              >
                 {(currentBook.visibility || "private") === "public"
                   ? "Public"
                   : "Private draft"}
