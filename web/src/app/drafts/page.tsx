@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getMe } from "../../lib/authClient";
 
@@ -99,7 +99,7 @@ const formatDate = (dateString: string) => {
   }
 };
 
-export default function DraftsPage() {
+function DraftsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [authEmail, setAuthEmail] = useState<string | null>(null);
@@ -943,5 +943,23 @@ export default function DraftsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function DraftsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
+          <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+            <div className="rounded-2xl border border-black/10 bg-white/85 p-6 text-sm text-zinc-600">
+              Loading drafts...
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <DraftsPageContent />
+    </Suspense>
   );
 }
