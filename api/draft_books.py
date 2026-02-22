@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from api.users import get_current_user, require_permission
 from models.book import Book
+from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.provenance_record import ProvenanceRecord
@@ -475,6 +476,24 @@ def _read_template_key(value: object) -> str | None:
         if cleaned:
             return cleaned
     return None
+
+
+def _book_is_visible_to_user(db: Session, book: Book, user_id: int) -> bool:
+    if _book_owner_id(book) == user_id:
+        return True
+
+    if _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC:
+        return True
+
+    share = (
+        db.query(BookShare.id)
+        .filter(
+            BookShare.book_id == book.id,
+            BookShare.shared_with_user_id == user_id,
+        )
+        .first()
+    )
+    return share is not None
 
 
 def _is_valid_template_key(template_key: str) -> bool:
@@ -1930,8 +1949,7 @@ def preview_book_render(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
-    can_view = _book_owner_id(book) == current_user.id or _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC
-    if not can_view:
+    if not _book_is_visible_to_user(db, book, current_user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     source_nodes = (

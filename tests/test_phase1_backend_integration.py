@@ -2238,6 +2238,89 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert len(payload["sections"]["body"]) >= 1
         assert payload["sections"]["body"][0]["template_key"].startswith("default.body.")
 
+    def test_book_preview_render_allows_shared_private_book_for_viewer(self, client):
+        owner_headers = _register_and_login(client)
+        viewer_headers = _register_and_login(client)
+
+        viewer_me_response = client.get("/api/users/me", headers=viewer_headers)
+        assert viewer_me_response.status_code == status.HTTP_200_OK
+        viewer_email = viewer_me_response.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Shared Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for shared private book preview",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Shared Private Book {uuid4().hex[:6]}",
+                "book_code": f"preview-shared-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Shared Chapter",
+                "has_content": False,
+            },
+            headers=owner_headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_node_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_node_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Shared Verse",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Shared preview verse"}},
+            },
+            headers=owner_headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": viewer_email, "permission": "viewer"},
+            headers=owner_headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={},
+            headers=viewer_headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["book_id"] == book_id
+        assert payload["preview_mode"] == "book"
+        assert len(payload["sections"]["body"]) >= 1
+
     def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
         headers = _register_and_login(client)
 
