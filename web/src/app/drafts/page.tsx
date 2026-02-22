@@ -717,45 +717,42 @@ function DraftsPageContent() {
   };
 
   const handleDeleteDraft = async (draft: DraftBook) => {
-    const confirmed = window.confirm(
-      `Delete draft \"${draft.title}\"? This cannot be undone.`
-    );
-    if (!confirmed) {
-      return;
-    }
-
     setBusyDraftId(draft.id);
     setMessage(null);
 
     try {
-      const response = await fetch(`/api/draft-books/${draft.id}`, {
+      let requiresForceDelete = draft.status === "published";
+      if (!requiresForceDelete) {
+        const snapshotsResponse = await fetch(`/api/draft-books/${draft.id}/snapshots`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (snapshotsResponse.ok) {
+          const snapshots = (await snapshotsResponse.json().catch(() => [])) as EditionSnapshot[];
+          requiresForceDelete = snapshots.length > 0;
+        }
+      }
+
+      const confirmed = window.confirm(
+        requiresForceDelete
+          ? `Delete draft \"${draft.title}\" and its snapshots? This cannot be undone.`
+          : `Delete draft \"${draft.title}\"? This cannot be undone.`
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const response = await fetch(
+        `/api/draft-books/${draft.id}${requiresForceDelete ? "?force=true" : ""}`,
+        {
         method: "DELETE",
         credentials: "include",
-      });
+        }
+      );
 
       const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null;
-      if (response.status === 409) {
-        const reason = extractApiErrorMessage(payload, "Draft cannot be deleted in current state.");
-        setMessage(`✗ ${reason}`);
-        const forceConfirmed = window.confirm("Are you sure you want to delete?");
-        if (!forceConfirmed) {
-          return;
-        }
-
-        const forceResponse = await fetch(`/api/draft-books/${draft.id}?force=true`, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        const forcePayload = (await forceResponse.json().catch(() => null)) as ApiErrorPayload | null;
-        if (!forceResponse.ok) {
-          throw new Error(
-            extractApiErrorMessage(
-              forcePayload,
-              `Failed to force delete draft (HTTP ${forceResponse.status})`
-            )
-          );
-        }
-      } else if (!response.ok) {
+      if (!response.ok) {
         throw new Error(
           extractApiErrorMessage(payload, `Failed to delete draft (HTTP ${response.status})`)
         );
