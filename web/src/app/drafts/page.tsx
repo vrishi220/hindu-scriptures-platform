@@ -734,11 +734,7 @@ function DraftsPageContent() {
         }
       }
 
-      const confirmed = window.confirm(
-        requiresForceDelete
-          ? `Delete draft \"${draft.title}\" and its snapshots? This cannot be undone.`
-          : `Delete draft \"${draft.title}\"? This cannot be undone.`
-      );
+      const confirmed = window.confirm("Are you sure you want to delete?");
       if (!confirmed) {
         return;
       }
