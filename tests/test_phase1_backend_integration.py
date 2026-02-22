@@ -1873,6 +1873,68 @@ class TestDraftBookAndEditionSnapshotIntegration:
         )
         assert persisted_bindings.get("level_template_keys", {}).get("verse") == "template.level.base.content_item.v1"
 
+    def test_preview_warns_and_publish_blocks_on_invalid_template_bindings(self, client):
+        headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "Invalid Template Binding Draft",
+                "description": "Template validation gate coverage",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.invalid"
+                        }
+                    },
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/draft-books/{draft_id}/preview/render",
+            json={},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        preview_payload = preview_response.json()
+
+        assert preview_payload["preview_mode"] == "draft"
+        assert len(preview_payload["warnings"]) == 1
+        assert "level_template_keys.verse" in preview_payload["warnings"][0]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={
+                "snapshot_data": {
+                    "front": [],
+                    "body": [
+                        {"title": "Verse 1", "level_name": "Verse", "order": 1},
+                    ],
+                    "back": [],
+                    "template_bindings": {
+                        "level_template_keys": {
+                            "verse": "template.level.invalid"
+                        }
+                    },
+                }
+            },
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = publish_response.json()["detail"]
+        assert detail["message"] == "Publish blocked by template validation."
+        assert len(detail["errors"]) == 1
+        assert "level_template_keys.verse" in detail["errors"][0]
+
     def test_publish_and_policy_failures_emit_audit_events(self, client, caplog):
         headers = _register_and_login(client)
         caplog.set_level("INFO", logger="api.draft_books")

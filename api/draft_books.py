@@ -2,6 +2,7 @@ import logging
 import textwrap
 import hashlib
 import json
+import re
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +50,7 @@ _SNAPSHOT_TEMPLATE_VERSION = "v1"
 _SNAPSHOT_TEMPLATE_PATTERN = "default.{section}.content_item.v1"
 _SNAPSHOT_RENDERER = "edition_snapshot_renderer"
 _SNAPSHOT_OUTPUT_PROFILE = "reader_pdf_parity_v1"
+_TEMPLATE_KEY_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*\.content_item\.v1$")
 
 
 def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> str | None:
@@ -309,6 +311,64 @@ def _read_template_key(value: object) -> str | None:
         if cleaned:
             return cleaned
     return None
+
+
+def _is_valid_template_key(template_key: str) -> bool:
+    return bool(_TEMPLATE_KEY_PATTERN.fullmatch(template_key))
+
+
+def _validate_template_bindings(snapshot_data: dict | None) -> list[str]:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_bindings = resolved_data.get("template_bindings")
+    bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+    if not bindings:
+        return []
+
+    errors: list[str] = []
+
+    def _validate_template_value(path: str, raw_value: object) -> None:
+        template_key = _read_template_key(raw_value)
+        if template_key is None:
+            return
+        if not _is_valid_template_key(template_key):
+            errors.append(
+                f"{path}: invalid template key '{template_key}' (must end with '.content_item.v1')"
+            )
+
+    _validate_template_value(
+        "global_template_key",
+        bindings.get("global_template_key") or bindings.get("global"),
+    )
+    _validate_template_value(
+        "book_template_key",
+        bindings.get("book_template_key") or bindings.get("book"),
+    )
+
+    raw_level_bindings = (
+        bindings.get("level_template_keys")
+        if isinstance(bindings.get("level_template_keys"), dict)
+        else bindings.get("levels")
+    )
+    if isinstance(raw_level_bindings, dict):
+        for level_name, raw_value in raw_level_bindings.items():
+            level_label = level_name.strip() if isinstance(level_name, str) and level_name.strip() else "<unknown>"
+            _validate_template_value(f"level_template_keys.{level_label}", raw_value)
+
+    raw_node_bindings = (
+        bindings.get("node_template_keys")
+        if isinstance(bindings.get("node_template_keys"), dict)
+        else bindings.get("nodes")
+    )
+    if isinstance(raw_node_bindings, dict):
+        for node_id, raw_value in raw_node_bindings.items():
+            parsed_node_id = _safe_int(node_id)
+            node_label = str(node_id)
+            if parsed_node_id is None:
+                errors.append(f"node_template_keys.{node_label}: invalid node id")
+                continue
+            _validate_template_value(f"node_template_keys.{parsed_node_id}", raw_value)
+
+    return errors
 
 
 def _extract_template_bindings(snapshot_data: dict | None) -> dict:
@@ -1191,6 +1251,23 @@ def publish_draft_book(
             ),
         )
 
+    template_binding_errors = _validate_template_bindings(resolved_snapshot_data)
+    if template_binding_errors:
+        _audit_event(
+            "publish.template_validation_failed",
+            current_user.id,
+            draft_id=draft_id,
+            error_count=len(template_binding_errors),
+            template_errors=template_binding_errors,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Publish blocked by template validation.",
+                "errors": template_binding_errors,
+            },
+        )
+
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
@@ -1292,6 +1369,7 @@ def preview_draft_render(
     resolved_snapshot_data = payload.snapshot_data or draft.section_structure or _default_sections()
     preview_payload = dict(resolved_snapshot_data)
     _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    template_warnings = _validate_template_bindings(preview_payload)
     _apply_template_metadata(preview_payload)
 
     sections = _materialize_snapshot_render_sections(preview_payload, db)
@@ -1304,6 +1382,7 @@ def preview_draft_render(
         render_settings=render_settings,
         template_metadata=template_metadata,
         preview_mode="session" if payload.session_template_bindings else "draft",
+        warnings=template_warnings,
     )
 
 

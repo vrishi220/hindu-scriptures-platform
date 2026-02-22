@@ -487,6 +487,7 @@ class DraftPreviewRenderArtifactPublic(BaseModel):
     render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
     preview_mode: Literal["session", "draft"] = "session"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ProvenanceRecordPublic(BaseModel):
