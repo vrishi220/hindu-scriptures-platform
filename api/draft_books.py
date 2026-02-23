@@ -16,7 +16,7 @@ from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
 from api.metadata import validate_draft_metadata_bindings_on_publish
-from api.users import get_current_user, require_permission
+from api.users import get_current_user, get_current_user_optional, require_permission
 from models.book import Book
 from models.book_share import BookShare
 from models.content_node import ContentNode
@@ -471,7 +471,10 @@ def _resolve_metadata_template_key(
     return None
 
 
-def _book_is_visible_to_user(db: Session, book: Book, user_id: int) -> bool:
+def _book_is_visible_to_user(db: Session, book: Book, user_id: int | None) -> bool:
+    if user_id is None:
+        return _book_visibility(book) == _BOOK_VISIBILITY_PUBLIC
+
     if _book_owner_id(book) == user_id:
         return True
 
@@ -738,6 +741,44 @@ def _ordered_nodes_by_hierarchy(nodes: list[ContentNode]) -> list[ContentNode]:
         ordered.append(node)
         _walk(node.id)
 
+    return ordered
+
+
+def _ordered_nodes_for_preview_scope(
+    nodes: list[ContentNode],
+    root_node_id: int | None,
+) -> list[ContentNode]:
+    if not nodes:
+        return []
+    if root_node_id is None:
+        return _ordered_nodes_by_hierarchy(nodes)
+
+    children_by_parent: dict[int | None, list[ContentNode]] = {}
+    node_by_id: dict[int, ContentNode] = {}
+    for node in nodes:
+        node_by_id[node.id] = node
+        parent_id = node.parent_node_id if isinstance(node.parent_node_id, int) else None
+        children_by_parent.setdefault(parent_id, []).append(node)
+
+    root = node_by_id.get(root_node_id)
+    if not root:
+        return []
+
+    for child_list in children_by_parent.values():
+        child_list.sort(key=_content_node_sort_key)
+
+    ordered: list[ContentNode] = []
+    visited_ids: set[int] = set()
+
+    def _walk(node: ContentNode) -> None:
+        if node.id in visited_ids:
+            return
+        visited_ids.add(node.id)
+        ordered.append(node)
+        for child in children_by_parent.get(node.id, []):
+            _walk(child)
+
+    _walk(root)
     return ordered
 
 
@@ -1255,7 +1296,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
 
 def _render_book_preview_template(
     preview_payload: dict,
-    book: Book,
+    display_title: str,
     sections: SnapshotRenderSections,
 ) -> BookPreviewTemplatePublic:
     template_bindings = _extract_template_bindings(preview_payload)
@@ -1286,7 +1327,7 @@ def _render_book_preview_template(
         children_summary = f"{children_summary} (+{hidden_count} more)" if children_summary else f"(+{hidden_count} more)"
 
     context = {
-        "title": _as_clean_string(book.book_name),
+        "title": _as_clean_string(display_title),
         "child_count": str(len(sections.body)),
         "children": children_summary,
     }
@@ -2272,14 +2313,15 @@ def preview_draft_render(
 def preview_book_render(
     book_id: int,
     payload: BookPreviewRenderRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
-    if not _book_is_visible_to_user(db, book, current_user.id):
+    current_user_id = current_user.id if current_user else None
+    if not _book_is_visible_to_user(db, book, current_user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     source_nodes = (
@@ -2287,7 +2329,21 @@ def preview_book_render(
         .filter(ContentNode.book_id == book.id)
         .all()
     )
-    source_nodes = _ordered_nodes_by_hierarchy(source_nodes)
+
+    root_node: ContentNode | None = None
+    if payload.node_id is not None:
+        root_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == payload.node_id, ContentNode.book_id == book.id)
+            .first()
+        )
+        if not root_node:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    source_nodes = _ordered_nodes_for_preview_scope(
+        source_nodes,
+        root_node.id if root_node else None,
+    )
 
     body_items = [
         {
@@ -2317,11 +2373,15 @@ def preview_book_render(
     sections = _materialize_snapshot_render_sections(preview_payload, db)
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
-    book_template = _render_book_preview_template(preview_payload, book, sections)
+    display_title = _book_title_for_preview(root_node) if root_node else book.book_name
+    book_template = _render_book_preview_template(preview_payload, display_title, sections)
 
     return BookPreviewRenderArtifactPublic(
         book_id=book.id,
         book_name=book.book_name,
+        preview_scope="node" if root_node else "book",
+        root_node_id=root_node.id if root_node else None,
+        root_title=display_title if root_node else None,
         sections={"body": sections.body},
         book_template=book_template,
         render_settings=render_settings,
