@@ -1,5 +1,6 @@
 """Integration tests for metadata governance and binding validation APIs."""
 
+import logging
 from uuid import uuid4
 
 from fastapi import status
@@ -237,3 +238,146 @@ class TestMetadataPublishValidation:
         )
         assert publish_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "metadata validation" in str(publish_response.json().get("detail", "")).lower()
+
+
+class TestMetadataAuditEvents:
+    def test_governance_endpoints_emit_audit_events(self, client, caplog):
+        admin_headers = _register_and_login_as_admin(client)
+        suffix = uuid4().hex[:8]
+
+        caplog.set_level(logging.INFO, logger="api.metadata")
+
+        create_prop = client.post(
+            "/api/metadata/property-definitions",
+            headers=admin_headers,
+            json={
+                "internal_name": f"audit_prop_{suffix}",
+                "display_name": "Audit Prop",
+                "data_type": "text",
+                "default_value": "d",
+                "is_required": False,
+            },
+        )
+        assert create_prop.status_code == status.HTTP_201_CREATED
+        prop_id = create_prop.json()["id"]
+
+        update_prop = client.patch(
+            f"/api/metadata/property-definitions/{prop_id}",
+            headers=admin_headers,
+            json={"display_name": "Audit Prop Updated"},
+        )
+        assert update_prop.status_code == status.HTTP_200_OK
+
+        create_cat = client.post(
+            "/api/metadata/categories",
+            headers=admin_headers,
+            json={
+                "name": f"audit_category_{suffix}",
+                "description": "Audit category",
+                "applicable_scopes": ["book"],
+                "parent_category_ids": [],
+                "properties": [],
+            },
+        )
+        assert create_cat.status_code == status.HTTP_201_CREATED
+        cat_id = create_cat.json()["id"]
+
+        publish_cat = client.post(
+            f"/api/metadata/categories/{cat_id}/publish",
+            headers=admin_headers,
+        )
+        assert publish_cat.status_code == status.HTTP_200_OK
+
+        delete_prop = client.delete(
+            f"/api/metadata/property-definitions/{prop_id}",
+            headers=admin_headers,
+        )
+        assert delete_prop.status_code == status.HTTP_204_NO_CONTENT
+
+        messages = "\n".join(record.getMessage() for record in caplog.records)
+        assert "metadata.property_definition.created" in messages
+        assert "metadata.property_definition.updated" in messages
+        assert "metadata.category.created" in messages
+        assert "metadata.category.published" in messages
+        assert "metadata.property_definition.deleted" in messages
+
+    def test_binding_endpoints_emit_audit_events(self, client, caplog):
+        admin_headers = _register_and_login_as_admin(client)
+        editor_headers = _register_and_login(client)
+        suffix = uuid4().hex[:8]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            headers=editor_headers,
+            json={
+                "title": f"Audit Binding Draft {suffix}",
+                "description": "Draft for binding audit",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        category_response = client.post(
+            "/api/metadata/categories",
+            headers=admin_headers,
+            json={
+                "name": f"audit_binding_category_{suffix}",
+                "description": "Binding category",
+                "applicable_scopes": ["book", "level", "node"],
+                "parent_category_ids": [],
+                "properties": [],
+            },
+        )
+        assert category_response.status_code == status.HTTP_201_CREATED
+        category_id = category_response.json()["id"]
+
+        caplog.set_level(logging.INFO, logger="api.metadata")
+
+        book_binding = client.post(
+            f"/api/metadata/draft-books/{draft_id}/metadata-binding",
+            headers=editor_headers,
+            json={
+                "category_id": category_id,
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert book_binding.status_code == status.HTTP_200_OK
+
+        patch_binding = client.patch(
+            f"/api/metadata/draft-books/{draft_id}/metadata-binding",
+            headers=editor_headers,
+            json={
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert patch_binding.status_code == status.HTTP_200_OK
+
+        level_binding = client.post(
+            f"/api/metadata/draft-books/{draft_id}/levels/1/metadata-binding",
+            headers=editor_headers,
+            json={
+                "category_id": category_id,
+                "scope_key": "verse",
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert level_binding.status_code == status.HTTP_200_OK
+
+        node_binding = client.post(
+            f"/api/metadata/draft-books/{draft_id}/sections/1/nodes/1/metadata-binding",
+            headers=editor_headers,
+            json={
+                "category_id": category_id,
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert node_binding.status_code == status.HTTP_200_OK
+
+        messages = "\n".join(record.getMessage() for record in caplog.records)
+        assert "metadata.binding.upserted" in messages
+        assert "metadata.binding.patched" in messages

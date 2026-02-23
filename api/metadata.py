@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -31,6 +32,17 @@ from models.user import User
 from services import get_db
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
+logger = logging.getLogger(__name__)
+
+
+def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
+    payload = {
+        "event": event_name,
+        "actor_user_id": actor_user_id,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    payload.update(fields)
+    logger.info("audit_event %s", payload)
 
 
 def _user_can_edit_draft(current_user: User, draft: DraftBook) -> bool:
@@ -378,6 +390,12 @@ def create_property_definition(
     db.add(item)
     db.commit()
     db.refresh(item)
+    _audit_event(
+        "metadata.property_definition.created",
+        current_user.id,
+        property_definition_id=item.id,
+        internal_name=item.internal_name,
+    )
     return _coerce_property_public(item)
 
 
@@ -426,6 +444,12 @@ def update_property_definition(
 
     db.commit()
     db.refresh(item)
+    _audit_event(
+        "metadata.property_definition.updated",
+        current_user.id,
+        property_definition_id=item.id,
+        internal_name=item.internal_name,
+    )
     return _coerce_property_public(item)
 
 
@@ -448,6 +472,12 @@ def delete_property_definition(
 
     db.delete(item)
     db.commit()
+    _audit_event(
+        "metadata.property_definition.deleted",
+        current_user.id,
+        property_definition_id=prop_id,
+        internal_name=item.internal_name,
+    )
 
 
 @router.post("/categories", response_model=CategoryPublic, status_code=status.HTTP_201_CREATED)
@@ -507,6 +537,12 @@ def create_category(
 
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.created",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+    )
     return _coerce_category_public(category)
 
 
@@ -569,6 +605,13 @@ def update_category(
     category.version = (category.version or 1) + 1
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.updated",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+        version=category.version,
+    )
     return _coerce_category_public(category)
 
 
@@ -587,6 +630,13 @@ def publish_category(
     category.version = (category.version or 1) + 1
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.published",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+        version=category.version,
+    )
     return _coerce_category_public(category)
 
 
@@ -611,6 +661,12 @@ def delete_category(
 
     db.delete(category)
     db.commit()
+    _audit_event(
+        "metadata.category.deleted",
+        current_user.id,
+        category_id=cat_id,
+        name=category.name,
+    )
 
 
 @router.get("/categories/{cat_id}/effective-properties", response_model=CategoryEffectivePropertiesPublic)
@@ -725,6 +781,15 @@ def upsert_draft_book_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -798,6 +863,15 @@ def patch_draft_book_metadata_binding(
 
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.patched",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -840,6 +914,15 @@ def upsert_level_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -882,4 +965,13 @@ def upsert_node_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
