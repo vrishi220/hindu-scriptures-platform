@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getMe } from "../../lib/authClient";
 
 type User = {
   id: number;
@@ -83,7 +82,6 @@ export default function AdminPage() {
   const [createRole, setCreateRole] = useState("viewer");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
 
   const parsePayload = (raw: string) => {
     if (!raw) {
@@ -139,20 +137,9 @@ export default function AdminPage() {
     }
   };
 
-  const loadAuth = async () => {
-    try {
-      const data = await getMe();
-      if (data) {
-        setAuthEmail(data.email || null);
-      }
-    } catch {
-      // Ignore auth errors on admin page
-    }
-  };
-
   useEffect(() => {
-    loadAuth();
     loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -307,18 +294,6 @@ export default function AdminPage() {
         type: "error",
         message: err instanceof Error ? err.message : "Delete failed",
       });
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      window.location.href = "/";
-    } catch {
-      window.location.href = "/";
     }
   };
 

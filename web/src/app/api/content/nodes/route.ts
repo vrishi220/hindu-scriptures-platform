@@ -27,7 +27,6 @@ const refreshAccessToken = async (refreshToken: string) => {
 export async function POST(request: Request) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = buildAuthHeader(accessToken);
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
   const body = await request.json().catch(() => null);
 

@@ -158,6 +158,7 @@ export default function MetadataCategoriesAdminPage() {
         await loadAll();
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

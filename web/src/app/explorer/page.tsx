@@ -96,12 +96,17 @@ export default function ExplorerPage() {
   const [collectPolicyError, setCollectPolicyError] = useState<string | null>(null);
   const [highlightedPickedNodeId, setHighlightedPickedNodeId] = useState<number | null>(null);
   const pickedNodeRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [authEmail, setAuthEmail] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [showLogin, setShowLogin] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [authStatus, setAuthStatus] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [canAdmin, setCanAdmin] = useState(false);
 
 
@@ -123,6 +128,7 @@ export default function ExplorerPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAuthMessage(null);
@@ -152,6 +158,7 @@ export default function ExplorerPage() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogout = async () => {
     setAuthMessage(null);
     setAuthStatus(null);
@@ -244,6 +251,7 @@ export default function ExplorerPage() {
       setSelectedNode(null);
       setLevelFilters([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSchemaId]);
 
   // Auto-select first book when books are loaded
@@ -260,6 +268,7 @@ export default function ExplorerPage() {
       setTree([]);
       setLevelFilters([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBookId]);
 
   useEffect(() => {
@@ -795,6 +804,7 @@ export default function ExplorerPage() {
     });
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderTreeNode = (node: ContentNode, depth: number = 0) => {
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = expandedIds.has(node.id);

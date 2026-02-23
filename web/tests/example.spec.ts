@@ -93,8 +93,6 @@ test.describe('Navigation', () => {
     await page.goto('http://localhost:3000');
     await page.waitForLoadState('domcontentloaded');
     
-    // Check that response was successful
-    const responses = await page.context().storageState().catch(() => ({}));
     // If we got here without error, the page loaded
     expect(true).toBe(true);
   });

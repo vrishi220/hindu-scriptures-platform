@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { getMe, invalidateMeCache } from "@/lib/authClient";
 
@@ -67,9 +68,11 @@ export default function NavBar() {
 
           {/* Logo - always visible */}
           <Link href="/" className="flex items-center gap-2">
-            <img
+            <Image
               src="/logo-mark.svg"
               alt="Hindu Scriptures"
+              width={32}
+              height={32}
               className="h-7 sm:h-8 w-7 sm:w-8"
             />
             <span className="inline text-sm font-semibold text-[color:var(--deep)]">

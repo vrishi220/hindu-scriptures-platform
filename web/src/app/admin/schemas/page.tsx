@@ -47,9 +47,7 @@ export default function SchemaBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
-  const [canEdit, setCanEdit] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
 
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
@@ -74,19 +72,16 @@ export default function SchemaBuilderPage() {
     try {
       const data = await getMe();
       if (!data) {
-        setCanEdit(false);
         setCanAdmin(false);
         setAccessDenied(true);
         return;
       }
-      setAuthEmail(data.email || null);
       const allowEdit = Boolean(
         data.permissions?.can_edit || data.role === "editor" || data.role === "admin"
       );
       const allowAdmin = Boolean(
         data.permissions?.can_admin || data.role === "admin"
       );
-      setCanEdit(allowEdit);
       setCanAdmin(allowAdmin);
       setAccessDenied(!allowEdit && !allowAdmin);
     } catch {
@@ -359,18 +354,6 @@ export default function SchemaBuilderPage() {
       });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      window.location.href = "/";
-    } catch {
-      window.location.href = "/";
     }
   };
 

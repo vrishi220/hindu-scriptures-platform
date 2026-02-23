@@ -22,8 +22,6 @@ type TreeNode = {
 
 export default function ContributePage() {
   const [canContribute, setCanContribute] = useState(false);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [canAdmin, setCanAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [books, setBooks] = useState<BookOption[]>([]);
   const [bookId, setBookId] = useState("");
@@ -51,7 +49,6 @@ export default function ContributePage() {
         const data = await getMe();
 
         if (data) {
-          setAuthEmail(data.email || null);
           setCanContribute(
             Boolean(
               data.permissions?.can_contribute ||
@@ -61,7 +58,6 @@ export default function ContributePage() {
                 data.role === "admin"
             )
           );
-          setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
         }
       } catch (err) {
         console.error("Auth check error:", err);
@@ -199,18 +195,6 @@ export default function ContributePage() {
       });
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleSignOut = async () => {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      window.location.href = "/";
-    } catch {
-      window.location.href = "/";
     }
   };
 

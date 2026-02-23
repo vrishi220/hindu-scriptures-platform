@@ -63,7 +63,6 @@ export async function PATCH(
 ) {
   const store = await cookies();
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
-  const authHeader = buildAuthHeader(accessToken);
   const resolvedParams = await params;
   const body = await request.json().catch(() => null);
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;

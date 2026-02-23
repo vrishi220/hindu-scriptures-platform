@@ -72,18 +72,18 @@ function HomeContent() {
   const [total, setTotal] = useState(0);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const [, setAuthMessage] = useState<string | null>(null);
+  const [, setAuthStatus] = useState<string | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [treeError, setTreeError] = useState<string | null>(null);
+  const [, setShowLogin] = useState(false);
+  const [, setAuthEmail] = useState<string | null>(null);
+  const [, setTreeData] = useState<TreeNode[]>([]);
+  const [, setTreeLoading] = useState(false);
+  const [, setTreeError] = useState<string | null>(null);
   const treeCacheRef = useRef<Map<string, TreeNode[]>>(new Map());
-  const [cachedTreeBooks, setCachedTreeBooks] = useState<Set<string>>(new Set());
+  const [, setCachedTreeBooks] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<{
     books_count: number;
     nodes_count: number;
@@ -489,11 +489,13 @@ function HomeContent() {
     runSearch(query);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const quickSearch = (term: string) => {
     setQuery(term);
     setTimeout(() => runSearch(term), 0);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAuthMessage(null);
@@ -612,19 +614,6 @@ function HomeContent() {
 
   // Helper function to build breadcrumb path for a node from tree
   const buildNodePath = (nodeId: number, nodes: TreeNode[]): TreeNode[] => {
-    const path: TreeNode[] = [];
-    
-    const findNode = (id: number, nodeList: TreeNode[]): TreeNode | null => {
-      for (const node of nodeList) {
-        if (node.id === id) return node;
-        if (node.children) {
-          const found = findNode(id, node.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
     // Build path from root to target node
     const buildFullPath = (id: number, nodeList: TreeNode[], currentPath: TreeNode[] = []): TreeNode[] | null => {
       for (const node of nodeList) {
@@ -674,6 +663,7 @@ function HomeContent() {
     );
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderTree = (nodes: TreeNode[], depth = 0) => {
     return nodes.map((node) => (
       <div key={node.id} className="mt-2">
@@ -761,6 +751,7 @@ function HomeContent() {
     ));
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogout = async () => {
     setAuthMessage(null);
     setAuthStatus(null);

@@ -285,6 +285,7 @@ export default function BasketPanel({
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getValidChildLevels = (parentLevel: string | null, schemaLevels: string[]): string[] => {
     if (!parentLevel || parentLevel === "BOOK") {
       // Root level - can only add first level
@@ -356,6 +357,7 @@ export default function BasketPanel({
     setShowOrganizer(true);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addOrganizationalNode = (level: string, levelOrder: number, title: string) => {
     // Verify that this level can have organizational nodes (not leaf level)
     if (!canAddAtLevel(level, targetSchemaLevels, "placeholder")) {
@@ -375,6 +377,7 @@ export default function BasketPanel({
     setOrganizedTree([...organizedTree, newNode]);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const moveNodeUnderParent = (nodeId: string, parentId: string | null) => {
     // Move a node to be a child of another node (or root if parentId is null)
     const cloneTree = JSON.parse(JSON.stringify(organizedTree)) as OrganizedNode[];
@@ -605,6 +608,7 @@ export default function BasketPanel({
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addOrganizedNodesToBook = async (
     bookId: number,
     tree: OrganizedNode[],

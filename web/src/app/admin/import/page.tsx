@@ -65,8 +65,6 @@ interface HTMLImportConfig {
   import_type: "html";
 }
 
-type ImportConfig = PDFImportConfig | HTMLImportConfig;
-
 interface ImportResponse {
   success: boolean;
   book_id?: number;
@@ -567,7 +565,7 @@ export default function AdminImportPage() {
                               extraction_rules: parsed,
                             });
                             setError(null);
-                          } catch (err) {
+                          } catch {
                             // Only set error if user is done typing
                           }
                         }}
@@ -847,7 +845,7 @@ export default function AdminImportPage() {
                             },
                           }));
                           setError(null);
-                        } catch (err) {
+                        } catch {
                           // Only set error if user is done typing
                         }
                       }}

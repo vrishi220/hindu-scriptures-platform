@@ -36,12 +36,14 @@ export default function CompilationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [publishingId, setPublishingId] = useState<number | null>(null);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
   const [bookName, setBookName] = useState("");
   const [bookCode, setBookCode] = useState("");
   const [languagePrimary, setLanguagePrimary] = useState("sanskrit");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -136,6 +138,7 @@ export default function CompilationsPage() {
     await loadSchemas();
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handlePublishSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!publishingId || !selectedSchema) return;

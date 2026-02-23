@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShoppingBasket } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
@@ -232,7 +232,7 @@ function ScripturesContent() {
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
-  const [authStatus, setAuthStatus] = useState<string | null>(null);
+  const [, setAuthStatus] = useState<string | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [canAdmin, setCanAdmin] = useState(false);
@@ -796,6 +796,7 @@ function ScripturesContent() {
     }
 
     if (!urlInitialized) setUrlInitialized(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get("book"), searchParams.get("from"), searchParams.get("searchContext"), bookId, urlInitialized]);
 
   // Watch for book ID changes and load tree with optional node auto-selection
@@ -840,6 +841,7 @@ function ScripturesContent() {
       setBreadcrumb([]);
       setNodeContent(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId, urlInitialized, searchParams.get("node"), treeData]);
 
   useEffect(() => {
@@ -1534,6 +1536,7 @@ function ScripturesContent() {
     return nextLevelIndex < schemaLevels.length;
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getSiblings = (): TreeNode[] => {
     if (breadcrumb.length <= 1) {
       // Current node is root or no parent
@@ -1828,6 +1831,7 @@ function ScripturesContent() {
     ));
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSignOut = async () => {
     setBasketItems([]);
     invalidateMeCache();
@@ -1842,6 +1846,7 @@ function ScripturesContent() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAuthMessage(null);

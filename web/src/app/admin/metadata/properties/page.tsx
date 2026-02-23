@@ -131,6 +131,7 @@ export default function MetadataPropertiesAdminPage() {
         await loadProperties();
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
