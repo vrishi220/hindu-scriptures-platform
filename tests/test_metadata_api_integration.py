@@ -381,3 +381,101 @@ class TestMetadataAuditEvents:
         messages = "\n".join(record.getMessage() for record in caplog.records)
         assert "metadata.binding.upserted" in messages
         assert "metadata.binding.patched" in messages
+
+
+class TestMetadataDeprecationSemantics:
+    def test_deprecated_property_cannot_be_assigned_to_new_category(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        suffix = uuid4().hex[:8]
+
+        prop_response = client.post(
+            "/api/metadata/property-definitions",
+            headers=admin_headers,
+            json={
+                "internal_name": f"deprecated_prop_{suffix}",
+                "display_name": "Deprecated Prop",
+                "data_type": "text",
+                "default_value": "x",
+                "is_required": False,
+            },
+        )
+        assert prop_response.status_code == status.HTTP_201_CREATED
+        prop_id = prop_response.json()["id"]
+
+        deprecate_response = client.post(
+            f"/api/metadata/property-definitions/{prop_id}/deprecate",
+            headers=admin_headers,
+        )
+        assert deprecate_response.status_code == status.HTTP_200_OK
+        assert deprecate_response.json()["is_deprecated"] is True
+        assert deprecate_response.json().get("deprecated_at")
+
+        category_response = client.post(
+            "/api/metadata/categories",
+            headers=admin_headers,
+            json={
+                "name": f"category_with_deprecated_prop_{suffix}",
+                "description": "Should fail",
+                "applicable_scopes": ["book"],
+                "parent_category_ids": [],
+                "properties": [
+                    {
+                        "property_definition_id": prop_id,
+                        "order": 1,
+                    }
+                ],
+            },
+        )
+        assert category_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "deprecated properties" in str(category_response.json().get("detail", "")).lower()
+
+    def test_deprecated_category_cannot_be_used_for_new_binding(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        editor_headers = _register_and_login(client)
+        suffix = uuid4().hex[:8]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            headers=editor_headers,
+            json={
+                "title": f"Deprecated Category Draft {suffix}",
+                "description": "Draft for deprecation test",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        category_response = client.post(
+            "/api/metadata/categories",
+            headers=admin_headers,
+            json={
+                "name": f"deprecated_category_{suffix}",
+                "description": "Deprecated category",
+                "applicable_scopes": ["book"],
+                "parent_category_ids": [],
+                "properties": [],
+            },
+        )
+        assert category_response.status_code == status.HTTP_201_CREATED
+        category_id = category_response.json()["id"]
+
+        deprecate_category = client.post(
+            f"/api/metadata/categories/{category_id}/deprecate",
+            headers=admin_headers,
+        )
+        assert deprecate_category.status_code == status.HTTP_200_OK
+        assert deprecate_category.json()["is_deprecated"] is True
+        assert deprecate_category.json().get("deprecated_at")
+
+        binding_response = client.post(
+            f"/api/metadata/draft-books/{draft_id}/metadata-binding",
+            headers=editor_headers,
+            json={
+                "category_id": category_id,
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert binding_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "deprecated categories" in str(binding_response.json().get("detail", "")).lower()

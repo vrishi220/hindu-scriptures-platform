@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS property_definitions (
   default_value JSONB,
   is_required BOOLEAN NOT NULL DEFAULT false,
   is_system BOOLEAN NOT NULL DEFAULT false,
+  is_deprecated BOOLEAN NOT NULL DEFAULT false,
+  deprecated_at TIMESTAMP,
   dropdown_options VARCHAR(255)[],
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
@@ -126,6 +128,8 @@ CREATE TABLE IF NOT EXISTS categories (
   version INTEGER NOT NULL DEFAULT 1,
   is_system BOOLEAN NOT NULL DEFAULT false,
   is_published BOOLEAN NOT NULL DEFAULT false,
+  is_deprecated BOOLEAN NOT NULL DEFAULT false,
+  deprecated_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -167,9 +171,11 @@ CREATE TABLE IF NOT EXISTS category_parents (
 
 CREATE INDEX IF NOT EXISTS idx_property_definitions_internal_name ON property_definitions(internal_name);
 CREATE INDEX IF NOT EXISTS idx_property_definitions_is_system ON property_definitions(is_system);
+CREATE INDEX IF NOT EXISTS idx_property_definitions_is_deprecated ON property_definitions(is_deprecated);
 CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name);
 CREATE INDEX IF NOT EXISTS idx_categories_is_system ON categories(is_system);
 CREATE INDEX IF NOT EXISTS idx_categories_is_published ON categories(is_published);
+CREATE INDEX IF NOT EXISTS idx_categories_is_deprecated ON categories(is_deprecated);
 CREATE INDEX IF NOT EXISTS idx_category_properties_category_id ON category_properties(category_id);
 CREATE INDEX IF NOT EXISTS idx_category_properties_property_definition_id ON category_properties(property_definition_id);
 CREATE INDEX IF NOT EXISTS idx_metadata_bindings_entity_type ON metadata_bindings(entity_type);

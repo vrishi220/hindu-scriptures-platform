@@ -49,6 +49,8 @@ class PropertyDefinitionPublic(PropertyDefinitionBase):
 
     id: int
     is_system: bool
+    is_deprecated: bool
+    deprecated_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -113,6 +115,8 @@ class CategoryPublic(CategoryBase):
     version: int
     is_system: bool
     is_published: bool
+    is_deprecated: bool
+    deprecated_at: str | None = None
     created_at: str
     updated_at: str
 
