@@ -591,7 +591,17 @@ def delete_book(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    _ensure_book_edit_access(db, current_user, book)
+    owner_id = _book_owner_id(book)
+    is_owner = owner_id is not None and owner_id == current_user.id
+
+    if not _user_can_edit_any(current_user) and not is_owner:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the book owner can delete this book")
+
+    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC and not _user_can_edit_any(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public books cannot be deleted. Unpublish the book first.",
+        )
 
     db.delete(book)
     db.commit()
