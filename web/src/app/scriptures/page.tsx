@@ -822,14 +822,28 @@ function ScripturesContent() {
 
   const currentBookMetadata =
     currentBook?.metadata_json || currentBook?.metadata || null;
+  const parsedCurrentBookOwnerId = (() => {
+    const owner = currentBookMetadata?.owner_id;
+    if (typeof owner === "number") return owner;
+    if (typeof owner === "string") {
+      const parsed = Number.parseInt(owner, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  })();
   const currentBookOwnerId =
-    typeof currentBookMetadata?.owner_id === "number"
-      ? currentBookMetadata.owner_id
-      : null;
+    parsedCurrentBookOwnerId;
+  const isCurrentBookOwner =
+    authUserId !== null && currentBookOwnerId !== null && currentBookOwnerId === authUserId;
+  const canEditCurrentBook = Boolean(currentBook) && (canEdit || canAdmin || isCurrentBookOwner);
+  const canDeleteCurrentBook =
+    Boolean(currentBook) &&
+    (canAdmin ||
+      (isCurrentBookOwner && (currentBook?.visibility || "private") !== "public"));
   const canTogglePublish =
     Boolean(bookId) &&
     Boolean(currentBook) &&
-    (canAdmin || (authUserId !== null && currentBookOwnerId === authUserId));
+    (canAdmin || isCurrentBookOwner);
   const canManageShares = canTogglePublish;
 
   const handleTogglePublish = async () => {
@@ -878,6 +892,53 @@ function ScripturesContent() {
       alert("Failed to update publish state");
     } finally {
       setBookVisibilitySubmitting(false);
+    }
+  };
+
+  const handleDeleteCurrentBook = async () => {
+    if (!bookId || !currentBook) return;
+
+    const isPublic = (currentBook.visibility || "private") === "public";
+    if (isPublic && !canAdmin) {
+      alert("Public books cannot be deleted. Unpublish the book first.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Delete "${currentBook.book_name}"? This will permanently remove all nested content.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        alert(payload?.detail || "Failed to delete book");
+        return;
+      }
+
+      setShowBookActionsMenu(false);
+      setShowShareManager(false);
+      setSelectedId(null);
+      setNodeContent(null);
+      setTreeData([]);
+      setExpandedIds(new Set());
+      setBreadcrumb([]);
+      setCurrentBook(null);
+      setBookId("");
+      await loadBooksRefresh();
+      router.replace("/scriptures");
+    } catch {
+      alert("Failed to delete book");
     }
   };
 
@@ -2463,7 +2524,7 @@ function ScripturesContent() {
                         Manage sharing
                       </button>
                     )}
-                    {canEdit && bookId && (
+                    {canEditCurrentBook && bookId && (
                       <button
                         type="button"
                         onClick={() => {
@@ -2474,6 +2535,19 @@ function ScripturesContent() {
                       >
                         <SlidersHorizontal size={14} />
                         Book properties
+                      </button>
+                    )}
+                    {canDeleteCurrentBook && bookId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBookActionsMenu(false);
+                          void handleDeleteCurrentBook();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                      >
+                        <Trash2 size={14} />
+                        Delete book
                       </button>
                     )}
                   </div>
@@ -2679,7 +2753,7 @@ function ScripturesContent() {
                   </div>
                   {selectedId && !isLeafSelected && (
                     <>
-                      {!(canEdit || canAdmin) && (
+                      {!canEditCurrentBook && (
                         <button
                           type="button"
                           onClick={() => {
@@ -2712,7 +2786,7 @@ function ScripturesContent() {
                   <div
                     className="flex items-center justify-between mb-4"
                     onContextMenu={(event) => {
-                      if (!(isLeafSelected || canEdit || canAdmin)) {
+                      if (!(isLeafSelected || canEditCurrentBook)) {
                         return;
                       }
                       event.preventDefault();
@@ -2762,7 +2836,7 @@ function ScripturesContent() {
                           →
                         </button>
                       </div>
-                      {(isLeafSelected || canEdit || canAdmin) && (
+                      {(isLeafSelected || canEditCurrentBook) && (
                         <div ref={nodeActionsMenuRef} className="relative">
                           <button
                             type="button"
@@ -2831,7 +2905,7 @@ function ScripturesContent() {
                                   Copy node link
                                 </button>
                               )}
-                              {canEdit && (
+                              {canEditCurrentBook && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -2844,7 +2918,7 @@ function ScripturesContent() {
                                   Node properties
                                 </button>
                               )}
-                              {canEdit && (
+                              {canEditCurrentBook && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -2871,7 +2945,7 @@ function ScripturesContent() {
                                   Edit node
                                 </button>
                               )}
-                              {canAdmin && (
+                              {canEditCurrentBook && (
                                 <button
                                   type="button"
                                   onClick={async () => {

@@ -1400,7 +1400,7 @@ function DraftsPageContent() {
                               <MoreVertical size={16} />
                             </button>
                             {openHeaderActionsDraftId === draft.id && (
-                              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              <div className="absolute right-0 z-40 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -1690,7 +1690,7 @@ function DraftsPageContent() {
                                 <MoreVertical size={16} />
                               </button>
                               {openManageActionsDraftId === draft.id && (
-                                <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                <div className="absolute left-0 z-40 mt-2 w-56 max-w-[calc(100vw-1rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl">
                                   <button
                                     type="button"
                                     onClick={() => {
