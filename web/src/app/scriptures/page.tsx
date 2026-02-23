@@ -407,6 +407,35 @@ function ScripturesContent() {
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
+  const [showBookActionsMenu, setShowBookActionsMenu] = useState(false);
+  const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
+  const bookActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (bookActionsMenuRef.current && !bookActionsMenuRef.current.contains(target)) {
+        setShowBookActionsMenu(false);
+      }
+      if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
+        setShowNodeActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
+
+  useEffect(() => {
+    setShowBookActionsMenu(false);
+  }, [bookId]);
+
+  useEffect(() => {
+    setShowNodeActionsMenu(false);
+  }, [selectedId]);
 
   const resolvePreviewContentLines = (
     block: BookPreviewBlock,
@@ -2251,132 +2280,135 @@ function ScripturesContent() {
                 ))}
               </select>
             </label>
-            {bookId && (
-              <div className="flex items-center gap-2">
+            {(bookId || canContribute) && (
+              <div ref={bookActionsMenuRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => {
-                    void handleAddBookAsDraftBody();
-                  }}
-                  disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
-                  title="Add this book as body to your basket"
-                  aria-label="Add book as body"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-amber-500/30 bg-amber-50 text-lg text-amber-700 transition hover:border-amber-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => setShowBookActionsMenu((prev) => !prev)}
+                  title="Book actions"
+                  aria-label="Book actions"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-lg text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                 >
-                  {bookBodyAddLoading ? "⏳" : "🧺"}
+                  ⋮
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleCreateDraftFromBookBody();
-                  }}
-                  disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                  title="Create a new draft from this book body"
-                  aria-label="Create draft from book"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-lg text-zinc-700 transition hover:bg-zinc-50 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {bookBodyCreateDraftLoading ? "⏳" : "📝"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handlePreviewBook();
-                  }}
-                  disabled={bookPreviewLoading}
-                  title="Preview this book"
-                  aria-label="Preview book"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-lg text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {bookPreviewLoading ? "⏳" : "👁"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = `${window.location.origin}/scriptures?book=${bookId}`;
-                    navigator.clipboard.writeText(url);
-                    setAuthMessage("Link copied.");
-                    setCopyTarget("book");
-                    setTimeout(() => {
-                      setAuthMessage(null);
-                      setCopyTarget(null);
-                    }, 2000);
-                  }}
-                  title="Copy link to this book"
-                  aria-label="Copy book link"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50/50 text-lg text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
-                >
-                  🔗
-                </button>
-                {isCopyMessage && copyTarget === "book" && !showLogin && (
-                  <div className="rounded-full bg-blue-500 px-3 py-1 text-[10px] text-white shadow">
-                    {authMessage}
+                {showBookActionsMenu && (
+                  <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                    {bookId && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBookActionsMenu(false);
+                            void handleAddBookAsDraftBody();
+                          }}
+                          disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {bookBodyAddLoading ? "Adding to basket..." : "Add book as body to basket"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBookActionsMenu(false);
+                            void handleCreateDraftFromBookBody();
+                          }}
+                          disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBookActionsMenu(false);
+                            void handlePreviewBook();
+                          }}
+                          disabled={bookPreviewLoading}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {bookPreviewLoading ? "Loading preview..." : "Preview book"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/scriptures?book=${bookId}`;
+                            navigator.clipboard.writeText(url);
+                            setShowBookActionsMenu(false);
+                            setAuthMessage("Link copied.");
+                            setCopyTarget("book");
+                            setTimeout(() => {
+                              setAuthMessage(null);
+                              setCopyTarget(null);
+                            }, 2000);
+                          }}
+                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                        >
+                          Copy book link
+                        </button>
+                      </>
+                    )}
+                    {canContribute && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBookActionsMenu(false);
+                          loadSchemas();
+                          setShowCreateBook(true);
+                        }}
+                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Create book
+                      </button>
+                    )}
+                    {canTogglePublish && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBookActionsMenu(false);
+                          void handleTogglePublish();
+                        }}
+                        disabled={bookVisibilitySubmitting}
+                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {bookVisibilitySubmitting
+                          ? "Updating visibility..."
+                          : currentBook?.visibility === "public"
+                          ? "Unpublish book"
+                          : "Publish book"}
+                      </button>
+                    )}
+                    {canManageShares && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBookActionsMenu(false);
+                          void handleOpenShareManager();
+                        }}
+                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Manage sharing
+                      </button>
+                    )}
+                    {canEdit && bookId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBookActionsMenu(false);
+                          void openPropertiesModal("book");
+                        }}
+                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Book properties
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             )}
-            {canContribute && (
-              <button
-                type="button"
-                onClick={() => {
-                  loadSchemas();
-                  setShowCreateBook(true);
-                }}
-                title="Create book"
-                aria-label="Create book"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-lg text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm"
-              >
-                ➕
-              </button>
-            )}
-            {canTogglePublish && (
-              <button
-                type="button"
-                onClick={handleTogglePublish}
-                disabled={bookVisibilitySubmitting}
-                title={
-                  currentBook?.visibility === "public"
-                    ? "Unpublish this book"
-                    : "Publish this book"
-                }
-                aria-label={
-                  currentBook?.visibility === "public"
-                    ? "Unpublish book"
-                    : "Publish book"
-                }
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-500/30 bg-indigo-50 text-lg text-indigo-700 transition hover:border-indigo-500/60 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {bookVisibilitySubmitting
-                  ? "⏳"
-                  : currentBook?.visibility === "public"
-                  ? "📕"
-                  : "📗"}
-              </button>
-            )}
-            {canManageShares && (
-              <button
-                type="button"
-                onClick={() => {
-                  void handleOpenShareManager();
-                }}
-                title="Manage book sharing"
-                aria-label="Manage shares"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-50 text-lg text-purple-700 transition hover:border-purple-500/60 hover:shadow-sm"
-              >
-                👥
-              </button>
-            )}
-            {canEdit && bookId && (
-              <button
-                type="button"
-                onClick={() => {
-                  void openPropertiesModal("book");
-                }}
-                title="Book properties"
-                aria-label="Book properties"
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 px-3 text-xs font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-              >
-                Properties
-              </button>
+            {isCopyMessage && copyTarget === "book" && !showLogin && (
+              <div className="rounded-full bg-blue-500 px-3 py-1 text-[10px] text-white shadow">
+                {authMessage}
+              </div>
             )}
             {bookId && currentBook && (
               <span
@@ -2643,103 +2675,124 @@ function ScripturesContent() {
                           →
                         </button>
                       </div>
-                      {isLeafSelected && (
-                        <>
+                      {(isLeafSelected || canEdit || canAdmin) && (
+                        <div ref={nodeActionsMenuRef} className="relative">
                           <button
                             type="button"
-                            onClick={addCurrentToBasket}
-                            disabled={basketItems.some((item) => item.node_id === nodeContent.id)}
-                            title={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
-                            aria-label={basketItems.some((item) => item.node_id === nodeContent.id) ? "Already in basket" : "Add to basket"}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-sm text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-md disabled:opacity-50"
+                            onClick={() => setShowNodeActionsMenu((prev) => !prev)}
+                            title="Node actions"
+                            aria-label="Node actions"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                           >
-                            <ShoppingBasket size={14} />
+                            ⋮
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
-                              navigator.clipboard.writeText(url);
-                              setAuthMessage("Link copied.");
-                              setCopyTarget("leaf");
-                              setTimeout(() => {
-                                setAuthMessage(null);
-                                setCopyTarget(null);
-                              }, 2000);
-                            }}
-                            title="Copy shareable link"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50 text-sm text-blue-700 transition hover:border-blue-500/60 hover:shadow-md"
-                          >
-                            🔗
-                          </button>
-                          {isCopyMessage && copyTarget === "leaf" && !showLogin && (
-                            <div className="rounded-full bg-blue-500 px-3 py-1 text-xs text-white shadow">
-                              {authMessage}
+                          {showNodeActionsMenu && (
+                            <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              {isLeafSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    addCurrentToBasket();
+                                  }}
+                                  disabled={basketItems.some((item) => item.node_id === nodeContent.id)}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <ShoppingBasket size={14} />
+                                  {basketItems.some((item) => item.node_id === nodeContent.id)
+                                    ? "Already in basket"
+                                    : "Add to basket"}
+                                </button>
+                              )}
+                              {isLeafSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
+                                    navigator.clipboard.writeText(url);
+                                    setShowNodeActionsMenu(false);
+                                    setAuthMessage("Link copied.");
+                                    setCopyTarget("leaf");
+                                    setTimeout(() => {
+                                      setAuthMessage(null);
+                                      setCopyTarget(null);
+                                    }, 2000);
+                                  }}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  Copy node link
+                                </button>
+                              )}
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    void openPropertiesModal("node", nodeContent.id);
+                                  }}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  Node properties
+                                </button>
+                              )}
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    if (!nodeContent) return;
+                                    const foundNode = findNodeById(treeData, selectedId);
+                                    const fallbackNode: TreeNode = foundNode || {
+                                      id: nodeContent.id,
+                                      level_name: nodeContent.level_name,
+                                      level_order: nodeContent.level_order,
+                                      sequence_number: nodeContent.sequence_number ?? null,
+                                      title_english: nodeContent.title_english ?? null,
+                                      title_sanskrit: nodeContent.title_sanskrit ?? null,
+                                      title_transliteration: nodeContent.title_transliteration ?? null,
+                                      children: [],
+                                    };
+                                    setActionNode(fallbackNode);
+                                    setFormData(buildFormDataFromNode(nodeContent));
+                                    setAction("edit");
+                                  }}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  Edit node
+                                </button>
+                              )}
+                              {canAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    setShowNodeActionsMenu(false);
+                                    if (window.confirm("Delete this node? This cannot be undone.")) {
+                                      try {
+                                        await fetch(contentPath(`/nodes/${selectedId}`), {
+                                          method: "DELETE",
+                                          credentials: "include",
+                                        });
+                                        setSelectedId(null);
+                                        setNodeContent(null);
+                                        if (bookId) loadTree(bookId);
+                                      } catch {
+                                        alert("Failed to delete");
+                                      }
+                                    }
+                                  }}
+                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                >
+                                  Delete node
+                                </button>
+                              )}
                             </div>
                           )}
-                        </>
+                        </div>
                       )}
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void openPropertiesModal("node", nodeContent.id);
-                          }}
-                          title="Node properties"
-                          className="flex h-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                        >
-                          Props
-                        </button>
-                      )}
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!nodeContent) return;
-                            const foundNode = findNodeById(treeData, selectedId);
-                            const fallbackNode: TreeNode = foundNode || {
-                              id: nodeContent.id,
-                              level_name: nodeContent.level_name,
-                              level_order: nodeContent.level_order,
-                              sequence_number: nodeContent.sequence_number ?? null,
-                              title_english: nodeContent.title_english ?? null,
-                              title_sanskrit: nodeContent.title_sanskrit ?? null,
-                              title_transliteration: nodeContent.title_transliteration ?? null,
-                              children: [],
-                            };
-                            setActionNode(fallbackNode);
-                            setFormData(buildFormDataFromNode(nodeContent));
-                            setAction("edit");
-                          }}
-                          title="Edit"
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50 text-sm text-blue-700 transition hover:border-blue-500/60 hover:shadow-md"
-                        >
-                          ✎
-                        </button>
-                      )}
-                      {canAdmin && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (window.confirm("Delete this node? This cannot be undone.")) {
-                              try {
-                                await fetch(contentPath(`/nodes/${selectedId}`), {
-                                  method: "DELETE",
-                                  credentials: "include",
-                                });
-                                setSelectedId(null);
-                                setNodeContent(null);
-                                if (bookId) loadTree(bookId);
-                              } catch {
-                                alert("Failed to delete");
-                              }
-                            }
-                          }}
-                          title="Delete"
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-500/30 bg-red-50 text-sm text-red-700 transition hover:border-red-500/60 hover:shadow-md"
-                        >
-                          🗑
-                        </button>
+                      {isCopyMessage && copyTarget === "leaf" && !showLogin && (
+                        <div className="rounded-full bg-blue-500 px-3 py-1 text-xs text-white shadow">
+                          {authMessage}
+                        </div>
                       )}
                     </div>
                   </div>
