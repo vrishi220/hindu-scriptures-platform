@@ -3047,7 +3047,7 @@ function ScripturesContent() {
 
                           const primaryLabel =
                             sourceLanguage === "sanskrit"
-                              ? "Sanskrit"
+                              ? "Sanskrit (Original)"
                               : sourceLanguage === "hindi"
                               ? "Hindi/Translation"
                               : "English Translation";
@@ -3079,7 +3079,7 @@ function ScripturesContent() {
                                 renderedSanskrit !== primaryContent && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    Sanskrit
+                                    Sanskrit (Original)
                                   </div>
                                   <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
                                     {renderedSanskrit}
