@@ -1357,6 +1357,21 @@ def get_node_book_metadata_binding(
         .first()
     )
     if not binding:
+        binding = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.entity_id == node_id,
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.root_entity_id.is_(None),
+            )
+            .first()
+        )
+        if binding and binding.root_entity_id is None:
+            binding.root_entity_id = book_id
+            db.commit()
+            db.refresh(binding)
+    if not binding:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
 
     return _resolve_binding_metadata(binding, db)
@@ -1389,6 +1404,21 @@ def patch_node_book_metadata_binding(
         )
         .first()
     )
+    if not binding:
+        binding = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.entity_id == node_id,
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.root_entity_id.is_(None),
+            )
+            .first()
+        )
+        if binding and binding.root_entity_id is None:
+            binding.root_entity_id = book_id
+            db.commit()
+            db.refresh(binding)
     if not binding:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
 
