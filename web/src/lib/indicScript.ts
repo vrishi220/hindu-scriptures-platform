@@ -36,6 +36,7 @@ const SCHEME_BY_OPTION: Record<TransliterationScriptOption, string> = {
 };
 
 const SCRIPT_SET = new Set<string>(TRANSLITERATION_SCRIPT_OPTIONS);
+const DEVANAGARI_LETTER_PATTERN = /[\u0904-\u0939\u0958-\u0961\u0971-\u097F]/;
 
 export const normalizeTransliterationScript = (
   value?: string | null
@@ -55,6 +56,11 @@ export const normalizeTransliterationScript = (
 
 export const isRomanScript = (script: TransliterationScriptOption): boolean =>
   ROMAN_SCRIPT_OPTIONS.includes(script as (typeof ROMAN_SCRIPT_OPTIONS)[number]);
+
+export const hasDevanagariLetters = (text: string): boolean => {
+  if (!text) return false;
+  return DEVANAGARI_LETTER_PATTERN.test(text);
+};
 
 const transliterate = (text: string, from: string, to: string): string => {
   if (!text) return "";
