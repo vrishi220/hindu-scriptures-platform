@@ -1843,8 +1843,8 @@ class TestDraftBookAndEditionSnapshotIntegration:
 
         assert body_blocks[0]["template_key"] == "default.body.chapter.content_item.v1"
         assert body_blocks[1]["template_key"] == "default.body.verse.content_item.v1"
-        assert "{{ english }}" in body_blocks[0]["resolved_template_source"]
-        assert "{{ sanskrit }}" in body_blocks[1]["resolved_template_source"]
+        assert "{{ metadata.english }}" in body_blocks[0]["resolved_template_source"]
+        assert "{{ metadata.sanskrit }}" in body_blocks[1]["resolved_template_source"]
         assert [line["field"] for line in chapter_lines] == ["english"]
         assert [line["field"] for line in verse_lines] == [
             "sanskrit",
@@ -2202,7 +2202,7 @@ class TestDraftBookAndEditionSnapshotIntegration:
         body_block = render_response.json()["sections"]["body"][0]
 
         assert body_block["template_key"] == "default.body.commentary.content_item.v1"
-        assert body_block["resolved_template_source"].startswith("{% if english %}Commentary:")
+        assert body_block["resolved_template_source"].startswith("{% if metadata.english %}Commentary:")
         assert body_block["content"]["rendered_lines"] == []
 
     def test_book_preview_render_allows_public_library_preview_for_non_owner(self, client):
