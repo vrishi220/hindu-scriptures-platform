@@ -520,6 +520,7 @@ class DraftPreviewRenderArtifactPublic(BaseModel):
 
 
 class BookPreviewRenderRequest(BaseModel):
+    node_id: int | None = Field(default=None, ge=1)
     session_template_bindings: dict | None = None
     render_settings: dict | None = None
     metadata_bindings: dict | None = None
@@ -539,6 +540,9 @@ class BookPreviewTemplatePublic(BaseModel):
 class BookPreviewRenderArtifactPublic(BaseModel):
     book_id: int
     book_name: str
+    preview_scope: Literal["book", "node"] = "book"
+    root_node_id: int | None = None
+    root_title: str | None = None
     section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
     sections: BookPreviewRenderSections
     book_template: BookPreviewTemplatePublic | None = None

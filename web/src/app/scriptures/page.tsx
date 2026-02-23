@@ -154,6 +154,9 @@ type BookPreviewLanguageSettings = {
 type BookPreviewArtifact = {
   book_id: number;
   book_name: string;
+  preview_scope?: "book" | "node";
+  root_node_id?: number | null;
+  root_title?: string | null;
   section_order: Array<"body">;
   sections: {
     body: BookPreviewBlock[];
@@ -1607,6 +1610,7 @@ function ScripturesContent() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          node_id: selectedId ?? undefined,
           render_settings: {
             ...bookPreviewLanguageSettings,
             show_metadata: true,
@@ -2457,7 +2461,11 @@ function ScripturesContent() {
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Eye size={14} />
-                          {bookPreviewLoading ? "Loading preview..." : "Preview book"}
+                          {bookPreviewLoading
+                            ? "Loading preview..."
+                            : selectedId
+                              ? "Preview selected level"
+                              : "Preview book"}
                         </button>
                         <button
                           type="button"
@@ -3364,9 +3372,13 @@ function ScripturesContent() {
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                    Book Preview
+                    {bookPreviewArtifact.preview_scope === "node" ? "Level Preview" : "Book Preview"}
                   </h2>
-                  <p className="text-sm text-zinc-600">{bookPreviewArtifact.book_name}</p>
+                  <p className="text-sm text-zinc-600">
+                    {bookPreviewArtifact.preview_scope === "node"
+                      ? `${bookPreviewArtifact.root_title || "Selected level"} • ${bookPreviewArtifact.book_name}`
+                      : bookPreviewArtifact.book_name}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -3448,7 +3460,9 @@ function ScripturesContent() {
 
               {bookPreviewArtifact.book_template && (
                 <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Template</div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
+                  </div>
                   <div className="mt-1 text-sm font-semibold text-[color:var(--deep)]">
                     {bookPreviewArtifact.book_template.template_key}
                   </div>
@@ -3456,14 +3470,21 @@ function ScripturesContent() {
                     Children rendered: {bookPreviewArtifact.book_template.child_count}
                   </div>
                   <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
-                    {bookPreviewArtifact.book_template.rendered_text || "No rendered book-level summary."}
+                    {bookPreviewArtifact.book_template.rendered_text ||
+                      (bookPreviewArtifact.preview_scope === "node"
+                        ? "No rendered level summary."
+                        : "No rendered book-level summary.")}
                   </p>
                 </div>
               )}
 
               <div className="max-h-[65vh] space-y-2 overflow-y-auto rounded-2xl border border-black/10 bg-white/80 p-3">
                 {bookPreviewArtifact.sections.body.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No previewable content found for this book.</p>
+                  <p className="text-sm text-zinc-500">
+                    {bookPreviewArtifact.preview_scope === "node"
+                      ? "No previewable content found under this level."
+                      : "No previewable content found for this book."}
+                  </p>
                 ) : (
                   bookPreviewArtifact.sections.body.map((block) => {
                     const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
