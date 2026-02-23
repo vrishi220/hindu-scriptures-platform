@@ -2622,23 +2622,25 @@ function ScripturesContent() {
                   </div>
                   {selectedId && !isLeafSelected && (
                     <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
-                          navigator.clipboard.writeText(url);
-                          setAuthMessage("Link copied.");
-                          setCopyTarget("node");
-                          setTimeout(() => {
-                            setAuthMessage(null);
-                            setCopyTarget(null);
-                          }, 2000);
-                        }}
-                        title="Copy shareable link"
-                        className="ml-auto rounded-full border border-blue-500/30 bg-blue-50/50 p-1 text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
-                      >
-                        🔗
-                      </button>
+                      {!(canEdit || canAdmin) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
+                            navigator.clipboard.writeText(url);
+                            setAuthMessage("Link copied.");
+                            setCopyTarget("node");
+                            setTimeout(() => {
+                              setAuthMessage(null);
+                              setCopyTarget(null);
+                            }, 2000);
+                          }}
+                          title="Copy shareable link"
+                          className="ml-auto rounded-full border border-blue-500/30 bg-blue-50/50 p-1 text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
+                        >
+                          🔗
+                        </button>
+                      )}
                       {isCopyMessage && copyTarget === "node" && !showLogin && (
                         <div className="ml-2 rounded-full bg-blue-500 px-3 py-1 text-xs text-white shadow">
                           {authMessage}
@@ -2741,6 +2743,26 @@ function ScripturesContent() {
                                     setShowNodeActionsMenu(false);
                                     setAuthMessage("Link copied.");
                                     setCopyTarget("leaf");
+                                    setTimeout(() => {
+                                      setAuthMessage(null);
+                                      setCopyTarget(null);
+                                    }, 2000);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Link2 size={14} />
+                                  Copy node link
+                                </button>
+                              )}
+                              {!isLeafSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
+                                    navigator.clipboard.writeText(url);
+                                    setShowNodeActionsMenu(false);
+                                    setAuthMessage("Link copied.");
+                                    setCopyTarget("node");
                                     setTimeout(() => {
                                       setAuthMessage(null);
                                       setCopyTarget(null);
