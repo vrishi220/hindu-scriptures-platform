@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getMe } from "../../lib/authClient";
 
 type User = {
@@ -344,6 +345,12 @@ export default function AdminPage() {
           <p className="max-w-2xl text-sm text-zinc-600">
             Create users and assign permissions for contributions and moderation.
           </p>
+          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+            <a href="/admin" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Users</a>
+            <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Schemas</a>
+            <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Properties</a>
+            <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Categories</a>
+          </div>
         </header>
         {toast && (
           <div
@@ -359,12 +366,12 @@ export default function AdminPage() {
         {accessDenied && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
             Admin access required. Sign in with an admin account to manage users.
-            <a
+            <Link
               className="ml-2 font-semibold text-amber-800 underline"
-              href="/#"
+              href="/signin"
             >
               Go to sign in
-            </a>
+            </Link>
           </div>
         )}
 

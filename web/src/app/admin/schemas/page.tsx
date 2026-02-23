@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import Link from "next/link";
 import { contentPath } from "../../../lib/apiPaths";
 import { getMe } from "../../../lib/authClient";
 
@@ -473,9 +474,9 @@ export default function SchemaBuilderPage() {
         {accessDenied && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
             Admin or editor access required. Sign in with an elevated account.
-            <a className="ml-2 font-semibold text-amber-800 underline" href="/#">
+            <Link className="ml-2 font-semibold text-amber-800 underline" href="/signin">
               Go to sign in
-            </a>
+            </Link>
           </div>
         )}
 

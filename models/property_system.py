@@ -43,6 +43,8 @@ class PropertyDefinition(Base):
     default_value = Column(JSONB, nullable=True)  # JSON-serializable default; required when is_required=True
     is_required = Column(Boolean, default=False, nullable=False)
     is_system = Column(Boolean, default=False, nullable=False, index=True)
+    is_deprecated = Column(Boolean, default=False, nullable=False, index=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
     dropdown_options = Column(ARRAY(String), nullable=True)  # For data_type=dropdown
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -66,6 +68,8 @@ class Category(Base):
     version = Column(Integer, default=1, nullable=False)
     is_system = Column(Boolean, default=False, nullable=False, index=True)
     is_published = Column(Boolean, default=False, nullable=False, index=True)
+    is_deprecated = Column(Boolean, default=False, nullable=False, index=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

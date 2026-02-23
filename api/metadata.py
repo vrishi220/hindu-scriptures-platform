@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -31,6 +32,17 @@ from models.user import User
 from services import get_db
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
+logger = logging.getLogger(__name__)
+
+
+def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
+    payload = {
+        "event": event_name,
+        "actor_user_id": actor_user_id,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    payload.update(fields)
+    logger.info("audit_event %s", payload)
 
 
 def _user_can_edit_draft(current_user: User, draft: DraftBook) -> bool:
@@ -93,6 +105,8 @@ def _coerce_property_public(item: PropertyDefinition) -> PropertyDefinitionPubli
         is_required=item.is_required,
         dropdown_options=item.dropdown_options,
         is_system=item.is_system,
+        is_deprecated=item.is_deprecated,
+        deprecated_at=item.deprecated_at.isoformat() if item.deprecated_at else None,
         created_at=item.created_at.isoformat() if item.created_at else "",
         updated_at=item.updated_at.isoformat() if item.updated_at else "",
     )
@@ -113,9 +127,31 @@ def _coerce_category_public(item: Category) -> CategoryPublic:
         version=item.version,
         is_system=item.is_system,
         is_published=item.is_published,
+        is_deprecated=item.is_deprecated,
+        deprecated_at=item.deprecated_at.isoformat() if item.deprecated_at else None,
         created_at=item.created_at.isoformat() if item.created_at else "",
         updated_at=item.updated_at.isoformat() if item.updated_at else "",
     )
+
+
+def _ensure_property_ids_not_deprecated(db: Session, property_ids: list[int]) -> None:
+    if not property_ids:
+        return
+
+    deprecated_rows = (
+        db.query(PropertyDefinition)
+        .filter(
+            PropertyDefinition.id.in_(property_ids),
+            PropertyDefinition.is_deprecated.is_(True),
+        )
+        .all()
+    )
+    if deprecated_rows:
+        names = ", ".join(sorted(row.internal_name for row in deprecated_rows))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Deprecated properties cannot be newly assigned: {names}",
+        )
 
 
 def _collect_effective_properties(db: Session, category_id: int) -> tuple[list[dict], dict[str, EffectivePropertyBindingPublic]]:
@@ -187,6 +223,11 @@ def _validate_binding_payload(
     category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    if category.is_deprecated:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Deprecated categories cannot be used for new bindings",
+        )
 
     _, effective_map = _collect_effective_properties(db, category_id)
 
@@ -378,6 +419,12 @@ def create_property_definition(
     db.add(item)
     db.commit()
     db.refresh(item)
+    _audit_event(
+        "metadata.property_definition.created",
+        current_user.id,
+        property_definition_id=item.id,
+        internal_name=item.internal_name,
+    )
     return _coerce_property_public(item)
 
 
@@ -426,6 +473,12 @@ def update_property_definition(
 
     db.commit()
     db.refresh(item)
+    _audit_event(
+        "metadata.property_definition.updated",
+        current_user.id,
+        property_definition_id=item.id,
+        internal_name=item.internal_name,
+    )
     return _coerce_property_public(item)
 
 
@@ -448,6 +501,12 @@ def delete_property_definition(
 
     db.delete(item)
     db.commit()
+    _audit_event(
+        "metadata.property_definition.deleted",
+        current_user.id,
+        property_definition_id=prop_id,
+        internal_name=item.internal_name,
+    )
 
 
 @router.post("/categories", response_model=CategoryPublic, status_code=status.HTTP_201_CREATED)
@@ -466,12 +525,20 @@ def create_category(
         count = db.query(Category).filter(Category.id.in_(parent_ids)).count()
         if count != len(parent_ids):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="One or more parent categories not found")
+        deprecated_parent = (
+            db.query(Category.id)
+            .filter(Category.id.in_(parent_ids), Category.is_deprecated.is_(True))
+            .first()
+        )
+        if deprecated_parent:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Deprecated categories cannot be assigned as parents")
 
     property_ids = [item.property_definition_id for item in payload.properties]
     if property_ids:
         count = db.query(PropertyDefinition).filter(PropertyDefinition.id.in_(property_ids)).count()
         if count != len(set(property_ids)):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="One or more properties not found")
+        _ensure_property_ids_not_deprecated(db, list(set(property_ids)))
 
     category = Category(
         name=payload.name.strip(),
@@ -507,6 +574,12 @@ def create_category(
 
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.created",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+    )
     return _coerce_category_public(category)
 
 
@@ -548,6 +621,13 @@ def update_category(
             count = db.query(Category).filter(Category.id.in_(parent_ids)).count()
             if count != len(parent_ids):
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="One or more parent categories not found")
+            deprecated_parent = (
+                db.query(Category.id)
+                .filter(Category.id.in_(parent_ids), Category.is_deprecated.is_(True))
+                .first()
+            )
+            if deprecated_parent:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Deprecated categories cannot be assigned as parents")
 
         db.query(CategoryParent).filter(CategoryParent.child_category_id == cat_id).delete(synchronize_session=False)
         for idx, parent_id in enumerate(parent_ids):
@@ -569,6 +649,13 @@ def update_category(
     category.version = (category.version or 1) + 1
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.updated",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+        version=category.version,
+    )
     return _coerce_category_public(category)
 
 
@@ -587,6 +674,13 @@ def publish_category(
     category.version = (category.version or 1) + 1
     db.commit()
     db.refresh(category)
+    _audit_event(
+        "metadata.category.published",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+        version=category.version,
+    )
     return _coerce_category_public(category)
 
 
@@ -611,6 +705,64 @@ def delete_category(
 
     db.delete(category)
     db.commit()
+    _audit_event(
+        "metadata.category.deleted",
+        current_user.id,
+        category_id=cat_id,
+        name=category.name,
+    )
+
+
+@router.post("/property-definitions/{prop_id}/deprecate", response_model=PropertyDefinitionPublic)
+def deprecate_property_definition(
+    prop_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("can_admin")),
+):
+    item = db.query(PropertyDefinition).filter(PropertyDefinition.id == prop_id).first()
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property definition not found")
+
+    if not item.is_deprecated:
+        item.is_deprecated = True
+        item.deprecated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(item)
+
+    _audit_event(
+        "metadata.property_definition.deprecated",
+        current_user.id,
+        property_definition_id=item.id,
+        internal_name=item.internal_name,
+    )
+    return _coerce_property_public(item)
+
+
+@router.post("/categories/{cat_id}/deprecate", response_model=CategoryPublic)
+def deprecate_category(
+    cat_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("can_admin")),
+):
+    category = db.query(Category).filter(Category.id == cat_id).first()
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    if not category.is_deprecated:
+        category.is_deprecated = True
+        category.deprecated_at = datetime.utcnow()
+        category.version = (category.version or 1) + 1
+        db.commit()
+        db.refresh(category)
+
+    _audit_event(
+        "metadata.category.deprecated",
+        current_user.id,
+        category_id=category.id,
+        name=category.name,
+        version=category.version,
+    )
+    return _coerce_category_public(category)
 
 
 @router.get("/categories/{cat_id}/effective-properties", response_model=CategoryEffectivePropertiesPublic)
@@ -725,6 +877,15 @@ def upsert_draft_book_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -798,6 +959,15 @@ def patch_draft_book_metadata_binding(
 
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.patched",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -840,6 +1010,15 @@ def upsert_level_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)
 
 
@@ -882,4 +1061,13 @@ def upsert_node_metadata_binding(
     )
     db.commit()
     db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        draft_id=draft_id,
+    )
     return _serialize_binding(binding)

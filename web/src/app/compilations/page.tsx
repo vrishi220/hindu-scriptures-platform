@@ -222,7 +222,7 @@ export default function CompilationsPage() {
         ) : compilations.length === 0 ? (
           <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
             <p className="mb-4 text-zinc-600">
-              You haven't saved any compilations yet.
+              You haven&apos;t saved any compilations yet.
             </p>
             <p className="text-sm text-zinc-500">
               Visit the{" "}

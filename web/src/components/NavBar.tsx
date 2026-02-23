@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getMe, invalidateMeCache } from "@/lib/authClient";
 
@@ -65,7 +66,7 @@ export default function NavBar() {
           </button>
 
           {/* Logo - always visible */}
-          <a href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <img
               src="/logo-mark.svg"
               alt="Hindu Scriptures"
@@ -74,19 +75,19 @@ export default function NavBar() {
             <span className="inline text-sm font-semibold text-[color:var(--deep)]">
               Hindu Scriptures
             </span>
-          </a>
+          </Link>
         </div>
 
         {/* Desktop menu - hidden on mobile */}
         <div className="hidden items-center gap-4 text-sm text-zinc-600 sm:flex">
-          <a
+          <Link
             href="/"
             className={`hover:text-[color:var(--accent)] ${
               isActive("/") ? "font-semibold text-[color:var(--deep)]" : ""
             }`}
           >
             Home
-          </a>
+          </Link>
           <a
             href="/scriptures"
             className={`hover:text-[color:var(--accent)] ${
@@ -151,6 +152,26 @@ export default function NavBar() {
               >
                 Schemas
               </a>
+              <a
+                href="/admin/metadata/properties"
+                className={`hover:text-[color:var(--accent)] ${
+                  isActive("/admin/metadata/properties")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : ""
+                }`}
+              >
+                Properties
+              </a>
+              <a
+                href="/admin/metadata/categories"
+                className={`hover:text-[color:var(--accent)] ${
+                  isActive("/admin/metadata/categories")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : ""
+                }`}
+              >
+                Categories
+              </a>
             </>
           )}
         </div>
@@ -180,7 +201,7 @@ export default function NavBar() {
       {mobileMenuOpen && (
         <div className="sm:hidden border-t border-black/10 bg-white/95">
           <div className="flex flex-col gap-2 px-4 py-3">
-            <a
+            <Link
               href="/"
               onClick={() => setMobileMenuOpen(false)}
               className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
@@ -190,7 +211,7 @@ export default function NavBar() {
               }`}
             >
               Home
-            </a>
+            </Link>
             <a
               href="/scriptures"
               onClick={() => setMobileMenuOpen(false)}
@@ -262,6 +283,28 @@ export default function NavBar() {
                   }`}
                 >
                   Schemas
+                </a>
+                <a
+                  href="/admin/metadata/properties"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                    isActive("/admin/metadata/properties")
+                      ? "font-semibold text-[color:var(--deep)]"
+                      : "text-zinc-600 hover:text-[color:var(--accent)]"
+                  }`}
+                >
+                  Properties
+                </a>
+                <a
+                  href="/admin/metadata/categories"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                    isActive("/admin/metadata/categories")
+                      ? "font-semibold text-[color:var(--deep)]"
+                      : "text-zinc-600 hover:text-[color:var(--accent)]"
+                  }`}
+                >
+                  Categories
                 </a>
               </>
             )}

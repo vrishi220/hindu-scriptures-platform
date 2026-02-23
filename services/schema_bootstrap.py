@@ -175,6 +175,8 @@ def ensure_phase1_schema(database_url: str) -> None:
             default_value JSONB,
             is_required BOOLEAN NOT NULL DEFAULT false,
             is_system BOOLEAN NOT NULL DEFAULT false,
+            is_deprecated BOOLEAN NOT NULL DEFAULT false,
+            deprecated_at TIMESTAMP,
             dropdown_options VARCHAR(255)[],
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
@@ -189,9 +191,21 @@ def ensure_phase1_schema(database_url: str) -> None:
             version INTEGER NOT NULL DEFAULT 1,
             is_system BOOLEAN NOT NULL DEFAULT false,
             is_published BOOLEAN NOT NULL DEFAULT false,
+            is_deprecated BOOLEAN NOT NULL DEFAULT false,
+            deprecated_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         );
+        """,
+        """
+        ALTER TABLE IF EXISTS property_definitions
+            ADD COLUMN IF NOT EXISTS is_deprecated BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS deprecated_at TIMESTAMP;
+        """,
+        """
+        ALTER TABLE IF EXISTS categories
+            ADD COLUMN IF NOT EXISTS is_deprecated BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS deprecated_at TIMESTAMP;
         """,
         """
         CREATE TABLE IF NOT EXISTS category_properties (
@@ -231,6 +245,103 @@ def ensure_phase1_schema(database_url: str) -> None:
             CONSTRAINT uc_category_parent_edge UNIQUE (child_category_id, parent_category_id)
         );
         """,
+        """
+        DO $$
+        DECLARE
+            default_category_id INTEGER;
+        BEGIN
+            INSERT INTO property_definitions (
+                internal_name,
+                display_name,
+                data_type,
+                description,
+                default_value,
+                is_required,
+                is_system,
+                dropdown_options
+            ) VALUES
+                ('render_template_key', 'Render Template Key', 'text', 'Primary metadata template key override', NULL, false, true, NULL),
+                ('template_key', 'Template Key', 'text', 'Generic metadata template key override', NULL, false, true, NULL),
+                ('level_template_key', 'Level Template Key', 'text', 'Template key for current level', NULL, false, true, NULL),
+                ('content_template_key', 'Content Template Key', 'text', 'Template key for content rendering', NULL, false, true, NULL),
+                ('source_language', 'Source Language', 'dropdown', 'Primary source language for this scope', '"sanskrit"'::jsonb, false, true, ARRAY['sanskrit','tamil','telugu','hindi','english']),
+                ('is_transliterable', 'Is Transliterable', 'boolean', 'Whether transliteration should be shown', 'true'::jsonb, false, true, NULL),
+                ('chapter_number', 'Chapter Number', 'number', 'Chapter number when applicable', NULL, false, true, NULL),
+                ('verse_number', 'Verse Number', 'number', 'Verse number when applicable', NULL, false, true, NULL),
+                ('sanskrit', 'Sanskrit', 'text', 'Sanskrit content value', NULL, false, true, NULL),
+                ('transliteration', 'Transliteration', 'text', 'Transliteration content value', NULL, false, true, NULL),
+                ('english', 'English', 'text', 'English content value', NULL, false, true, NULL),
+                ('text', 'Text', 'text', 'Generic text content value', NULL, false, true, NULL)
+            ON CONFLICT (internal_name)
+            DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                data_type = EXCLUDED.data_type,
+                description = EXCLUDED.description,
+                dropdown_options = EXCLUDED.dropdown_options,
+                is_system = true;
+
+            INSERT INTO categories (
+                name,
+                description,
+                applicable_scopes,
+                version,
+                is_system,
+                is_published
+            ) VALUES (
+                'system_default_metadata',
+                'Baseline metadata category for current rendering and draft flows',
+                ARRAY['book','level','node'],
+                1,
+                true,
+                true
+            )
+            ON CONFLICT (name)
+            DO UPDATE SET
+                description = EXCLUDED.description,
+                applicable_scopes = EXCLUDED.applicable_scopes,
+                is_system = true;
+
+            SELECT id INTO default_category_id
+            FROM categories
+            WHERE name = 'system_default_metadata';
+
+            INSERT INTO category_properties (
+                category_id,
+                property_definition_id,
+                "order",
+                description_override,
+                default_override,
+                is_required_override
+            )
+            SELECT
+                default_category_id,
+                pd.id,
+                mapping.property_order,
+                NULL,
+                NULL,
+                NULL
+            FROM (
+                VALUES
+                    ('render_template_key', 1),
+                    ('template_key', 2),
+                    ('level_template_key', 3),
+                    ('content_template_key', 4),
+                    ('source_language', 5),
+                    ('is_transliterable', 6),
+                    ('chapter_number', 7),
+                    ('verse_number', 8),
+                    ('sanskrit', 9),
+                    ('transliteration', 10),
+                    ('english', 11),
+                    ('text', 12)
+            ) AS mapping(internal_name, property_order)
+            JOIN property_definitions pd ON pd.internal_name = mapping.internal_name
+            WHERE default_category_id IS NOT NULL
+            ON CONFLICT (category_id, property_definition_id)
+            DO NOTHING;
+        END
+        $$;
+        """,
         "CREATE INDEX IF NOT EXISTS idx_content_nodes_status ON content_nodes(status);",
         "CREATE INDEX IF NOT EXISTS idx_content_nodes_visibility ON content_nodes(visibility);",
         "CREATE INDEX IF NOT EXISTS idx_content_nodes_language ON content_nodes(language_code);",
@@ -251,9 +362,11 @@ def ensure_phase1_schema(database_url: str) -> None:
         "CREATE INDEX IF NOT EXISTS idx_provenance_source_book_id ON provenance_records(source_book_id);",
         "CREATE INDEX IF NOT EXISTS idx_property_definitions_internal_name ON property_definitions(internal_name);",
         "CREATE INDEX IF NOT EXISTS idx_property_definitions_is_system ON property_definitions(is_system);",
+        "CREATE INDEX IF NOT EXISTS idx_property_definitions_is_deprecated ON property_definitions(is_deprecated);",
         "CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name);",
         "CREATE INDEX IF NOT EXISTS idx_categories_is_system ON categories(is_system);",
         "CREATE INDEX IF NOT EXISTS idx_categories_is_published ON categories(is_published);",
+        "CREATE INDEX IF NOT EXISTS idx_categories_is_deprecated ON categories(is_deprecated);",
         "CREATE INDEX IF NOT EXISTS idx_category_properties_category_id ON category_properties(category_id);",
         "CREATE INDEX IF NOT EXISTS idx_category_properties_property_definition_id ON category_properties(property_definition_id);",
         "CREATE INDEX IF NOT EXISTS idx_metadata_bindings_entity_type ON metadata_bindings(entity_type);",
