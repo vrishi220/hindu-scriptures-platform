@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from typing import Literal
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user, get_current_user_optional
@@ -21,7 +22,7 @@ class PublishAsBookPayload(BaseModel):
     schema_id: int
     book_name: str
     book_code: str | None = None
-    language_primary: str = "sanskrit"
+    language_primary: Literal["sanskrit", "english"] = "sanskrit"
     description: str | None = None
 
 

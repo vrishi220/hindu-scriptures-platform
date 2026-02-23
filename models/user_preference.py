@@ -21,6 +21,7 @@ class UserPreference(Base):
     transliteration_enabled = Column(Boolean, default=True, nullable=False)
     transliteration_script = Column(String(20), default="devanagari", nullable=False)
     show_roman_transliteration = Column(Boolean, default=True, nullable=False)
+    show_only_preferred_script = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

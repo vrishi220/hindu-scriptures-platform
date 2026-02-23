@@ -4,7 +4,7 @@ Handles extraction of chapters and verses from PDF documents.
 Supports both searchable and scanned (OCR) PDFs.
 """
 import re
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
 from io import BytesIO
 
@@ -23,7 +23,7 @@ class PDFImportConfig(BaseModel):
     book_name: str
     book_code: str
     schema_id: int
-    language_primary: str = "sanskrit"
+    language_primary: Literal["sanskrit", "english"] = "sanskrit"
     source_attribution: str = "PDF Source"
     original_source_url: Optional[str] = None
     pdf_file_path: str  # Path to PDF file or URL

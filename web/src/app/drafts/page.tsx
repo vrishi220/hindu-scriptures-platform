@@ -456,6 +456,7 @@ function DraftsPageContent() {
         transliteration_script: normalizeTransliterationScript(
           data.transliteration_script
         ),
+        show_only_preferred_script: data.show_only_preferred_script ?? false,
       });
     } catch {
       setPreferences(null);

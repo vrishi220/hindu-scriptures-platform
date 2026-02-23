@@ -123,18 +123,21 @@ class TestPhase1PreferencesIntegration:
         data = get_response.json()
         assert data["source_language"] == "en"
         assert data["transliteration_script"] == "devanagari"
+        assert data["show_only_preferred_script"] is False
 
         patch_payload = {
             "source_language": "en",
             "transliteration_enabled": True,
             "transliteration_script": "tamil",
             "show_roman_transliteration": False,
+            "show_only_preferred_script": True,
         }
         patch_response = client.patch("/api/preferences", json=patch_payload, headers=headers)
         assert patch_response.status_code == status.HTTP_200_OK
         updated = patch_response.json()
         assert updated["transliteration_script"] == "tamil"
         assert updated["show_roman_transliteration"] is False
+        assert updated["show_only_preferred_script"] is True
 
 
 class TestPhase1CompilationsIntegration:

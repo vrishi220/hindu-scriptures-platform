@@ -339,6 +339,11 @@ EOF
 psql $DATABASE_URL -f migrations/add_feature.sql
 ```
 
+**Run this migration for script-only preferences (one-time):**
+```bash
+psql $DATABASE_URL -f migrations/add_user_preferences_show_only_preferred_script.sql
+```
+
 **Database Queries:**
 ```bash
 # Connect

@@ -3,7 +3,7 @@ Generic importer for scripture documents from HTML/web sources.
 Supports user-defined extraction rules for flexible document processing.
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from bs4 import BeautifulSoup
 import requests
 from pydantic import BaseModel, Field
@@ -41,7 +41,7 @@ class ImportConfig(BaseModel):
     book_name: str
     book_code: Optional[str] = None
     schema_id: int
-    language_primary: str = "sanskrit"
+    language_primary: Literal["sanskrit", "english"] = "sanskrit"
     license_type: str = "CC-BY-SA-4.0"
     source_attribution: Optional[str] = None
     original_source_url: Optional[str] = None

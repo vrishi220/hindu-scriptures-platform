@@ -10,6 +10,7 @@ export type UserPreferences = {
   transliteration_enabled: boolean;
   transliteration_script: string;
   show_roman_transliteration: boolean;
+  show_only_preferred_script: boolean;
 };
 
 type UserPreferencesDialogProps = {
@@ -132,6 +133,19 @@ export default function UserPreferencesDialog({
               }
             />
             Show Roman transliteration
+          </label>
+          <label className="sm:col-span-2 flex items-center gap-2 text-sm text-zinc-700">
+            <input
+              type="checkbox"
+              checked={preferences.show_only_preferred_script}
+              onChange={(event) =>
+                onChange({
+                  ...preferences,
+                  show_only_preferred_script: event.target.checked,
+                })
+              }
+            />
+            Show only preferred script
           </label>
         </div>
 

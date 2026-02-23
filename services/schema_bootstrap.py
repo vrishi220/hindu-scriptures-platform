@@ -63,6 +63,10 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS search_vector tsvector;
         """,
         """
+        ALTER TABLE IF EXISTS user_preferences
+            ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false;
+        """,
+        """
         CREATE TABLE IF NOT EXISTS user_preferences (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -70,6 +74,7 @@ def ensure_phase1_schema(database_url: str) -> None:
             transliteration_enabled BOOLEAN NOT NULL DEFAULT true,
             transliteration_script VARCHAR(20) NOT NULL DEFAULT 'devanagari',
             show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
+            show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(user_id)

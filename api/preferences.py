@@ -31,6 +31,7 @@ def get_user_preferences(
                 transliteration_enabled=True,
                 transliteration_script="devanagari",
                 show_roman_transliteration=True,
+                show_only_preferred_script=False,
             )
             db.add(pref)
             db.commit()

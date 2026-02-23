@@ -132,11 +132,14 @@ class ScriptureSchemaPublic(ScriptureSchemaBase):
     id: int
 
 
+PrimaryLanguage = Literal["sanskrit", "english"]
+
+
 class BookBase(BaseModel):
     schema_id: int | None = None
     book_name: str
     book_code: str | None = None
-    language_primary: str = "sanskrit"
+    language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = Field(default=None, alias="metadata_json")
     status: Literal["draft", "published"] = "draft"
     visibility: Literal["private", "public"] = "private"
@@ -150,7 +153,7 @@ class BookUpdate(BaseModel):
     schema_id: int | None = None
     book_name: str | None = None
     book_code: str | None = None
-    language_primary: str | None = None
+    language_primary: PrimaryLanguage | None = None
     metadata: dict | None = None
     status: Literal["draft", "published"] | None = None
     visibility: Literal["private", "public"] | None = None
@@ -288,6 +291,7 @@ class UserPreferenceBase(BaseModel):
     transliteration_enabled: bool = True
     transliteration_script: str = "devanagari"
     show_roman_transliteration: bool = True
+    show_only_preferred_script: bool = False
 
 
 class UserPreferenceUpdate(BaseModel):
@@ -295,6 +299,7 @@ class UserPreferenceUpdate(BaseModel):
     transliteration_enabled: bool | None = None
     transliteration_script: str | None = None
     show_roman_transliteration: bool | None = None
+    show_only_preferred_script: bool | None = None
 
 
 class UserPreferencePublic(UserPreferenceBase):

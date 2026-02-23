@@ -495,8 +495,6 @@ export default function AdminImportPage() {
                     >
                       <option value="sanskrit">Sanskrit</option>
                       <option value="english">English</option>
-                      <option value="hindi">Hindi</option>
-                      <option value="tamil">Tamil</option>
                     </select>
                   </div>
                 </div>
@@ -794,8 +792,6 @@ export default function AdminImportPage() {
                     >
                       <option value="sanskrit">Sanskrit</option>
                       <option value="english">English</option>
-                      <option value="hindi">Hindi</option>
-                      <option value="tamil">Tamil</option>
                     </select>
                   </div>
                 </div>
