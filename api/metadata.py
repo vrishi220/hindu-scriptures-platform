@@ -5,6 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user, require_permission
+from models.book import Book
+from models.book_share import BookShare
+from models.content_node import ContentNode
 from models.draft_book import DraftBook
 from models.property_system import (
     Category,
@@ -34,6 +37,9 @@ from services import get_db
 router = APIRouter(prefix="/metadata", tags=["metadata"])
 logger = logging.getLogger(__name__)
 
+BOOK_VISIBILITY_PRIVATE = "private"
+BOOK_VISIBILITY_PUBLIC = "public"
+
 
 def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
     payload = {
@@ -50,6 +56,84 @@ def _user_can_edit_draft(current_user: User, draft: DraftBook) -> bool:
         return True
     perms = current_user.permissions or {}
     return bool(perms.get("can_edit") or perms.get("can_admin"))
+
+
+def _user_can_edit_any(current_user: User) -> bool:
+    perms = current_user.permissions or {}
+    return bool(perms.get("can_edit") or perms.get("can_admin"))
+
+
+def _book_owner_id(book: Book) -> int | None:
+    metadata = book.metadata_json or {}
+    if not isinstance(metadata, dict):
+        return None
+    owner_id = metadata.get("owner_id")
+    try:
+        return int(owner_id) if owner_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _book_visibility(book: Book) -> str:
+    metadata = book.metadata_json or {}
+    if isinstance(metadata, dict):
+        visibility = str(metadata.get("visibility") or "").strip().lower()
+        if visibility in {BOOK_VISIBILITY_PRIVATE, BOOK_VISIBILITY_PUBLIC}:
+            return visibility
+    return BOOK_VISIBILITY_PRIVATE
+
+
+def _share_permission_rank(permission: str | None) -> int:
+    rank_map = {
+        "viewer": 1,
+        "contributor": 2,
+        "editor": 3,
+    }
+    return rank_map.get((permission or "").strip().lower(), 0)
+
+
+def _book_share_permission(db: Session, book_id: int, user_id: int) -> str | None:
+    share = (
+        db.query(BookShare)
+        .filter(
+            BookShare.book_id == book_id,
+            BookShare.shared_with_user_id == user_id,
+        )
+        .first()
+    )
+    if not share:
+        return None
+    return str(share.permission).strip().lower()
+
+
+def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
+    if current_user is None:
+        return 1 if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC else 0
+
+    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
+        read_rank = 1
+    else:
+        read_rank = 0
+
+    if _user_can_edit_any(current_user):
+        return 3
+
+    if _book_owner_id(book) == current_user.id:
+        return 3
+
+    return max(read_rank, _share_permission_rank(_book_share_permission(db, book.id, current_user.id)))
+
+
+def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
+    if _book_access_rank(db, book, current_user) >= 1:
+        return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def _ensure_book_edit_access(db: Session, current_user: User, book: Book) -> None:
+    if _book_access_rank(db, book, current_user) >= 2:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def _parse_iso_date(value: str) -> bool:
@@ -1069,5 +1153,270 @@ def upsert_node_metadata_binding(
         entity_id=binding.entity_id,
         scope_type=binding.scope_type,
         draft_id=draft_id,
+    )
+    return _serialize_binding(binding)
+
+
+@router.post("/books/{book_id}/metadata-binding", response_model=MetadataBindingPublic)
+def upsert_book_metadata_binding(
+    book_id: int,
+    payload: MetadataBindingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_edit_access(db, current_user, book)
+
+    if payload.category_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="category_id is required")
+
+    _validate_binding_payload(
+        db=db,
+        category_id=payload.category_id,
+        property_overrides=payload.property_overrides or {},
+        unset_overrides=payload.unset_overrides or [],
+    )
+
+    binding = _upsert_binding(
+        db=db,
+        entity_type="book",
+        entity_id=book_id,
+        root_entity_id=book_id,
+        scope_type="book",
+        payload=payload,
+    )
+    db.commit()
+    db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        book_id=book_id,
+    )
+    return _serialize_binding(binding)
+
+
+@router.get("/books/{book_id}/metadata-binding", response_model=ResolvedMetadataPublic)
+def get_book_metadata_binding(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_view_access(db, book, current_user)
+
+    binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "book",
+            MetadataBinding.entity_id == book_id,
+            MetadataBinding.scope_type == "book",
+        )
+        .first()
+    )
+    if not binding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+
+    return _resolve_binding_metadata(binding, db)
+
+
+@router.patch("/books/{book_id}/metadata-binding", response_model=MetadataBindingPublic)
+def patch_book_metadata_binding(
+    book_id: int,
+    payload: MetadataBindingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_edit_access(db, current_user, book)
+
+    binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "book",
+            MetadataBinding.entity_id == book_id,
+            MetadataBinding.scope_type == "book",
+        )
+        .first()
+    )
+    if not binding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "category_id" in update_data:
+        binding.category_id = update_data["category_id"]
+    if "property_overrides" in update_data:
+        binding.property_overrides = update_data["property_overrides"] or {}
+    if "unset_overrides" in update_data:
+        binding.unset_overrides = update_data["unset_overrides"] or []
+
+    if binding.category_id is not None:
+        _validate_binding_payload(
+            db=db,
+            category_id=binding.category_id,
+            property_overrides=binding.property_overrides or {},
+            unset_overrides=binding.unset_overrides or [],
+        )
+
+    db.commit()
+    db.refresh(binding)
+    _audit_event(
+        "metadata.binding.patched",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        book_id=book_id,
+    )
+    return _serialize_binding(binding)
+
+
+@router.post("/books/{book_id}/nodes/{node_id}/metadata-binding", response_model=MetadataBindingPublic)
+def upsert_node_book_metadata_binding(
+    book_id: int,
+    node_id: int,
+    payload: MetadataBindingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_edit_access(db, current_user, book)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    if payload.category_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="category_id is required")
+
+    _validate_binding_payload(
+        db=db,
+        category_id=payload.category_id,
+        property_overrides=payload.property_overrides or {},
+        unset_overrides=payload.unset_overrides or [],
+    )
+
+    binding = _upsert_binding(
+        db=db,
+        entity_type="node",
+        entity_id=node_id,
+        root_entity_id=book_id,
+        scope_type="node",
+        payload=payload,
+    )
+    db.commit()
+    db.refresh(binding)
+    _audit_event(
+        "metadata.binding.upserted",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        book_id=book_id,
+    )
+    return _serialize_binding(binding)
+
+
+@router.get("/books/{book_id}/nodes/{node_id}/metadata-binding", response_model=ResolvedMetadataPublic)
+def get_node_book_metadata_binding(
+    book_id: int,
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_view_access(db, book, current_user)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "node",
+            MetadataBinding.entity_id == node_id,
+            MetadataBinding.scope_type == "node",
+            MetadataBinding.root_entity_id == book_id,
+        )
+        .first()
+    )
+    if not binding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+
+    return _resolve_binding_metadata(binding, db)
+
+
+@router.patch("/books/{book_id}/nodes/{node_id}/metadata-binding", response_model=MetadataBindingPublic)
+def patch_node_book_metadata_binding(
+    book_id: int,
+    node_id: int,
+    payload: MetadataBindingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    _ensure_book_edit_access(db, current_user, book)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "node",
+            MetadataBinding.entity_id == node_id,
+            MetadataBinding.scope_type == "node",
+            MetadataBinding.root_entity_id == book_id,
+        )
+        .first()
+    )
+    if not binding:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "category_id" in update_data:
+        binding.category_id = update_data["category_id"]
+    if "property_overrides" in update_data:
+        binding.property_overrides = update_data["property_overrides"] or {}
+    if "unset_overrides" in update_data:
+        binding.unset_overrides = update_data["unset_overrides"] or []
+
+    if binding.category_id is not None:
+        _validate_binding_payload(
+            db=db,
+            category_id=binding.category_id,
+            property_overrides=binding.property_overrides or {},
+            unset_overrides=binding.unset_overrides or [],
+        )
+
+    db.commit()
+    db.refresh(binding)
+    _audit_event(
+        "metadata.binding.patched",
+        current_user.id,
+        binding_id=binding.id,
+        entity_type=binding.entity_type,
+        entity_id=binding.entity_id,
+        scope_type=binding.scope_type,
+        book_id=book_id,
     )
     return _serialize_binding(binding)

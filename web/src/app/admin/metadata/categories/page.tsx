@@ -67,15 +67,26 @@ export default function MetadataCategoriesAdminPage() {
 
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
-  const [createScopesRaw, setCreateScopesRaw] = useState("book");
+  const [createScopes, setCreateScopes] = useState<string[]>(["book"]);
   const [createParentIds, setCreateParentIds] = useState<number[]>([]);
   const [createPropertyIds, setCreatePropertyIds] = useState<number[]>([]);
 
   const [selected, setSelected] = useState<Category | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editScopesRaw, setEditScopesRaw] = useState("book");
+  const [editScopes, setEditScopes] = useState<string[]>(["book"]);
   const [editParentIds, setEditParentIds] = useState<number[]>([]);
+
+  const scopeOptions = useMemo(() => {
+    const baseScopes = ["all", "book", "level", "node", "global"];
+    const combined = new Set<string>([...baseScopes, ...createScopes, ...editScopes]);
+    categories.forEach((category) => {
+      (category.applicable_scopes || []).forEach((scope) => {
+        if (scope) combined.add(scope);
+      });
+    });
+    return Array.from(combined).sort((left, right) => left.localeCompare(right));
+  }, [categories, createScopes, editScopes]);
 
   const categoryNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -137,7 +148,7 @@ export default function MetadataCategoriesAdminPage() {
         if (refreshed) {
           setEditName(refreshed.name || "");
           setEditDescription(refreshed.description || "");
-          setEditScopesRaw((refreshed.applicable_scopes || []).join(", "));
+          setEditScopes(refreshed.applicable_scopes || ["book"]);
           setEditParentIds(refreshed.parent_category_ids || []);
         }
       }
@@ -167,11 +178,8 @@ export default function MetadataCategoriesAdminPage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const parseScopes = (raw: string) =>
-    raw
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+  const getSelectedValues = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    Array.from(event.target.selectedOptions).map((option) => option.value);
 
   const toggleFromList = (
     id: number,
@@ -202,7 +210,7 @@ export default function MetadataCategoriesAdminPage() {
         name: createName.trim(),
         description: createDescription.trim() || null,
         parent_category_ids: createParentIds,
-        applicable_scopes: parseScopes(createScopesRaw),
+        applicable_scopes: createScopes,
         properties: propertiesPayload,
       };
 
@@ -224,7 +232,7 @@ export default function MetadataCategoriesAdminPage() {
 
       setCreateName("");
       setCreateDescription("");
-      setCreateScopesRaw("book");
+      setCreateScopes(["book"]);
       setCreateParentIds([]);
       setCreatePropertyIds([]);
       setToast({ type: "success", message: "Category created." });
@@ -243,7 +251,7 @@ export default function MetadataCategoriesAdminPage() {
     setSelected(item);
     setEditName(item.name || "");
     setEditDescription(item.description || "");
-    setEditScopesRaw((item.applicable_scopes || []).join(", "));
+    setEditScopes(item.applicable_scopes || ["book"]);
     setEditParentIds(item.parent_category_ids || []);
   };
 
@@ -260,7 +268,7 @@ export default function MetadataCategoriesAdminPage() {
           name: editName.trim(),
           description: editDescription.trim() || null,
           parent_category_ids: editParentIds,
-          applicable_scopes: parseScopes(editScopesRaw),
+          applicable_scopes: editScopes,
         }),
         credentials: "include",
       });
@@ -309,7 +317,7 @@ export default function MetadataCategoriesAdminPage() {
       setSelected(null);
       setEditName("");
       setEditDescription("");
-      setEditScopesRaw("book");
+      setEditScopes(["book"]);
       setEditParentIds([]);
       setToast({ type: "success", message: "Category deleted." });
       await loadAll();
@@ -434,14 +442,21 @@ export default function MetadataCategoriesAdminPage() {
                 />
               </label>
               <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                Applicable Scopes (comma separated)
-                <input
-                  value={createScopesRaw}
-                  onChange={(event) => setCreateScopesRaw(event.target.value)}
-                  className="rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-                  placeholder="book, chapter, verse"
+                Applicable Scopes
+                <select
+                  multiple
+                  value={createScopes}
+                  onChange={(event) => setCreateScopes(getSelectedValues(event))}
+                  className="min-h-[112px] rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
                   required
-                />
+                >
+                  {scopeOptions.map((scope) => (
+                    <option key={scope} value={scope}>
+                      {scope}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] normal-case tracking-normal text-zinc-500">Hold Command/Ctrl to select multiple scopes.</p>
               </label>
 
               <div className="grid gap-2">
@@ -559,12 +574,20 @@ export default function MetadataCategoriesAdminPage() {
                   </label>
                   <label className="grid gap-1 text-xs uppercase tracking-[0.14em] text-zinc-500">
                     Applicable Scopes
-                    <input
-                      value={editScopesRaw}
-                      onChange={(event) => setEditScopesRaw(event.target.value)}
+                    <select
+                      multiple
+                      value={editScopes}
+                      onChange={(event) => setEditScopes(getSelectedValues(event))}
                       disabled={selected.is_published}
-                      className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:bg-zinc-100 disabled:text-zinc-500"
-                    />
+                      className="min-h-[112px] rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:bg-zinc-100 disabled:text-zinc-500"
+                    >
+                      {scopeOptions.map((scope) => (
+                        <option key={scope} value={scope}>
+                          {scope}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] normal-case tracking-normal text-zinc-500">Hold Command/Ctrl to select multiple scopes.</p>
                   </label>
 
                   <div className="grid gap-1">

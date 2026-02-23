@@ -158,6 +158,44 @@ type BasketItem = {
   level_name?: string;
 };
 
+type MetadataCategory = {
+  id: number;
+  name: string;
+  description?: string | null;
+  applicable_scopes: string[];
+  is_deprecated: boolean;
+};
+
+type EffectivePropertyBinding = {
+  property_internal_name: string;
+  property_display_name: string;
+  property_data_type: "text" | "boolean" | "number" | "dropdown" | "date" | "datetime";
+  description?: string | null;
+  default_value?: unknown;
+  is_required?: boolean;
+  dropdown_options?: string[] | null;
+};
+
+type CategoryEffectiveProperties = {
+  category_id: number;
+  category_name: string;
+  properties: EffectivePropertyBinding[];
+};
+
+type ResolvedPropertyValue = {
+  property_internal_name: string;
+  property_data_type: string;
+  value: unknown;
+};
+
+type ResolvedMetadata = {
+  category_id: number | null;
+  property_overrides: Record<string, unknown>;
+  properties: ResolvedPropertyValue[];
+};
+
+type PropertiesScope = "book" | "node";
+
 const formatValue = (value: unknown) => {
   if (typeof value === "string") {
     return value;
@@ -211,6 +249,66 @@ const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" 
     return "hindi";
   }
   return "english";
+};
+
+const isBookScopedCategory = (category: MetadataCategory): boolean => {
+  const scopes = category.applicable_scopes || [];
+  return scopes.includes("book") || scopes.includes("all") || scopes.includes("node");
+};
+
+const normalizeMetadataValue = (dataType: string, rawValue: unknown): unknown => {
+  if (dataType === "boolean") {
+    return Boolean(rawValue);
+  }
+
+  if (dataType === "number") {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+      return null;
+    }
+    const numeric = Number(rawValue);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const stringValue = String(rawValue);
+  if (!stringValue.trim()) {
+    return null;
+  }
+
+  if (dataType === "datetime") {
+    const parsed = new Date(stringValue);
+    return Number.isNaN(parsed.getTime()) ? stringValue : parsed.toISOString();
+  }
+
+  return stringValue;
+};
+
+const valuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+};
+
+const toDatetimeLocalValue = (value: unknown): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 function ScripturesContent() {
@@ -297,6 +395,18 @@ function ScripturesContent() {
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
+  const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
+  const [showPropertiesModal, setShowPropertiesModal] = useState(false);
+  const [propertiesScope, setPropertiesScope] = useState<PropertiesScope>("book");
+  const [propertiesNodeId, setPropertiesNodeId] = useState<number | null>(null);
+  const [propertiesLoading, setPropertiesLoading] = useState(false);
+  const [propertiesSaving, setPropertiesSaving] = useState(false);
+  const [propertiesError, setPropertiesError] = useState<string | null>(null);
+  const [propertiesMessage, setPropertiesMessage] = useState<string | null>(null);
+  const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
+  const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
+  const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
 
   const resolvePreviewContentLines = (
     block: BookPreviewBlock,
@@ -387,6 +497,201 @@ function ScripturesContent() {
     }
 
     return lines;
+  };
+
+  const loadMetadataCategories = async () => {
+    setMetadataCategoriesLoading(true);
+    try {
+      const response = await fetch("/api/metadata/categories", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | MetadataCategory[]
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load metadata categories");
+      }
+      const categories = Array.isArray(payload) ? payload : [];
+      setMetadataCategories(categories.filter((category) => !category.is_deprecated && isBookScopedCategory(category)));
+    } catch {
+      setMetadataCategories([]);
+    } finally {
+      setMetadataCategoriesLoading(false);
+    }
+  };
+
+  const loadEffectiveProperties = async (categoryId: number) => {
+    const response = await fetch(`/api/metadata/categories/${categoryId}/effective-properties`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | CategoryEffectiveProperties
+      | { detail?: string }
+      | null;
+    if (!response.ok) {
+      throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load category properties");
+    }
+    return (payload as CategoryEffectiveProperties).properties || [];
+  };
+
+  const propertiesEndpoint = (scope: PropertiesScope, nodeId: number | null) => {
+    if (!bookId) {
+      throw new Error("Book is required");
+    }
+    if (scope === "book") {
+      return `/api/books/${bookId}/metadata-binding`;
+    }
+    if (!nodeId) {
+      throw new Error("Node is required");
+    }
+    return `/api/books/${bookId}/nodes/${nodeId}/metadata-binding`;
+  };
+
+  const openPropertiesModal = async (scope: PropertiesScope, nodeId: number | null = null) => {
+    if (!bookId) return;
+    if (scope === "node" && !nodeId) return;
+
+    setShowPropertiesModal(true);
+    setPropertiesScope(scope);
+    setPropertiesNodeId(nodeId);
+    setPropertiesLoading(true);
+    setPropertiesSaving(false);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const endpoint = propertiesEndpoint(scope, nodeId);
+      const response = await fetch(endpoint, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      let binding: ResolvedMetadata | null = null;
+      if (response.ok) {
+        binding = (await response.json()) as ResolvedMetadata;
+      } else if (response.status !== 404) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Failed to load metadata properties");
+      }
+
+      const categoryId = binding?.category_id ?? null;
+      if (!categoryId) {
+        setPropertiesCategoryId(null);
+        setPropertiesEffectiveFields([]);
+        setPropertiesValues({});
+        return;
+      }
+
+      const effective = await loadEffectiveProperties(categoryId);
+      const values: Record<string, unknown> = {};
+      effective.forEach((field) => {
+        values[field.property_internal_name] = field.default_value ?? null;
+      });
+      if (binding) {
+        binding.properties.forEach((item) => {
+          values[item.property_internal_name] = item.value ?? null;
+        });
+        Object.entries(binding.property_overrides || {}).forEach(([key, value]) => {
+          values[key] = value;
+        });
+      }
+
+      setPropertiesCategoryId(categoryId);
+      setPropertiesEffectiveFields(effective);
+      setPropertiesValues(values);
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to load metadata");
+    } finally {
+      setPropertiesLoading(false);
+    }
+  };
+
+  const handlePropertiesCategoryChange = async (nextCategoryIdRaw: string) => {
+    const nextCategoryId = Number(nextCategoryIdRaw);
+    if (!Number.isFinite(nextCategoryId) || nextCategoryId <= 0) {
+      setPropertiesCategoryId(null);
+      setPropertiesEffectiveFields([]);
+      setPropertiesValues({});
+      setPropertiesError(null);
+      setPropertiesMessage(null);
+      return;
+    }
+
+    setPropertiesLoading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const effective = await loadEffectiveProperties(nextCategoryId);
+      const values: Record<string, unknown> = {};
+      effective.forEach((field) => {
+        values[field.property_internal_name] = field.default_value ?? null;
+      });
+      setPropertiesCategoryId(nextCategoryId);
+      setPropertiesEffectiveFields(effective);
+      setPropertiesValues(values);
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to load category metadata properties");
+    } finally {
+      setPropertiesLoading(false);
+    }
+  };
+
+  const handlePropertiesValueChange = (propertyName: string, value: unknown) => {
+    setPropertiesValues((prev) => ({
+      ...prev,
+      [propertyName]: value,
+    }));
+    setPropertiesMessage(null);
+    setPropertiesError(null);
+  };
+
+  const handleSaveProperties = async () => {
+    if (!propertiesCategoryId) {
+      setPropertiesError("Select a category before saving");
+      return;
+    }
+
+    const propertyOverrides: Record<string, unknown> = {};
+    propertiesEffectiveFields.forEach((field) => {
+      const currentValue = normalizeMetadataValue(field.property_data_type, propertiesValues[field.property_internal_name]);
+      const defaultValue = normalizeMetadataValue(field.property_data_type, field.default_value ?? null);
+      if (!valuesEqual(currentValue, defaultValue)) {
+        propertyOverrides[field.property_internal_name] = currentValue;
+      }
+    });
+
+    setPropertiesSaving(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_id: propertiesCategoryId,
+          property_overrides: propertyOverrides,
+          unset_overrides: [],
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save properties");
+      }
+
+      setPropertiesMessage("Properties saved");
+      await openPropertiesModal(propertiesScope, propertiesNodeId);
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to save properties");
+    } finally {
+      setPropertiesSaving(false);
+    }
   };
 
   const loadBasket = async () => {
@@ -551,6 +856,14 @@ function ScripturesContent() {
     };
 
     loadPreferences();
+  }, [authEmail]);
+
+  useEffect(() => {
+    if (!authEmail) {
+      setMetadataCategories([]);
+      return;
+    }
+    void loadMetadataCategories();
   }, [authEmail]);
 
   const addCurrentToBasket = () => {
@@ -2052,6 +2365,19 @@ function ScripturesContent() {
                 👥
               </button>
             )}
+            {canEdit && bookId && (
+              <button
+                type="button"
+                onClick={() => {
+                  void openPropertiesModal("book");
+                }}
+                title="Book properties"
+                aria-label="Book properties"
+                className="inline-flex h-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 px-3 text-xs font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+              >
+                Properties
+              </button>
+            )}
             {bookId && currentBook && (
               <span
                 title={
@@ -2357,6 +2683,18 @@ function ScripturesContent() {
                         <button
                           type="button"
                           onClick={() => {
+                            void openPropertiesModal("node", nodeContent.id);
+                          }}
+                          title="Node properties"
+                          className="flex h-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          Props
+                        </button>
+                      )}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => {
                             if (!nodeContent) return;
                             const foundNode = findNodeById(treeData, selectedId);
                             const fallbackNode: TreeNode = foundNode || {
@@ -2624,6 +2962,215 @@ function ScripturesContent() {
             </div>
           </div>
         </section>
+
+        {showPropertiesModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    {propertiesScope === "book" ? "Book Properties" : "Node Properties"}
+                  </h2>
+                  <p className="text-sm text-zinc-600">
+                    Base properties: Name, Description, Category. Other fields are category metadata properties.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPropertiesModal(false);
+                    setPropertiesMessage(null);
+                    setPropertiesError(null);
+                  }}
+                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Name</span>
+                  <input
+                    type="text"
+                    readOnly
+                    value={
+                      propertiesScope === "book"
+                        ? currentBook?.book_name || ""
+                        : nodeContent?.title_english || nodeContent?.title_sanskrit || nodeContent?.title_transliteration || `Node ${propertiesNodeId || ""}`
+                    }
+                    className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Description</span>
+                  <textarea
+                    readOnly
+                    value={
+                      propertiesScope === "book"
+                        ? (typeof (currentBook?.metadata_json || currentBook?.metadata || {})?.description === "string"
+                            ? String((currentBook?.metadata_json || currentBook?.metadata || {}).description)
+                            : "")
+                        : `${nodeContent?.level_name || "Node"} ${formatSequenceDisplay(nodeContent?.sequence_number, Boolean(nodeContent?.has_content)) || propertiesNodeId || ""}`
+                    }
+                    rows={2}
+                    className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Category</span>
+                  <select
+                    value={propertiesCategoryId?.toString() || ""}
+                    onChange={(event) => {
+                      void handlePropertiesCategoryChange(event.target.value);
+                    }}
+                    disabled={propertiesLoading || metadataCategoriesLoading}
+                    className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-60"
+                  >
+                    <option value="">Select category</option>
+                    {metadataCategories.map((category) => (
+                      <option key={category.id} value={category.id.toString()}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {propertiesLoading && (
+                  <p className="text-xs text-zinc-500">Loading metadata properties...</p>
+                )}
+
+                {propertiesError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {propertiesError}
+                  </div>
+                )}
+
+                {!propertiesLoading && propertiesCategoryId && propertiesEffectiveFields.length === 0 && (
+                  <p className="text-xs text-zinc-500">Selected category has no metadata properties.</p>
+                )}
+
+                {propertiesEffectiveFields.map((field) => {
+                  const key = field.property_internal_name;
+                  const value = propertiesValues[key];
+                  const required = Boolean(field.is_required);
+
+                  if (field.property_data_type === "boolean") {
+                    return (
+                      <label key={key} className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(value)}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.checked)}
+                          className="rounded border-black/20"
+                        />
+                        <span>{field.property_display_name}{required ? " *" : ""}</span>
+                      </label>
+                    );
+                  }
+
+                  if (field.property_data_type === "dropdown") {
+                    return (
+                      <label key={key} className="flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
+                        <select
+                          value={typeof value === "string" ? value : ""}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        >
+                          <option value="">Select value</option>
+                          {(field.dropdown_options || []).map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+
+                  if (field.property_data_type === "number") {
+                    return (
+                      <label key={key} className="flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
+                        <input
+                          type="number"
+                          value={value === null || value === undefined ? "" : String(value)}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                    );
+                  }
+
+                  if (field.property_data_type === "date") {
+                    return (
+                      <label key={key} className="flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
+                        <input
+                          type="date"
+                          value={typeof value === "string" ? value : ""}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                    );
+                  }
+
+                  if (field.property_data_type === "datetime") {
+                    return (
+                      <label key={key} className="flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
+                        <input
+                          type="datetime-local"
+                          value={toDatetimeLocalValue(value)}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                    );
+                  }
+
+                  return (
+                    <label key={key} className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
+                      <input
+                        type="text"
+                        value={value === null || value === undefined ? "" : String(value)}
+                        onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                      />
+                    </label>
+                  );
+                })}
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSaveProperties();
+                    }}
+                    disabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
+                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                  >
+                    {propertiesSaving ? "Saving..." : "Save Properties"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void openPropertiesModal(propertiesScope, propertiesNodeId);
+                    }}
+                    disabled={propertiesLoading || propertiesSaving}
+                    className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20 disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                  {propertiesMessage && <span className="text-xs text-emerald-700">{propertiesMessage}</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showBookPreview && bookPreviewArtifact && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">

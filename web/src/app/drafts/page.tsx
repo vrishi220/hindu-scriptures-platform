@@ -93,6 +93,52 @@ type DraftEditorState = {
   sectionStructureText: string;
 };
 
+type MetadataCategory = {
+  id: number;
+  name: string;
+  description?: string | null;
+  applicable_scopes: string[];
+  is_deprecated: boolean;
+};
+
+type EffectivePropertyBinding = {
+  property_internal_name: string;
+  property_display_name: string;
+  property_data_type: "text" | "boolean" | "number" | "dropdown" | "date" | "datetime";
+  description?: string | null;
+  default_value?: unknown;
+  is_required?: boolean;
+  dropdown_options?: string[] | null;
+};
+
+type CategoryEffectiveProperties = {
+  category_id: number;
+  category_name: string;
+  properties: EffectivePropertyBinding[];
+};
+
+type ResolvedPropertyValue = {
+  property_internal_name: string;
+  property_data_type: string;
+  value: unknown;
+};
+
+type ResolvedMetadata = {
+  category_id: number | null;
+  property_overrides: Record<string, unknown>;
+  properties: ResolvedPropertyValue[];
+};
+
+type DraftMetadataState = {
+  loading: boolean;
+  saving: boolean;
+  error: string | null;
+  message: string | null;
+  categoryId: number | null;
+  effectiveProperties: EffectivePropertyBinding[];
+  values: Record<string, unknown>;
+};
+
 type CartComposeBodyResponse = {
   section_structure: {
     front?: unknown[];
@@ -141,6 +187,76 @@ const extractApiErrorMessage = (payload: ApiErrorPayload | null, fallback: strin
   return fallback;
 };
 
+const isBookScopedCategory = (category: MetadataCategory): boolean => {
+  const scopes = category.applicable_scopes || [];
+  return scopes.includes("book") || scopes.includes("all");
+};
+
+const toDatetimeLocalValue = (value: unknown): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const normalizeMetadataValue = (dataType: string, rawValue: unknown): unknown => {
+  if (dataType === "boolean") {
+    return Boolean(rawValue);
+  }
+
+  if (dataType === "number") {
+    if (rawValue === null || rawValue === undefined || rawValue === "") {
+      return null;
+    }
+    const numeric = Number(rawValue);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+
+  const stringValue = String(rawValue);
+  if (!stringValue.trim()) {
+    return null;
+  }
+
+  if (dataType === "datetime") {
+    const parsed = new Date(stringValue);
+    return Number.isNaN(parsed.getTime()) ? stringValue : parsed.toISOString();
+  }
+
+  return stringValue;
+};
+
+const valuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+};
+
+const defaultDraftMetadataState = (): DraftMetadataState => ({
+  loading: false,
+  saving: false,
+  error: null,
+  message: null,
+  categoryId: null,
+  effectiveProperties: [],
+  values: {},
+});
+
 function DraftsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -164,7 +280,24 @@ function DraftsPageContent() {
   const [licensePolicyByDraft, setLicensePolicyByDraft] = useState<Record<number, DraftLicensePolicyReport>>({});
   const [licensePolicyLoadingByDraft, setLicensePolicyLoadingByDraft] = useState<Record<number, boolean>>({});
   const [licensePolicyErrorByDraft, setLicensePolicyErrorByDraft] = useState<Record<number, string | null>>({});
+  const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
+  const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
+  const [metadataPanelOpenByDraft, setMetadataPanelOpenByDraft] = useState<Record<number, boolean>>({});
+  const [metadataStateByDraft, setMetadataStateByDraft] = useState<Record<number, DraftMetadataState>>({});
   const draftCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  const setDraftMetadataState = (
+    draftId: number,
+    updater: (prev: DraftMetadataState) => DraftMetadataState
+  ) => {
+    setMetadataStateByDraft((prev) => {
+      const current = prev[draftId] || defaultDraftMetadataState();
+      return {
+        ...prev,
+        [draftId]: updater(current),
+      };
+    });
+  };
 
   const extractDraftSourceItems = (sectionStructure: Record<string, unknown>): DraftSourceItem[] => {
     const sections: Array<"front" | "body" | "back"> = ["front", "body", "back"];
@@ -264,6 +397,237 @@ function DraftsPageContent() {
     }
   };
 
+  const loadMetadataCategories = async () => {
+    setMetadataCategoriesLoading(true);
+    try {
+      const response = await fetch("/api/metadata/categories", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | MetadataCategory[]
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load metadata categories");
+      }
+
+      const categories = Array.isArray(payload) ? payload : [];
+      setMetadataCategories(categories.filter((category) => !category.is_deprecated && isBookScopedCategory(category)));
+    } catch {
+      setMetadataCategories([]);
+    } finally {
+      setMetadataCategoriesLoading(false);
+    }
+  };
+
+  const loadEffectiveProperties = async (categoryId: number) => {
+    const response = await fetch(`/api/metadata/categories/${categoryId}/effective-properties`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | CategoryEffectiveProperties
+      | { detail?: string }
+      | null;
+
+    if (!response.ok) {
+      throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load category properties");
+    }
+
+    return (payload as CategoryEffectiveProperties).properties || [];
+  };
+
+  const openMetadataPanel = async (draftId: number) => {
+    setMetadataPanelOpenByDraft((prev) => ({ ...prev, [draftId]: true }));
+    setDraftMetadataState(draftId, (prev) => ({
+      ...prev,
+      loading: true,
+      error: null,
+      message: null,
+    }));
+
+    try {
+      const response = await fetch(`/api/draft-books/${draftId}/metadata-binding`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      let binding: ResolvedMetadata | null = null;
+      if (response.ok) {
+        binding = (await response.json()) as ResolvedMetadata;
+      } else if (response.status !== 404) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Failed to load metadata binding");
+      }
+
+      const categoryId = binding?.category_id ?? null;
+      if (!categoryId) {
+        setDraftMetadataState(draftId, (prev) => ({
+          ...prev,
+          loading: false,
+          categoryId: null,
+          effectiveProperties: [],
+          values: {},
+          error: null,
+        }));
+        return;
+      }
+
+      const effectiveProperties = await loadEffectiveProperties(categoryId);
+      const values: Record<string, unknown> = {};
+
+      effectiveProperties.forEach((property) => {
+        values[property.property_internal_name] = property.default_value ?? null;
+      });
+
+      if (binding) {
+        binding.properties.forEach((property) => {
+          values[property.property_internal_name] = property.value ?? null;
+        });
+        Object.entries(binding.property_overrides || {}).forEach(([key, value]) => {
+          values[key] = value;
+        });
+      }
+
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        loading: false,
+        categoryId,
+        effectiveProperties,
+        values,
+        error: null,
+      }));
+    } catch (err) {
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : "Failed to load metadata",
+      }));
+    }
+  };
+
+  const handleMetadataCategoryChange = async (draftId: number, nextCategoryIdRaw: string) => {
+    const nextCategoryId = Number(nextCategoryIdRaw);
+    if (!Number.isFinite(nextCategoryId) || nextCategoryId <= 0) {
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        categoryId: null,
+        effectiveProperties: [],
+        values: {},
+        message: null,
+        error: null,
+      }));
+      return;
+    }
+
+    setDraftMetadataState(draftId, (prev) => ({
+      ...prev,
+      loading: true,
+      categoryId: nextCategoryId,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const effectiveProperties = await loadEffectiveProperties(nextCategoryId);
+      const values: Record<string, unknown> = {};
+      effectiveProperties.forEach((property) => {
+        values[property.property_internal_name] = property.default_value ?? null;
+      });
+
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        loading: false,
+        categoryId: nextCategoryId,
+        effectiveProperties,
+        values,
+      }));
+    } catch (err) {
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : "Failed to load category metadata properties",
+      }));
+    }
+  };
+
+  const handleMetadataValueChange = (draftId: number, propertyName: string, value: unknown) => {
+    setDraftMetadataState(draftId, (prev) => ({
+      ...prev,
+      values: {
+        ...prev.values,
+        [propertyName]: value,
+      },
+      message: null,
+      error: null,
+    }));
+  };
+
+  const handleSaveMetadata = async (draftId: number) => {
+    const state = metadataStateByDraft[draftId] || defaultDraftMetadataState();
+    if (!state.categoryId) {
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        error: "Select a category before saving properties",
+      }));
+      return;
+    }
+
+    const propertyOverrides: Record<string, unknown> = {};
+    state.effectiveProperties.forEach((property) => {
+      const currentValue = normalizeMetadataValue(
+        property.property_data_type,
+        state.values[property.property_internal_name]
+      );
+      const defaultValue = normalizeMetadataValue(property.property_data_type, property.default_value ?? null);
+      if (!valuesEqual(currentValue, defaultValue)) {
+        propertyOverrides[property.property_internal_name] = currentValue;
+      }
+    });
+
+    setDraftMetadataState(draftId, (prev) => ({
+      ...prev,
+      saving: true,
+      message: null,
+      error: null,
+    }));
+
+    try {
+      const response = await fetch(`/api/draft-books/${draftId}/metadata-binding`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category_id: state.categoryId,
+          property_overrides: propertyOverrides,
+          unset_overrides: [],
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save metadata properties");
+      }
+
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        saving: false,
+        message: "Properties saved",
+        error: null,
+      }));
+
+      await openMetadataPanel(draftId);
+    } catch (err) {
+      setDraftMetadataState(draftId, (prev) => ({
+        ...prev,
+        saving: false,
+        error: err instanceof Error ? err.message : "Failed to save metadata",
+      }));
+    }
+  };
+
   const loadDrafts = async () => {
     try {
       setLoading(true);
@@ -298,6 +662,14 @@ function DraftsPageContent() {
       return;
     }
     loadDrafts();
+  }, [authEmail]);
+
+  useEffect(() => {
+    if (!authEmail) {
+      setMetadataCategories([]);
+      return;
+    }
+    void loadMetadataCategories();
   }, [authEmail]);
 
   useEffect(() => {
@@ -776,7 +1148,7 @@ function DraftsPageContent() {
     }
   };
 
-  const toggleExpand = async (draft: DraftBook) => {
+  const toggleExpand = async (draft: DraftBook, openProperties = false) => {
     const next = expandedDraftId === draft.id ? null : draft.id;
     setExpandedDraftId(next);
     if (next === draft.id) {
@@ -786,6 +1158,9 @@ function DraftsPageContent() {
         loadProvenanceForDraft(draft),
         loadLicensePolicyForDraft(draft.id),
       ]);
+      if (openProperties) {
+        await openMetadataPanel(draft.id);
+      }
     }
   };
 
@@ -892,13 +1267,33 @@ function DraftsPageContent() {
                             <span>Updated {formatDate(draft.updated_at)}</span>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(draft)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
-                        >
-                          {expandedDraftId === draft.id ? "Hide" : "Manage"}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (expandedDraftId !== draft.id) {
+                                void toggleExpand(draft, true);
+                                return;
+                              }
+                              const isOpen = Boolean(metadataPanelOpenByDraft[draft.id]);
+                              if (isOpen) {
+                                setMetadataPanelOpenByDraft((prev) => ({ ...prev, [draft.id]: false }));
+                                return;
+                              }
+                              void openMetadataPanel(draft.id);
+                            }}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
+                          >
+                            Properties
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void toggleExpand(draft)}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
+                          >
+                            {expandedDraftId === draft.id ? "Hide" : "Manage"}
+                          </button>
+                        </div>
                       </div>
 
                       {expandedDraftId === draft.id && draftEditor && (
@@ -926,6 +1321,190 @@ function DraftsPageContent() {
                               }
                               className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
                             />
+                          </div>
+
+                          <div className="rounded-xl border border-black/10 bg-white/70 p-4">
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div>
+                                <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-zinc-600">Properties</h3>
+                                <p className="mt-1 text-xs text-zinc-500">
+                                  Base properties are Name, Description, Category. Other fields are metadata properties from selected category.
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isOpen = Boolean(metadataPanelOpenByDraft[draft.id]);
+                                  if (isOpen) {
+                                    setMetadataPanelOpenByDraft((prev) => ({ ...prev, [draft.id]: false }));
+                                    return;
+                                  }
+                                  void openMetadataPanel(draft.id);
+                                }}
+                                className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
+                              >
+                                {metadataPanelOpenByDraft[draft.id] ? "Hide Properties" : "Open Properties"}
+                              </button>
+                            </div>
+
+                            {metadataPanelOpenByDraft[draft.id] && (() => {
+                              const metadataState = metadataStateByDraft[draft.id] || defaultDraftMetadataState();
+                              return (
+                                <div className="space-y-3">
+                                  <label className="flex flex-col gap-1">
+                                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Category</span>
+                                    <select
+                                      value={metadataState.categoryId?.toString() || ""}
+                                      onChange={(event) => {
+                                        void handleMetadataCategoryChange(draft.id, event.target.value);
+                                      }}
+                                      disabled={metadataState.loading || metadataCategoriesLoading}
+                                      className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                    >
+                                      <option value="">Select category</option>
+                                      {metadataCategories.map((category) => (
+                                        <option key={category.id} value={category.id.toString()}>
+                                          {category.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+
+                                  {metadataState.loading && (
+                                    <p className="text-xs text-zinc-500">Loading metadata properties...</p>
+                                  )}
+
+                                  {metadataState.error && (
+                                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                                      {metadataState.error}
+                                    </div>
+                                  )}
+
+                                  {!metadataState.loading && metadataState.categoryId && metadataState.effectiveProperties.length === 0 && (
+                                    <p className="text-xs text-zinc-500">Selected category has no metadata properties.</p>
+                                  )}
+
+                                  {metadataState.effectiveProperties.map((property) => {
+                                    const key = property.property_internal_name;
+                                    const currentValue = metadataState.values[key];
+                                    const label = property.property_display_name;
+                                    const required = Boolean(property.is_required);
+
+                                    if (property.property_data_type === "boolean") {
+                                      return (
+                                        <label key={key} className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(currentValue)}
+                                            onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.checked)}
+                                            className="rounded border-black/20"
+                                          />
+                                          <span>{label}{required ? " *" : ""}</span>
+                                        </label>
+                                      );
+                                    }
+
+                                    if (property.property_data_type === "dropdown") {
+                                      return (
+                                        <label key={key} className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}{required ? " *" : ""}</span>
+                                          <select
+                                            value={typeof currentValue === "string" ? currentValue : ""}
+                                            onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.value)}
+                                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                          >
+                                            <option value="">Select value</option>
+                                            {(property.dropdown_options || []).map((option) => (
+                                              <option key={option} value={option}>{option}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      );
+                                    }
+
+                                    if (property.property_data_type === "number") {
+                                      return (
+                                        <label key={key} className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}{required ? " *" : ""}</span>
+                                          <input
+                                            type="number"
+                                            value={currentValue === null || currentValue === undefined ? "" : String(currentValue)}
+                                            onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.value)}
+                                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                          />
+                                        </label>
+                                      );
+                                    }
+
+                                    if (property.property_data_type === "date") {
+                                      return (
+                                        <label key={key} className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}{required ? " *" : ""}</span>
+                                          <input
+                                            type="date"
+                                            value={typeof currentValue === "string" ? currentValue : ""}
+                                            onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.value)}
+                                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                          />
+                                        </label>
+                                      );
+                                    }
+
+                                    if (property.property_data_type === "datetime") {
+                                      return (
+                                        <label key={key} className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}{required ? " *" : ""}</span>
+                                          <input
+                                            type="datetime-local"
+                                            value={toDatetimeLocalValue(currentValue)}
+                                            onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.value)}
+                                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                          />
+                                        </label>
+                                      );
+                                    }
+
+                                    return (
+                                      <label key={key} className="flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{label}{required ? " *" : ""}</span>
+                                        <input
+                                          type="text"
+                                          value={currentValue === null || currentValue === undefined ? "" : String(currentValue)}
+                                          onChange={(event) => handleMetadataValueChange(draft.id, key, event.target.value)}
+                                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                                        />
+                                      </label>
+                                    );
+                                  })}
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSaveMetadata(draft.id);
+                                      }}
+                                      disabled={metadataState.saving || metadataState.loading || !metadataState.categoryId}
+                                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {metadataState.saving ? "Saving..." : "Save Properties"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void openMetadataPanel(draft.id);
+                                      }}
+                                      disabled={metadataState.loading || metadataState.saving}
+                                      className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Refresh
+                                    </button>
+                                    {metadataState.message && (
+                                      <span className="text-xs text-emerald-700">{metadataState.message}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           <div>
