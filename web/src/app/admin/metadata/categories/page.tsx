@@ -77,6 +77,14 @@ export default function MetadataCategoriesAdminPage() {
   const [editScopes, setEditScopes] = useState<string[]>(["book"]);
   const [editParentIds, setEditParentIds] = useState<number[]>([]);
 
+  const scopeLabelMap: Record<string, string> = {
+    all: "All",
+    book: "Book",
+    level: "Level",
+    node: "Node",
+    global: "Global",
+  };
+
   const scopeOptions = useMemo(() => {
     const baseScopes = ["all", "book", "level", "node", "global"];
     const combined = new Set<string>([...baseScopes, ...createScopes, ...editScopes]);
@@ -180,6 +188,8 @@ export default function MetadataCategoriesAdminPage() {
 
   const getSelectedValues = (event: React.ChangeEvent<HTMLSelectElement>) =>
     Array.from(event.target.selectedOptions).map((option) => option.value);
+
+  const scopeLabel = (scope: string) => scopeLabelMap[scope] || scope;
 
   const toggleFromList = (
     id: number,
@@ -452,7 +462,7 @@ export default function MetadataCategoriesAdminPage() {
                 >
                   {scopeOptions.map((scope) => (
                     <option key={scope} value={scope}>
-                      {scope}
+                      {scopeLabel(scope)}
                     </option>
                   ))}
                 </select>
@@ -583,7 +593,7 @@ export default function MetadataCategoriesAdminPage() {
                     >
                       {scopeOptions.map((scope) => (
                         <option key={scope} value={scope}>
-                          {scope}
+                          {scopeLabel(scope)}
                         </option>
                       ))}
                     </select>
