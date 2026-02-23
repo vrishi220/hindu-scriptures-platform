@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user_optional
@@ -8,6 +8,11 @@ from models.search_query import SearchQuery
 from models.schemas import ContentNodePublic, SearchRequest, SearchResponse, SearchResult
 from models.user import User
 from services import get_db
+from services.transliteration import (
+    contains_devanagari,
+    get_latin_query_variants,
+    latin_to_devanagari,
+)
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -66,6 +71,27 @@ def build_search_query(
     
     # Check if search term is in quotes for exact matching
     search_text = text.strip()
+    latin_query_variants = get_latin_query_variants(search_text)
+    devanagari_query = (
+        search_text if contains_devanagari(search_text) else latin_to_devanagari(search_text)
+    )
+
+    like_conditions = [
+        func.lower(searchable_combined).like(f"%{variant.lower()}%")
+        for variant in latin_query_variants
+        if variant
+    ]
+    if devanagari_query:
+        like_conditions.extend(
+            [
+                func.lower(sanskrit_raw).like(f"%{devanagari_query.lower()}%"),
+                func.lower(title_sanskrit).like(f"%{devanagari_query.lower()}%"),
+            ]
+        )
+
+    if not like_conditions:
+        like_conditions.append(func.lower(searchable_combined).like("%"))
+
     if (search_text.startswith('"') and search_text.endswith('"')) or \
        (search_text.startswith("'") and search_text.endswith("'")):
         # Exact phrase matching - use ILIKE for case-insensitive substring match
@@ -74,9 +100,7 @@ def build_search_query(
         import re
         escaped_text = re.escape(search_text)
         
-        query = db.query(ContentNode).filter(
-            func.lower(searchable_combined).like(f"%{search_text.lower()}%")
-        )
+        query = db.query(ContentNode).filter(or_(*like_conditions))
         # Shorter texts rank higher (invert length)
         rank = (10000 - func.length(searchable_combined)).label("rank")
         # Highlight the matched text with <mark> tags using case-insensitive regex
@@ -89,9 +113,7 @@ def build_search_query(
         ).label("snippet")
     else:
         # Partial/prefix matching - use ILIKE for broader matching
-        query = db.query(ContentNode).filter(
-            func.lower(searchable_combined).like(f"%{search_text.lower()}%")
-        )
+        query = db.query(ContentNode).filter(or_(*like_conditions))
         rank = (10000 - func.length(searchable_combined)).label("rank")
         
         # Try to highlight with regex
@@ -232,6 +254,12 @@ def fulltext_search(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Query required"
         )
+
+    query_text = q.strip()
+    latin_query_variants = get_latin_query_variants(query_text)
+    devanagari_query = (
+        query_text if contains_devanagari(query_text) else latin_to_devanagari(query_text)
+    )
     
     # Build query with status = published visible to all
     query = db.query(ContentNode).filter(
@@ -241,8 +269,21 @@ def fulltext_search(
     
     # Full-text search using TSVECTOR match
     # to_tsquery converts search text to tsquery format
-    tsquery = func.plainto_tsquery('english', q)
-    query = query.filter(ContentNode.search_vector.op('@@')(tsquery))
+    tsquery = func.plainto_tsquery('english', latin_query_variants[0] if latin_query_variants else query_text)
+    fulltext_conditions = [ContentNode.search_vector.op('@@')(tsquery)]
+
+    sanskrit_source = func.concat_ws(
+        " ",
+        func.coalesce(ContentNode.title_sanskrit, ""),
+        func.coalesce(ContentNode.content_data["basic"]["sanskrit"].astext, ""),
+    )
+    sanskrit_tsvector = func.to_tsvector("simple", sanskrit_source)
+    sanskrit_tsquery = None
+    if devanagari_query:
+        sanskrit_tsquery = func.plainto_tsquery("simple", devanagari_query)
+        fulltext_conditions.append(sanskrit_tsvector.op("@@")(sanskrit_tsquery))
+
+    query = query.filter(or_(*fulltext_conditions))
     
     # Apply filters
     if book_id is not None:
@@ -257,7 +298,10 @@ def fulltext_search(
     total = query.count()
     
     # Rank by relevance (ts_rank)
-    rank = func.ts_rank(ContentNode.search_vector, tsquery).label("rank")
+    rank_expr = func.ts_rank(ContentNode.search_vector, tsquery)
+    if sanskrit_tsquery is not None:
+        rank_expr = func.greatest(rank_expr, func.ts_rank(sanskrit_tsvector, sanskrit_tsquery))
+    rank = rank_expr.label("rank")
     
     # Get results with ranking
     rows = apply_stable_search_order(query.add_columns(rank), rank).offset(offset).limit(limit).all()

@@ -1131,8 +1131,6 @@ export default function BasketPanel({
                     className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
                   >
                     <option value="sanskrit">Sanskrit</option>
-                    <option value="hindi">Hindi</option>
-                    <option value="tamil">Tamil</option>
                     <option value="english">English</option>
                   </select>
                 </div>

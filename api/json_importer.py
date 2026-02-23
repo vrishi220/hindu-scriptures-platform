@@ -3,7 +3,7 @@ JSON-based scripture importer.
 Handles importing scripture content from JSON/API sources.
 """
 import requests
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 
@@ -12,7 +12,7 @@ class JSONImportConfig(BaseModel):
     book_name: str
     book_code: str
     schema_id: int
-    language_primary: str = "sanskrit"
+    language_primary: Literal["sanskrit", "english"] = "sanskrit"
     source_attribution: str
     original_source_url: Optional[str] = None
     json_source_url: str  # URL to fetch JSON data from

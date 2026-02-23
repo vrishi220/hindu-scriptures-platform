@@ -2867,7 +2867,7 @@ function ScripturesContent() {
                           </button>
                           {showNodeActionsMenu && (
                             <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                              {isLeafSelected && (
+                              {isLeafSelected && authEmail && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -3770,9 +3770,6 @@ function ScripturesContent() {
                       className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
                     >
                       <option value="sanskrit">Sanskrit</option>
-                      <option value="hindi">Hindi</option>
-                      <option value="tamil">Tamil</option>
-                      <option value="telugu">Telugu</option>
                       <option value="english">English</option>
                     </select>
                   </div>
@@ -4034,25 +4031,38 @@ function ScripturesContent() {
       </main>
 
       {/* Floating Basket Panel */}
-      <BasketPanel
-        items={basketItems.map(item => ({
-          node_id: item.node_id,
-          order: item.order,
-          title: item.title,
-          book_name: item.book_name,
-          level_name: item.level_name,
-        }))}
-        onRemoveItem={removeFromBasket}
-        onMoveItem={moveBasketItem}
-        reorderLoading={isReorderingBasket}
-        onClearBasket={clearBasket}
-        onItemsAdded={() => {
-          // Optionally refresh the tree if needed
-          if (bookId) {
-            void loadTree(bookId);
-          }
-        }}
-      />
+      {authEmail ? (
+        <BasketPanel
+          items={basketItems.map(item => ({
+            node_id: item.node_id,
+            order: item.order,
+            title: item.title,
+            book_name: item.book_name,
+            level_name: item.level_name,
+          }))}
+          onRemoveItem={removeFromBasket}
+          onMoveItem={moveBasketItem}
+          reorderLoading={isReorderingBasket}
+          onClearBasket={clearBasket}
+          onItemsAdded={() => {
+            if (bookId) {
+              void loadTree(bookId);
+            }
+          }}
+        />
+      ) : (
+        <div className="fixed bottom-4 right-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-black/10 bg-white/95 p-4 shadow-xl">
+          <p className="text-sm font-medium text-[color:var(--deep)]">Sign in to collect verses</p>
+          <p className="mt-1 text-xs text-zinc-600">Basket is available for signed-in users.</p>
+          <button
+            type="button"
+            onClick={() => router.push("/signin?returnTo=/scriptures")}
+            className="mt-3 rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-white transition hover:opacity-95"
+          >
+            Sign In
+          </button>
+        </div>
+      )}
     </div>
   );
 }
