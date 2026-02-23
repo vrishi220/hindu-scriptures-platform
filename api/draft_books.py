@@ -21,6 +21,7 @@ from models.book import Book
 from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
+from models.property_system import Category, MetadataBinding
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
     AdminDraftBookCreate,
@@ -51,6 +52,7 @@ from models.schemas import (
 from models.user import User
 from services import get_db
 from services.license_policy import classify_license_action, normalize_license
+from services.metadata_defaults import ensure_default_metadata_binding_for_draft
 
 router = APIRouter(tags=["draft_books"])
 logger = logging.getLogger(__name__)
@@ -93,6 +95,7 @@ _METADATA_TEMPLATE_KEY_FALLBACK_FIELDS = (
     "level_template_key",
     "content_template_key",
 )
+
 
 
 def _metadata_liquid_template(fields: list[str]) -> str:
@@ -1855,6 +1858,8 @@ def create_draft_book(
         status="draft",
     )
     db.add(draft)
+    db.flush()
+    ensure_default_metadata_binding_for_draft(db, draft.id)
     db.commit()
     db.refresh(draft)
     return DraftBookPublic.model_validate(draft)
@@ -1883,6 +1888,8 @@ def admin_create_clean_draft_book(
         status="draft",
     )
     db.add(draft)
+    db.flush()
+    ensure_default_metadata_binding_for_draft(db, draft.id)
     db.commit()
     db.refresh(draft)
     return DraftBookPublic.model_validate(draft)

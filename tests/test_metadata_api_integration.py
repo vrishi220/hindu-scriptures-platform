@@ -479,3 +479,106 @@ class TestMetadataDeprecationSemantics:
         )
         assert binding_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "deprecated categories" in str(binding_response.json().get("detail", "")).lower()
+
+
+class TestMetadataSystemDefaults:
+    def test_seeded_system_properties_and_category_exist(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+
+        properties_response = client.get(
+            "/api/metadata/property-definitions",
+            headers=admin_headers,
+        )
+        assert properties_response.status_code == status.HTTP_200_OK
+        properties = properties_response.json()
+
+        system_internal_names = {item["internal_name"] for item in properties if item.get("is_system")}
+        assert {
+            "render_template_key",
+            "template_key",
+            "level_template_key",
+            "content_template_key",
+            "source_language",
+            "is_transliterable",
+        }.issubset(system_internal_names)
+
+        categories_response = client.get(
+            "/api/metadata/categories",
+            headers=admin_headers,
+        )
+        assert categories_response.status_code == status.HTTP_200_OK
+        categories = categories_response.json()
+
+        default_category = next(
+            (item for item in categories if item.get("name") == "system_default_metadata"),
+            None,
+        )
+        assert default_category is not None
+        assert default_category.get("is_system") is True
+
+    def test_new_draft_gets_default_metadata_binding(self, client):
+        editor_headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            headers=editor_headers,
+            json={
+                "title": f"Default Metadata Draft {uuid4().hex[:8]}",
+                "description": "Draft for default metadata binding",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        binding_response = client.get(
+            f"/api/metadata/draft-books/{draft_id}/metadata-binding",
+            headers=editor_headers,
+        )
+        assert binding_response.status_code == status.HTTP_200_OK
+        payload = binding_response.json()
+        assert payload["category_name"] == "system_default_metadata"
+
+
+class TestMetadataBackfillDefaults:
+    def test_backfill_adds_default_binding_for_existing_draft(self, client):
+        from models.database import SessionLocal
+        from models.property_system import MetadataBinding
+        from services.metadata_defaults import backfill_default_metadata_bindings
+
+        editor_headers = _register_and_login(client)
+
+        draft_response = client.post(
+            "/api/draft-books",
+            headers=editor_headers,
+            json={
+                "title": f"Backfill Metadata Draft {uuid4().hex[:8]}",
+                "description": "Draft for backfill validation",
+                "section_structure": {"front": [], "body": [], "back": []},
+            },
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            db.query(MetadataBinding).filter(
+                MetadataBinding.entity_type == "draft_book",
+                MetadataBinding.entity_id == draft_id,
+                MetadataBinding.scope_type == "book",
+            ).delete(synchronize_session=False)
+            db.commit()
+
+            result = backfill_default_metadata_bindings(db)
+            db.commit()
+            assert result.default_category_found is True
+            assert result.created_bindings >= 1
+        finally:
+            db.close()
+
+        binding_response = client.get(
+            f"/api/metadata/draft-books/{draft_id}/metadata-binding",
+            headers=editor_headers,
+        )
+        assert binding_response.status_code == status.HTTP_200_OK
+        assert binding_response.json()["category_name"] == "system_default_metadata"

@@ -151,6 +151,26 @@ export default function NavBar() {
               >
                 Schemas
               </a>
+              <a
+                href="/admin/metadata/properties"
+                className={`hover:text-[color:var(--accent)] ${
+                  isActive("/admin/metadata/properties")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : ""
+                }`}
+              >
+                Properties
+              </a>
+              <a
+                href="/admin/metadata/categories"
+                className={`hover:text-[color:var(--accent)] ${
+                  isActive("/admin/metadata/categories")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : ""
+                }`}
+              >
+                Categories
+              </a>
             </>
           )}
         </div>
@@ -262,6 +282,28 @@ export default function NavBar() {
                   }`}
                 >
                   Schemas
+                </a>
+                <a
+                  href="/admin/metadata/properties"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                    isActive("/admin/metadata/properties")
+                      ? "font-semibold text-[color:var(--deep)]"
+                      : "text-zinc-600 hover:text-[color:var(--accent)]"
+                  }`}
+                >
+                  Properties
+                </a>
+                <a
+                  href="/admin/metadata/categories"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                    isActive("/admin/metadata/categories")
+                      ? "font-semibold text-[color:var(--deep)]"
+                      : "text-zinc-600 hover:text-[color:var(--accent)]"
+                  }`}
+                >
+                  Categories
                 </a>
               </>
             )}
