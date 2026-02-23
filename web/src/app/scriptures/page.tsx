@@ -2632,7 +2632,17 @@ function ScripturesContent() {
               )}
               {selectedId && nodeContent ? (
                 <>
-                  <div className="flex items-center justify-between mb-4">
+                  <div
+                    className="flex items-center justify-between mb-4"
+                    onContextMenu={(event) => {
+                      if (!(isLeafSelected || canEdit || canAdmin)) {
+                        return;
+                      }
+                      event.preventDefault();
+                      setShowBookActionsMenu(false);
+                      setShowNodeActionsMenu(true);
+                    }}
+                  >
                     <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                       {(() => {
                         const displaySeq =
