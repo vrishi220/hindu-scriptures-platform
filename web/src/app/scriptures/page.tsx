@@ -16,6 +16,9 @@ import {
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
+import UserPreferencesDialog, {
+  type UserPreferences,
+} from "../../components/UserPreferencesDialog";
 import {
   isRomanScript,
   normalizeTransliterationScript,
@@ -111,13 +114,6 @@ type NodeContent = {
   tags?: string[] | null;
 };
 
-type UserPreferences = {
-  source_language: string;
-  transliteration_enabled: boolean;
-  transliteration_script: string;
-  show_roman_transliteration: boolean;
-};
-
 type BookPreviewBlock = {
   section: "body";
   order: number;
@@ -147,6 +143,12 @@ type BookPreviewRenderSettings = {
   show_english: boolean;
   show_metadata: boolean;
   text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
+};
+
+type BookPreviewLanguageSettings = {
+  show_sanskrit: boolean;
+  show_transliteration: boolean;
+  show_english: boolean;
 };
 
 type BookPreviewArtifact = {
@@ -387,6 +389,12 @@ function ScripturesContent() {
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
+  const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
+    useState<BookPreviewLanguageSettings>({
+      show_sanskrit: true,
+      show_transliteration: true,
+      show_english: true,
+    });
   const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
   const [bookBodyCreateDraftLoading, setBookBodyCreateDraftLoading] = useState(false);
   const [bookBodyAddMessage, setBookBodyAddMessage] = useState<string | null>(null);
@@ -410,6 +418,7 @@ function ScripturesContent() {
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
   const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
@@ -1536,7 +1545,13 @@ function ScripturesContent() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          render_settings: {
+            ...bookPreviewLanguageSettings,
+            show_metadata: true,
+            text_order: ["sanskrit", "transliteration", "english", "text"],
+          },
+        }),
       });
       const payload = (await response.json().catch(() => null)) as
         | BookPreviewArtifact
@@ -1548,7 +1563,13 @@ function ScripturesContent() {
         throw new Error((payload as { detail?: string } | null)?.detail || "Failed to render book preview");
       }
 
-      setBookPreviewArtifact(payload as BookPreviewArtifact);
+      const artifact = payload as BookPreviewArtifact;
+      setBookPreviewArtifact(artifact);
+      setBookPreviewLanguageSettings({
+        show_sanskrit: artifact.render_settings.show_sanskrit,
+        show_transliteration: artifact.render_settings.show_transliteration,
+        show_english: artifact.render_settings.show_english,
+      });
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -2890,100 +2911,18 @@ function ScripturesContent() {
                   <div className="flex flex-col gap-6">
                     {authEmail && preferences && (
                       <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                        <div className="mb-3 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                          Display preferences
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="flex flex-col gap-1">
-                            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Source language
-                            </span>
-                            <select
-                              value={preferences.source_language}
-                              onChange={(event) =>
-                                setPreferences({
-                                  ...preferences,
-                                  source_language: event.target.value,
-                                })
-                              }
-                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                            >
-                              <option value="sanskrit">Sanskrit</option>
-                              <option value="hindi">Hindi</option>
-                              <option value="english">English</option>
-                            </select>
-                          </label>
-                          <label className="flex flex-col gap-1">
-                            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Transliteration script
-                            </span>
-                            <select
-                              value={preferences.transliteration_script}
-                              onChange={(event) =>
-                                setPreferences({
-                                  ...preferences,
-                                  transliteration_script: normalizeTransliterationScript(
-                                    event.target.value
-                                  ),
-                                })
-                              }
-                              disabled={!transliterationEnabled}
-                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <option value="iast">IAST</option>
-                              <option value="harvard_kyoto">Harvard-Kyoto</option>
-                              <option value="itrans">ITRANS</option>
-                              <option value="devanagari">Devanagari</option>
-                              <option value="bengali">Bengali</option>
-                              <option value="gujarati">Gujarati</option>
-                              <option value="gurmukhi">Gurmukhi</option>
-                              <option value="kannada">Kannada</option>
-                              <option value="malayalam">Malayalam</option>
-                              <option value="oriya">Odia</option>
-                              <option value="tamil">Tamil</option>
-                              <option value="telugu">Telugu</option>
-                            </select>
-                          </label>
-                          <label className="flex items-center gap-2 text-sm text-zinc-700">
-                            <input
-                              type="checkbox"
-                              checked={transliterationEnabled}
-                              onChange={(event) =>
-                                setPreferences({
-                                  ...preferences,
-                                  transliteration_enabled: event.target.checked,
-                                })
-                              }
-                            />
-                            Enable transliteration
-                          </label>
-                          <label className="flex items-center gap-2 text-sm text-zinc-700">
-                            <input
-                              type="checkbox"
-                              checked={showRomanTransliteration}
-                              disabled={!transliterationEnabled || !scriptPrefersRoman}
-                              onChange={(event) =>
-                                setPreferences({
-                                  ...preferences,
-                                  show_roman_transliteration: event.target.checked,
-                                })
-                              }
-                            />
-                            Show Roman transliteration
-                          </label>
-                        </div>
-                        <div className="mt-3 flex items-center gap-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                            Display preferences
+                          </div>
                           <button
                             type="button"
-                            onClick={savePreferences}
-                            disabled={preferencesSaving}
-                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
+                            onClick={() => setShowPreferencesDialog(true)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                           >
-                            {preferencesSaving ? "Saving..." : "Save prefs"}
+                            <SlidersHorizontal size={14} />
+                            Open
                           </button>
-                          {preferencesMessage && (
-                            <span className="text-xs text-zinc-600">{preferencesMessage}</span>
-                          )}
                         </div>
                       </div>
                     )}
@@ -3370,6 +3309,69 @@ function ScripturesContent() {
                 </div>
               )}
 
+              <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
+                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
+                <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={bookPreviewLanguageSettings.show_sanskrit}
+                      onChange={(event) =>
+                        setBookPreviewLanguageSettings((prev) => ({
+                          ...prev,
+                          show_sanskrit: event.target.checked,
+                        }))
+                      }
+                      disabled={bookPreviewLoading}
+                    />
+                    Sanskrit
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={bookPreviewLanguageSettings.show_transliteration}
+                      onChange={(event) =>
+                        setBookPreviewLanguageSettings((prev) => ({
+                          ...prev,
+                          show_transliteration: event.target.checked,
+                        }))
+                      }
+                      disabled={bookPreviewLoading}
+                    />
+                    Transliteration
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={bookPreviewLanguageSettings.show_english}
+                      onChange={(event) =>
+                        setBookPreviewLanguageSettings((prev) => ({
+                          ...prev,
+                          show_english: event.target.checked,
+                        }))
+                      }
+                      disabled={bookPreviewLoading}
+                    />
+                    English
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handlePreviewBook();
+                    }}
+                    disabled={
+                      bookPreviewLoading ||
+                      (!bookPreviewLanguageSettings.show_sanskrit &&
+                        !bookPreviewLanguageSettings.show_transliteration &&
+                        !bookPreviewLanguageSettings.show_english)
+                    }
+                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {bookPreviewLoading ? "Applying..." : "Apply"}
+                  </button>
+                </div>
+              </div>
+
               {bookPreviewArtifact.book_template && (
                 <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
                   <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Template</div>
@@ -3419,6 +3421,16 @@ function ScripturesContent() {
             </div>
           </div>
         )}
+
+        <UserPreferencesDialog
+          open={showPreferencesDialog}
+          onClose={() => setShowPreferencesDialog(false)}
+          preferences={preferences}
+          onChange={(next) => setPreferences(next)}
+          onSave={savePreferences}
+          saving={preferencesSaving}
+          message={preferencesMessage}
+        />
 
         {/* Share Manager Modal */}
         {showShareManager && (
