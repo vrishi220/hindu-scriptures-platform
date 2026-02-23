@@ -2008,9 +2008,11 @@ function ScripturesContent() {
                   loadSchemas();
                   setShowCreateBook(true);
                 }}
-                className="rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm"
+                title="Create book"
+                aria-label="Create book"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-lg text-emerald-700 transition hover:border-emerald-500/60 hover:shadow-sm"
               >
-                + Create Book
+                ➕
               </button>
             )}
             {canTogglePublish && (

@@ -50,6 +50,7 @@ export default function NavBar() {
   };
 
   const isActive = (href: string) => pathname === href;
+  const isAdminActive = pathname?.startsWith("/admin");
 
   return (
     <nav className="border-b border-black/10 bg-white/80 sticky top-0 z-40">
@@ -136,46 +137,14 @@ export default function NavBar() {
             Explorer
           </a>
           {canAdmin && (
-            <>
-              <a
-                href="/admin"
-                className={`hover:text-[color:var(--accent)] ${
-                  isActive("/admin") ? "font-semibold text-[color:var(--deep)]" : ""
-                }`}
-              >
-                Users
-              </a>
-              <a
-                href="/admin/schemas"
-                className={`hover:text-[color:var(--accent)] ${
-                  isActive("/admin/schemas")
-                    ? "font-semibold text-[color:var(--deep)]"
-                    : ""
-                }`}
-              >
-                Schemas
-              </a>
-              <a
-                href="/admin/metadata/properties"
-                className={`hover:text-[color:var(--accent)] ${
-                  isActive("/admin/metadata/properties")
-                    ? "font-semibold text-[color:var(--deep)]"
-                    : ""
-                }`}
-              >
-                Properties
-              </a>
-              <a
-                href="/admin/metadata/categories"
-                className={`hover:text-[color:var(--accent)] ${
-                  isActive("/admin/metadata/categories")
-                    ? "font-semibold text-[color:var(--deep)]"
-                    : ""
-                }`}
-              >
-                Categories
-              </a>
-            </>
+            <a
+              href="/admin"
+              className={`hover:text-[color:var(--accent)] ${
+                isAdminActive ? "font-semibold text-[color:var(--deep)]" : ""
+              }`}
+            >
+              Admin
+            </a>
           )}
         </div>
 
@@ -264,52 +233,17 @@ export default function NavBar() {
               Explorer
             </a>
             {canAdmin && (
-              <>
-                <a
-                  href="/admin"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                    isActive("/admin")
-                      ? "font-semibold text-[color:var(--deep)]"
-                      : "text-zinc-600 hover:text-[color:var(--accent)]"
-                  }`}
-                >
-                  Users
-                </a>
-                <a
-                  href="/admin/schemas"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                    isActive("/admin/schemas")
-                      ? "font-semibold text-[color:var(--deep)]"
-                      : "text-zinc-600 hover:text-[color:var(--accent)]"
-                  }`}
-                >
-                  Schemas
-                </a>
-                <a
-                  href="/admin/metadata/properties"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                    isActive("/admin/metadata/properties")
-                      ? "font-semibold text-[color:var(--deep)]"
-                      : "text-zinc-600 hover:text-[color:var(--accent)]"
-                  }`}
-                >
-                  Properties
-                </a>
-                <a
-                  href="/admin/metadata/categories"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                    isActive("/admin/metadata/categories")
-                      ? "font-semibold text-[color:var(--deep)]"
-                      : "text-zinc-600 hover:text-[color:var(--accent)]"
-                  }`}
-                >
-                  Categories
-                </a>
-              </>
+              <a
+                href="/admin"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                  isAdminActive
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : "text-zinc-600 hover:text-[color:var(--accent)]"
+                }`}
+              >
+                Admin
+              </a>
             )}
             <div className="border-t border-black/10 pt-2 mt-2">
               {authEmail ? (
