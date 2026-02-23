@@ -65,15 +65,28 @@ const transliterate = (text: string, from: string, to: string): string => {
   }
 };
 
+const normalizeLegacyIastInput = (text: string): string => {
+  if (!text) return "";
+
+  return text
+    .replace(/kṣh/gi, "kṣ")
+    .replace(/śh/gi, "ś")
+    .replace(/ṣh/gi, "ṣ")
+    .replace(/ṛi/gi, "ṛ")
+    .replace(/ṝi/gi, "ṝ")
+    .replace(/ḷi/gi, "ḷ");
+};
+
 export const transliterateFromIast = (
   text: string,
   script: TransliterationScriptOption
 ): string => {
   const targetScheme = SCHEME_BY_OPTION[script];
+  const normalizedInput = normalizeLegacyIastInput(text);
   if (!targetScheme || targetScheme === "iast") {
-    return text;
+    return normalizedInput;
   }
-  return transliterate(text, "iast", targetScheme);
+  return transliterate(normalizedInput, "iast", targetScheme);
 };
 
 export const transliterateFromDevanagari = (
