@@ -16,6 +16,13 @@ import {
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
+import {
+  isRomanScript,
+  normalizeTransliterationScript,
+  transliterateFromDevanagari,
+  transliterateFromIast,
+  transliterationScriptLabel,
+} from "../../lib/indicScript";
 
 type BookOption = {
   id: number;
@@ -888,6 +895,7 @@ function ScripturesContent() {
         setPreferences({
           ...data,
           source_language: normalizeSourceLanguage(data.source_language),
+          transliteration_script: normalizeTransliterationScript(data.transliteration_script),
         });
       } catch {
         setPreferences(null);
@@ -1087,33 +1095,64 @@ function ScripturesContent() {
   };
 
   const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
+  const transliterationScript = normalizeTransliterationScript(preferences?.transliteration_script);
+  const scriptPrefersRoman = isRomanScript(transliterationScript);
   const transliterationEnabled = preferences?.transliteration_enabled ?? true;
   const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
   const showTransliteration =
-    transliterationEnabled && showRomanTransliteration;
+    transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
+
+  const renderTransliterationByPreference = (value: string): string => {
+    if (!value) return "";
+    return transliterateFromIast(value, transliterationScript);
+  };
+
+  const renderSanskritByPreference = (
+    sanskritValue: string,
+    transliterationValue?: string
+  ): string => {
+    if (!sanskritValue && !transliterationValue) {
+      return "";
+    }
+
+    if (scriptPrefersRoman) {
+      if (transliterationValue) {
+        return renderTransliterationByPreference(transliterationValue);
+      }
+      return transliterateFromDevanagari(sanskritValue, transliterationScript);
+    }
+
+    if (transliterationValue) {
+      return renderTransliterationByPreference(transliterationValue);
+    }
+
+    return transliterateFromDevanagari(sanskritValue, transliterationScript);
+  };
 
   const getPreferredTitle = (node: TreeNode | NodeContent): string => {
+    const sanskritTitle = renderSanskritByPreference(
+      formatValue(node.title_sanskrit),
+      formatValue(node.title_transliteration)
+    );
+
     if (sourceLanguage === "sanskrit") {
       return (
-        formatValue(node.title_sanskrit) ||
+        sanskritTitle ||
         formatValue(node.title_english) ||
-        formatValue(node.title_hindi) ||
-        (showTransliteration ? formatValue(node.title_transliteration) : "")
+        formatValue(node.title_hindi)
       );
     }
     if (sourceLanguage === "hindi") {
       return (
         formatValue(node.title_hindi) ||
         formatValue(node.title_english) ||
-        formatValue(node.title_sanskrit) ||
-        (showTransliteration ? formatValue(node.title_transliteration) : "")
+        sanskritTitle
       );
     }
     return (
       formatValue(node.title_english) ||
       formatValue(node.title_hindi) ||
-      formatValue(node.title_sanskrit) ||
-      (showTransliteration ? formatValue(node.title_transliteration) : "")
+      sanskritTitle
     );
   };
 
@@ -2260,7 +2299,7 @@ function ScripturesContent() {
         </header>
 
         <section className="rounded-2xl border border-black/10 bg-white/80 p-4 shadow-lg sm:rounded-[32px] sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                 Book
@@ -2440,7 +2479,7 @@ function ScripturesContent() {
                     ? "Public visibility"
                     : "Private draft visibility: only you and explicitly shared users can view"
                 }
-                className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
+                className="inline-flex h-9 items-center rounded-full border border-black/10 bg-white/80 px-3 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
               >
                 {(currentBook.visibility || "private") === "public"
                   ? "Public"
@@ -2886,15 +2925,26 @@ function ScripturesContent() {
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
-                                  transliteration_script: event.target.value,
+                                  transliteration_script: normalizeTransliterationScript(
+                                    event.target.value
+                                  ),
                                 })
                               }
-                              disabled={!transliterationEnabled || !showRomanTransliteration}
+                              disabled={!transliterationEnabled}
                               className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <option value="iast">IAST</option>
                               <option value="harvard_kyoto">Harvard-Kyoto</option>
                               <option value="itrans">ITRANS</option>
+                              <option value="devanagari">Devanagari</option>
+                              <option value="bengali">Bengali</option>
+                              <option value="gujarati">Gujarati</option>
+                              <option value="gurmukhi">Gurmukhi</option>
+                              <option value="kannada">Kannada</option>
+                              <option value="malayalam">Malayalam</option>
+                              <option value="oriya">Odia</option>
+                              <option value="tamil">Tamil</option>
+                              <option value="telugu">Telugu</option>
                             </select>
                           </label>
                           <label className="flex items-center gap-2 text-sm text-zinc-700">
@@ -2914,7 +2964,7 @@ function ScripturesContent() {
                             <input
                               type="checkbox"
                               checked={showRomanTransliteration}
-                              disabled={!transliterationEnabled}
+                              disabled={!transliterationEnabled || !scriptPrefersRoman}
                               onChange={(event) =>
                                 setPreferences({
                                   ...preferences,
@@ -2952,12 +3002,22 @@ function ScripturesContent() {
                           </div>
                         )}
                         {showTransliteration &&
-                          nodeContent.title_transliteration &&
-                          nodeContent.title_transliteration !== getPreferredTitle(nodeContent) && (
-                            <div className="text-lg italic text-zinc-700">
-                              {formatValue(nodeContent.title_transliteration)}
-                            </div>
-                          )}
+                          (() => {
+                            const renderedTitleTransliteration = renderTransliterationByPreference(
+                              formatValue(nodeContent.title_transliteration)
+                            );
+                            if (
+                              !renderedTitleTransliteration ||
+                              renderedTitleTransliteration === getPreferredTitle(nodeContent)
+                            ) {
+                              return null;
+                            }
+                            return (
+                              <div className="text-lg italic text-zinc-700">
+                                {renderedTitleTransliteration}
+                              </div>
+                            );
+                          })()}
                       </div>
                     )}
 
@@ -2966,8 +3026,15 @@ function ScripturesContent() {
                       <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
                         {(() => {
                           const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
-                          const transliteration = formatValue(
+                          const transliterationRaw = formatValue(
                             nodeContent.content_data?.basic?.transliteration
+                          );
+                          const transliteration = renderTransliterationByPreference(
+                            transliterationRaw
+                          );
+                          const renderedSanskrit = renderSanskritByPreference(
+                            sanskrit,
+                            transliterationRaw
                           );
                           const english = formatValue(
                             nodeContent.content_data?.translations?.english ||
@@ -2976,10 +3043,10 @@ function ScripturesContent() {
 
                           const primaryContent =
                             sourceLanguage === "sanskrit"
-                              ? sanskrit || english
+                              ? renderedSanskrit || english
                               : sourceLanguage === "hindi"
-                              ? english || sanskrit
-                              : english || sanskrit;
+                              ? english || renderedSanskrit
+                              : english || renderedSanskrit;
 
                           const primaryLabel =
                             sourceLanguage === "sanskrit"
@@ -3003,20 +3070,22 @@ function ScripturesContent() {
                               {showTransliteration && transliteration && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    Transliteration ({preferences?.transliteration_script || "iast"})
+                                    Transliteration ({transliterationScriptLabel(transliterationScript)})
                                   </div>
                                   <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
                                     {transliteration}
                                   </div>
                                 </div>
                               )}
-                              {sourceLanguage !== "sanskrit" && sanskrit && sanskrit !== primaryContent && (
+                              {sourceLanguage !== "sanskrit" &&
+                                renderedSanskrit &&
+                                renderedSanskrit !== primaryContent && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     Sanskrit
                                   </div>
                                   <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                    {sanskrit}
+                                    {renderedSanskrit}
                                   </div>
                                 </div>
                               )}

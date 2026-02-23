@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, ShoppingBasket } from "lucide-react";
+import { Eye, MoreVertical, ShoppingBasket } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
@@ -107,6 +107,8 @@ function HomeContent() {
     level_name?: string;
     order: number;
   }>>([]);
+  const [openResultActionsId, setOpenResultActionsId] = useState<number | null>(null);
+  const resultActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadBasket = async () => {
     try {
@@ -424,6 +426,21 @@ function HomeContent() {
       }
     }
   }, [results]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!resultActionsMenuRef.current) return;
+      const target = event.target as Node;
+      if (!resultActionsMenuRef.current.contains(target)) {
+        setOpenResultActionsId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
 
   const runSearch = async (term: string, searchBookId?: string, searchLevelName?: string, searchHasContent?: boolean) => {
     const searchTerm = term || query;
@@ -923,37 +940,62 @@ function HomeContent() {
                               {renderBreadcrumb(result, bookName)}
                             </div>
                             <div className="flex shrink-0 gap-2">
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
-                                  void addToBasket(
-                                    result.node.id,
-                                    result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
-                                    bookName,
-                                    result.node.level_name
-                                  );
+                              <div
+                                ref={(el) => {
+                                  if (openResultActionsId === result.node.id) {
+                                    resultActionsMenuRef.current = el;
+                                  }
                                 }}
-                                disabled={isInBasket}
-                                title={isInBasket ? "Already in basket" : "Add to basket"}
-                                aria-label={isInBasket ? "Already in basket" : "Add to basket"}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                                className="relative"
                               >
-                                <ShoppingBasket size={14} />
-                              </button>
-                              <a
-                                href={destinationUrl}
-                                onClick={() => {
-                                  const scrollY = window.scrollY;
-                                  sessionStorage.setItem("searchScrollY", scrollY.toString());
-                                }}
-                                title="View"
-                                aria-label="View"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50 text-blue-700 transition hover:bg-blue-100"
-                              >
-                                <Eye size={16} />
-                              </a>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenResultActionsId((prev) =>
+                                      prev === result.node.id ? null : result.node.id
+                                    )
+                                  }
+                                  title="Result actions"
+                                  aria-label="Result actions"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                                >
+                                  <MoreVertical size={14} />
+                                </button>
+                                {openResultActionsId === result.node.id && (
+                                  <div className="absolute right-0 z-20 mt-2 w-44 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                    <a
+                                      href={destinationUrl}
+                                      onClick={() => {
+                                        const scrollY = window.scrollY;
+                                        sessionStorage.setItem("searchScrollY", scrollY.toString());
+                                        setOpenResultActionsId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                    >
+                                      <Eye size={14} />
+                                      View
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const bookName = books.find((b) => b.id === result.node.book_id)?.book_name;
+                                        void addToBasket(
+                                          result.node.id,
+                                          result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
+                                          bookName,
+                                          result.node.level_name
+                                        );
+                                        setOpenResultActionsId(null);
+                                      }}
+                                      disabled={isInBasket}
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      <ShoppingBasket size={14} />
+                                      {isInBasket ? "Already in basket" : "Add to basket"}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                           {result.snippet ? (

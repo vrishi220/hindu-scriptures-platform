@@ -493,6 +493,12 @@ export default function SchemaBuilderPage() {
           <p className="max-w-2xl text-sm text-zinc-600">
             Design hierarchical scripture schemas and keep structure consistent across books.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs uppercase tracking-[0.18em] text-zinc-600">
+            <a href="/admin" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Users</a>
+            <a href="/admin/schemas" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Schemas</a>
+            <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Properties</a>
+            <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Categories</a>
+          </div>
         </header>
 
         {toast && (
