@@ -1381,6 +1381,15 @@ function DraftsPageContent() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void toggleExpand(draft);
+                            }}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            {expandedDraftId === draft.id ? "Hide" : "Manage"}
+                          </button>
                           <div
                             ref={(element) => {
                               headerActionsMenuRefs.current[draft.id] = element;
@@ -1671,6 +1680,26 @@ function DraftsPageContent() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleSaveDraft(draft.id);
+                              }}
+                              disabled={isBusy}
+                              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Save Draft
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handlePublishDraft(draft);
+                              }}
+                              disabled={isBusy}
+                              className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Publish
+                            </button>
                             <div
                               ref={(element) => {
                                 manageActionsMenuRefs.current[draft.id] = element;
