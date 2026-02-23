@@ -217,6 +217,8 @@ pip install -r requirements.txt
 pytest tests/test_backend_sanity.py -v
 ```
 
+Playwright output directories such as `web/playwright-report/`, `web/test-results/`, and `web/blob-report/` are generated locally and intentionally untracked.
+
 ### Test Suite Coverage
 
 - **Health Check**: API status and connectivity
