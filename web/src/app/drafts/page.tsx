@@ -12,6 +12,10 @@ import {
   Upload,
 } from "lucide-react";
 import { getMe } from "../../lib/authClient";
+import UserPreferencesDialog, {
+  type UserPreferences,
+} from "../../components/UserPreferencesDialog";
+import { normalizeTransliterationScript } from "../../lib/indicScript";
 
 type DraftBook = {
   id: number;
@@ -280,6 +284,10 @@ function DraftsPageContent() {
   const [createTitle, setCreateTitle] = useState("");
   const [createDescription, setCreateDescription] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [hasAppliedDraftQuery, setHasAppliedDraftQuery] = useState(false);
   const [highlightedDraftId, setHighlightedDraftId] = useState<number | null>(null);
   const [provenanceByDraft, setProvenanceByDraft] = useState<Record<number, ProvenanceRecord[]>>({});
@@ -432,6 +440,53 @@ function DraftsPageContent() {
       setAuthEmail(data.email || null);
     } catch {
       setAuthEmail(null);
+    }
+  };
+
+  const loadPreferences = async () => {
+    try {
+      const response = await fetch("/api/preferences", { credentials: "include" });
+      if (!response.ok) {
+        setPreferences(null);
+        return;
+      }
+      const data = (await response.json()) as UserPreferences;
+      setPreferences({
+        ...data,
+        transliteration_script: normalizeTransliterationScript(
+          data.transliteration_script
+        ),
+      });
+    } catch {
+      setPreferences(null);
+    }
+  };
+
+  const savePreferences = async () => {
+    if (!preferences) return;
+    try {
+      setPreferencesSaving(true);
+      setPreferencesMessage(null);
+      const response = await fetch("/api/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save preferences");
+      }
+      setPreferencesMessage("Preferences saved");
+    } catch (err) {
+      setPreferencesMessage(
+        err instanceof Error ? err.message : "Failed to save preferences"
+      );
+    } finally {
+      setPreferencesSaving(false);
+      setTimeout(() => setPreferencesMessage(null), 2000);
     }
   };
 
@@ -708,6 +763,14 @@ function DraftsPageContent() {
       return;
     }
     void loadMetadataCategories();
+  }, [authEmail]);
+
+  useEffect(() => {
+    if (!authEmail) {
+      setPreferences(null);
+      return;
+    }
+    void loadPreferences();
   }, [authEmail]);
 
   useEffect(() => {
@@ -1206,7 +1269,19 @@ function DraftsPageContent() {
     <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
         <div className="mb-8">
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">Draft Books</h1>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">Draft Books</h1>
+            {authEmail && preferences && (
+              <button
+                type="button"
+                onClick={() => setShowPreferencesDialog(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+              >
+                <SlidersHorizontal size={14} />
+                Preferences
+              </button>
+            )}
+          </div>
           <p className="mt-2 text-zinc-600">Create editable drafts and publish immutable edition snapshots.</p>
         </div>
 
@@ -1888,6 +1963,16 @@ function DraftsPageContent() {
           </>
         )}
       </div>
+
+      <UserPreferencesDialog
+        open={showPreferencesDialog}
+        onClose={() => setShowPreferencesDialog(false)}
+        preferences={preferences}
+        onChange={(next) => setPreferences(next)}
+        onSave={savePreferences}
+        saving={preferencesSaving}
+        message={preferencesMessage}
+      />
     </div>
   );
 }
