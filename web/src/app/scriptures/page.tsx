@@ -20,10 +20,13 @@ import UserPreferencesDialog, {
   type UserPreferences,
 } from "../../components/UserPreferencesDialog";
 import {
+  hasDevanagariLetters,
+  TRANSLITERATION_SCRIPT_OPTIONS,
   isRomanScript,
   normalizeTransliterationScript,
   transliterateFromDevanagari,
   transliterateFromIast,
+  type TransliterationScriptOption,
   transliterationScriptLabel,
 } from "../../lib/indicScript";
 
@@ -421,6 +424,8 @@ function ScripturesContent() {
       show_transliteration: true,
       show_english: true,
     });
+  const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
+    useState<TransliterationScriptOption>("iast");
   const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
   const [bookBodyCreateDraftLoading, setBookBodyCreateDraftLoading] = useState(false);
   const [bookBodyAddMessage, setBookBodyAddMessage] = useState<string | null>(null);
@@ -522,8 +527,8 @@ function ScripturesContent() {
       let previousFieldName = "";
       for (let index = 0; index < renderedLines.length; index += 1) {
         const line = renderedLines[index];
-        const value = (line?.value || "").trim();
-        if (!value) {
+        const rawValue = (line?.value || "").trim();
+        if (!rawValue) {
           continue;
         }
 
@@ -532,8 +537,17 @@ function ScripturesContent() {
           continue;
         }
 
+        const value =
+          fieldName === "transliteration"
+            ? renderPreviewTransliteration(rawValue)
+            : rawValue;
+
         const rawLabel = (line?.label || "").trim();
-        const label = fieldName === previousFieldName ? "" : rawLabel;
+        const computedLabel =
+          fieldName === "transliteration"
+            ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
+            : rawLabel;
+        const label = fieldName === previousFieldName ? "" : computedLabel;
 
         lines.push({
           key: `${fieldName || "line"}-${index}`,
@@ -551,7 +565,11 @@ function ScripturesContent() {
     }
 
     for (const key of resolvedSettings.text_order) {
-      const value = (block.content[key] || "").trim();
+      const rawValue = (block.content[key] || "").trim();
+      const value =
+        key === "transliteration"
+          ? renderPreviewTransliteration(rawValue)
+          : rawValue;
       if (!value || !visibleByKey[key]) {
         continue;
       }
@@ -560,7 +578,7 @@ function ScripturesContent() {
         key === "sanskrit"
           ? "Sanskrit"
           : key === "transliteration"
-            ? "Transliteration"
+            ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
             : key === "english"
               ? "English"
               : "Text";
@@ -1223,6 +1241,9 @@ function ScripturesContent() {
 
   const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
   const transliterationScript = normalizeTransliterationScript(preferences?.transliteration_script);
+  const previewTransliterationScript = normalizeTransliterationScript(
+    bookPreviewTransliterationScript
+  );
   const scriptPrefersRoman = isRomanScript(transliterationScript);
   const transliterationEnabled = preferences?.transliteration_enabled ?? true;
   const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
@@ -1232,8 +1253,23 @@ function ScripturesContent() {
 
   const renderTransliterationByPreference = (value: string): string => {
     if (!value) return "";
+    if (hasDevanagariLetters(value)) {
+      return transliterateFromDevanagari(value, transliterationScript);
+    }
     return transliterateFromIast(value, transliterationScript);
   };
+
+  const renderPreviewTransliteration = (value: string): string => {
+    if (!value) return "";
+    if (hasDevanagariLetters(value)) {
+      return transliterateFromDevanagari(value, previewTransliterationScript);
+    }
+    return transliterateFromIast(value, previewTransliterationScript);
+  };
+
+  useEffect(() => {
+    setBookPreviewTransliterationScript(transliterationScript);
+  }, [transliterationScript]);
 
   const renderSanskritByPreference = (
     sanskritValue: string,
@@ -1656,7 +1692,7 @@ function ScripturesContent() {
     await loadBookShares();
   };
 
-  const handlePreviewBook = async () => {
+  const handlePreviewBook = async (scope: "book" | "node" = "book") => {
     if (!bookId) return;
 
     setBookPreviewLoading(true);
@@ -1668,7 +1704,7 @@ function ScripturesContent() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          node_id: selectedId ?? undefined,
+          node_id: scope === "node" ? selectedId ?? undefined : undefined,
           render_settings: {
             ...bookPreviewLanguageSettings,
             show_metadata: true,
@@ -2517,7 +2553,7 @@ function ScripturesContent() {
                           type="button"
                           onClick={() => {
                             setShowBookActionsMenu(false);
-                            void handlePreviewBook();
+                            void handlePreviewBook("book");
                           }}
                           disabled={bookPreviewLoading || !canPreviewCurrentBook}
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2527,10 +2563,22 @@ function ScripturesContent() {
                             ? "Preview unavailable"
                             : bookPreviewLoading
                             ? "Loading preview..."
-                            : selectedId
-                              ? "Preview selected level"
-                              : "Preview book"}
+                            : "Preview book"}
                         </button>
+                        {selectedId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowBookActionsMenu(false);
+                              void handlePreviewBook("node");
+                            }}
+                            disabled={bookPreviewLoading || !canPreviewCurrentBook}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Eye size={14} />
+                            {bookPreviewLoading ? "Loading preview..." : "Preview selected level"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -3111,10 +3159,12 @@ function ScripturesContent() {
                           const transliterationRaw = formatValue(
                             nodeContent.content_data?.basic?.transliteration
                           );
+                          const originalSanskrit =
+                            sanskrit || transliterateFromIast(transliterationRaw, "devanagari");
                           const transliteration = renderTransliterationByPreference(
                             transliterationRaw
                           );
-                          const renderedSanskrit = renderSanskritByPreference(
+                          const preferredSanskrit = renderSanskritByPreference(
                             sanskrit,
                             transliterationRaw
                           );
@@ -3124,18 +3174,29 @@ function ScripturesContent() {
                           );
 
                           const primaryContent =
-                            sourceLanguage === "sanskrit"
-                              ? renderedSanskrit || english
-                              : sourceLanguage === "hindi"
-                              ? english || renderedSanskrit
-                              : english || renderedSanskrit;
+                            showOnlyPreferredScript
+                              ? sourceLanguage === "sanskrit"
+                                ? preferredSanskrit || english
+                                : sourceLanguage === "hindi"
+                                ? english || originalSanskrit
+                                : english || originalSanskrit
+                              : originalSanskrit || english;
 
                           const primaryLabel =
-                            sourceLanguage === "sanskrit"
-                              ? "Sanskrit (Original)"
-                              : sourceLanguage === "hindi"
-                              ? "Hindi/Translation"
-                              : "English Translation";
+                            showOnlyPreferredScript
+                              ? sourceLanguage === "sanskrit"
+                                ? "Sanskrit"
+                                : sourceLanguage === "hindi"
+                                ? "Hindi/Translation"
+                                : "English Translation"
+                              : "Sanskrit (Original)";
+
+                          const showSecondaryTransliteration =
+                            !showOnlyPreferredScript &&
+                            showTransliteration &&
+                            Boolean(transliteration) &&
+                            transliteration !== primaryContent &&
+                            transliteration !== originalSanskrit;
 
                           return (
                             <>
@@ -3149,7 +3210,7 @@ function ScripturesContent() {
                                   </div>
                                 </div>
                               )}
-                              {!showOnlyPreferredScript && showTransliteration && transliteration && (
+                              {showSecondaryTransliteration && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     Transliteration ({transliterationScriptLabel(transliterationScript)})
@@ -3160,18 +3221,18 @@ function ScripturesContent() {
                                 </div>
                               )}
                               {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
-                                renderedSanskrit &&
-                                renderedSanskrit !== primaryContent && (
+                                originalSanskrit &&
+                                originalSanskrit !== primaryContent && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     Sanskrit (Original)
                                   </div>
                                   <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                    {renderedSanskrit}
+                                    {originalSanskrit}
                                   </div>
                                 </div>
                               )}
-                              {!showOnlyPreferredScript && sourceLanguage !== "english" && english && english !== primaryContent && (
+                              {!showOnlyPreferredScript && english && english !== primaryContent && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     English Translation
@@ -3489,6 +3550,25 @@ function ScripturesContent() {
                       disabled={bookPreviewLoading}
                     />
                     Transliteration
+                  </label>
+                  <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                    Script
+                    <select
+                      value={previewTransliterationScript}
+                      onChange={(event) =>
+                        setBookPreviewTransliterationScript(
+                          normalizeTransliterationScript(event.target.value)
+                        )
+                      }
+                      disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
+                      className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
+                        <option key={scriptOption} value={scriptOption}>
+                          {transliterationScriptLabel(scriptOption)}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="flex items-center gap-2">
                     <input
