@@ -86,14 +86,20 @@ export default function MetadataCategoriesAdminPage() {
   };
 
   const scopeOptions = useMemo(() => {
-    const baseScopes = ["all", "book", "level", "node", "global"];
-    const combined = new Set<string>([...baseScopes, ...createScopes, ...editScopes]);
+    const preferredOrder = ["all", "book", "level", "node", "global"];
+    const combined = new Set<string>([...preferredOrder, ...createScopes, ...editScopes]);
     categories.forEach((category) => {
       (category.applicable_scopes || []).forEach((scope) => {
         if (scope) combined.add(scope);
       });
     });
-    return Array.from(combined).sort((left, right) => left.localeCompare(right));
+
+    const preferred = preferredOrder.filter((scope) => combined.has(scope));
+    const extras = Array.from(combined)
+      .filter((scope) => !preferredOrder.includes(scope))
+      .sort((left, right) => left.localeCompare(right));
+
+    return [...preferred, ...extras];
   }, [categories, createScopes, editScopes]);
 
   const categoryNameById = useMemo(() => {
