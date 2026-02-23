@@ -671,6 +671,17 @@ function ScripturesContent() {
       let binding: ResolvedMetadata | null = null;
       if (response.ok) {
         binding = (await response.json()) as ResolvedMetadata;
+      } else if (response.status === 404 && scope === "node" && bookId) {
+        const fallbackResponse = await fetch(`/api/books/${bookId}/metadata-binding`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (fallbackResponse.ok) {
+          binding = (await fallbackResponse.json()) as ResolvedMetadata;
+        } else if (fallbackResponse.status !== 404) {
+          const payload = (await fallbackResponse.json().catch(() => null)) as { detail?: string } | null;
+          throw new Error(payload?.detail || "Failed to load metadata properties");
+        }
       } else if (response.status !== 404) {
         const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
         throw new Error(payload?.detail || "Failed to load metadata properties");
