@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import Link from "next/link";
+import { ArrowDown, ArrowUp, MoreVertical, Save, Trash2 } from "lucide-react";
 import { contentPath } from "../../../lib/apiPaths";
 import { getMe } from "../../../lib/authClient";
 
@@ -58,6 +59,10 @@ export default function SchemaBuilderPage() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editLevels, setEditLevels] = useState<string[]>([]);
+  const [openLevelActionsKey, setOpenLevelActionsKey] = useState<string | null>(null);
+  const [showSchemaActionsMenu, setShowSchemaActionsMenu] = useState(false);
+  const levelActionsMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const schemaActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const usageCounts = useMemo(() => {
     const counts = new Map<number, number>();
@@ -144,6 +149,26 @@ export default function SchemaBuilderPage() {
     const timer = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (openLevelActionsKey) {
+        const menu = levelActionsMenuRefs.current[openLevelActionsKey];
+        if (menu && !menu.contains(target)) {
+          setOpenLevelActionsKey(null);
+        }
+      }
+      if (showSchemaActionsMenu && schemaActionsMenuRef.current && !schemaActionsMenuRef.current.contains(target)) {
+        setShowSchemaActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [openLevelActionsKey, showSchemaActionsMenu]);
 
   const handleSelectSchema = (schema: Schema) => {
     setSelectedId(schema.id);
@@ -357,7 +382,7 @@ export default function SchemaBuilderPage() {
     }
   };
 
-  const renderLevelEditor = (levels: string[], setter: Dispatch<SetStateAction<string[]>>) => (
+  const renderLevelEditor = (levels: string[], setter: Dispatch<SetStateAction<string[]>>, panelKey: "create" | "edit") => (
     <div className="flex flex-col gap-2">
       {levels.map((level, idx) => (
         <div key={idx} className="flex items-center gap-2">
@@ -371,32 +396,60 @@ export default function SchemaBuilderPage() {
             placeholder={`Level ${idx + 1}`}
             className="flex-1 rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
           />
-          <button
-            type="button"
-            onClick={() => moveLevel(idx, -1, levels, setter)}
-            className="rounded-xl border border-black/10 bg-white/80 px-2 py-2 text-xs text-zinc-600 transition hover:border-black/30"
-            aria-label="Move level up"
-            disabled={idx === 0}
+          <div
+            ref={(element) => {
+              levelActionsMenuRefs.current[`${panelKey}-${idx}`] = element;
+            }}
+            className="relative"
           >
-            Up
-          </button>
-          <button
-            type="button"
-            onClick={() => moveLevel(idx, 1, levels, setter)}
-            className="rounded-xl border border-black/10 bg-white/80 px-2 py-2 text-xs text-zinc-600 transition hover:border-black/30"
-            aria-label="Move level down"
-            disabled={idx === levels.length - 1}
-          >
-            Down
-          </button>
-          <button
-            type="button"
-            onClick={() => removeLevel(idx, levels, setter)}
-            className="rounded-xl border border-rose-200 bg-rose-50 px-2 py-2 text-xs text-rose-700 transition hover:border-rose-300"
-            aria-label="Remove level"
-          >
-            Remove
-          </button>
+            <button
+              type="button"
+              onClick={() => setOpenLevelActionsKey((prev) => (prev === `${panelKey}-${idx}` ? null : `${panelKey}-${idx}`))}
+              aria-label="Level actions"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {openLevelActionsKey === `${panelKey}-${idx}` && (
+              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenLevelActionsKey(null);
+                    moveLevel(idx, -1, levels, setter);
+                  }}
+                  disabled={idx === 0}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowUp size={14} />
+                  Move up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenLevelActionsKey(null);
+                    moveLevel(idx, 1, levels, setter);
+                  }}
+                  disabled={idx === levels.length - 1}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowDown size={14} />
+                  Move down
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenLevelActionsKey(null);
+                    removeLevel(idx, levels, setter);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50"
+                >
+                  <Trash2 size={14} />
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ))}
       <button
@@ -545,7 +598,7 @@ export default function SchemaBuilderPage() {
                     <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Levels
                     </div>
-                    {renderLevelEditor(createLevels, setCreateLevels)}
+                    {renderLevelEditor(createLevels, setCreateLevels, "create")}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
                     {renderPreview(createLevels.filter((level) => level.trim()))}
@@ -585,29 +638,52 @@ export default function SchemaBuilderPage() {
                       <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                         Levels
                       </div>
-                      {renderLevelEditor(editLevels, setEditLevels)}
+                      {renderLevelEditor(editLevels, setEditLevels, "edit")}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
                       {renderPreview(editLevels.filter((level) => level.trim()))}
                       <div className="flex flex-col gap-2">
-                        <button
-                          type="button"
-                          onClick={handleUpdateSchema}
-                          disabled={saving}
-                          className="rounded-2xl border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
-                        >
-                          {saving ? "Saving..." : "Save changes"}
-                        </button>
-                        {canAdmin && (
+                        <div ref={schemaActionsMenuRef} className="relative ml-auto">
                           <button
                             type="button"
-                            onClick={handleDeleteSchema}
-                            disabled={saving}
-                            className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition disabled:opacity-50"
+                            onClick={() => setShowSchemaActionsMenu((prev) => !prev)}
+                            title="Schema actions"
+                            aria-label="Schema actions"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                           >
-                            Delete schema
+                            <MoreVertical size={16} />
                           </button>
-                        )}
+                          {showSchemaActionsMenu && (
+                            <div className="absolute right-0 z-40 mt-2 w-52 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowSchemaActionsMenu(false);
+                                  void handleUpdateSchema();
+                                }}
+                                disabled={saving}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Save size={14} />
+                                {saving ? "Saving..." : "Save changes"}
+                              </button>
+                              {canAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowSchemaActionsMenu(false);
+                                    void handleDeleteSchema();
+                                  }}
+                                  disabled={saving}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Trash2 size={14} />
+                                  Delete schema
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

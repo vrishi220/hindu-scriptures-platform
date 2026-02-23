@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { MoreVertical, Trash2, UserCheck, UserX } from "lucide-react";
 
 type User = {
   id: number;
@@ -82,6 +83,8 @@ export default function AdminPage() {
   const [createRole, setCreateRole] = useState("viewer");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
+  const [openUserActionsId, setOpenUserActionsId] = useState<number | null>(null);
+  const userActionsMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const parsePayload = (raw: string) => {
     if (!raw) {
@@ -151,6 +154,24 @@ export default function AdminPage() {
     }, 4000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (openUserActionsId === null) {
+        return;
+      }
+      const menu = userActionsMenuRefs.current[openUserActionsId];
+      const target = event.target as Node;
+      if (menu && !menu.contains(target)) {
+        setOpenUserActionsId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [openUserActionsId]);
 
   const handleCreateUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -405,18 +426,50 @@ export default function AdminPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => toggleUserActive(user.id, !user.is_active)}
-                        className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                      <div
+                        ref={(element) => {
+                          userActionsMenuRefs.current[user.id] = element;
+                        }}
+                        className="relative"
                       >
-                        {user.is_active ? "Deactivate" : "Activate"}
-                      </button>
-                      <button
-                        onClick={() => deleteUser(user.id)}
-                        className="rounded-full border border-rose-200 bg-rose-50/80 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
-                      >
-                        Delete
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenUserActionsId((prev) => (prev === user.id ? null : user.id))
+                          }
+                          title="User actions"
+                          aria-label="User actions"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        {openUserActionsId === user.id && (
+                          <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenUserActionsId(null);
+                                void toggleUserActive(user.id, !user.is_active);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              {user.is_active ? <UserX size={14} /> : <UserCheck size={14} />}
+                              {user.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenUserActionsId(null);
+                                void deleteUser(user.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                            >
+                              <Trash2 size={14} />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <select
                         value={user.role}
                         onChange={(event) => {

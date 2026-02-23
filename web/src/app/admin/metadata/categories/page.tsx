@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MoreVertical, Save, Trash2, TriangleAlert, Upload } from "lucide-react";
 import { getMe } from "@/lib/authClient";
 
 type Toast = {
@@ -76,6 +77,8 @@ export default function MetadataCategoriesAdminPage() {
   const [editDescription, setEditDescription] = useState("");
   const [editScopes, setEditScopes] = useState<string[]>(["book"]);
   const [editParentIds, setEditParentIds] = useState<number[]>([]);
+  const [showSelectedActionsMenu, setShowSelectedActionsMenu] = useState(false);
+  const selectedActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const scopeLabelMap: Record<string, string> = {
     all: "All",
@@ -112,6 +115,21 @@ export default function MetadataCategoriesAdminPage() {
     () => properties.filter((property) => !property.is_deprecated),
     [properties]
   );
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!showSelectedActionsMenu || !selectedActionsMenuRef.current) return;
+      const target = event.target as Node;
+      if (!selectedActionsMenuRef.current.contains(target)) {
+        setShowSelectedActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [showSelectedActionsMenu]);
 
   const ensureAdmin = async () => {
     try {
@@ -629,38 +647,69 @@ export default function MetadataCategoriesAdminPage() {
                   </div>
 
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={handleUpdateSelected}
-                      disabled={saving || selected.is_published}
-                      className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handlePublishSelected}
-                      disabled={saving || selected.is_published}
-                      className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Publish
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeprecateSelected}
-                      disabled={saving || selected.is_deprecated}
-                      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Deprecate
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeleteSelected}
-                      disabled={saving || selected.is_system || selected.is_published}
-                      className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
+                    <div ref={selectedActionsMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowSelectedActionsMenu((prev) => !prev)}
+                        title="Selected category actions"
+                        aria-label="Selected category actions"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {showSelectedActionsMenu && (
+                        <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleUpdateSelected();
+                            }}
+                            disabled={saving || selected.is_published}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Save size={14} />
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handlePublishSelected();
+                            }}
+                            disabled={saving || selected.is_published}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Upload size={14} />
+                            Publish
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleDeprecateSelected();
+                            }}
+                            disabled={saving || selected.is_deprecated}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-800 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <TriangleAlert size={14} />
+                            Deprecate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleDeleteSelected();
+                            }}
+                            disabled={saving || selected.is_system || selected.is_published}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

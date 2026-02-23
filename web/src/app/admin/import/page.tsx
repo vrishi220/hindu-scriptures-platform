@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { MoreVertical, Play, X } from "lucide-react";
 import { contentPath } from "../../../lib/apiPaths";
 
 interface Schema {
@@ -158,6 +159,29 @@ export default function AdminImportPage() {
   const [rulesJson, setRulesJson] = useState<string>(
     JSON.stringify(PREDEFINED_PDF_RULES.sanskritdocuments_gita, null, 2)
   );
+  const [showPdfActionsMenu, setShowPdfActionsMenu] = useState(false);
+  const [showHtmlActionsMenu, setShowHtmlActionsMenu] = useState(false);
+  const pdfActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const htmlActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const pdfFormRef = useRef<HTMLFormElement | null>(null);
+  const htmlFormRef = useRef<HTMLFormElement | null>(null);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (showPdfActionsMenu && pdfActionsMenuRef.current && !pdfActionsMenuRef.current.contains(target)) {
+        setShowPdfActionsMenu(false);
+      }
+      if (showHtmlActionsMenu && htmlActionsMenuRef.current && !htmlActionsMenuRef.current.contains(target)) {
+        setShowHtmlActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [showPdfActionsMenu, showHtmlActionsMenu]);
 
   // Load schemas
   useEffect(() => {
@@ -393,7 +417,7 @@ export default function AdminImportPage() {
             </div>
 
             {/* PDF Form */}
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form ref={pdfFormRef} onSubmit={handleSubmit} className="space-y-6">
               {/* Basic Information */}
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h3 className="text-lg font-semibold text-slate-900 mb-4">
@@ -616,20 +640,47 @@ export default function AdminImportPage() {
 
               {/* Action Buttons */}
               <div className="flex gap-4">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 rounded-lg transition"
-                >
-                  {loading ? "Importing..." : "Start PDF Import"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.back()}
-                  className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold py-3 rounded-lg transition"
-                >
-                  Cancel
-                </button>
+                <div ref={pdfActionsMenuRef} className="relative ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHtmlActionsMenu(false);
+                      setShowPdfActionsMenu((prev) => !prev);
+                    }}
+                    title="PDF import actions"
+                    aria-label="PDF import actions"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                  {showPdfActionsMenu && (
+                    <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPdfActionsMenu(false);
+                          pdfFormRef.current?.requestSubmit();
+                        }}
+                        disabled={loading}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Play size={14} />
+                        {loading ? "Importing..." : "Start PDF import"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPdfActionsMenu(false);
+                          router.back();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        <X size={14} />
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </form>
           </>
@@ -665,7 +716,7 @@ export default function AdminImportPage() {
             </div>
 
             {/* HTML Form */}
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form ref={htmlFormRef} onSubmit={handleSubmit} className="space-y-6">
               {/* Basic Information */}
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h3 className="text-lg font-semibold text-slate-900 mb-4">
@@ -884,20 +935,47 @@ export default function AdminImportPage() {
 
               {/* Action Buttons */}
               <div className="flex gap-4">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-semibold py-3 rounded-lg transition"
-                >
-                  {loading ? "Importing..." : "Start HTML Import"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.back()}
-                  className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold py-3 rounded-lg transition"
-                >
-                  Cancel
-                </button>
+                <div ref={htmlActionsMenuRef} className="relative ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPdfActionsMenu(false);
+                      setShowHtmlActionsMenu((prev) => !prev);
+                    }}
+                    title="HTML import actions"
+                    aria-label="HTML import actions"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                  {showHtmlActionsMenu && (
+                    <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowHtmlActionsMenu(false);
+                          htmlFormRef.current?.requestSubmit();
+                        }}
+                        disabled={loading}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Play size={14} />
+                        {loading ? "Importing..." : "Start HTML import"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowHtmlActionsMenu(false);
+                          router.back();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        <X size={14} />
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </form>
           </>

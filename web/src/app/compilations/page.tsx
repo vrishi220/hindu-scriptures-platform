@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye } from "lucide-react";
+import { Eye, MoreVertical, Trash2, Upload } from "lucide-react";
 import { getMe } from "../../lib/authClient";
 
 type CompilationItem = {
@@ -45,6 +45,23 @@ export default function CompilationsPage() {
   const [languagePrimary, setLanguagePrimary] = useState("sanskrit");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
+  const [openActionsId, setOpenActionsId] = useState<number | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!actionsMenuRef.current) return;
+      const target = event.target as Node;
+      if (!actionsMenuRef.current.contains(target)) {
+        setOpenActionsId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, []);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -276,26 +293,56 @@ export default function CompilationsPage() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() =>
-                          setExpandedId(expandedId === compilation.id ? null : compilation.id)
-                        }
-                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                      >
-                        {expandedId === compilation.id ? "Hide" : "View"} Items
-                      </button>
-                      <button
-                        onClick={() => handlePublishClick(compilation)}
-                        className="rounded-lg border border-emerald-500/30 bg-emerald-50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-emerald-700 transition hover:border-emerald-500/60 hover:bg-emerald-100"
-                      >
-                        Publish as Book
-                      </button>
-                      <button
-                        onClick={() => handleDelete(compilation.id)}
-                        className="rounded-lg border border-red-500/30 bg-red-50 px-3 py-2 text-xs font-medium uppercase tracking-wider text-red-700 transition hover:border-red-500/60 hover:bg-red-100"
-                      >
-                        Delete
-                      </button>
+                      <div ref={openActionsId === compilation.id ? actionsMenuRef : null} className="relative">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenActionsId((prev) => (prev === compilation.id ? null : compilation.id))
+                          }
+                          title="Compilation actions"
+                          aria-label="Compilation actions"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          <MoreVertical size={16} />
+                        </button>
+                        {openActionsId === compilation.id && (
+                          <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenActionsId(null);
+                                setExpandedId(expandedId === compilation.id ? null : compilation.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <Eye size={14} />
+                              {expandedId === compilation.id ? "Hide items" : "View items"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenActionsId(null);
+                                void handlePublishClick(compilation);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <Upload size={14} />
+                              Publish as book
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenActionsId(null);
+                                void handleDelete(compilation.id);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                            >
+                              <Trash2 size={14} />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 

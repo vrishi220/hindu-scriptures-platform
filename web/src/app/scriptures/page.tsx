@@ -2,7 +2,17 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ShoppingBasket } from "lucide-react";
+import {
+  Eye,
+  Link2,
+  Pencil,
+  Plus,
+  Share2,
+  ShoppingBasket,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
@@ -2302,8 +2312,9 @@ function ScripturesContent() {
                             void handleAddBookAsDraftBody();
                           }}
                           disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <ShoppingBasket size={14} />
                           {bookBodyAddLoading ? "Adding to basket..." : "Add book as body to basket"}
                         </button>
                         <button
@@ -2313,8 +2324,9 @@ function ScripturesContent() {
                             void handleCreateDraftFromBookBody();
                           }}
                           disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <Plus size={14} />
                           {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
                         </button>
                         <button
@@ -2324,8 +2336,9 @@ function ScripturesContent() {
                             void handlePreviewBook();
                           }}
                           disabled={bookPreviewLoading}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
+                          <Eye size={14} />
                           {bookPreviewLoading ? "Loading preview..." : "Preview book"}
                         </button>
                         <button
@@ -2341,8 +2354,9 @@ function ScripturesContent() {
                               setCopyTarget(null);
                             }, 2000);
                           }}
-                          className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                         >
+                          <Link2 size={14} />
                           Copy book link
                         </button>
                       </>
@@ -2355,8 +2369,9 @@ function ScripturesContent() {
                           loadSchemas();
                           setShowCreateBook(true);
                         }}
-                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                       >
+                        <Plus size={14} />
                         Create book
                       </button>
                     )}
@@ -2368,8 +2383,9 @@ function ScripturesContent() {
                           void handleTogglePublish();
                         }}
                         disabled={bookVisibilitySubmitting}
-                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
+                        <Upload size={14} />
                         {bookVisibilitySubmitting
                           ? "Updating visibility..."
                           : currentBook?.visibility === "public"
@@ -2384,8 +2400,9 @@ function ScripturesContent() {
                           setShowBookActionsMenu(false);
                           void handleOpenShareManager();
                         }}
-                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                       >
+                        <Share2 size={14} />
                         Manage sharing
                       </button>
                     )}
@@ -2396,8 +2413,9 @@ function ScripturesContent() {
                           setShowBookActionsMenu(false);
                           void openPropertiesModal("book");
                         }}
-                        className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                       >
+                        <SlidersHorizontal size={14} />
                         Book properties
                       </button>
                     )}
@@ -2728,8 +2746,9 @@ function ScripturesContent() {
                                       setCopyTarget(null);
                                     }, 2000);
                                   }}
-                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
+                                  <Link2 size={14} />
                                   Copy node link
                                 </button>
                               )}
@@ -2740,8 +2759,9 @@ function ScripturesContent() {
                                     setShowNodeActionsMenu(false);
                                     void openPropertiesModal("node", nodeContent.id);
                                   }}
-                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
+                                  <SlidersHorizontal size={14} />
                                   Node properties
                                 </button>
                               )}
@@ -2766,8 +2786,9 @@ function ScripturesContent() {
                                     setFormData(buildFormDataFromNode(nodeContent));
                                     setAction("edit");
                                   }}
-                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
+                                  <Pencil size={14} />
                                   Edit node
                                 </button>
                               )}
@@ -2790,8 +2811,9 @@ function ScripturesContent() {
                                       }
                                     }
                                   }}
-                                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
                                 >
+                                  <Trash2 size={14} />
                                   Delete node
                                 </button>
                               )}

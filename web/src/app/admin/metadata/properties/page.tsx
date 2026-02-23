@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { MoreVertical, Save, Trash2, TriangleAlert } from "lucide-react";
 import { getMe } from "@/lib/authClient";
 
 type Toast = {
@@ -73,6 +74,8 @@ export default function MetadataPropertiesAdminPage() {
   const [selected, setSelected] = useState<PropertyDefinition | null>(null);
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [showSelectedActionsMenu, setShowSelectedActionsMenu] = useState(false);
+  const selectedActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const ensureAdmin = async () => {
     try {
@@ -133,6 +136,21 @@ export default function MetadataPropertiesAdminPage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!showSelectedActionsMenu || !selectedActionsMenuRef.current) return;
+      const target = event.target as Node;
+      if (!selectedActionsMenuRef.current.contains(target)) {
+        setShowSelectedActionsMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [showSelectedActionsMenu]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -507,30 +525,57 @@ export default function MetadataPropertiesAdminPage() {
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSaveSelected}
-                      disabled={saving}
-                      className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeprecateSelected}
-                      disabled={saving || selected.is_deprecated}
-                      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Deprecate
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeleteSelected}
-                      disabled={saving || selected.is_system}
-                      className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Delete
-                    </button>
+                    <div ref={selectedActionsMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowSelectedActionsMenu((prev) => !prev)}
+                        title="Selected property actions"
+                        aria-label="Selected property actions"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {showSelectedActionsMenu && (
+                        <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleSaveSelected();
+                            }}
+                            disabled={saving}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Save size={14} />
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleDeprecateSelected();
+                            }}
+                            disabled={saving || selected.is_deprecated}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-800 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <TriangleAlert size={14} />
+                            Deprecate
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSelectedActionsMenu(false);
+                              void handleDeleteSelected();
+                            }}
+                            disabled={saving || selected.is_system}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -2,6 +2,15 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Camera,
+  MoreVertical,
+  Save,
+  ShoppingBasket,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { getMe } from "../../lib/authClient";
 
 type DraftBook = {
@@ -284,7 +293,36 @@ function DraftsPageContent() {
   const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
   const [metadataPanelOpenByDraft, setMetadataPanelOpenByDraft] = useState<Record<number, boolean>>({});
   const [metadataStateByDraft, setMetadataStateByDraft] = useState<Record<number, DraftMetadataState>>({});
+  const [openHeaderActionsDraftId, setOpenHeaderActionsDraftId] = useState<number | null>(null);
+  const [openManageActionsDraftId, setOpenManageActionsDraftId] = useState<number | null>(null);
   const draftCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const headerActionsMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const manageActionsMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+
+      if (openHeaderActionsDraftId !== null) {
+        const menu = headerActionsMenuRefs.current[openHeaderActionsDraftId];
+        if (menu && !menu.contains(target)) {
+          setOpenHeaderActionsDraftId(null);
+        }
+      }
+
+      if (openManageActionsDraftId !== null) {
+        const menu = manageActionsMenuRefs.current[openManageActionsDraftId];
+        if (menu && !menu.contains(target)) {
+          setOpenManageActionsDraftId(null);
+        }
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [openHeaderActionsDraftId, openManageActionsDraftId]);
 
   const setDraftMetadataState = (
     draftId: number,
@@ -1268,31 +1306,60 @@ function DraftsPageContent() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (expandedDraftId !== draft.id) {
-                                void toggleExpand(draft, true);
-                                return;
-                              }
-                              const isOpen = Boolean(metadataPanelOpenByDraft[draft.id]);
-                              if (isOpen) {
-                                setMetadataPanelOpenByDraft((prev) => ({ ...prev, [draft.id]: false }));
-                                return;
-                              }
-                              void openMetadataPanel(draft.id);
+                          <div
+                            ref={(element) => {
+                              headerActionsMenuRefs.current[draft.id] = element;
                             }}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
+                            className="relative"
                           >
-                            Properties
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void toggleExpand(draft)}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
-                          >
-                            {expandedDraftId === draft.id ? "Hide" : "Manage"}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenManageActionsDraftId(null);
+                                setOpenHeaderActionsDraftId((prev) => (prev === draft.id ? null : draft.id));
+                              }}
+                              title="Draft actions"
+                              aria-label="Draft actions"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                            >
+                              <MoreVertical size={16} />
+                            </button>
+                            {openHeaderActionsDraftId === draft.id && (
+                              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenHeaderActionsDraftId(null);
+                                    if (expandedDraftId !== draft.id) {
+                                      void toggleExpand(draft, true);
+                                      return;
+                                    }
+                                    const isOpen = Boolean(metadataPanelOpenByDraft[draft.id]);
+                                    if (isOpen) {
+                                      setMetadataPanelOpenByDraft((prev) => ({ ...prev, [draft.id]: false }));
+                                      return;
+                                    }
+                                    void openMetadataPanel(draft.id);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <SlidersHorizontal size={14} />
+                                  Properties
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenHeaderActionsDraftId(null);
+                                    void toggleExpand(draft);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Save size={14} />
+                                  {expandedDraftId === draft.id ? "Hide editor" : "Manage draft"}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1341,8 +1408,9 @@ function DraftsPageContent() {
                                   }
                                   void openMetadataPanel(draft.id);
                                 }}
-                                className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
+                                className="inline-flex items-center gap-1 rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-wider text-zinc-700"
                               >
+                                <SlidersHorizontal size={14} />
                                 {metadataPanelOpenByDraft[draft.id] ? "Hide Properties" : "Open Properties"}
                               </button>
                             </div>
@@ -1528,46 +1596,89 @@ function DraftsPageContent() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleSaveDraft(draft.id)}
-                              disabled={isBusy}
-                              className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                            <div
+                              ref={(element) => {
+                                manageActionsMenuRefs.current[draft.id] = element;
+                              }}
+                              className="relative"
                             >
-                              Save Draft
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleAddCartBodyToDraft(draft)}
-                              disabled={isBusy}
-                              className="rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Add Cart Body
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCreateSnapshot(draft)}
-                              disabled={isBusy}
-                              className="rounded-lg border border-emerald-500/40 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Create Snapshot
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handlePublishDraft(draft)}
-                              disabled={isBusy}
-                              className="rounded-lg border border-[color:var(--deep)]/30 bg-[color:var(--deep)] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Publish
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteDraft(draft)}
-                              disabled={isBusy}
-                              className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              Delete Draft
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenHeaderActionsDraftId(null);
+                                  setOpenManageActionsDraftId((prev) => (prev === draft.id ? null : draft.id));
+                                }}
+                                title="Editor actions"
+                                aria-label="Editor actions"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
+                              {openManageActionsDraftId === draft.id && (
+                                <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManageActionsDraftId(null);
+                                      handleSaveDraft(draft.id);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Save size={14} />
+                                    Save draft
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManageActionsDraftId(null);
+                                      void handleAddCartBodyToDraft(draft);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <ShoppingBasket size={14} />
+                                    Add cart body
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManageActionsDraftId(null);
+                                      handleCreateSnapshot(draft);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Camera size={14} />
+                                    Create snapshot
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManageActionsDraftId(null);
+                                      void handlePublishDraft(draft);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Upload size={14} />
+                                    Publish
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenManageActionsDraftId(null);
+                                      void handleDeleteDraft(draft);
+                                    }}
+                                    disabled={isBusy}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Trash2 size={14} />
+                                    Delete draft
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
 
                           <div>
