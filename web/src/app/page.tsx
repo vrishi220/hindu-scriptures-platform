@@ -2,10 +2,14 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, MoreVertical, ShoppingBasket } from "lucide-react";
+import { Eye, MoreVertical, ShoppingBasket, SlidersHorizontal } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
+import UserPreferencesDialog, {
+  type UserPreferences,
+} from "../components/UserPreferencesDialog";
+import { normalizeTransliterationScript } from "../lib/indicScript";
 
 type SearchNode = {
   id: number;
@@ -78,7 +82,11 @@ function HomeContent() {
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [, setShowLogin] = useState(false);
-  const [, setAuthEmail] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [, setTreeData] = useState<TreeNode[]>([]);
   const [, setTreeLoading] = useState(false);
   const [, setTreeError] = useState<string | null>(null);
@@ -378,6 +386,53 @@ function HomeContent() {
     }
   };
 
+  const loadPreferences = async () => {
+    try {
+      const response = await fetch("/api/preferences", { credentials: "include" });
+      if (!response.ok) {
+        setPreferences(null);
+        return;
+      }
+      const data = (await response.json()) as UserPreferences;
+      setPreferences({
+        ...data,
+        transliteration_script: normalizeTransliterationScript(
+          data.transliteration_script
+        ),
+      });
+    } catch {
+      setPreferences(null);
+    }
+  };
+
+  const savePreferences = async () => {
+    if (!preferences) return;
+    try {
+      setPreferencesSaving(true);
+      setPreferencesMessage(null);
+      const response = await fetch("/api/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save preferences");
+      }
+      setPreferencesMessage("Preferences saved");
+    } catch (err) {
+      setPreferencesMessage(
+        err instanceof Error ? err.message : "Failed to save preferences"
+      );
+    } finally {
+      setPreferencesSaving(false);
+      setTimeout(() => setPreferencesMessage(null), 2000);
+    }
+  };
+
 
   useEffect(() => {
     const init = async () => {
@@ -410,6 +465,14 @@ function HomeContent() {
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!authEmail) {
+      setPreferences(null);
+      return;
+    }
+    void loadPreferences();
+  }, [authEmail]);
 
   // Restore scroll position after results are loaded
   useEffect(() => {
@@ -792,6 +855,18 @@ function HomeContent() {
       <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-20 px-6 pb-20 pt-10 sm:px-10">
         <section className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="flex flex-col gap-6 order-2 lg:order-1">
+            {authEmail && preferences && (
+              <div className="flex justify-start">
+                <button
+                  type="button"
+                  onClick={() => setShowPreferencesDialog(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                >
+                  <SlidersHorizontal size={14} />
+                  Preferences
+                </button>
+              </div>
+            )}
             <h2 className="font-[var(--font-display)] text-4xl leading-tight text-[color:var(--deep)] sm:text-5xl">
               Search, reflect, discuss, and compose
             </h2>
@@ -1141,6 +1216,16 @@ function HomeContent() {
         onItemsAdded={() => {
           // Refresh or handle after items are added to book
         }}
+      />
+
+      <UserPreferencesDialog
+        open={showPreferencesDialog}
+        onClose={() => setShowPreferencesDialog(false)}
+        preferences={preferences}
+        onChange={(next) => setPreferences(next)}
+        onSave={savePreferences}
+        saving={preferencesSaving}
+        message={preferencesMessage}
       />
     </div>
   );

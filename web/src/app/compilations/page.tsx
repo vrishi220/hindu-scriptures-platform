@@ -2,8 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, MoreVertical, Trash2, Upload } from "lucide-react";
+import { Eye, MoreVertical, SlidersHorizontal, Trash2, Upload } from "lucide-react";
 import { getMe } from "../../lib/authClient";
+import UserPreferencesDialog, {
+  type UserPreferences,
+} from "../../components/UserPreferencesDialog";
+import { normalizeTransliterationScript } from "../../lib/indicScript";
 
 type CompilationItem = {
   node_id: number;
@@ -35,6 +39,10 @@ export default function CompilationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [schemas, setSchemas] = useState<Schema[]>([]);
@@ -107,6 +115,61 @@ export default function CompilationsPage() {
     };
 
     loadCompilations();
+  }, [authEmail]);
+
+  const loadPreferences = async () => {
+    try {
+      const response = await fetch("/api/preferences", { credentials: "include" });
+      if (!response.ok) {
+        setPreferences(null);
+        return;
+      }
+      const data = (await response.json()) as UserPreferences;
+      setPreferences({
+        ...data,
+        transliteration_script: normalizeTransliterationScript(
+          data.transliteration_script
+        ),
+      });
+    } catch {
+      setPreferences(null);
+    }
+  };
+
+  const savePreferences = async () => {
+    if (!preferences) return;
+    try {
+      setPreferencesSaving(true);
+      setPreferencesMessage(null);
+      const response = await fetch("/api/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save preferences");
+      }
+      setPreferencesMessage("Preferences saved");
+    } catch (err) {
+      setPreferencesMessage(
+        err instanceof Error ? err.message : "Failed to save preferences"
+      );
+    } finally {
+      setPreferencesSaving(false);
+      setTimeout(() => setPreferencesMessage(null), 2000);
+    }
+  };
+
+  useEffect(() => {
+    if (!authEmail) {
+      setPreferences(null);
+      return;
+    }
+    void loadPreferences();
   }, [authEmail]);
 
   const handleDelete = async (id: number) => {
@@ -212,9 +275,21 @@ export default function CompilationsPage() {
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">
-            My Compilations
-          </h1>
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">
+              My Compilations
+            </h1>
+            {authEmail && preferences && (
+              <button
+                type="button"
+                onClick={() => setShowPreferencesDialog(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+              >
+                <SlidersHorizontal size={14} />
+                Preferences
+              </button>
+            )}
+          </div>
           <p className="mt-2 text-zinc-600">
             View and manage your saved scripture collections
           </p>
@@ -382,6 +457,16 @@ export default function CompilationsPage() {
             ))}
           </div>
         )}
+
+        <UserPreferencesDialog
+          open={showPreferencesDialog}
+          onClose={() => setShowPreferencesDialog(false)}
+          preferences={preferences}
+          onChange={(next) => setPreferences(next)}
+          onSave={savePreferences}
+          saving={preferencesSaving}
+          message={preferencesMessage}
+        />
       </div>
     </div>
   );
