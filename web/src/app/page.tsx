@@ -2,10 +2,14 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, ShoppingBasket } from "lucide-react";
+import { Eye, MoreVertical, ShoppingBasket, SlidersHorizontal } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
+import UserPreferencesDialog, {
+  type UserPreferences,
+} from "../components/UserPreferencesDialog";
+import { normalizeTransliterationScript } from "../lib/indicScript";
 
 type SearchNode = {
   id: number;
@@ -78,7 +82,11 @@ function HomeContent() {
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [, setShowLogin] = useState(false);
-  const [, setAuthEmail] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [, setTreeData] = useState<TreeNode[]>([]);
   const [, setTreeLoading] = useState(false);
   const [, setTreeError] = useState<string | null>(null);
@@ -107,6 +115,8 @@ function HomeContent() {
     level_name?: string;
     order: number;
   }>>([]);
+  const [openResultActionsId, setOpenResultActionsId] = useState<number | null>(null);
+  const resultActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadBasket = async () => {
     try {
@@ -376,6 +386,53 @@ function HomeContent() {
     }
   };
 
+  const loadPreferences = async () => {
+    try {
+      const response = await fetch("/api/preferences", { credentials: "include" });
+      if (!response.ok) {
+        setPreferences(null);
+        return;
+      }
+      const data = (await response.json()) as UserPreferences;
+      setPreferences({
+        ...data,
+        transliteration_script: normalizeTransliterationScript(
+          data.transliteration_script
+        ),
+      });
+    } catch {
+      setPreferences(null);
+    }
+  };
+
+  const savePreferences = async () => {
+    if (!preferences) return;
+    try {
+      setPreferencesSaving(true);
+      setPreferencesMessage(null);
+      const response = await fetch("/api/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save preferences");
+      }
+      setPreferencesMessage("Preferences saved");
+    } catch (err) {
+      setPreferencesMessage(
+        err instanceof Error ? err.message : "Failed to save preferences"
+      );
+    } finally {
+      setPreferencesSaving(false);
+      setTimeout(() => setPreferencesMessage(null), 2000);
+    }
+  };
+
 
   useEffect(() => {
     const init = async () => {
@@ -409,6 +466,14 @@ function HomeContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!authEmail) {
+      setPreferences(null);
+      return;
+    }
+    void loadPreferences();
+  }, [authEmail]);
+
   // Restore scroll position after results are loaded
   useEffect(() => {
     if (results.length > 0) {
@@ -424,6 +489,21 @@ function HomeContent() {
       }
     }
   }, [results]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!resultActionsMenuRef.current) return;
+      const target = event.target as Node;
+      if (!resultActionsMenuRef.current.contains(target)) {
+        setOpenResultActionsId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, []);
 
   const runSearch = async (term: string, searchBookId?: string, searchLevelName?: string, searchHasContent?: boolean) => {
     const searchTerm = term || query;
@@ -775,6 +855,18 @@ function HomeContent() {
       <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-20 px-6 pb-20 pt-10 sm:px-10">
         <section className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="flex flex-col gap-6 order-2 lg:order-1">
+            {authEmail && preferences && (
+              <div className="flex justify-start">
+                <button
+                  type="button"
+                  onClick={() => setShowPreferencesDialog(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                >
+                  <SlidersHorizontal size={14} />
+                  Preferences
+                </button>
+              </div>
+            )}
             <h2 className="font-[var(--font-display)] text-4xl leading-tight text-[color:var(--deep)] sm:text-5xl">
               Search, reflect, discuss, and compose
             </h2>
@@ -923,37 +1015,62 @@ function HomeContent() {
                               {renderBreadcrumb(result, bookName)}
                             </div>
                             <div className="flex shrink-0 gap-2">
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
-                                  void addToBasket(
-                                    result.node.id,
-                                    result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
-                                    bookName,
-                                    result.node.level_name
-                                  );
+                              <div
+                                ref={(el) => {
+                                  if (openResultActionsId === result.node.id) {
+                                    resultActionsMenuRef.current = el;
+                                  }
                                 }}
-                                disabled={isInBasket}
-                                title={isInBasket ? "Already in basket" : "Add to basket"}
-                                aria-label={isInBasket ? "Already in basket" : "Add to basket"}
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                                className="relative"
                               >
-                                <ShoppingBasket size={14} />
-                              </button>
-                              <a
-                                href={destinationUrl}
-                                onClick={() => {
-                                  const scrollY = window.scrollY;
-                                  sessionStorage.setItem("searchScrollY", scrollY.toString());
-                                }}
-                                title="View"
-                                aria-label="View"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-50 text-blue-700 transition hover:bg-blue-100"
-                              >
-                                <Eye size={16} />
-                              </a>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setOpenResultActionsId((prev) =>
+                                      prev === result.node.id ? null : result.node.id
+                                    )
+                                  }
+                                  title="Result actions"
+                                  aria-label="Result actions"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                                >
+                                  <MoreVertical size={14} />
+                                </button>
+                                {openResultActionsId === result.node.id && (
+                                  <div className="absolute right-0 z-20 mt-2 w-44 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                    <a
+                                      href={destinationUrl}
+                                      onClick={() => {
+                                        const scrollY = window.scrollY;
+                                        sessionStorage.setItem("searchScrollY", scrollY.toString());
+                                        setOpenResultActionsId(null);
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                    >
+                                      <Eye size={14} />
+                                      View
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const bookName = books.find((b) => b.id === result.node.book_id)?.book_name;
+                                        void addToBasket(
+                                          result.node.id,
+                                          result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
+                                          bookName,
+                                          result.node.level_name
+                                        );
+                                        setOpenResultActionsId(null);
+                                      }}
+                                      disabled={isInBasket}
+                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      <ShoppingBasket size={14} />
+                                      {isInBasket ? "Already in basket" : "Add to basket"}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                           {result.snippet ? (
@@ -1099,6 +1216,16 @@ function HomeContent() {
         onItemsAdded={() => {
           // Refresh or handle after items are added to book
         }}
+      />
+
+      <UserPreferencesDialog
+        open={showPreferencesDialog}
+        onClose={() => setShowPreferencesDialog(false)}
+        preferences={preferences}
+        onChange={(next) => setPreferences(next)}
+        onSave={savePreferences}
+        saving={preferencesSaving}
+        message={preferencesMessage}
       />
     </div>
   );
