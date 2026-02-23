@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
+import packageJson from "./package.json";
 
-const packageVersion = require("./package.json").version as string;
+const packageVersion = packageJson.version as string;
 
 const sanitizeSha = (value?: string) => (value || "").trim().replace(/['"]/g, "");
 

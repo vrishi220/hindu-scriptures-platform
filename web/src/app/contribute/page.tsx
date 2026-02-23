@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { contentPath } from "../../lib/apiPaths";
 import { getMe } from "../../lib/authClient";
 
@@ -228,9 +229,9 @@ export default function ContributePage() {
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
             Contributor access required. Please sign in with a contributor, editor, or admin
             account.
-            <a className="ml-2 font-semibold text-amber-800 underline" href="/">
+            <Link className="ml-2 font-semibold text-amber-800 underline" href="/signin">
               Go to sign in
-            </a>
+            </Link>
           </div>
         </main>
       </div>

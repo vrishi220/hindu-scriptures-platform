@@ -111,7 +111,7 @@ function SignInPageContent() {
 
           <div className="mt-6 border-t border-black/10 pt-4">
             <p className="text-center text-sm text-zinc-600">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <a href="/signup" className="font-semibold text-[color:var(--accent)] hover:underline">
                 Create one
               </a>

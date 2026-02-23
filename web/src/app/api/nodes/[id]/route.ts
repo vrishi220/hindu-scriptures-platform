@@ -51,7 +51,7 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  let authHeader = await buildAuthHeader();
+  const authHeader = await buildAuthHeader();
 
   // Public endpoint - auth is optional
   const headers: HeadersInit = {

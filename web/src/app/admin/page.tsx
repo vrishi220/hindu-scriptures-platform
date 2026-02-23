@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { getMe } from "../../lib/authClient";
 
 type User = {
@@ -365,12 +366,12 @@ export default function AdminPage() {
         {accessDenied && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
             Admin access required. Sign in with an admin account to manage users.
-            <a
+            <Link
               className="ml-2 font-semibold text-amber-800 underline"
-              href="/#"
+              href="/signin"
             >
               Go to sign in
-            </a>
+            </Link>
           </div>
         )}
 
