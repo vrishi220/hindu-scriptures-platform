@@ -18,7 +18,7 @@ requests==2.31.0
 pypdf==4.0.1
 reportlab==4.2.5
 python-liquid==2.1.0
-indic-transliteration==2.3.63
+indic-transliteration==2.3.79
 
 # Testing
 pytest==7.4.3

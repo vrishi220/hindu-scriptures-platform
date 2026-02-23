@@ -259,6 +259,29 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
   return parsed.toString();
 };
 
+const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
+
+const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  source_language: "english",
+  transliteration_enabled: true,
+  transliteration_script: "iast",
+  show_roman_transliteration: true,
+  show_only_preferred_script: false,
+};
+
+type StoredScripturesPreferences = {
+  preferences?: Partial<UserPreferences>;
+  show_only_preferred_script?: boolean;
+};
+
+const normalizePreferences = (value: Partial<UserPreferences> | null | undefined): UserPreferences => ({
+  source_language: normalizeSourceLanguage(value?.source_language),
+  transliteration_enabled: value?.transliteration_enabled ?? true,
+  transliteration_script: normalizeTransliterationScript(value?.transliteration_script),
+  show_roman_transliteration: value?.show_roman_transliteration ?? true,
+  show_only_preferred_script: value?.show_only_preferred_script ?? false,
+});
+
 const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
   const normalized = (value || "").trim().toLowerCase();
   if (normalized === "en" || normalized === "eng" || normalized === "english") {
@@ -961,21 +984,37 @@ function ScripturesContent() {
 
   useEffect(() => {
     const loadPreferences = async () => {
-      if (!authEmail) {
-        setPreferences(null);
+      if (typeof window === "undefined") {
         return;
       }
+
+      if (!authEmail) {
+        const storedRaw = window.localStorage.getItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
+        if (storedRaw) {
+          try {
+            const parsed = JSON.parse(storedRaw) as StoredScripturesPreferences;
+            const normalized = normalizePreferences(parsed.preferences ?? parsed);
+            if (typeof parsed.show_only_preferred_script === "boolean") {
+              normalized.show_only_preferred_script = parsed.show_only_preferred_script;
+            }
+            setPreferences(normalized);
+            return;
+          } catch {
+            window.localStorage.removeItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
+          }
+        }
+
+        setPreferences(DEFAULT_USER_PREFERENCES);
+        return;
+      }
+
       try {
         const response = await fetch("/api/preferences", { credentials: "include" });
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
-        setPreferences({
-          ...data,
-          source_language: normalizeSourceLanguage(data.source_language),
-          transliteration_script: normalizeTransliterationScript(data.transliteration_script),
-        });
+        setPreferences(normalizePreferences(data));
       } catch {
-        setPreferences(null);
+        setPreferences(DEFAULT_USER_PREFERENCES);
       }
     };
 
@@ -1152,16 +1191,27 @@ function ScripturesContent() {
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
-      const response = await fetch("/api/preferences", {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(preferences),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to save preferences");
+
+      if (typeof window !== "undefined") {
+        const toStore: StoredScripturesPreferences = {
+          preferences: normalizePreferences(preferences),
+        };
+        window.localStorage.setItem(LOCAL_SCRIPTURES_PREFERENCES_KEY, JSON.stringify(toStore));
       }
+
+      if (authEmail) {
+        const response = await fetch("/api/preferences", {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(normalizePreferences(preferences)),
+        });
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (!response.ok) {
+          throw new Error(payload?.detail || "Failed to save preferences");
+        }
+      }
+
       setPreferencesMessage("Preferences saved");
     } catch (err) {
       setPreferencesMessage(err instanceof Error ? err.message : "Failed to save preferences");
@@ -1176,6 +1226,7 @@ function ScripturesContent() {
   const scriptPrefersRoman = isRomanScript(transliterationScript);
   const transliterationEnabled = preferences?.transliteration_enabled ?? true;
   const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
+  const showOnlyPreferredScript = preferences?.show_only_preferred_script ?? false;
   const showTransliteration =
     transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
 
@@ -1193,7 +1244,10 @@ function ScripturesContent() {
     }
 
     if (sanskritValue) {
-      return sanskritValue;
+      if (transliterationScript === "devanagari") {
+        return sanskritValue;
+      }
+      return transliterateFromDevanagari(sanskritValue, transliterationScript);
     }
 
     if (!transliterationValue) {
@@ -3001,7 +3055,7 @@ function ScripturesContent() {
                   </div>
 
                   <div className="flex flex-col gap-6">
-                    {authEmail && preferences && (
+                    {preferences && (
                       <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -3029,7 +3083,7 @@ function ScripturesContent() {
                             {getPreferredTitle(nodeContent)}
                           </div>
                         )}
-                        {showTransliteration &&
+                        {!showOnlyPreferredScript && showTransliteration &&
                           (() => {
                             const renderedTitleTransliteration = renderTransliterationByPreference(
                               formatValue(nodeContent.title_transliteration)
@@ -3095,7 +3149,7 @@ function ScripturesContent() {
                                   </div>
                                 </div>
                               )}
-                              {showTransliteration && transliteration && (
+                              {!showOnlyPreferredScript && showTransliteration && transliteration && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     Transliteration ({transliterationScriptLabel(transliterationScript)})
@@ -3105,7 +3159,7 @@ function ScripturesContent() {
                                   </div>
                                 </div>
                               )}
-                              {sourceLanguage !== "sanskrit" &&
+                              {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
                                 renderedSanskrit &&
                                 renderedSanskrit !== primaryContent && (
                                 <div>
@@ -3117,7 +3171,7 @@ function ScripturesContent() {
                                   </div>
                                 </div>
                               )}
-                              {sourceLanguage !== "english" && english && english !== primaryContent && (
+                              {!showOnlyPreferredScript && sourceLanguage !== "english" && english && english !== primaryContent && (
                                 <div>
                                   <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                     English Translation

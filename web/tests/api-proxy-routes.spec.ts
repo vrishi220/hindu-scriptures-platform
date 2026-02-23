@@ -71,6 +71,7 @@ test.describe('API proxy routes', () => {
         transliteration_enabled: true,
         transliteration_script: 'iast',
         show_roman_transliteration: true,
+        show_only_preferred_script: true,
       },
     });
     expect(prefPatchResponse.status()).toBe(200);
@@ -78,10 +79,12 @@ test.describe('API proxy routes', () => {
       source_language: string;
       transliteration_script: string;
       show_roman_transliteration: boolean;
+      show_only_preferred_script: boolean;
     };
     expect(updatedPrefs.source_language).toBe('sanskrit');
     expect(updatedPrefs.transliteration_script).toBe('iast');
     expect(updatedPrefs.show_roman_transliteration).toBe(true);
+    expect(updatedPrefs.show_only_preferred_script).toBe(true);
 
     const compilationResponse = await request.post('/api/compilations', {
       data: {

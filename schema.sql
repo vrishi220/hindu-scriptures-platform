@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   transliteration_enabled BOOLEAN NOT NULL DEFAULT true,
   transliteration_script VARCHAR(50) NOT NULL DEFAULT 'devanagari',
   show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
+  show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)

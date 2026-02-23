@@ -291,6 +291,7 @@ class UserPreferenceBase(BaseModel):
     transliteration_enabled: bool = True
     transliteration_script: str = "devanagari"
     show_roman_transliteration: bool = True
+    show_only_preferred_script: bool = False
 
 
 class UserPreferenceUpdate(BaseModel):
@@ -298,6 +299,7 @@ class UserPreferenceUpdate(BaseModel):
     transliteration_enabled: bool | None = None
     transliteration_script: str | None = None
     show_roman_transliteration: bool | None = None
+    show_only_preferred_script: bool | None = None
 
 
 class UserPreferencePublic(UserPreferenceBase):
