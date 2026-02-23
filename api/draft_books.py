@@ -15,6 +15,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
+from api.metadata import validate_draft_metadata_bindings_on_publish
 from api.users import get_current_user, require_permission
 from models.book import Book
 from models.book_share import BookShare
@@ -86,6 +87,24 @@ _DEFAULT_TEMPLATE_LABEL_TO_FIELD = {
     label.lower(): field_name for field_name, label in _DEFAULT_TEMPLATE_FIELD_LABELS.items()
 }
 
+_METADATA_TEMPLATE_KEY_FALLBACK_FIELDS = (
+    "render_template_key",
+    "template_key",
+    "level_template_key",
+    "content_template_key",
+)
+
+
+def _metadata_liquid_template(fields: list[str]) -> str:
+    lines: list[str] = []
+    for field_name in fields:
+        label = _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
+        lines.append(
+            f"{{% if metadata.{field_name} %}}{label}: {{{{ metadata.{field_name} }}}}\n{{% endif %}}"
+        )
+    return "".join(lines)
+
+
 _BOOK_VISIBILITY_PUBLIC = "public"
 
 _DEFAULT_LIQUID_TEMPLATES = {
@@ -94,80 +113,21 @@ _DEFAULT_LIQUID_TEMPLATES = {
         "{% if child_count %}Child Count: {{ child_count }}\n{% endif %}"
         "{% if children %}Children: {{ children }}\n{% endif %}"
     ),
-    "default.front.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.front.chapter.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.front.section.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.front.verse.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.front.shloka.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.body.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.body.chapter.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.body.section.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.body.verse.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.body.shloka.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.back.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.back.chapter.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.back.section.content_item.v1": (
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.back.verse.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
-    "default.back.shloka.content_item.v1": (
-        "{% if sanskrit %}Sanskrit: {{ sanskrit }}\n{% endif %}"
-        "{% if transliteration %}Transliteration: {{ transliteration }}\n{% endif %}"
-        "{% if english %}English: {{ english }}\n{% endif %}"
-        "{% if text %}Text: {{ text }}\n{% endif %}"
-    ),
+    "default.front.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.front.chapter.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.front.section.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.front.verse.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.front.shloka.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.body.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.body.chapter.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.body.section.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.body.verse.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.body.shloka.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.back.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.back.chapter.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.back.section.content_item.v1": _metadata_liquid_template(["english", "text"]),
+    "default.back.verse.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
+    "default.back.shloka.content_item.v1": _metadata_liquid_template(["sanskrit", "transliteration", "english", "text"]),
 }
 
 
@@ -484,6 +444,30 @@ def _read_template_key(value: object) -> str | None:
     return None
 
 
+def _resolve_metadata_template_key(
+    section_name: str,
+    level_name: str | None,
+    resolved_metadata: dict | None,
+) -> str | None:
+    if not isinstance(resolved_metadata, dict):
+        return None
+
+    normalized_level = level_name.strip().lower() if isinstance(level_name, str) and level_name.strip() else ""
+    candidate_fields: list[str] = []
+    if normalized_level:
+        candidate_fields.append(f"{section_name}_{normalized_level}_template_key")
+        candidate_fields.append(f"{normalized_level}_template_key")
+    candidate_fields.append(f"{section_name}_template_key")
+    candidate_fields.extend(_METADATA_TEMPLATE_KEY_FALLBACK_FIELDS)
+
+    for field_name in candidate_fields:
+        template_key = _read_template_key(resolved_metadata.get(field_name))
+        if template_key and _is_valid_template_key(template_key):
+            return template_key
+
+    return None
+
+
 def _book_is_visible_to_user(db: Session, book: Book, user_id: int) -> bool:
     if _book_owner_id(book) == user_id:
         return True
@@ -653,6 +637,7 @@ def _resolve_block_template_key(
     item: dict,
     source_node: ContentNode | None,
     template_bindings: dict,
+    resolved_metadata: dict | None = None,
 ) -> str:
     default_template = f"default.{section_name}.content_item.v1"
     level_name = source_node.level_name if source_node else item.get("level_name")
@@ -668,6 +653,14 @@ def _resolve_block_template_key(
             node_template = _read_template_key(node_bindings.get(source_node_id))
             if node_template:
                 return node_template
+
+    metadata_template = _resolve_metadata_template_key(
+        section_name=section_name,
+        level_name=level_name,
+        resolved_metadata=resolved_metadata,
+    )
+    if metadata_template:
+        return metadata_template
 
     level_bindings = template_bindings.get("level_template_keys")
     if isinstance(level_bindings, dict):
@@ -843,9 +836,13 @@ def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> Co
     return resolved
 
 
-def _build_template_context(source_node: ContentNode | None, item: dict) -> dict:
+def _build_template_context(
+    source_node: ContentNode | None,
+    item: dict,
+    resolved_metadata: dict | None = None,
+) -> dict:
     if source_node is None:
-        return {
+        base_context = {
             "title": _as_clean_string(item.get("title")),
             "level_name": _as_clean_string(item.get("level_name")),
             "sequence_number": _as_clean_string(item.get("sequence_number")),
@@ -854,81 +851,101 @@ def _build_template_context(source_node: ContentNode | None, item: dict) -> dict
             "english": "",
             "text": "",
         }
+    else:
+        content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
+        summary_data = source_node.summary_data if isinstance(source_node.summary_data, dict) else {}
+        basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
+        translations_data = (
+            content_data.get("translations") if isinstance(content_data.get("translations"), dict) else {}
+        )
+        summary_basic = summary_data.get("basic") if isinstance(summary_data.get("basic"), dict) else {}
+        summary_translations = (
+            summary_data.get("translations") if isinstance(summary_data.get("translations"), dict) else {}
+        )
 
-    content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
-    summary_data = source_node.summary_data if isinstance(source_node.summary_data, dict) else {}
-    basic_data = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
-    translations_data = (
-        content_data.get("translations") if isinstance(content_data.get("translations"), dict) else {}
-    )
-    summary_basic = summary_data.get("basic") if isinstance(summary_data.get("basic"), dict) else {}
-    summary_translations = (
-        summary_data.get("translations") if isinstance(summary_data.get("translations"), dict) else {}
-    )
+        sanskrit_text = (
+            basic_data.get("sanskrit")
+            or basic_data.get("text_sanskrit")
+            or content_data.get("sanskrit")
+            or content_data.get("text_sanskrit")
+            or summary_basic.get("sanskrit")
+            or summary_data.get("sanskrit")
+            or source_node.title_sanskrit
+            or ""
+        )
+        transliteration_text = (
+            basic_data.get("transliteration")
+            or basic_data.get("iast")
+            or content_data.get("transliteration")
+            or content_data.get("iast")
+            or content_data.get("text_transliteration")
+            or summary_basic.get("transliteration")
+            or summary_basic.get("iast")
+            or summary_data.get("transliteration")
+            or source_node.title_transliteration
+            or ""
+        )
+        english_text = (
+            translations_data.get("english")
+            or translations_data.get("en")
+            or summary_translations.get("english")
+            or summary_translations.get("en")
+            or basic_data.get("english")
+            or basic_data.get("translation")
+            or content_data.get("text_english")
+            or content_data.get("english")
+            or content_data.get("en")
+            or content_data.get("translation")
+            or summary_basic.get("english")
+            or summary_basic.get("translation")
+            or summary_data.get("text_english")
+            or summary_data.get("english")
+            or summary_data.get("en")
+            or summary_data.get("translation")
+            or source_node.title_english
+            or ""
+        )
+        fallback_text = (
+            basic_data.get("text")
+            or content_data.get("text")
+            or content_data.get("content")
+            or summary_basic.get("text")
+            or summary_data.get("text")
+            or summary_data.get("content")
+            or ""
+        )
 
-    sanskrit_text = (
-        basic_data.get("sanskrit")
-        or basic_data.get("text_sanskrit")
-        or content_data.get("sanskrit")
-        or content_data.get("text_sanskrit")
-        or summary_basic.get("sanskrit")
-        or summary_data.get("sanskrit")
-        or source_node.title_sanskrit
-        or ""
-    )
-    transliteration_text = (
-        basic_data.get("transliteration")
-        or basic_data.get("iast")
-        or content_data.get("transliteration")
-        or content_data.get("iast")
-        or content_data.get("text_transliteration")
-        or summary_basic.get("transliteration")
-        or summary_basic.get("iast")
-        or summary_data.get("transliteration")
-        or source_node.title_transliteration
-        or ""
-    )
-    english_text = (
-        translations_data.get("english")
-        or translations_data.get("en")
-        or summary_translations.get("english")
-        or summary_translations.get("en")
-        or basic_data.get("english")
-        or basic_data.get("translation")
-        or content_data.get("text_english")
-        or content_data.get("english")
-        or content_data.get("en")
-        or content_data.get("translation")
-        or summary_basic.get("english")
-        or summary_basic.get("translation")
-        or summary_data.get("text_english")
-        or summary_data.get("english")
-        or summary_data.get("en")
-        or summary_data.get("translation")
-        or source_node.title_english
-        or ""
-    )
-    fallback_text = (
-        basic_data.get("text")
-        or content_data.get("text")
-        or content_data.get("content")
-        or summary_basic.get("text")
-        or summary_data.get("text")
-        or summary_data.get("content")
-        or ""
-    )
+        title_value = _as_clean_string(source_node.title_english) or _as_clean_string(item.get("title"))
 
-    title_value = _as_clean_string(source_node.title_english) or _as_clean_string(item.get("title"))
+        base_context = {
+            "title": title_value,
+            "level_name": _as_clean_string(source_node.level_name),
+            "sequence_number": _as_clean_string(source_node.sequence_number),
+            "sanskrit": _normalize_devanagari_text(_as_clean_string(sanskrit_text)),
+            "transliteration": _as_clean_string(transliteration_text),
+            "english": _as_clean_string(english_text),
+            "text": _as_clean_string(fallback_text),
+        }
 
-    return {
-        "title": title_value,
-        "level_name": _as_clean_string(source_node.level_name),
-        "sequence_number": _as_clean_string(source_node.sequence_number),
-        "sanskrit": _normalize_devanagari_text(_as_clean_string(sanskrit_text)),
-        "transliteration": _as_clean_string(transliteration_text),
-        "english": _as_clean_string(english_text),
-        "text": _as_clean_string(fallback_text),
-    }
+    metadata_context: dict = {}
+    if isinstance(resolved_metadata, dict):
+        for key, value in resolved_metadata.items():
+            if not isinstance(key, str) or not key.strip():
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                metadata_context[key.strip()] = value
+            elif isinstance(value, (list, dict)):
+                metadata_context[key.strip()] = json.dumps(value, ensure_ascii=False)
+            else:
+                metadata_context[key.strip()] = _as_clean_string(value)
+
+    for field_name in ("title", "level_name", "sequence_number", "sanskrit", "transliteration", "english", "text"):
+        value = base_context.get(field_name)
+        if value not in (None, ""):
+            metadata_context.setdefault(field_name, value)
+
+    base_context["metadata"] = metadata_context
+    return base_context
 
 
 def _normalize_template_field_name(value: object) -> str | None:
@@ -989,7 +1006,7 @@ def _build_default_liquid_template_from_fields(fields: list[str], labels: dict[s
     lines: list[str] = []
     for field_name in fields:
         label = resolved_labels.get(field_name, field_name.title())
-        lines.append(f"{{% if {field_name} %}}{label}: {{{{ {field_name} }}}}\n{{% endif %}}")
+        lines.append(f"{{% if metadata.{field_name} %}}{label}: {{{{ metadata.{field_name} }}}}\n{{% endif %}}")
     return "".join(lines)
 
 
@@ -1077,7 +1094,7 @@ def _render_block_content_with_template(
     item: dict,
     resolved_metadata: dict | None = None,
 ) -> tuple[dict, str]:
-    context = _build_template_context(source_node, item)
+    context = _build_template_context(source_node, item, resolved_metadata)
     resolved_labels = _resolve_default_template_labels(resolved_metadata)
     label_to_field = {
         _as_clean_string(label).lower(): field_name
@@ -1102,6 +1119,8 @@ def _render_block_content_with_template(
         rendered_lines = []
         for field_name in fallback_fields:
             value = _as_clean_string(context.get(field_name))
+            if not value and isinstance(context.get("metadata"), dict):
+                value = _as_clean_string(context["metadata"].get(field_name))
             if not value:
                 continue
             rendered_lines.append(
@@ -1121,7 +1140,12 @@ def _render_block_content_with_template(
     }
 
     for field_name in ("sanskrit", "transliteration", "english", "text"):
-        content[field_name] = _as_clean_string(context.get(field_name))
+        value = _as_clean_string(context.get(field_name))
+        if not value and isinstance(context.get("metadata"), dict):
+            value = _as_clean_string(context["metadata"].get(field_name))
+        content[field_name] = value
+
+    content["metadata"] = context.get("metadata", {})
 
     return content, template_source
 
@@ -1379,16 +1403,17 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         for block_index, (_, item) in enumerate(candidates, start=1):
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
             source_node = _resolve_referenced_source_node(db, source_node)
+            resolved_metadata = _resolve_block_metadata(
+                item=item,
+                source_node=source_node,
+                metadata_bindings=metadata_bindings,
+            )
             template_key = _resolve_block_template_key(
                 section_name=section_name,
                 item=item,
                 source_node=source_node,
                 template_bindings=template_bindings,
-            )
-            resolved_metadata = _resolve_block_metadata(
-                item=item,
-                source_node=source_node,
-                metadata_bindings=metadata_bindings,
+                resolved_metadata=resolved_metadata,
             )
             block_content, resolved_template_source = _render_block_content_with_template(
                 section_name=section_name,
@@ -2034,6 +2059,8 @@ def create_edition_snapshot(
             ),
         )
 
+    validate_draft_metadata_bindings_on_publish(draft.id, db)
+
     resolved_snapshot_data = payload.snapshot_data or draft.section_structure or _default_sections()
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
@@ -2093,6 +2120,8 @@ def publish_draft_book(
                 f"Disallowed license(s): {', '.join(blocked_licenses)}"
             ),
         )
+
+    validate_draft_metadata_bindings_on_publish(draft.id, db)
 
     template_binding_errors = _validate_template_bindings(resolved_snapshot_data)
     if template_binding_errors:

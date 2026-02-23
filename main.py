@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books
+from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books, metadata
 from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -31,5 +31,6 @@ app.include_router(preferences.router, prefix="/api")
 app.include_router(compilations.router, prefix="/api")
 app.include_router(collection_cart.router, prefix="/api")
 app.include_router(draft_books.router, prefix="/api")
+app.include_router(metadata.router, prefix="/api")
 
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")

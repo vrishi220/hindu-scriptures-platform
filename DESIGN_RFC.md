@@ -52,6 +52,7 @@ Book → Sections → Levels/Nodes → Fields.
 
 ### 5.3 Template Layer
 - Templates can attach at book, level type, node type, and explicit node.
+- For custom rendering, level template selection can be represented as metadata properties (for example `verse_template_key`), then resolved by precedence.
 - Templates define block structure, conditional visibility, order, page behavior, and style tokens.
 
 ### 5.4 Edition Layer
@@ -63,7 +64,7 @@ Book → Sections → Levels/Nodes → Fields.
 field override > node binding > level binding > book binding > global default.
 
 ### 6.2 Template precedence
-explicit node template > level template > book template > global fallback.
+explicit node template binding > metadata template key properties (`<section>_<level>_template_key`, `<level>_template_key`, `<section>_template_key`, `render_template_key`) > level template binding > book template binding > global fallback.
 
 ### 6.3 Conflict rule
 If same scope collides, latest published version wins.
@@ -462,3 +463,33 @@ Resolve these before coding starts:
 - Deterministic mode requirement: PDF generation must use invariant serialization (`invariant=1`).
 - Current export is MVP-grade: simple page flow and text blocks, not full typography parity with a future template-materialization renderer.
 - Constraints and baseline expectations are documented in `PDF_EXPORT_BASELINE.md`.
+
+### 21.8 Draft Preview Payload Example (Metadata Template Key)
+- Endpoint: `POST /api/draft-books/{draft_id}/preview/render`
+- Purpose: assign a level template through metadata (`verse_template_key`) for custom rendering.
+
+```json
+{
+	"snapshot_data": {
+		"front": [],
+		"body": [
+			{
+				"node_id": 101,
+				"source_book_id": 12,
+				"title": "Verse 2.47",
+				"level_name": "verse"
+			}
+		],
+		"back": [],
+		"metadata_bindings": {
+			"levels": {
+				"verse": {
+					"verse_template_key": "default.body.verse.content_item.v1"
+				}
+			}
+		}
+	}
+}
+```
+
+- Effective template resolution for this flow is: explicit node template binding > metadata template key properties (`<section>_<level>_template_key`, `<level>_template_key`, `<section>_template_key`, `render_template_key`) > level template binding > book template binding > global fallback.

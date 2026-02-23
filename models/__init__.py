@@ -12,6 +12,13 @@ from models.scripture_schema import ScriptureSchema
 from models.user import User
 from models.user_preference import UserPreference
 from models.compilation import Compilation
+from models.property_system import (
+	Category,
+	CategoryParent,
+	CategoryProperty,
+	MetadataBinding,
+	PropertyDefinition,
+)
 
 __all__ = [
 	"Base",
@@ -20,10 +27,15 @@ __all__ = [
 	"CollectionCart",
 	"CollectionCartItem",
 	"Compilation",
+	"Category",
+	"CategoryParent",
+	"CategoryProperty",
 	"DraftBook",
 	"EditionSnapshot",
 	"ContentNode",
+	"MetadataBinding",
 	"MediaFile",
+	"PropertyDefinition",
 	"ProvenanceRecord",
 	"SearchQuery",
 	"ScriptureSchema",
