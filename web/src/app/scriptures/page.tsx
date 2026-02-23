@@ -1115,18 +1115,15 @@ function ScripturesContent() {
       return "";
     }
 
-    if (scriptPrefersRoman) {
-      if (transliterationValue) {
-        return renderTransliterationByPreference(transliterationValue);
-      }
-      return transliterateFromDevanagari(sanskritValue, transliterationScript);
+    if (sanskritValue) {
+      return sanskritValue;
     }
 
-    if (transliterationValue) {
-      return renderTransliterationByPreference(transliterationValue);
+    if (!transliterationValue) {
+      return "";
     }
 
-    return transliterateFromDevanagari(sanskritValue, transliterationScript);
+    return renderTransliterationByPreference(transliterationValue);
   };
 
   const getPreferredTitle = (node: TreeNode | NodeContent): string => {
