@@ -424,6 +424,21 @@ function ScripturesContent() {
       show_transliteration: true,
       show_english: true,
     });
+  // Track the last applied settings to enable/disable Apply button
+  const [appliedBookPreviewLanguageSettings, setAppliedBookPreviewLanguageSettings] =
+    useState<BookPreviewLanguageSettings>({
+      show_sanskrit: true,
+      show_transliteration: true,
+      show_english: true,
+    });
+  const [showPreviewLabels, setShowPreviewLabels] = useState(false);
+  const [showPreviewDetails, setShowPreviewDetails] = useState(false);
+  const [showPreviewTitles, setShowPreviewTitles] = useState(false);
+  // Track the last applied preview options
+  const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
+  const [appliedShowPreviewDetails, setAppliedShowPreviewDetails] = useState(false);
+  const [appliedShowPreviewTitles, setAppliedShowPreviewTitles] = useState(false);
+  const [showPreviewControls, setShowPreviewControls] = useState(false);
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
@@ -547,7 +562,7 @@ function ScripturesContent() {
           fieldName === "transliteration"
             ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
             : rawLabel;
-        const label = fieldName === previousFieldName ? "" : computedLabel;
+        const label = showPreviewLabels && fieldName !== previousFieldName ? computedLabel : "";
 
         lines.push({
           key: `${fieldName || "line"}-${index}`,
@@ -574,14 +589,15 @@ function ScripturesContent() {
         continue;
       }
 
-      const label =
-        key === "sanskrit"
+      const label = showPreviewLabels
+        ? key === "sanskrit"
           ? "Sanskrit"
           : key === "transliteration"
             ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
             : key === "english"
               ? "English"
-              : "Text";
+              : "Text"
+        : "";
 
       const className = lineClassNameForField(key);
 
@@ -1718,7 +1734,7 @@ function ScripturesContent() {
           node_id: scope === "node" ? selectedId ?? undefined : undefined,
           render_settings: {
             ...bookPreviewLanguageSettings,
-            show_metadata: true,
+            show_metadata: showPreviewDetails,
             text_order: ["sanskrit", "transliteration", "english", "text"],
           },
         }),
@@ -1740,6 +1756,14 @@ function ScripturesContent() {
         show_transliteration: artifact.render_settings.show_transliteration,
         show_english: artifact.render_settings.show_english,
       });
+      setAppliedBookPreviewLanguageSettings({
+        show_sanskrit: artifact.render_settings.show_sanskrit,
+        show_transliteration: artifact.render_settings.show_transliteration,
+        show_english: artifact.render_settings.show_english,
+      });
+      setAppliedShowPreviewLabels(showPreviewLabels);
+      setAppliedShowPreviewDetails(showPreviewDetails);
+      setAppliedShowPreviewTitles(showPreviewTitles);
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -3503,9 +3527,9 @@ function ScripturesContent() {
         )}
 
         {showBookPreview && bookPreviewArtifact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-            <div className="w-full max-w-4xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
-              <div className="mb-4 flex items-center justify-between">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 sm:p-6">
+            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-black/10 bg-white/95 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-black/10 bg-white/95 px-6 py-4">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     {bookPreviewArtifact.preview_scope === "node" ? "Level Preview" : "Book Preview"}
@@ -3516,157 +3540,227 @@ function ScripturesContent() {
                       : bookPreviewArtifact.book_name}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowBookPreview(false)}
-                  className="text-2xl text-zinc-400 hover:text-zinc-600"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
-                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  {bookPreviewArtifact.warnings.join(" ")}
-                </div>
-              )}
-
-              <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
-                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
-                <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={bookPreviewLanguageSettings.show_sanskrit}
-                      onChange={(event) =>
-                        setBookPreviewLanguageSettings((prev) => ({
-                          ...prev,
-                          show_sanskrit: event.target.checked,
-                        }))
-                      }
-                      disabled={bookPreviewLoading}
-                    />
-                    Sanskrit
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={bookPreviewLanguageSettings.show_transliteration}
-                      onChange={(event) =>
-                        setBookPreviewLanguageSettings((prev) => ({
-                          ...prev,
-                          show_transliteration: event.target.checked,
-                        }))
-                      }
-                      disabled={bookPreviewLoading}
-                    />
-                    Transliteration
-                  </label>
-                  <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                    Script
-                    <select
-                      value={previewTransliterationScript}
-                      onChange={(event) =>
-                        setBookPreviewTransliterationScript(
-                          normalizeTransliterationScript(event.target.value)
-                        )
-                      }
-                      disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
-                      className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
-                        <option key={scriptOption} value={scriptOption}>
-                          {transliterationScriptLabel(scriptOption)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={bookPreviewLanguageSettings.show_english}
-                      onChange={(event) =>
-                        setBookPreviewLanguageSettings((prev) => ({
-                          ...prev,
-                          show_english: event.target.checked,
-                        }))
-                      }
-                      disabled={bookPreviewLoading}
-                    />
-                    English
-                  </label>
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => {
-                      void handlePreviewBook();
-                    }}
-                    disabled={
-                      bookPreviewLoading ||
-                      (!bookPreviewLanguageSettings.show_sanskrit &&
-                        !bookPreviewLanguageSettings.show_transliteration &&
-                        !bookPreviewLanguageSettings.show_english)
-                    }
-                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => setShowPreviewControls((prev) => !prev)}
+                    className="rounded-full border border-black/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-zinc-600 transition hover:border-black/20"
                   >
-                    {bookPreviewLoading ? "Applying..." : "Apply"}
+                    {showPreviewControls ? "Hide Controls" : "Show Controls"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowBookPreview(false)}
+                    className="text-2xl text-zinc-400 hover:text-zinc-600"
+                  >
+                    ✕
                   </button>
                 </div>
               </div>
 
-              {bookPreviewArtifact.book_template && (
-                <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
+              <div className="flex-1 overflow-y-auto px-6 pb-6 pt-4">
+                {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    {bookPreviewArtifact.warnings.join(" ")}
                   </div>
-                  <div className="mt-1 text-sm font-semibold text-[color:var(--deep)]">
-                    {bookPreviewArtifact.book_template.template_key}
-                  </div>
-                  <div className="mt-1 text-xs text-zinc-500">
-                    Children rendered: {bookPreviewArtifact.book_template.child_count}
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
-                    {bookPreviewArtifact.book_template.rendered_text ||
-                      (bookPreviewArtifact.preview_scope === "node"
-                        ? "No rendered level summary."
-                        : "No rendered book-level summary.")}
-                  </p>
-                </div>
-              )}
-
-              <div className="max-h-[65vh] space-y-2 overflow-y-auto rounded-2xl border border-black/10 bg-white/80 p-3">
-                {bookPreviewArtifact.sections.body.length === 0 ? (
-                  <p className="text-sm text-zinc-500">
-                    {bookPreviewArtifact.preview_scope === "node"
-                      ? "No previewable content found under this level."
-                      : "No previewable content found for this book."}
-                  </p>
-                ) : (
-                  bookPreviewArtifact.sections.body.map((block) => {
-                    const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
-                    return (
-                      <article
-                        key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
-                        className="rounded-xl border border-black/10 bg-white p-3"
-                      >
-                        <div className="text-sm font-semibold text-[color:var(--deep)]">{block.title}</div>
-                        <div className="mt-2 space-y-1">
-                          {contentLines.length === 0 ? (
-                            <p className="text-sm text-zinc-500">No textual content in this block.</p>
-                          ) : (
-                            contentLines.map((line) => (
-                              <div key={`${line.key}-${line.value.slice(0, 24)}`}>
-                                {line.label && (
-                                  <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
-                                )}
-                                <p className={line.className}>{line.value}</p>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </article>
-                    );
-                  })
                 )}
+
+                {showPreviewControls && (
+                  <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={showPreviewTitles}
+                              onChange={(event) => setShowPreviewTitles(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            Show titles
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={showPreviewLabels}
+                              onChange={(event) => setShowPreviewLabels(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            Show labels
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={showPreviewDetails}
+                              onChange={(event) => setShowPreviewDetails(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            Show template details
+                          </label>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={bookPreviewLanguageSettings.show_sanskrit}
+                              onChange={(event) =>
+                                setBookPreviewLanguageSettings((prev) => ({
+                                  ...prev,
+                                  show_sanskrit: event.target.checked,
+                                }))
+                              }
+                              disabled={bookPreviewLoading}
+                            />
+                            Sanskrit
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={bookPreviewLanguageSettings.show_transliteration}
+                              onChange={(event) =>
+                                setBookPreviewLanguageSettings((prev) => ({
+                                  ...prev,
+                                  show_transliteration: event.target.checked,
+                                }))
+                              }
+                              disabled={bookPreviewLoading}
+                            />
+                            Transliteration
+                          </label>
+                          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                            Script
+                            <select
+                              value={previewTransliterationScript}
+                              onChange={(event) =>
+                                setBookPreviewTransliterationScript(
+                                  normalizeTransliterationScript(event.target.value)
+                                )
+                              }
+                              disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
+                              className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
+                                <option key={scriptOption} value={scriptOption}>
+                                  {transliterationScriptLabel(scriptOption)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={bookPreviewLanguageSettings.show_english}
+                              onChange={(event) =>
+                                setBookPreviewLanguageSettings((prev) => ({
+                                  ...prev,
+                                  show_english: event.target.checked,
+                                }))
+                              }
+                              disabled={bookPreviewLoading}
+                            />
+                            English
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePreviewBook();
+                            }}
+                            disabled={
+                              bookPreviewLoading ||
+                              (!bookPreviewLanguageSettings.show_sanskrit &&
+                                !bookPreviewLanguageSettings.show_transliteration &&
+                                !bookPreviewLanguageSettings.show_english) ||
+                              (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
+                                bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
+                                bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
+                                showPreviewLabels === appliedShowPreviewLabels &&
+                                showPreviewDetails === appliedShowPreviewDetails &&
+                                showPreviewTitles === appliedShowPreviewTitles)
+                            }
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {bookPreviewLoading ? "Applying..." : "Apply"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {showPreviewDetails && bookPreviewArtifact.book_template && (
+                  <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--deep)]">
+                      {bookPreviewArtifact.book_template.template_key}
+                    </div>
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Children rendered: {bookPreviewArtifact.book_template.child_count}
+                    </div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
+                      {bookPreviewArtifact.book_template.rendered_text ||
+                        (bookPreviewArtifact.preview_scope === "node"
+                          ? "No rendered level summary."
+                          : "No rendered book-level summary.")}
+                    </p>
+                  </div>
+                )}
+
+                <div className="space-y-2 rounded-2xl border border-black/10 bg-white/80 p-3">
+                  {bookPreviewArtifact.sections.body.length === 0 ? (
+                    <p className="text-sm text-zinc-500">
+                      {bookPreviewArtifact.preview_scope === "node"
+                        ? "No previewable content found under this level."
+                        : "No previewable content found for this book."}
+                    </p>
+                  ) : (
+                    bookPreviewArtifact.sections.body.map((block) => {
+                      const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
+                      const rawTitle = block.title || "";
+                      const hideNodeFallback = !showPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
+                      const displayTitle = showPreviewTitles && !hideNodeFallback ? rawTitle : "";
+                      return (
+                        <article
+                          key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
+                          className="rounded-xl border border-black/10 bg-white p-3"
+                        >
+                          {displayTitle && (
+                            <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
+                          )}
+                          <div className="mt-2 space-y-1">
+                            {contentLines.length === 0 ? (
+                              <p className="text-sm text-zinc-500">No textual content in this block.</p>
+                            ) : (
+                              contentLines.map((line) => (
+                                <div key={`${line.key}-${line.value.slice(0, 24)}`}>
+                                  {line.label && (
+                                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                                  )}
+                                  <p className={line.className}>{line.value}</p>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                          {showPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
+                            <div className="mt-2 text-xs text-zinc-500">
+                              template: {block.template_key}
+                              {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
+                              {typeof block.content.sequence_number === "number"
+                                ? ` • seq ${block.content.sequence_number}`
+                                : ""}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
           </div>
