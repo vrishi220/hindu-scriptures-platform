@@ -1,6 +1,13 @@
 "use client";
 import { useEffect } from "react";
 
+// Extend the Window interface to include our singleton property
+declare global {
+  interface Window {
+    __sessionKeepaliveInitialized?: boolean;
+  }
+}
+
 export default function SessionKeepalive() {
   useEffect(() => {
     // Singleton guard (window-scoped)
