@@ -3,6 +3,7 @@ import { Playfair_Display, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
+import SessionKeepalive from "@/components/SessionKeepalive";
 
 const displayFont = Playfair_Display({
   variable: "--font-display",
@@ -28,6 +29,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${displayFont.variable} ${sansFont.variable} antialiased`}>
+        <SessionKeepalive />
         <NavBar />
         {children}
         <Footer />
