@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   transliteration_script VARCHAR(50) NOT NULL DEFAULT 'devanagari',
   show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
   show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
+  preview_show_titles BOOLEAN NOT NULL DEFAULT false,
+  preview_show_labels BOOLEAN NOT NULL DEFAULT false,
+  preview_show_details BOOLEAN NOT NULL DEFAULT false,
+  preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
+  preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
+  preview_show_english BOOLEAN NOT NULL DEFAULT true,
+  preview_transliteration_script VARCHAR(50) NOT NULL DEFAULT 'iast',
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)

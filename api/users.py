@@ -6,7 +6,7 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from models.schemas import UserAdminCreate, UserPermissionsUpdate, UserPublic
+from models.schemas import UserAdminCreate, UserPermissionsUpdate, UserPublic, UserSelfUpdate
 from models.user import User
 from services import decode_token, get_db, hash_password
 
@@ -86,6 +86,37 @@ def require_permission(permission: str):
 
 @router.get("/me", response_model=UserPublic)
 def read_current_user(current_user: User = Depends(get_current_user)) -> UserPublic:
+    return UserPublic.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserPublic)
+def update_current_user(
+    payload: UserSelfUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    updates = payload.model_dump(exclude_unset=True)
+
+    if "username" in updates:
+        username = updates["username"]
+        if username:
+            existing_username = (
+                db.query(User)
+                .filter(User.username == username, User.id != current_user.id)
+                .first()
+            )
+            if existing_username:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username in use",
+                )
+        current_user.username = username
+
+    if "full_name" in updates:
+        current_user.full_name = updates["full_name"]
+
+    db.commit()
+    db.refresh(current_user)
     return UserPublic.model_validate(current_user)
 
 

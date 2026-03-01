@@ -5,7 +5,7 @@ const uniqueIdentity = () => {
   return {
     email: `proxy_${suffix}@example.com`,
     username: `proxy_${suffix}`,
-    password: 'StrongPass123',
+    password: 'StrongPass123!',
   };
 };
 
@@ -37,6 +37,7 @@ test.describe('API proxy routes', () => {
 
   test('authenticated preferences and compilations work via frontend proxy', async ({ request }) => {
     const identity = uniqueIdentity();
+    const updatedUsername = `proxy_updated_${Date.now()}`;
 
     const registerResponse = await request.post('/api/auth/register', {
       data: {
@@ -56,6 +57,32 @@ test.describe('API proxy routes', () => {
     });
     expect(loginResponse.status()).toBe(200);
 
+    const meGetResponse = await request.get('/api/me');
+    expect(meGetResponse.status()).toBe(200);
+    const me = (await meGetResponse.json()) as {
+      email: string;
+      username: string;
+      full_name: string;
+    };
+    expect(me.email).toBe(identity.email);
+    expect(me.username).toBe(identity.username);
+
+    const mePatchResponse = await request.patch('/api/me', {
+      data: {
+        full_name: 'Proxy Flow Updated Name',
+        username: updatedUsername,
+      },
+    });
+    expect(mePatchResponse.status()).toBe(200);
+    const patchedMe = (await mePatchResponse.json()) as {
+      email: string;
+      username: string;
+      full_name: string;
+    };
+    expect(patchedMe.email).toBe(identity.email);
+    expect(patchedMe.full_name).toBe('Proxy Flow Updated Name');
+    expect(patchedMe.username).toBe(updatedUsername);
+
     const prefGetResponse = await request.get('/api/preferences');
     expect(prefGetResponse.status()).toBe(200);
     const prefs = (await prefGetResponse.json()) as {
@@ -72,6 +99,13 @@ test.describe('API proxy routes', () => {
         transliteration_script: 'iast',
         show_roman_transliteration: true,
         show_only_preferred_script: true,
+        preview_show_titles: true,
+        preview_show_labels: true,
+        preview_show_details: true,
+        preview_show_sanskrit: true,
+        preview_show_transliteration: true,
+        preview_show_english: false,
+        preview_transliteration_script: 'harvard_kyoto',
       },
     });
     expect(prefPatchResponse.status()).toBe(200);
@@ -80,11 +114,25 @@ test.describe('API proxy routes', () => {
       transliteration_script: string;
       show_roman_transliteration: boolean;
       show_only_preferred_script: boolean;
+      preview_show_titles: boolean;
+      preview_show_labels: boolean;
+      preview_show_details: boolean;
+      preview_show_sanskrit: boolean;
+      preview_show_transliteration: boolean;
+      preview_show_english: boolean;
+      preview_transliteration_script: string;
     };
     expect(updatedPrefs.source_language).toBe('sanskrit');
     expect(updatedPrefs.transliteration_script).toBe('iast');
     expect(updatedPrefs.show_roman_transliteration).toBe(true);
     expect(updatedPrefs.show_only_preferred_script).toBe(true);
+    expect(updatedPrefs.preview_show_titles).toBe(true);
+    expect(updatedPrefs.preview_show_labels).toBe(true);
+    expect(updatedPrefs.preview_show_details).toBe(true);
+    expect(updatedPrefs.preview_show_sanskrit).toBe(true);
+    expect(updatedPrefs.preview_show_transliteration).toBe(true);
+    expect(updatedPrefs.preview_show_english).toBe(false);
+    expect(updatedPrefs.preview_transliteration_script).toBe('harvard_kyoto');
 
     const compilationResponse = await request.post('/api/compilations', {
       data: {

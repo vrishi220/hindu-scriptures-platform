@@ -12,7 +12,7 @@ const uniqueIdentity = (prefix: string): Identity => {
   return {
     email: `${prefix}_${suffix}@example.com`,
     username: `${prefix}_${suffix}`,
-    password: 'StrongPass123',
+    password: 'StrongPass123!',
   };
 };
 

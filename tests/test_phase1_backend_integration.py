@@ -23,7 +23,7 @@ import pytest
 def _register_and_login(client):
     suffix = uuid4().hex[:8]
     email = f"phase1_{suffix}@example.com"
-    password = "StrongPass123"
+    password = "StrongPass123!"
 
     register_payload = {
         "email": email,
@@ -46,7 +46,7 @@ def _register_and_login(client):
 def _register_user(client):
     suffix = uuid4().hex[:8]
     email = f"phase1_reset_{suffix}@example.com"
-    password = "StrongPass123"
+    password = "StrongPass123!"
 
     register_payload = {
         "email": email,
@@ -83,6 +83,18 @@ def _register_and_login_as_admin(client):
 
 
 class TestPasswordResetIntegration:
+    def test_register_rejects_weak_password(self, client):
+        suffix = uuid4().hex[:8]
+        register_response = client.post(
+            "/api/auth/register",
+            json={
+                "email": f"weak_{suffix}@example.com",
+                "password": "weakpass1",
+                "username": f"weak_{suffix}",
+            },
+        )
+        assert register_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
     def test_forgot_and_reset_password_flow(self, client):
         email, old_password = _register_user(client)
 
@@ -96,7 +108,7 @@ class TestPasswordResetIntegration:
             "/api/auth/reset-password",
             json={
                 "token": forgot_payload["reset_token"],
-                "new_password": "NewStrongPass456",
+                "new_password": "NewStrongPass456!",
             },
         )
         assert reset_response.status_code == status.HTTP_200_OK
@@ -109,7 +121,7 @@ class TestPasswordResetIntegration:
 
         new_login_response = client.post(
             "/api/auth/login",
-            json={"email": email, "password": "NewStrongPass456"},
+            json={"email": email, "password": "NewStrongPass456!"},
         )
         assert new_login_response.status_code == status.HTTP_200_OK
 
@@ -131,6 +143,13 @@ class TestPhase1PreferencesIntegration:
             "transliteration_script": "tamil",
             "show_roman_transliteration": False,
             "show_only_preferred_script": True,
+            "preview_show_titles": True,
+            "preview_show_labels": True,
+            "preview_show_details": True,
+            "preview_show_sanskrit": True,
+            "preview_show_transliteration": False,
+            "preview_show_english": False,
+            "preview_transliteration_script": "iast",
         }
         patch_response = client.patch("/api/preferences", json=patch_payload, headers=headers)
         assert patch_response.status_code == status.HTTP_200_OK
@@ -138,6 +157,37 @@ class TestPhase1PreferencesIntegration:
         assert updated["transliteration_script"] == "tamil"
         assert updated["show_roman_transliteration"] is False
         assert updated["show_only_preferred_script"] is True
+        assert updated["preview_show_titles"] is True
+        assert updated["preview_show_labels"] is True
+        assert updated["preview_show_details"] is True
+        assert updated["preview_show_sanskrit"] is True
+        assert updated["preview_show_transliteration"] is False
+        assert updated["preview_show_english"] is False
+        assert updated["preview_transliteration_script"] == "iast"
+
+
+class TestPhase1UsersMeIntegration:
+    def test_get_and_patch_current_user_profile(self, client):
+        headers = _register_and_login(client)
+
+        me_response = client.get("/api/users/me", headers=headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        me_payload = me_response.json()
+
+        updated_username = f"patched_{uuid4().hex[:8]}"
+        patch_response = client.patch(
+            "/api/users/me",
+            json={
+                "full_name": "Updated Phase1 Name",
+                "username": updated_username,
+            },
+            headers=headers,
+        )
+        assert patch_response.status_code == status.HTTP_200_OK
+        patched_user = patch_response.json()
+        assert patched_user["full_name"] == "Updated Phase1 Name"
+        assert patched_user["username"] == updated_username
+        assert patched_user["email"] == me_payload["email"]
 
 
 class TestPhase1CompilationsIntegration:
@@ -3567,7 +3617,7 @@ class TestUsersCoverageSprintCOV03:
             "/api/users",
             json={
                 "email": f"cov_user_{uuid4().hex[:8]}@example.com",
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": f"cov_user_{uuid4().hex[:8]}",
                 "role": "viewer",
             },
@@ -3582,7 +3632,7 @@ class TestUsersCoverageSprintCOV03:
             "/api/users",
             json={
                 "email": f"cov_admin_create_{uuid4().hex[:8]}@example.com",
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": f"cov_admin_create_{uuid4().hex[:8]}",
                 "full_name": "Coverage Admin Created",
                 "role": "editor",
@@ -3613,7 +3663,7 @@ class TestUsersCoverageSprintCOV03:
             "/api/users",
             json={
                 "email": existing_email,
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": f"cov_unique_{uuid4().hex[:8]}",
                 "role": "viewer",
             },
@@ -3626,7 +3676,7 @@ class TestUsersCoverageSprintCOV03:
             "/api/users",
             json={
                 "email": f"cov_dup_{uuid4().hex[:8]}@example.com",
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": existing_username,
                 "role": "viewer",
             },
@@ -3642,7 +3692,7 @@ class TestUsersCoverageSprintCOV03:
             "/api/users",
             json={
                 "email": f"cov_update_{uuid4().hex[:8]}@example.com",
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": f"cov_update_{uuid4().hex[:8]}",
                 "role": "viewer",
             },

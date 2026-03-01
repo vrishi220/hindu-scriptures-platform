@@ -11,7 +11,7 @@ from models.scripture_schema import ScriptureSchema
 def _register_and_login(client):
     suffix = uuid4().hex[:8]
     email = f"cov01_{suffix}@example.com"
-    password = "StrongPass123"
+    password = "StrongPass123!"
 
     register_response = client.post(
         "/api/auth/register",

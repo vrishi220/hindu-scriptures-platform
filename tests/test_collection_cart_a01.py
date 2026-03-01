@@ -13,7 +13,7 @@ def _register_and_login(client):
     """Helper: register user and return auth header."""
     suffix = uuid4().hex[:8]
     email = f"cart_user_{suffix}@example.com"
-    password = "StrongPass123"
+    password = "StrongPass123!"
 
     register_payload = {
         "email": email,
