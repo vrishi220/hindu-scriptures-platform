@@ -139,10 +139,10 @@ test.describe('Authentication', () => {
 });
 
 test.describe('Logout Regression', () => {
-  const openMobileMenu = async (page: import('@playwright/test').Page) => {
-    const menuButton = page.getByTitle('Menu');
-    await expect(menuButton).toBeVisible();
-    await menuButton.click();
+  const openUserMenu = async (page: import('@playwright/test').Page) => {
+    const userMenuButton = page.getByRole('button', { name: 'User menu' });
+    await expect(userMenuButton).toBeVisible();
+    await userMenuButton.click();
   };
 
   test('desktop sign out returns to signed-out state', async ({ page }) => {
@@ -152,32 +152,31 @@ test.describe('Logout Regression', () => {
     await page.goto('http://localhost:3000');
     await page.waitForLoadState('domcontentloaded');
 
-    const signOutDesktop = page.getByRole('button', { name: 'Sign out' }).first();
+    await openUserMenu(page);
+    const signOutDesktop = page.getByRole('button', { name: 'Sign out' });
     await expect(signOutDesktop).toBeVisible();
     await signOutDesktop.click();
 
     await page.waitForURL('**/');
     await page.waitForLoadState('domcontentloaded');
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
   });
 
-  test('mobile menu sign out returns to signed-out state', async ({ page }) => {
+  test('mobile user-menu sign out returns to signed-out state', async ({ page }) => {
     await mockAuthenticatedSession(page);
     await page.setViewportSize({ width: 390, height: 844 });
 
     await page.goto('http://localhost:3000');
     await page.waitForLoadState('domcontentloaded');
 
-    await openMobileMenu(page);
-    const mobileSignOut = page.getByRole('button', { name: 'Sign out' }).last();
+    await openUserMenu(page);
+    const mobileSignOut = page.getByRole('button', { name: 'Sign out' });
     await expect(mobileSignOut).toBeVisible();
     await mobileSignOut.click();
 
     await page.waitForURL('**/');
     await page.waitForLoadState('domcontentloaded');
-
-    await openMobileMenu(page);
-    await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
   });
 });
 
