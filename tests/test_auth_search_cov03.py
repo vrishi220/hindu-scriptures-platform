@@ -175,7 +175,7 @@ class TestAuthCoverageCOV03:
 
         stale_token_response = client.post(
             "/api/auth/reset-password",
-            json={"token": reset_token, "new_password": "NewestStrongPass999"},
+            json={"token": reset_token, "new_password": "NewestStrongPass999!"},
         )
         assert stale_token_response.status_code == status.HTTP_400_BAD_REQUEST
         assert stale_token_response.json()["detail"] == "Invalid or expired reset token"

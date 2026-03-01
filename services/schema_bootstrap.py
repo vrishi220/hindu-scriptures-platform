@@ -67,6 +67,16 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false;
         """,
         """
+        ALTER TABLE IF EXISTS user_preferences
+            ADD COLUMN IF NOT EXISTS preview_show_titles BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS preview_show_labels BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS preview_show_details BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast';
+        """,
+        """
         CREATE TABLE IF NOT EXISTS user_preferences (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -75,6 +85,13 @@ def ensure_phase1_schema(database_url: str) -> None:
             transliteration_script VARCHAR(20) NOT NULL DEFAULT 'devanagari',
             show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
             show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
+            preview_show_titles BOOLEAN NOT NULL DEFAULT false,
+            preview_show_labels BOOLEAN NOT NULL DEFAULT false,
+            preview_show_details BOOLEAN NOT NULL DEFAULT false,
+            preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
+            preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
+            preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(user_id)
