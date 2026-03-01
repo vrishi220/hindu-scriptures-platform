@@ -578,9 +578,9 @@ function ScripturesContent() {
         const rawLabel = (line?.label || "").trim();
         const computedLabel =
           fieldName === "transliteration"
-            ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
+            ? `Transliteration (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
             : rawLabel;
-        const label = showPreviewLabels && fieldName !== previousFieldName ? computedLabel : "";
+        const label = appliedShowPreviewLabels && fieldName !== previousFieldName ? computedLabel : "";
 
         lines.push({
           key: `${fieldName || "line"}-${index}`,
@@ -607,11 +607,11 @@ function ScripturesContent() {
         continue;
       }
 
-      const label = showPreviewLabels
+      const label = appliedShowPreviewLabels
         ? key === "sanskrit"
           ? "Sanskrit"
           : key === "transliteration"
-            ? `Transliteration (${transliterationScriptLabel(previewTransliterationScript)})`
+            ? `Transliteration (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
             : key === "english"
               ? "English"
               : "Text"
@@ -1249,15 +1249,16 @@ function ScripturesContent() {
     })();
   };
 
-  const savePreferences = async () => {
-    if (!preferences) return;
+  const savePreferences = async (nextPreferences?: UserPreferences | null) => {
+    const preferencesToSave = normalizePreferences(nextPreferences ?? preferences);
+    if (!preferencesToSave) return;
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
 
       if (typeof window !== "undefined") {
         const toStore: StoredScripturesPreferences = {
-          preferences: normalizePreferences(preferences),
+          preferences: preferencesToSave,
         };
         window.localStorage.setItem(LOCAL_SCRIPTURES_PREFERENCES_KEY, JSON.stringify(toStore));
       }
@@ -1267,7 +1268,7 @@ function ScripturesContent() {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(normalizePreferences(preferences)),
+          body: JSON.stringify(preferencesToSave),
         });
         const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
         if (!response.ok) {
@@ -1289,6 +1290,9 @@ function ScripturesContent() {
   const previewTransliterationScript = normalizeTransliterationScript(
     bookPreviewTransliterationScript
   );
+  const appliedPreviewTransliterationScript = normalizeTransliterationScript(
+    appliedBookPreviewTransliterationScript
+  );
   const scriptPrefersRoman = isRomanScript(transliterationScript);
   const transliterationEnabled = preferences?.transliteration_enabled ?? true;
   const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
@@ -1307,9 +1311,9 @@ function ScripturesContent() {
   const renderPreviewTransliteration = (value: string): string => {
     if (!value) return "";
     if (hasDevanagariLetters(value)) {
-      return transliterateFromDevanagari(value, previewTransliterationScript);
+      return transliterateFromDevanagari(value, appliedPreviewTransliterationScript);
     }
-    return transliterateFromIast(value, previewTransliterationScript);
+    return transliterateFromIast(value, appliedPreviewTransliterationScript);
   };
 
   useEffect(() => {
@@ -1761,6 +1765,14 @@ function ScripturesContent() {
   const handlePreviewBook = async (scope: "book" | "node" = "book") => {
     if (!bookId) return;
 
+    const nextLanguageSettings = {
+      ...bookPreviewLanguageSettings,
+    };
+    const nextShowPreviewLabels = showPreviewLabels;
+    const nextShowPreviewDetails = showPreviewDetails;
+    const nextShowPreviewTitles = showPreviewTitles;
+    const nextPreviewTransliterationScript = previewTransliterationScript;
+
     setBookPreviewLoading(true);
     setBookPreviewError(null);
 
@@ -1772,8 +1784,8 @@ function ScripturesContent() {
         body: JSON.stringify({
           node_id: scope === "node" ? selectedId ?? undefined : undefined,
           render_settings: {
-            ...bookPreviewLanguageSettings,
-            show_metadata: showPreviewDetails,
+            ...nextLanguageSettings,
+            show_metadata: nextShowPreviewDetails,
             text_order: ["sanskrit", "transliteration", "english", "text"],
           },
         }),
@@ -1790,20 +1802,25 @@ function ScripturesContent() {
 
       const artifact = payload as BookPreviewArtifact;
       setBookPreviewArtifact(artifact);
-      setBookPreviewLanguageSettings({
-        show_sanskrit: artifact.render_settings.show_sanskrit,
-        show_transliteration: artifact.render_settings.show_transliteration,
-        show_english: artifact.render_settings.show_english,
+      setAppliedBookPreviewLanguageSettings(nextLanguageSettings);
+      setAppliedShowPreviewLabels(nextShowPreviewLabels);
+      setAppliedShowPreviewDetails(nextShowPreviewDetails);
+      setAppliedShowPreviewTitles(nextShowPreviewTitles);
+      setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
+
+      const nextPreferences = normalizePreferences({
+        ...(preferences || DEFAULT_USER_PREFERENCES),
+        preview_show_titles: nextShowPreviewTitles,
+        preview_show_labels: nextShowPreviewLabels,
+        preview_show_details: nextShowPreviewDetails,
+        preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
+        preview_show_transliteration: nextLanguageSettings.show_transliteration,
+        preview_show_english: nextLanguageSettings.show_english,
+        preview_transliteration_script: nextPreviewTransliterationScript,
       });
-      setAppliedBookPreviewLanguageSettings({
-        show_sanskrit: artifact.render_settings.show_sanskrit,
-        show_transliteration: artifact.render_settings.show_transliteration,
-        show_english: artifact.render_settings.show_english,
-      });
-      setAppliedShowPreviewLabels(showPreviewLabels);
-      setAppliedShowPreviewDetails(showPreviewDetails);
-      setAppliedShowPreviewTitles(showPreviewTitles);
-      setAppliedBookPreviewTransliterationScript(previewTransliterationScript);
+      setPreferences(nextPreferences);
+      await savePreferences(nextPreferences);
+
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -3708,7 +3725,9 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={() => {
-                              void handlePreviewBook();
+                              const currentScope =
+                                bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+                              void handlePreviewBook(currentScope);
                             }}
                             disabled={
                               bookPreviewLoading ||
@@ -3733,7 +3752,7 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                {showPreviewDetails && bookPreviewArtifact.book_template && (
+                {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
                   <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
@@ -3764,8 +3783,8 @@ function ScripturesContent() {
                     bookPreviewArtifact.sections.body.map((block) => {
                       const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
                       const rawTitle = block.title || "";
-                      const hideNodeFallback = !showPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
-                      const displayTitle = showPreviewTitles && !hideNodeFallback ? rawTitle : "";
+                      const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
+                      const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
                       return (
                         <article
                           key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
@@ -3788,7 +3807,7 @@ function ScripturesContent() {
                               ))
                             )}
                           </div>
-                          {showPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
+                          {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
                             <div className="mt-2 text-xs text-zinc-500">
                               template: {block.template_key}
                               {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
