@@ -1,6 +1,8 @@
 export type MeResponse = {
   id?: number;
   email?: string;
+  username?: string;
+  full_name?: string;
   role?: string;
   permissions?: {
     can_admin?: boolean;

@@ -47,9 +47,19 @@ function SignInPageContent() {
     <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg">
-          <h1 className="mb-6 font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-            Sign In
-          </h1>
+          <div className="mb-6 flex items-center justify-between">
+            <h1 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+              Sign In
+            </h1>
+            <a
+              href="/"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+              aria-label="Cancel sign in"
+              title="Cancel"
+            >
+              ✕
+            </a>
+          </div>
 
           {authMessage && (
             <div

@@ -103,7 +103,18 @@ export default function BasketPanel({
   onClearBasket,
   onItemsAdded,
 }: BasketPanelProps) {
+  const FLOATING_WIDGET_WIDTH = 220;
+  const FLOATING_WIDGET_HEIGHT = 56;
+  const PANEL_WIDTH = 384;
+  const PANEL_HEIGHT = 520;
+  const VIEWPORT_PADDING = 16;
+
   const [isExpanded, setIsExpanded] = useState(false);
+  const [viewport, setViewport] = useState({ width: 1280, height: 800 });
+  const [widgetPosition, setWidgetPosition] = useState({ x: 0, y: 0 });
+  const [positionInitialized, setPositionInitialized] = useState(false);
+  const [isDraggingWidget, setIsDraggingWidget] = useState(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
   const [creatingDraft, setCreatingDraft] = useState(false);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
   const [showAddToBook, setShowAddToBook] = useState(false);
@@ -132,6 +143,76 @@ export default function BasketPanel({
   const [licensePolicyError, setLicensePolicyError] = useState<string | null>(null);
   const [highlightedBasketNodeId, setHighlightedBasketNodeId] = useState<number | null>(null);
   const basketItemRefs = useRef<Record<number, HTMLDivElement | null>>({});
+
+  const clampWidgetPosition = (x: number, y: number) => {
+    const maxX = Math.max(VIEWPORT_PADDING, viewport.width - FLOATING_WIDGET_WIDTH - VIEWPORT_PADDING);
+    const maxY = Math.max(VIEWPORT_PADDING, viewport.height - FLOATING_WIDGET_HEIGHT - VIEWPORT_PADDING);
+    return {
+      x: Math.min(Math.max(VIEWPORT_PADDING, x), maxX),
+      y: Math.min(Math.max(VIEWPORT_PADDING, y), maxY),
+    };
+  };
+
+  const panelLeft = Math.min(
+    Math.max(VIEWPORT_PADDING, widgetPosition.x + FLOATING_WIDGET_WIDTH - PANEL_WIDTH),
+    Math.max(VIEWPORT_PADDING, viewport.width - PANEL_WIDTH - VIEWPORT_PADDING)
+  );
+  const panelTop = Math.min(
+    Math.max(VIEWPORT_PADDING, widgetPosition.y - PANEL_HEIGHT - 12),
+    Math.max(VIEWPORT_PADDING, viewport.height - PANEL_HEIGHT - VIEWPORT_PADDING)
+  );
+
+  useEffect(() => {
+    const applyViewport = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      setViewport({ width, height });
+      if (!positionInitialized) {
+        setWidgetPosition(
+          clampWidgetPosition(width - FLOATING_WIDGET_WIDTH - VIEWPORT_PADDING, height - FLOATING_WIDGET_HEIGHT - 24)
+        );
+        setPositionInitialized(true);
+      } else {
+        setWidgetPosition((current) => clampWidgetPosition(current.x, current.y));
+      }
+    };
+
+    applyViewport();
+    window.addEventListener("resize", applyViewport);
+    return () => window.removeEventListener("resize", applyViewport);
+  }, [positionInitialized]);
+
+  useEffect(() => {
+    if (!isDraggingWidget) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const nextPosition = clampWidgetPosition(
+        event.clientX - dragOffsetRef.current.x,
+        event.clientY - dragOffsetRef.current.y
+      );
+      setWidgetPosition(nextPosition);
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingWidget(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isDraggingWidget, viewport]);
+
+  const handleDragStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    dragOffsetRef.current = {
+      x: event.clientX - widgetPosition.x,
+      y: event.clientY - widgetPosition.y,
+    };
+    setIsDraggingWidget(true);
+  };
 
   const scrollToBasketItem = (nodeId: number) => {
     const target = basketItemRefs.current[nodeId];
@@ -748,7 +829,21 @@ export default function BasketPanel({
   return (
     <>
       {/* Floating Basket Button */}
-      <div className="fixed bottom-6 right-6 z-40">
+      <div
+        className="fixed z-40"
+        style={{ left: `${widgetPosition.x}px`, top: `${widgetPosition.y}px` }}
+      >
+        <div className="mb-1 flex justify-end">
+          <button
+            type="button"
+            onPointerDown={handleDragStart}
+            className="rounded-full border border-black/10 bg-white/95 px-2 py-1 text-xs text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 cursor-grab active:cursor-grabbing"
+            title="Drag basket"
+            aria-label="Drag basket"
+          >
+            ⠿
+          </button>
+        </div>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 font-medium text-white shadow-lg transition hover:shadow-xl"
@@ -764,7 +859,10 @@ export default function BasketPanel({
 
       {/* Expanded Panel */}
       {isExpanded && (
-        <div className="fixed bottom-24 right-6 z-40 w-96 rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-sm">
+        <div
+          className="fixed z-40 w-96 rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-sm"
+          style={{ left: `${panelLeft}px`, top: `${panelTop}px` }}
+        >
           <div className="flex items-center justify-between border-b border-black/10 p-4">
             <h3 className="font-[var(--font-display)] text-lg text-[color:var(--deep)]">
               Basket ({items.length})

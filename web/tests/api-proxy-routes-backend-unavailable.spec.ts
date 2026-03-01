@@ -13,7 +13,7 @@ test.describe('API proxy routes backend unavailable', () => {
         email: `down_${Date.now()}@example.com`,
         username: `down_${Date.now()}`,
         full_name: 'Backend Down Test',
-        password: 'StrongPass123',
+        password: 'StrongPass123!',
       },
     });
 

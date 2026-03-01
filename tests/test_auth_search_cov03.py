@@ -14,7 +14,7 @@ from services import hash_password
 def _register_and_login(client):
     suffix = uuid4().hex[:8]
     email = f"cov03_{suffix}@example.com"
-    password = "StrongPass123"
+    password = "StrongPass123!"
     username = f"cov03_{suffix}"
 
     register_response = client.post(
@@ -50,7 +50,7 @@ class TestAuthCoverageCOV03:
             "/api/auth/register",
             json={
                 "email": f"other_{uuid4().hex[:8]}@example.com",
-                "password": "StrongPass123",
+                "password": "StrongPass123!",
                 "username": first["email"].split("@")[0],
                 "full_name": "Duplicate Username",
             },
@@ -155,7 +155,7 @@ class TestAuthCoverageCOV03:
 
         invalid_token_response = client.post(
             "/api/auth/reset-password",
-            json={"token": "definitely-invalid", "new_password": "NewStrongPass456"},
+            json={"token": "definitely-invalid", "new_password": "NewStrongPass456!"},
         )
         assert invalid_token_response.status_code == status.HTTP_400_BAD_REQUEST
 

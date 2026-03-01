@@ -270,6 +270,13 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   transliteration_script: "iast",
   show_roman_transliteration: true,
   show_only_preferred_script: false,
+  preview_show_titles: false,
+  preview_show_labels: false,
+  preview_show_details: false,
+  preview_show_sanskrit: true,
+  preview_show_transliteration: true,
+  preview_show_english: true,
+  preview_transliteration_script: "iast",
 };
 
 type StoredScripturesPreferences = {
@@ -283,6 +290,15 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   transliteration_script: normalizeTransliterationScript(value?.transliteration_script),
   show_roman_transliteration: value?.show_roman_transliteration ?? true,
   show_only_preferred_script: value?.show_only_preferred_script ?? false,
+  preview_show_titles: value?.preview_show_titles ?? false,
+  preview_show_labels: value?.preview_show_labels ?? false,
+  preview_show_details: value?.preview_show_details ?? false,
+  preview_show_sanskrit: value?.preview_show_sanskrit ?? true,
+  preview_show_transliteration: value?.preview_show_transliteration ?? true,
+  preview_show_english: value?.preview_show_english ?? true,
+  preview_transliteration_script: normalizeTransliterationScript(
+    value?.preview_transliteration_script
+  ),
 });
 
 const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
@@ -438,6 +454,8 @@ function ScripturesContent() {
   const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
   const [appliedShowPreviewDetails, setAppliedShowPreviewDetails] = useState(false);
   const [appliedShowPreviewTitles, setAppliedShowPreviewTitles] = useState(false);
+  const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
+    useState<TransliterationScriptOption>("iast");
   const [showPreviewControls, setShowPreviewControls] = useState(false);
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
@@ -1295,8 +1313,29 @@ function ScripturesContent() {
   };
 
   useEffect(() => {
-    setBookPreviewTransliterationScript(transliterationScript);
-  }, [transliterationScript]);
+    if (!preferences) return;
+
+    const previewScript = normalizeTransliterationScript(
+      preferences.preview_transliteration_script
+    );
+    const previewLanguages: BookPreviewLanguageSettings = {
+      show_sanskrit: preferences.preview_show_sanskrit,
+      show_transliteration: preferences.preview_show_transliteration,
+      show_english: preferences.preview_show_english,
+    };
+
+    setShowPreviewTitles(preferences.preview_show_titles);
+    setShowPreviewLabels(preferences.preview_show_labels);
+    setShowPreviewDetails(preferences.preview_show_details);
+    setBookPreviewLanguageSettings(previewLanguages);
+    setBookPreviewTransliterationScript(previewScript);
+
+    setAppliedShowPreviewTitles(preferences.preview_show_titles);
+    setAppliedShowPreviewLabels(preferences.preview_show_labels);
+    setAppliedShowPreviewDetails(preferences.preview_show_details);
+    setAppliedBookPreviewLanguageSettings(previewLanguages);
+    setAppliedBookPreviewTransliterationScript(previewScript);
+  }, [preferences]);
 
   const renderSanskritByPreference = (
     sanskritValue: string,
@@ -1764,6 +1803,7 @@ function ScripturesContent() {
       setAppliedShowPreviewLabels(showPreviewLabels);
       setAppliedShowPreviewDetails(showPreviewDetails);
       setAppliedShowPreviewTitles(showPreviewTitles);
+      setAppliedBookPreviewTransliterationScript(previewTransliterationScript);
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -3680,7 +3720,8 @@ function ScripturesContent() {
                                 bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
                                 showPreviewLabels === appliedShowPreviewLabels &&
                                 showPreviewDetails === appliedShowPreviewDetails &&
-                                showPreviewTitles === appliedShowPreviewTitles)
+                                showPreviewTitles === appliedShowPreviewTitles &&
+                                previewTransliterationScript === appliedBookPreviewTransliterationScript)
                             }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                           >
@@ -4289,19 +4330,7 @@ function ScripturesContent() {
             }
           }}
         />
-      ) : (
-        <div className="fixed bottom-4 right-4 z-40 w-[min(22rem,calc(100vw-2rem))] rounded-2xl border border-black/10 bg-white/95 p-4 shadow-xl">
-          <p className="text-sm font-medium text-[color:var(--deep)]">Sign in to collect verses</p>
-          <p className="mt-1 text-xs text-zinc-600">Basket is available for signed-in users.</p>
-          <button
-            type="button"
-            onClick={() => router.push("/signin?returnTo=/scriptures")}
-            className="mt-3 rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-white transition hover:opacity-95"
-          >
-            Sign In
-          </button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

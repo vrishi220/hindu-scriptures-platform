@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -6,6 +7,20 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field
 
 class HealthResponse(BaseModel):
     status: str
+
+
+def _validate_password_strength(value: str) -> str:
+    if len(value.encode("utf-8")) > 72:
+        raise ValueError("Password must be 72 bytes or fewer")
+    if not re.search(r"[A-Z]", value):
+        raise ValueError("Password must include at least one uppercase letter")
+    if not re.search(r"[a-z]", value):
+        raise ValueError("Password must include at least one lowercase letter")
+    if not re.search(r"[0-9]", value):
+        raise ValueError("Password must include at least one number")
+    if not re.search(r"[^A-Za-z0-9]", value):
+        raise ValueError("Password must include at least one special character")
+    return value
 
 
 class UserCreate(BaseModel):
@@ -17,9 +32,7 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password_length(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 72:
-            raise ValueError("Password must be 72 bytes or fewer")
-        return value
+        return _validate_password_strength(value)
 
 
 class UserLogin(BaseModel):
@@ -50,9 +63,7 @@ class ResetPasswordRequest(BaseModel):
     @field_validator("new_password")
     @classmethod
     def validate_password_length(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 72:
-            raise ValueError("Password must be 72 bytes or fewer")
-        return value
+        return _validate_password_strength(value)
 
 
 class RefreshRequest(BaseModel):
@@ -85,6 +96,11 @@ class UserPublic(BaseModel):
     is_active: bool = True
 
 
+class UserSelfUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=100)
+    full_name: str | None = Field(default=None, max_length=255)
+
+
 class UserAdminCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
@@ -96,9 +112,7 @@ class UserAdminCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password_length(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 72:
-            raise ValueError("Password must be 72 bytes or fewer")
-        return value
+        return _validate_password_strength(value)
 
 
 class UserPermissionsUpdate(BaseModel):
@@ -292,6 +306,13 @@ class UserPreferenceBase(BaseModel):
     transliteration_script: str = "devanagari"
     show_roman_transliteration: bool = True
     show_only_preferred_script: bool = False
+    preview_show_titles: bool = False
+    preview_show_labels: bool = False
+    preview_show_details: bool = False
+    preview_show_sanskrit: bool = True
+    preview_show_transliteration: bool = True
+    preview_show_english: bool = True
+    preview_transliteration_script: str = "iast"
 
 
 class UserPreferenceUpdate(BaseModel):
@@ -300,6 +321,13 @@ class UserPreferenceUpdate(BaseModel):
     transliteration_script: str | None = None
     show_roman_transliteration: bool | None = None
     show_only_preferred_script: bool | None = None
+    preview_show_titles: bool | None = None
+    preview_show_labels: bool | None = None
+    preview_show_details: bool | None = None
+    preview_show_sanskrit: bool | None = None
+    preview_show_transliteration: bool | None = None
+    preview_show_english: bool | None = None
+    preview_transliteration_script: str | None = None
 
 
 class UserPreferencePublic(UserPreferenceBase):

@@ -11,6 +11,13 @@ export type UserPreferences = {
   transliteration_script: string;
   show_roman_transliteration: boolean;
   show_only_preferred_script: boolean;
+  preview_show_titles: boolean;
+  preview_show_labels: boolean;
+  preview_show_details: boolean;
+  preview_show_sanskrit: boolean;
+  preview_show_transliteration: boolean;
+  preview_show_english: boolean;
+  preview_transliteration_script: string;
 };
 
 type UserPreferencesDialogProps = {
@@ -23,6 +30,235 @@ type UserPreferencesDialogProps = {
   message: string | null;
 };
 
+type UserPreferencesFormProps = {
+  preferences: UserPreferences;
+  onChange: (next: UserPreferences) => void;
+};
+
+export function UserPreferencesForm({
+  preferences,
+  onChange,
+}: UserPreferencesFormProps) {
+  const transliterationEnabled = preferences.transliteration_enabled;
+  const transliterationScript = normalizeTransliterationScript(
+    preferences.transliteration_script
+  );
+  const scriptPrefersRoman = isRomanScript(transliterationScript);
+
+  return (
+    <div className="grid gap-3">
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Source language
+        </span>
+        <select
+          value={preferences.source_language}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              source_language: event.target.value,
+            })
+          }
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+        >
+          <option value="sanskrit">Sanskrit</option>
+          <option value="hindi">Hindi</option>
+          <option value="english">English</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Transliteration
+        </span>
+        <select
+          value={preferences.transliteration_script}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              transliteration_script: normalizeTransliterationScript(
+                event.target.value
+              ),
+            })
+          }
+          disabled={!transliterationEnabled}
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="iast">IAST</option>
+          <option value="harvard_kyoto">Harvard-Kyoto</option>
+          <option value="itrans">ITRANS</option>
+          <option value="devanagari">Devanagari</option>
+          <option value="bengali">Bengali</option>
+          <option value="gujarati">Gujarati</option>
+          <option value="gurmukhi">Gurmukhi</option>
+          <option value="kannada">Kannada</option>
+          <option value="malayalam">Malayalam</option>
+          <option value="oriya">Odia</option>
+          <option value="tamil">Tamil</option>
+          <option value="telugu">Telugu</option>
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={transliterationEnabled}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              transliteration_enabled: event.target.checked,
+            })
+          }
+        />
+        Enable transliteration
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.show_roman_transliteration}
+          disabled={!transliterationEnabled || !scriptPrefersRoman}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              show_roman_transliteration: event.target.checked,
+            })
+          }
+        />
+        Show Roman transliteration
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.show_only_preferred_script}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              show_only_preferred_script: event.target.checked,
+            })
+          }
+        />
+        Show only preferred script
+      </label>
+
+      <div className="mt-1 border-t border-black/10 pt-3">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Preview Options
+        </span>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_titles}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_titles: event.target.checked,
+            })
+          }
+        />
+        Show titles
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_labels}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_labels: event.target.checked,
+            })
+          }
+        />
+        Show labels
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_details}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_details: event.target.checked,
+            })
+          }
+        />
+        Show template details
+      </label>
+
+      <div className="mt-1 border-t border-black/10 pt-3">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Preview Languages
+        </span>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_sanskrit}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_sanskrit: event.target.checked,
+            })
+          }
+        />
+        Sanskrit
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_transliteration}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_transliteration: event.target.checked,
+            })
+          }
+        />
+        Transliteration
+      </label>
+      <label className="flex flex-col gap-1">
+        <select
+          value={preferences.preview_transliteration_script}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_transliteration_script: normalizeTransliterationScript(
+                event.target.value
+              ),
+            })
+          }
+          disabled={!preferences.preview_show_transliteration}
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="iast">IAST</option>
+          <option value="harvard_kyoto">Harvard-Kyoto</option>
+          <option value="itrans">ITRANS</option>
+          <option value="devanagari">Devanagari</option>
+          <option value="bengali">Bengali</option>
+          <option value="gujarati">Gujarati</option>
+          <option value="gurmukhi">Gurmukhi</option>
+          <option value="kannada">Kannada</option>
+          <option value="malayalam">Malayalam</option>
+          <option value="oriya">Odia</option>
+          <option value="tamil">Tamil</option>
+          <option value="telugu">Telugu</option>
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_english}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_english: event.target.checked,
+            })
+          }
+        />
+        English
+      </label>
+    </div>
+  );
+}
+
 export default function UserPreferencesDialog({
   open,
   onClose,
@@ -34,15 +270,9 @@ export default function UserPreferencesDialog({
 }: UserPreferencesDialogProps) {
   if (!open || !preferences) return null;
 
-  const transliterationEnabled = preferences.transliteration_enabled;
-  const transliterationScript = normalizeTransliterationScript(
-    preferences.transliteration_script
-  );
-  const scriptPrefersRoman = isRomanScript(transliterationScript);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-lg rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
             Display Preferences
@@ -56,98 +286,7 @@ export default function UserPreferencesDialog({
           </button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-              Source language
-            </span>
-            <select
-              value={preferences.source_language}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  source_language: event.target.value,
-                })
-              }
-              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-            >
-              <option value="sanskrit">Sanskrit</option>
-              <option value="hindi">Hindi</option>
-              <option value="english">English</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-              Transliteration script
-            </span>
-            <select
-              value={preferences.transliteration_script}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  transliteration_script: normalizeTransliterationScript(
-                    event.target.value
-                  ),
-                })
-              }
-              disabled={!transliterationEnabled}
-              className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="iast">IAST</option>
-              <option value="harvard_kyoto">Harvard-Kyoto</option>
-              <option value="itrans">ITRANS</option>
-              <option value="devanagari">Devanagari</option>
-              <option value="bengali">Bengali</option>
-              <option value="gujarati">Gujarati</option>
-              <option value="gurmukhi">Gurmukhi</option>
-              <option value="kannada">Kannada</option>
-              <option value="malayalam">Malayalam</option>
-              <option value="oriya">Odia</option>
-              <option value="tamil">Tamil</option>
-              <option value="telugu">Telugu</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={transliterationEnabled}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  transliteration_enabled: event.target.checked,
-                })
-              }
-            />
-            Enable transliteration
-          </label>
-          <label className="flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={preferences.show_roman_transliteration}
-              disabled={!transliterationEnabled || !scriptPrefersRoman}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  show_roman_transliteration: event.target.checked,
-                })
-              }
-            />
-            Show Roman transliteration
-          </label>
-          <label className="sm:col-span-2 flex items-center gap-2 text-sm text-zinc-700">
-            <input
-              type="checkbox"
-              checked={preferences.show_only_preferred_script}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  show_only_preferred_script: event.target.checked,
-                })
-              }
-            />
-            Show only preferred script
-          </label>
-        </div>
+        <UserPreferencesForm preferences={preferences} onChange={onChange} />
 
         <div className="mt-4 flex items-center gap-2">
           <button
