@@ -20,13 +20,21 @@ export async function GET(
     API_BASE_URL
   );
 
-  const response = await fetch(target.toString(), {
-    headers: {
-      Accept: "application/json",
-      ...authHeader,
-    },
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(target.toString(), {
+      headers: {
+        Accept: "application/json",
+        ...authHeader,
+      },
+      cache: "no-store",
+    });
+  } catch {
+    return NextResponse.json(
+      { detail: "Tree service unavailable. Please start the API server and try again." },
+      { status: 503 }
+    );
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {

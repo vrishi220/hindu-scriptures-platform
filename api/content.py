@@ -41,6 +41,7 @@ from models.scripture_schema import ScriptureSchema
 from models.user import User
 from services import get_db
 from services.license_policy import classify_license_action, normalize_license
+from services.transliteration import contains_devanagari, devanagari_to_iast, latin_to_devanagari
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -312,6 +313,61 @@ def _book_share_public_model(share: BookShare, shared_user: User) -> BookSharePu
             "shared_with_username": shared_user.username,
         }
     )
+
+
+def _clean_optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _autofill_sanskrit_transliteration_pair(
+    sanskrit_value: object,
+    transliteration_value: object,
+) -> tuple[str | None, str | None]:
+    sanskrit = _clean_optional_text(sanskrit_value)
+    transliteration = _clean_optional_text(transliteration_value)
+
+    if not sanskrit and not transliteration:
+        return None, None
+
+    if sanskrit and transliteration:
+        return sanskrit, transliteration
+
+    if not sanskrit and transliteration:
+        if contains_devanagari(transliteration):
+            return transliteration, devanagari_to_iast(transliteration) or transliteration
+        return latin_to_devanagari(transliteration), transliteration
+
+    if sanskrit and not transliteration:
+        if contains_devanagari(sanskrit):
+            return sanskrit, devanagari_to_iast(sanskrit)
+        generated_sanskrit = latin_to_devanagari(sanskrit)
+        return generated_sanskrit or sanskrit, sanskrit
+
+    return sanskrit, transliteration
+
+
+def _autofill_content_data_pair(content_data: dict | None) -> dict | None:
+    if not isinstance(content_data, dict):
+        return content_data
+
+    basic_raw = content_data.get("basic")
+    if not isinstance(basic_raw, dict):
+        return content_data
+
+    basic = dict(basic_raw)
+    sanskrit, transliteration = _autofill_sanskrit_transliteration_pair(
+        basic.get("sanskrit"),
+        basic.get("transliteration"),
+    )
+    basic["sanskrit"] = sanskrit
+    basic["transliteration"] = transliteration
+
+    next_content_data = dict(content_data)
+    next_content_data["basic"] = basic
+    return next_content_data
 
 
 @router.get("/schemas", response_model=list[ScriptureSchemaPublic])
@@ -1497,6 +1553,12 @@ def create_node(
         ).scalar()
         sequence_number = (int(max_seq) if max_seq else 0) + 1
 
+    title_sanskrit, title_transliteration = _autofill_sanskrit_transliteration_pair(
+        payload.title_sanskrit,
+        payload.title_transliteration,
+    )
+    content_data = _autofill_content_data_pair(payload.content_data or {})
+
     node = ContentNode(
         book_id=payload.book_id,
         parent_node_id=payload.parent_node_id,
@@ -1504,13 +1566,13 @@ def create_node(
         level_name=payload.level_name,
         level_order=payload.level_order,
         sequence_number=sequence_number,
-        title_sanskrit=payload.title_sanskrit,
-        title_transliteration=payload.title_transliteration,
+        title_sanskrit=title_sanskrit,
+        title_transliteration=title_transliteration,
         title_english=payload.title_english,
         title_hindi=payload.title_hindi,
         title_tamil=payload.title_tamil,
         has_content=payload.has_content,
-        content_data=payload.content_data or {},
+        content_data=content_data,
         summary_data=payload.summary_data or {},
         source_attribution=payload.source_attribution,
         license_type=payload.license_type,
@@ -1604,6 +1666,17 @@ def update_node(
 
     updates = payload.model_dump(exclude_unset=True)
     edit_reason = updates.pop("edit_reason", None)  # Remove from updates dict
+
+    if "title_sanskrit" in updates or "title_transliteration" in updates:
+        next_title_sanskrit, next_title_transliteration = _autofill_sanskrit_transliteration_pair(
+            updates.get("title_sanskrit", node.title_sanskrit),
+            updates.get("title_transliteration", node.title_transliteration),
+        )
+        updates["title_sanskrit"] = next_title_sanskrit
+        updates["title_transliteration"] = next_title_transliteration
+
+    if "content_data" in updates:
+        updates["content_data"] = _autofill_content_data_pair(updates.get("content_data"))
     
     if "parent_node_id" in updates and updates["parent_node_id"] is not None:
         parent = (

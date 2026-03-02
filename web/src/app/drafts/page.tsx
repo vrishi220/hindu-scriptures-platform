@@ -260,6 +260,10 @@ const valuesEqual = (left: unknown, right: unknown): boolean => {
   }
 };
 
+const getPropertyDefaultValue = (property: EffectivePropertyBinding): unknown => {
+  return property.default_value ?? null;
+};
+
 const defaultDraftMetadataState = (): DraftMetadataState => ({
   loading: false,
   saving: false,
@@ -573,7 +577,7 @@ function DraftsPageContent() {
       const values: Record<string, unknown> = {};
 
       effectiveProperties.forEach((property) => {
-        values[property.property_internal_name] = property.default_value ?? null;
+        values[property.property_internal_name] = getPropertyDefaultValue(property);
       });
 
       if (binding) {
@@ -628,7 +632,7 @@ function DraftsPageContent() {
       const effectiveProperties = await loadEffectiveProperties(nextCategoryId);
       const values: Record<string, unknown> = {};
       effectiveProperties.forEach((property) => {
-        values[property.property_internal_name] = property.default_value ?? null;
+        values[property.property_internal_name] = getPropertyDefaultValue(property);
       });
 
       setDraftMetadataState(draftId, (prev) => ({
@@ -675,7 +679,7 @@ function DraftsPageContent() {
         property.property_data_type,
         state.values[property.property_internal_name]
       );
-      const defaultValue = normalizeMetadataValue(property.property_data_type, property.default_value ?? null);
+      const defaultValue = normalizeMetadataValue(property.property_data_type, getPropertyDefaultValue(property));
       if (!valuesEqual(currentValue, defaultValue)) {
         propertyOverrides[property.property_internal_name] = currentValue;
       }

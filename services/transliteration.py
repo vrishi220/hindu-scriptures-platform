@@ -47,3 +47,17 @@ def latin_to_devanagari(query: str) -> str | None:
             continue
 
     return None
+
+
+def devanagari_to_iast(text: str) -> str | None:
+    source = (text or "").strip()
+    if not source or not contains_devanagari(source) or sanscript is None:
+        return None
+
+    try:
+        converted = sanscript.transliterate(source, sanscript.DEVANAGARI, sanscript.IAST)
+    except Exception:
+        return None
+
+    normalized = (converted or "").strip()
+    return normalized or None

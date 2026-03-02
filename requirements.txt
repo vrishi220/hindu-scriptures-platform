@@ -9,7 +9,6 @@ bcrypt==3.2.2
 python-multipart==0.0.6
 celery==5.3.4
 redis==5.0.1
-anthropic==0.7.8
 pydantic==2.5.0
 email-validator==2.1.1
 alembic==1.12.1

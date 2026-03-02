@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import InlineClearButton from "../../components/InlineClearButton";
 import { contentPath } from "../../lib/apiPaths";
 import { getMe } from "../../lib/authClient";
 
@@ -307,26 +308,40 @@ export default function ContributePage() {
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   Level name *
                 </span>
-                <input
-                  value={levelName}
-                  onChange={(event) => setLevelName(event.target.value)}
-                  placeholder="e.g., Chapter, Shloka, Verse"
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  required
-                />
+                <div className="group relative">
+                  <input
+                    value={levelName}
+                    onChange={(event) => setLevelName(event.target.value)}
+                    placeholder="e.g., Chapter, Shloka, Verse"
+                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                    required
+                  />
+                  <InlineClearButton
+                    visible={Boolean(levelName)}
+                    onClear={() => setLevelName("")}
+                    ariaLabel="Clear level name"
+                  />
+                </div>
               </label>
 
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   Sequence number
                 </span>
-                <input
-                  type="number"
-                  value={sequenceNumber}
-                  onChange={(event) => setSequenceNumber(event.target.value)}
-                  placeholder="Auto-calculated if empty"
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                />
+                <div className="group relative">
+                  <input
+                    type="number"
+                    value={sequenceNumber}
+                    onChange={(event) => setSequenceNumber(event.target.value)}
+                    placeholder="Auto-calculated if empty"
+                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                  />
+                  <InlineClearButton
+                    visible={Boolean(sequenceNumber)}
+                    onClear={() => setSequenceNumber("")}
+                    ariaLabel="Clear sequence number"
+                  />
+                </div>
               </label>
             </div>
 
@@ -335,36 +350,57 @@ export default function ContributePage() {
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   Title (Sanskrit)
                 </span>
-                <input
-                  value={titleSanskrit}
-                  onChange={(event) => setTitleSanskrit(event.target.value)}
-                  placeholder="देवनागरी"
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                />
+                <div className="group relative">
+                  <input
+                    value={titleSanskrit}
+                    onChange={(event) => setTitleSanskrit(event.target.value)}
+                    placeholder="देवनागरी"
+                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                  />
+                  <InlineClearButton
+                    visible={Boolean(titleSanskrit)}
+                    onClear={() => setTitleSanskrit("")}
+                    ariaLabel="Clear title Sanskrit"
+                  />
+                </div>
               </label>
 
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   Title (Transliteration)
                 </span>
-                <input
-                  value={titleTransliteration}
-                  onChange={(event) => setTitleTransliteration(event.target.value)}
-                  placeholder="IAST or simplified"
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                />
+                <div className="group relative">
+                  <input
+                    value={titleTransliteration}
+                    onChange={(event) => setTitleTransliteration(event.target.value)}
+                    placeholder="IAST or simplified"
+                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                  />
+                  <InlineClearButton
+                    visible={Boolean(titleTransliteration)}
+                    onClear={() => setTitleTransliteration("")}
+                    ariaLabel="Clear title transliteration"
+                  />
+                </div>
               </label>
 
               <label className="flex flex-col gap-1">
                 <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                   Title (English)
                 </span>
-                <input
-                  value={titleEnglish}
-                  onChange={(event) => setTitleEnglish(event.target.value)}
-                  placeholder="English title or translation"
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                />
+                <div className="group relative">
+                  <input
+                    value={titleEnglish}
+                    onChange={(event) => setTitleEnglish(event.target.value)}
+                    placeholder="English title or translation"
+                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                  />
+                  <InlineClearButton
+                    visible={Boolean(titleEnglish)}
+                    onClear={() => setTitleEnglish("")}
+                    ariaLabel="Clear title English"
+                  />
+                </div>
               </label>
             </div>
 
@@ -384,39 +420,63 @@ export default function ContributePage() {
                   <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                     Content (Sanskrit)
                   </span>
-                  <textarea
-                    value={contentSanskrit}
-                    onChange={(event) => setContentSanskrit(event.target.value)}
-                    placeholder="देवनागरी text"
-                    rows={3}
-                    className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
+                  <div className="group relative">
+                    <textarea
+                      value={contentSanskrit}
+                      onChange={(event) => setContentSanskrit(event.target.value)}
+                      placeholder="देवनागरी text"
+                      rows={3}
+                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                    />
+                    <InlineClearButton
+                      visible={Boolean(contentSanskrit)}
+                      onClear={() => setContentSanskrit("")}
+                      ariaLabel="Clear content Sanskrit"
+                      position="top"
+                    />
+                  </div>
                 </label>
 
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                     Content (Transliteration)
                   </span>
-                  <textarea
-                    value={contentTransliteration}
-                    onChange={(event) => setContentTransliteration(event.target.value)}
-                    placeholder="IAST or simplified transliteration"
-                    rows={3}
-                    className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
+                  <div className="group relative">
+                    <textarea
+                      value={contentTransliteration}
+                      onChange={(event) => setContentTransliteration(event.target.value)}
+                      placeholder="IAST or simplified transliteration"
+                      rows={3}
+                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                    />
+                    <InlineClearButton
+                      visible={Boolean(contentTransliteration)}
+                      onClear={() => setContentTransliteration("")}
+                      ariaLabel="Clear content transliteration"
+                      position="top"
+                    />
+                  </div>
                 </label>
 
                 <label className="flex flex-col gap-1">
                   <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                     Translation (English)
                   </span>
-                  <textarea
-                    value={contentEnglish}
-                    onChange={(event) => setContentEnglish(event.target.value)}
-                    placeholder="English translation"
-                    rows={3}
-                    className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
+                  <div className="group relative">
+                    <textarea
+                      value={contentEnglish}
+                      onChange={(event) => setContentEnglish(event.target.value)}
+                      placeholder="English translation"
+                      rows={3}
+                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                    />
+                    <InlineClearButton
+                      visible={Boolean(contentEnglish)}
+                      onClear={() => setContentEnglish("")}
+                      ariaLabel="Clear content English"
+                      position="top"
+                    />
+                  </div>
                 </label>
               </div>
             )}
@@ -425,12 +485,19 @@ export default function ContributePage() {
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
                 Tags (comma-separated)
               </span>
-              <input
-                value={tags}
-                onChange={(event) => setTags(event.target.value)}
-                placeholder="e.g., philosophy, devotion, yoga"
-                className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-              />
+              <div className="group relative">
+                <input
+                  value={tags}
+                  onChange={(event) => setTags(event.target.value)}
+                  placeholder="e.g., philosophy, devotion, yoga"
+                  className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                />
+                <InlineClearButton
+                  visible={Boolean(tags)}
+                  onClear={() => setTags("")}
+                  ariaLabel="Clear tags"
+                />
+              </div>
             </label>
 
             <button

@@ -13,6 +13,7 @@ type PropertyDefinition = {
   id: number;
   display_name: string;
   internal_name: string;
+  data_type: "text" | "boolean" | "number" | "dropdown" | "date" | "datetime";
   is_deprecated: boolean;
 };
 
@@ -37,7 +38,7 @@ type CategoryCreatePayload = {
     property_definition_id: number;
     order: number;
     description_override: string | null;
-    default_override: string | null;
+    default_override: string | number | boolean | Record<string, unknown> | null;
     is_required_override: boolean | null;
   }>;
 };
