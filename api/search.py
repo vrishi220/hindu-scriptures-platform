@@ -44,6 +44,9 @@ def build_search_query(
     english_raw = func.coalesce(
         ContentNode.content_data["translations"]["english"].astext, ""
     )
+    word_meanings_raw = func.coalesce(
+        ContentNode.content_data["word_meanings"].astext, ""
+    )
 
     sanskrit = func.nullif(func.trim(sanskrit_raw), "")
     translit = func.nullif(func.trim(translit_raw), "")
@@ -60,6 +63,7 @@ def build_search_query(
         sanskrit_raw,
         translit_raw,
         english_raw,
+        word_meanings_raw,
         title_english,
         title_sanskrit,
         title_translit,
@@ -86,6 +90,7 @@ def build_search_query(
             [
                 func.lower(sanskrit_raw).like(f"%{devanagari_query.lower()}%"),
                 func.lower(title_sanskrit).like(f"%{devanagari_query.lower()}%"),
+                func.lower(word_meanings_raw).like(f"%{devanagari_query.lower()}%"),
             ]
         )
 

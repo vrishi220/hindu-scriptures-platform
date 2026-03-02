@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from pathlib import Path
 from uuid import uuid4
 from types import SimpleNamespace
 
@@ -18,6 +19,14 @@ from models.schemas import ContentNodeCreate
 from models.scripture_schema import ScriptureSchema
 from models.user import User
 import pytest
+
+
+_WORD_MEANINGS_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "word_meanings"
+
+
+def _load_word_meanings_fixture(filename: str) -> dict:
+    fixture_path = _WORD_MEANINGS_FIXTURE_DIR / filename
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 def _register_and_login(client):
@@ -1920,6 +1929,384 @@ class TestDraftBookAndEditionSnapshotIntegration:
             }
         ]
 
+    def test_word_meaning_source_resolution_runtime_generation_order(self, client, monkeypatch):
+        source_payload = {
+            "language": "sa",
+            "transliteration": {
+                "hk": "dharmakSetre",
+            },
+        }
+
+        monkeypatch.setattr(
+            draft_books_api,
+            "latin_to_devanagari",
+            lambda value: "धर्मक्षेत्रे" if value == "dharmakSetre" else None,
+        )
+
+        resolved_with_runtime = draft_books_api._resolve_word_meaning_source_token(
+            source_payload=source_payload,
+            preferred_mode="script",
+            preferred_scheme="iast",
+            allow_runtime_generation=True,
+        )
+        assert resolved_with_runtime == {
+            "text": "धर्मक्षेत्रे",
+            "mode": "script",
+            "scheme": None,
+            "generated": True,
+        }
+
+        resolved_without_runtime = draft_books_api._resolve_word_meaning_source_token(
+            source_payload=source_payload,
+            preferred_mode="script",
+            preferred_scheme="iast",
+            allow_runtime_generation=False,
+        )
+        assert resolved_without_runtime == {
+            "text": "dharmakSetre",
+            "mode": "transliteration",
+            "scheme": "hk",
+            "generated": False,
+        }
+
+    def test_word_meanings_rows_resolution_is_deterministic(self, client):
+        content_data = {
+            "word_meanings": {
+                "version": "1.0",
+                "rows": [
+                    {
+                        "id": "wm_b",
+                        "order": 2,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "कर्म",
+                            "transliteration": {
+                                "iast": "karma",
+                                "hk": "karma_hk",
+                            },
+                        },
+                        "meanings": {
+                            "en": {"text": "action"},
+                        },
+                    },
+                    {
+                        "id": "wm_a",
+                        "order": 1,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "योग",
+                        },
+                        "meanings": {
+                            "en": {"text": "union"},
+                        },
+                    },
+                ],
+            }
+        }
+        resolved_metadata = {
+            "word_meanings": {
+                "source": {
+                    "source_display_mode": "transliteration",
+                    "preferred_transliteration_scheme": "hk",
+                    "allow_runtime_transliteration_generation": False,
+                }
+            }
+        }
+
+        rows = draft_books_api._resolve_word_meanings_rows(content_data, resolved_metadata)
+
+        assert [row["id"] for row in rows] == ["wm_a", "wm_b"]
+        assert rows[0]["resolved_source"] == {
+            "text": "योग",
+            "mode": "script",
+            "scheme": None,
+            "generated": False,
+        }
+        assert rows[1]["resolved_source"] == {
+            "text": "karma_hk",
+            "mode": "transliteration",
+            "scheme": "hk",
+            "generated": False,
+        }
+
+    def test_word_meaning_language_fallback_pref_then_en_then_first_available(self, client):
+        meanings = {
+            "hi": {"text": "कर्म"},
+            "en": {"text": "action"},
+            "ta": {"text": "செயல்"},
+        }
+
+        resolved_preferred = draft_books_api._resolve_word_meaning_meaning_text(
+            meanings_payload=meanings,
+            preferred_language="hi",
+            fallback_order=["user_preference", "en", "first_available"],
+            show_badge_when_fallback_used=True,
+        )
+        assert resolved_preferred == {
+            "language": "hi",
+            "text": "कर्म",
+            "fallback_used": False,
+            "fallback_badge_visible": False,
+        }
+
+        resolved_en_fallback = draft_books_api._resolve_word_meaning_meaning_text(
+            meanings_payload=meanings,
+            preferred_language="ml",
+            fallback_order=["user_preference", "en", "first_available"],
+            show_badge_when_fallback_used=True,
+        )
+        assert resolved_en_fallback == {
+            "language": "en",
+            "text": "action",
+            "fallback_used": True,
+            "fallback_badge_visible": True,
+        }
+
+        resolved_first_available = draft_books_api._resolve_word_meaning_meaning_text(
+            meanings_payload={
+                "ta": {"text": "செயல்"},
+                "hi": {"text": "कर्म"},
+            },
+            preferred_language="ml",
+            fallback_order=["user_preference", "en", "first_available"],
+            show_badge_when_fallback_used=False,
+        )
+        assert resolved_first_available == {
+            "language": "ta",
+            "text": "செயல்",
+            "fallback_used": True,
+            "fallback_badge_visible": False,
+        }
+
+    def test_word_meanings_rows_include_resolved_meaning_with_badge_control(self, client):
+        content_data = {
+            "word_meanings": {
+                "version": "1.0",
+                "rows": [
+                    {
+                        "id": "wm_001",
+                        "order": 1,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "धर्म",
+                        },
+                        "meanings": {
+                            "en": {"text": "dharma"},
+                            "hi": {"text": "धर्म"},
+                        },
+                    }
+                ],
+            }
+        }
+
+        metadata_with_badge = {
+            "word_meanings": {
+                "meanings": {
+                    "meaning_language": "ml",
+                    "fallback_order": ["user_preference", "en", "first_available"],
+                },
+                "rendering": {
+                    "show_language_badge_when_fallback_used": True,
+                },
+            }
+        }
+
+        rows_with_badge = draft_books_api._resolve_word_meanings_rows(content_data, metadata_with_badge)
+        assert rows_with_badge[0]["resolved_meaning"] == {
+            "language": "en",
+            "text": "dharma",
+            "fallback_used": True,
+            "fallback_badge_visible": True,
+        }
+
+        metadata_without_badge = {
+            "word_meanings": {
+                "meanings": {
+                    "meaning_language": "ml",
+                    "fallback_order": ["user_preference", "en", "first_available"],
+                },
+                "rendering": {
+                    "show_language_badge_when_fallback_used": False,
+                },
+            }
+        }
+
+        rows_without_badge = draft_books_api._resolve_word_meanings_rows(content_data, metadata_without_badge)
+        assert rows_without_badge[0]["resolved_meaning"] == {
+            "language": "en",
+            "text": "dharma",
+            "fallback_used": True,
+            "fallback_badge_visible": False,
+        }
+
+    def test_pdf_content_lines_include_word_meanings_with_fallback_and_deterministic_order(self, client):
+        content = {
+            "metadata": {
+                "word_meanings": {
+                    "source": {
+                        "source_display_mode": "transliteration",
+                        "preferred_transliteration_scheme": "hk",
+                        "allow_runtime_transliteration_generation": False,
+                    },
+                    "meanings": {
+                        "meaning_language": "ml",
+                        "fallback_order": ["user_preference", "en", "first_available"],
+                    },
+                }
+            },
+            "word_meanings": {
+                "version": "1.0",
+                "rows": [
+                    {
+                        "id": "wm_b",
+                        "order": 2,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "कर्म",
+                            "transliteration": {"hk": "karma_hk"},
+                        },
+                        "meanings": {
+                            "en": {"text": "action"},
+                        },
+                    },
+                    {
+                        "id": "wm_a",
+                        "order": 1,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "योग",
+                        },
+                        "meanings": {
+                            "en": {"text": "union"},
+                        },
+                    },
+                ],
+            },
+        }
+
+        lines = draft_books_api._resolve_pdf_content_lines(
+            content,
+            draft_books_api.SnapshotRenderSettings(),
+        )
+
+        assert lines == [
+            ("Word Meanings", "योग — union"),
+            ("", "karma_hk — action"),
+        ]
+
+    def test_book_preview_render_includes_word_meanings_with_fallback_badge_metadata(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"WM09 Schema {uuid4().hex[:8]}",
+                "description": "Schema for WM-09 preview contract",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"WM09 Book {uuid4().hex[:6]}",
+                "book_code": f"wm09-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्म",
+                                },
+                                "meanings": {
+                                    "en": {"text": "dharma"},
+                                    "hi": {"text": "धर्म"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_id = verse_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={
+                "node_id": verse_id,
+                "metadata_bindings": {
+                    "global": {
+                        "word_meanings": {
+                            "meanings": {
+                                "meaning_language": "ml",
+                                "fallback_order": ["user_preference", "en", "first_available"],
+                            },
+                            "rendering": {
+                                "show_language_badge_when_fallback_used": True,
+                            },
+                        }
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        body_blocks = payload["sections"]["body"]
+        assert len(body_blocks) == 1
+
+        word_meaning_rows = body_blocks[0]["content"]["word_meanings_rows"]
+        assert len(word_meaning_rows) == 1
+        assert word_meaning_rows[0]["resolved_meaning"] == {
+            "language": "en",
+            "text": "dharma",
+            "fallback_used": True,
+            "fallback_badge_visible": True,
+        }
+
     def test_snapshot_render_artifact_resolves_metadata_precedence(self, client):
         headers = _register_and_login(client)
 
@@ -3785,3 +4172,620 @@ class TestUsersCoverageSprintCOV03:
 
         non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
         assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
+
+class TestWordMeaningsValidation:
+    def _create_leaf_parent(self, client, headers, book_metadata: dict | None = None):
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Word Meanings Schema {uuid4().hex[:8]}",
+                "description": "Schema for word meanings validation tests",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Word Meanings Book {uuid4().hex[:6]}",
+                "book_code": f"wm-book-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+                "metadata_json": book_metadata,
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+        return book_id, chapter_id
+
+    def test_create_node_rejects_word_meanings_when_level_not_in_enabled_rollout(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(
+            client,
+            headers,
+            book_metadata={
+                "word_meanings": {
+                    "enabled_levels": ["Chapter"],
+                }
+            },
+        )
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Rollout-disabled Verse",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_1301",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्म",
+                                },
+                                "meanings": {
+                                    "en": {"text": "dharma"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "not enabled for this level" in str(create_response.json().get("detail", ""))
+
+    def test_create_node_accepts_word_meanings_when_level_in_enabled_rollout(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(
+            client,
+            headers,
+            book_metadata={
+                "word_meanings": {
+                    "enabled_levels": ["Verse"],
+                }
+            },
+        )
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Rollout-enabled Verse",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_1302",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "योग",
+                                },
+                                "meanings": {
+                                    "en": {"text": "union"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED
+
+    def test_create_node_rejects_word_meanings_missing_required_en(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्मक्षेत्रे",
+                                },
+                                "meanings": {
+                                    "hi": {"text": "धर्म क्षेत्र में"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = create_response.json().get("detail") or []
+        assert any("meanings.en.text is required" in str(item.get("msg", "")) for item in detail)
+
+    def test_create_node_rejects_invalid_word_meanings_fixture(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+        invalid_fixture = _load_word_meanings_fixture("invalid_missing_required_en.json")
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Fixture Invalid Verse",
+                "has_content": True,
+                "content_data": invalid_fixture,
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = create_response.json().get("detail") or []
+        assert any("meanings.en.text is required" in str(item.get("msg", "")) for item in detail)
+
+    def test_create_node_rejects_word_meanings_rows_not_array(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": {"id": "wm_001"},
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = create_response.json().get("detail") or []
+        assert any("rows must be an array" in str(item.get("msg", "")) for item in detail)
+
+    def test_patch_node_rejects_word_meanings_html_content(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्मक्षेत्रे",
+                                },
+                                "meanings": {
+                                    "en": {"text": "in the field of dharma"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        patch_response = client.patch(
+            f"/api/content/nodes/{node_id}",
+            json={
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्मक्षेत्रे",
+                                },
+                                "meanings": {
+                                    "en": {"text": "<b>bad html</b>"},
+                                },
+                            }
+                        ],
+                    }
+                }
+            },
+            headers=headers,
+        )
+
+        assert patch_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = patch_response.json().get("detail") or []
+        assert any("must not contain HTML" in str(item.get("msg", "")) for item in detail)
+
+    def test_word_meanings_roundtrip_preserves_order_and_unknown_keys(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        source_payload = {
+            "word_meanings": {
+                "version": "1.0",
+                "future_metadata": {
+                    "v_next_enabled": True,
+                    "layout_hint": "compact",
+                },
+                "rows": [
+                    {
+                        "id": "wm_010",
+                        "order": 10,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "कर्मण्येव",
+                            "transliteration": {
+                                "iast": "karmaṇyeva",
+                                "future_scheme_x": "karmanyeva",
+                            },
+                        },
+                        "meanings": {
+                            "en": {"text": "only in action"},
+                        },
+                        "future_row_field": {
+                            "confidence": 0.92,
+                        },
+                    },
+                    {
+                        "id": "wm_001",
+                        "order": 1,
+                        "source": {
+                            "language": "sa",
+                            "script_text": "अधिकारः",
+                        },
+                        "meanings": {
+                            "en": {"text": "entitlement"},
+                        },
+                    },
+                ],
+            }
+        }
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse with word meanings",
+                "has_content": True,
+                "content_data": source_payload,
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        get_response = client.get(f"/api/content/nodes/{node_id}", headers=headers)
+        assert get_response.status_code == status.HTTP_200_OK
+        stored = get_response.json()["content_data"]["word_meanings"]
+
+        assert [row["id"] for row in stored["rows"]] == ["wm_010", "wm_001"]
+        assert stored["future_metadata"]["v_next_enabled"] is True
+        assert stored["rows"][0]["future_row_field"]["confidence"] == 0.92
+        assert (
+            stored["rows"][0]["source"]["transliteration"]["future_scheme_x"]
+            == "karmanyeva"
+        )
+
+    def test_word_meanings_patch_persists_forward_compatible_keys(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "धर्मक्षेत्रे",
+                                },
+                                "meanings": {
+                                    "en": {"text": "in the field of dharma"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        patch_payload = {
+            "content_data": {
+                "word_meanings": {
+                    "version": "1.0",
+                    "runtime_hints": {
+                        "preferred_alignment": "left",
+                    },
+                    "rows": [
+                        {
+                            "id": "wm_001",
+                            "order": 1,
+                            "source": {
+                                "language": "sa",
+                                "script_text": "धर्मक्षेत्रे",
+                                "transliteration": {
+                                    "iast": "dharmakṣetre",
+                                    "scheme_future": "dharmakshetre",
+                                },
+                            },
+                            "meanings": {
+                                "en": {"text": "in the field of dharma"},
+                            },
+                            "future_row_field": {
+                                "note": "keep-me",
+                            },
+                        }
+                    ],
+                }
+            }
+        }
+
+        patch_response = client.patch(
+            f"/api/content/nodes/{node_id}",
+            json=patch_payload,
+            headers=headers,
+        )
+        assert patch_response.status_code == status.HTTP_200_OK
+
+        get_response = client.get(f"/api/content/nodes/{node_id}", headers=headers)
+        assert get_response.status_code == status.HTTP_200_OK
+        stored = get_response.json()["content_data"]["word_meanings"]
+
+        assert stored["runtime_hints"]["preferred_alignment"] == "left"
+        assert stored["rows"][0]["future_row_field"]["note"] == "keep-me"
+        assert (
+            stored["rows"][0]["source"]["transliteration"]["scheme_future"]
+            == "dharmakshetre"
+        )
+
+    def test_search_matches_word_meanings_source_and_meanings(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Searchable Verse",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "version": "1.0",
+                        "rows": [
+                            {
+                                "id": "wm_001",
+                                "order": 1,
+                                "source": {
+                                    "language": "sa",
+                                    "script_text": "शब्दपरीक्षणम्",
+                                    "transliteration": {
+                                        "hk": "wm10sourceascii",
+                                    },
+                                },
+                                "meanings": {
+                                    "en": {"text": "wm10meaningenglish"},
+                                    "hi": {"text": "wm10meaninghindi"},
+                                },
+                            }
+                        ],
+                    }
+                },
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        script_search = client.get("/api/search", params={"q": "शब्दपरीक्षणम्"}, headers=headers)
+        assert script_search.status_code == status.HTTP_200_OK
+        script_results = script_search.json().get("results") or []
+        assert any(item.get("node", {}).get("id") == node_id for item in script_results)
+
+        transliteration_search = client.get(
+            "/api/search",
+            params={"q": "wm10sourceascii"},
+            headers=headers,
+        )
+        assert transliteration_search.status_code == status.HTTP_200_OK
+        transliteration_results = transliteration_search.json().get("results") or []
+        assert any(item.get("node", {}).get("id") == node_id for item in transliteration_results)
+
+        meaning_search = client.get(
+            "/api/search",
+            params={"q": "wm10meaninghindi"},
+            headers=headers,
+        )
+        assert meaning_search.status_code == status.HTTP_200_OK
+        meaning_results = meaning_search.json().get("results") or []
+        assert any(item.get("node", {}).get("id") == node_id for item in meaning_results)
+
+    def test_word_meanings_e2e_author_save_browse_search_export_flow(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+        valid_fixture = _load_word_meanings_fixture("valid_multilingual.json")
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "WM12 E2E Verse",
+                "has_content": True,
+                "content_data": valid_fixture,
+            },
+            headers=headers,
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        draft_response = client.post(
+            "/api/draft-books",
+            json={
+                "title": "WM12 E2E Draft",
+                "description": "Author save browse search export flow",
+                "section_structure": {
+                    "front": [],
+                    "body": [
+                        {
+                            "title": "Imported Source Book",
+                            "source_book_id": book_id,
+                            "source_scope": "book",
+                            "order": 1,
+                        }
+                    ],
+                    "back": [],
+                },
+            },
+            headers=headers,
+        )
+        assert draft_response.status_code == status.HTTP_201_CREATED
+        draft_id = draft_response.json()["id"]
+
+        publish_response = client.post(
+            f"/api/draft-books/{draft_id}/publish",
+            json={},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_201_CREATED
+        snapshot_id = publish_response.json()["snapshot"]["id"]
+
+        browse_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/render-artifact",
+            headers=headers,
+        )
+        assert browse_response.status_code == status.HTTP_200_OK
+        body_blocks = browse_response.json().get("sections", {}).get("body", [])
+
+        matching_blocks = [block for block in body_blocks if block.get("source_node_id") == node_id]
+        assert matching_blocks
+        word_rows = matching_blocks[0].get("content", {}).get("word_meanings_rows", [])
+        assert word_rows
+        assert word_rows[0]["id"] == "wm_1201"
+        assert word_rows[0]["resolved_meaning"]["text"] == "wm12meaningenglish"
+
+        search_source_response = client.get(
+            "/api/search",
+            params={"q": "wm12sourceascii"},
+            headers=headers,
+        )
+        assert search_source_response.status_code == status.HTTP_200_OK
+        source_results = search_source_response.json().get("results") or []
+        assert any(item.get("node", {}).get("id") == node_id for item in source_results)
+
+        search_meaning_response = client.get(
+            "/api/search",
+            params={"q": "wm12meaninghindi"},
+            headers=headers,
+        )
+        assert search_meaning_response.status_code == status.HTTP_200_OK
+        meaning_results = search_meaning_response.json().get("results") or []
+        assert any(item.get("node", {}).get("id") == node_id for item in meaning_results)
+
+        export_response = client.get(
+            f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers,
+        )
+        assert export_response.status_code == status.HTTP_200_OK
+        assert export_response.content.startswith(b"%PDF")

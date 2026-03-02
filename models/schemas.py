@@ -5,6 +5,14 @@ from typing import Literal
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
+WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = {"sa", "pi", "hi", "ta"}
+WORD_MEANINGS_REQUIRED_LANGUAGES = {"en"}
+WORD_MEANINGS_MAX_ROWS = 400
+WORD_MEANINGS_MAX_SOURCE_CHARS = 120
+WORD_MEANINGS_MAX_MEANING_CHARS = 400
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
 class HealthResponse(BaseModel):
     status: str
 
@@ -21,6 +29,142 @@ def _validate_password_strength(value: str) -> str:
     if not re.search(r"[^A-Za-z0-9]", value):
         raise ValueError("Password must include at least one special character")
     return value
+
+
+def _trimmed_string(value: object, path: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{path} must be a string")
+    return value.strip()
+
+
+def _validate_plain_text(value: object, path: str, max_chars: int) -> str:
+    text = _trimmed_string(value, path)
+    if len(text) > max_chars:
+        raise ValueError(f"{path} exceeds max length of {max_chars}")
+    if HTML_TAG_PATTERN.search(text):
+        raise ValueError(f"{path} must not contain HTML")
+    return text
+
+
+def _validate_word_meanings_content_data(content_data: dict | None) -> dict | None:
+    if content_data is None:
+        return None
+    if not isinstance(content_data, dict):
+        raise ValueError("content_data must be an object")
+
+    word_meanings = content_data.get("word_meanings")
+    if word_meanings is None:
+        return content_data
+    if not isinstance(word_meanings, dict):
+        raise ValueError("content_data.word_meanings must be an object")
+
+    version = word_meanings.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("content_data.word_meanings.version is required")
+
+    rows = word_meanings.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("content_data.word_meanings.rows must be an array")
+    if len(rows) > WORD_MEANINGS_MAX_ROWS:
+        raise ValueError(
+            f"content_data.word_meanings.rows exceeds max size of {WORD_MEANINGS_MAX_ROWS}"
+        )
+
+    seen_ids: set[str] = set()
+    for index, row in enumerate(rows):
+        row_path = f"content_data.word_meanings.rows[{index}]"
+        if not isinstance(row, dict):
+            raise ValueError(f"{row_path} must be an object")
+
+        row_id = row.get("id")
+        if not isinstance(row_id, str) or not row_id.strip():
+            raise ValueError(f"{row_path}.id is required")
+        normalized_row_id = row_id.strip()
+        if normalized_row_id in seen_ids:
+            raise ValueError(f"{row_path}.id must be unique")
+        seen_ids.add(normalized_row_id)
+
+        order = row.get("order")
+        if not isinstance(order, int) or order < 1:
+            raise ValueError(f"{row_path}.order must be an integer >= 1")
+
+        source = row.get("source")
+        if not isinstance(source, dict):
+            raise ValueError(f"{row_path}.source must be an object")
+
+        source_language = source.get("language")
+        if not isinstance(source_language, str) or source_language.strip() not in WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES:
+            raise ValueError(
+                f"{row_path}.source.language must be one of {sorted(WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES)}"
+            )
+
+        has_source_form = False
+        script_text = source.get("script_text")
+        if script_text is not None:
+            normalized_script_text = _validate_plain_text(
+                script_text,
+                f"{row_path}.source.script_text",
+                WORD_MEANINGS_MAX_SOURCE_CHARS,
+            )
+            if normalized_script_text:
+                has_source_form = True
+
+        transliteration = source.get("transliteration")
+        if transliteration is not None:
+            if not isinstance(transliteration, dict):
+                raise ValueError(f"{row_path}.source.transliteration must be an object")
+            for scheme, scheme_value in transliteration.items():
+                if not isinstance(scheme, str) or not scheme.strip():
+                    raise ValueError(f"{row_path}.source.transliteration keys must be non-empty strings")
+                normalized_value = _validate_plain_text(
+                    scheme_value,
+                    f"{row_path}.source.transliteration.{scheme}",
+                    WORD_MEANINGS_MAX_SOURCE_CHARS,
+                )
+                if normalized_value:
+                    has_source_form = True
+
+        if not has_source_form:
+            raise ValueError(
+                f"{row_path}.source requires at least one non-empty form in script_text or transliteration"
+            )
+
+        meanings = row.get("meanings")
+        if not isinstance(meanings, dict) or not meanings:
+            raise ValueError(f"{row_path}.meanings must be a non-empty object")
+
+        non_empty_meanings = 0
+        for language_code, meaning_payload in meanings.items():
+            if not isinstance(language_code, str) or not language_code.strip():
+                raise ValueError(f"{row_path}.meanings contains an invalid language key")
+            if not isinstance(meaning_payload, dict):
+                raise ValueError(f"{row_path}.meanings.{language_code} must be an object")
+
+            meaning_text = meaning_payload.get("text")
+            normalized_meaning_text = _validate_plain_text(
+                meaning_text,
+                f"{row_path}.meanings.{language_code}.text",
+                WORD_MEANINGS_MAX_MEANING_CHARS,
+            )
+            if normalized_meaning_text:
+                non_empty_meanings += 1
+
+        if non_empty_meanings == 0:
+            raise ValueError(f"{row_path}.meanings requires at least one non-empty text value")
+
+        for required_language in WORD_MEANINGS_REQUIRED_LANGUAGES:
+            required_payload = meanings.get(required_language)
+            if not isinstance(required_payload, dict):
+                raise ValueError(f"{row_path}.meanings.{required_language}.text is required")
+            required_text = _validate_plain_text(
+                required_payload.get("text"),
+                f"{row_path}.meanings.{required_language}.text",
+                WORD_MEANINGS_MAX_MEANING_CHARS,
+            )
+            if not required_text:
+                raise ValueError(f"{row_path}.meanings.{required_language}.text is required")
+
+    return content_data
 
 
 class UserCreate(BaseModel):
@@ -226,6 +370,11 @@ class ContentNodeBase(BaseModel):
     original_source_url: str | None = None
     tags: list | None = None
 
+    @field_validator("content_data")
+    @classmethod
+    def validate_content_data(cls, value: dict | None) -> dict | None:
+        return _validate_word_meanings_content_data(value)
+
 
 class ContentNodeCreate(ContentNodeBase):
     pass
@@ -255,6 +404,11 @@ class ContentNodeUpdate(BaseModel):
     visibility: str | None = None  # private, draft, published, archived
     language_code: str | None = None
     edit_reason: str | None = None  # Reason for edit (included in version history)
+
+    @field_validator("content_data")
+    @classmethod
+    def validate_content_data(cls, value: dict | None) -> dict | None:
+        return _validate_word_meanings_content_data(value)
 
 
 class ContentNodePublic(ContentNodeBase):

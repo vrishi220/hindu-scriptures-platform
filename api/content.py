@@ -190,6 +190,50 @@ def _book_visibility(book: Book) -> str:
     return BOOK_VISIBILITY_PRIVATE
 
 
+def _book_word_meanings_level_rollout(book: Book) -> tuple[bool, set[str]]:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    word_meanings_config = metadata.get("word_meanings") if isinstance(metadata.get("word_meanings"), dict) else {}
+
+    has_explicit_level_config = "enabled_levels" in word_meanings_config
+    raw_levels = word_meanings_config.get("enabled_levels")
+
+    enabled_levels: set[str] = set()
+    if isinstance(raw_levels, list):
+        for level in raw_levels:
+            if isinstance(level, str) and level.strip():
+                enabled_levels.add(level.strip().lower())
+
+    return has_explicit_level_config, enabled_levels
+
+
+def _content_has_word_meanings(content_data: object) -> bool:
+    if not isinstance(content_data, dict):
+        return False
+    return isinstance(content_data.get("word_meanings"), dict)
+
+
+def _ensure_word_meanings_level_is_enabled(book: Book, level_name: str, content_data: object) -> None:
+    if not _content_has_word_meanings(content_data):
+        return
+
+    has_explicit_level_config, enabled_levels = _book_word_meanings_level_rollout(book)
+    if not has_explicit_level_config:
+        return
+
+    normalized_level = (level_name or "").strip().lower()
+    if normalized_level in enabled_levels:
+        return
+
+    configured_levels = sorted(enabled_levels)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=(
+            "content_data.word_meanings is not enabled for this level"
+            f" ({level_name}). Enabled levels: {configured_levels}"
+        ),
+    )
+
+
 def _share_permission_rank(permission: str | None) -> int:
     rank_map = {
         BOOK_SHARE_VIEWER: 1,
@@ -1558,6 +1602,7 @@ def create_node(
         payload.title_transliteration,
     )
     content_data = _autofill_content_data_pair(payload.content_data or {})
+    _ensure_word_meanings_level_is_enabled(book, payload.level_name, content_data)
 
     node = ContentNode(
         book_id=payload.book_id,
@@ -1649,6 +1694,10 @@ def update_node(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
     _ensure_node_edit_access(db, current_user, node)
 
     source_node = None
@@ -1677,6 +1726,12 @@ def update_node(
 
     if "content_data" in updates:
         updates["content_data"] = _autofill_content_data_pair(updates.get("content_data"))
+
+    effective_level_name = updates.get("level_name") or node.level_name
+    effective_content_data = updates.get("content_data")
+    if "content_data" not in updates:
+        effective_content_data = source_node.content_data if source_node is not None else node.content_data
+    _ensure_word_meanings_level_is_enabled(node_book, effective_level_name, effective_content_data)
     
     if "parent_node_id" in updates and updates["parent_node_id"] is not None:
         parent = (

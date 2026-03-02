@@ -142,6 +142,12 @@ See `.env.example` for required configuration. Key variables include:
 - Explorer page allows picking scriptures to insert references into other texts
 - All navigation is permission-aware; links only show if user has appropriate access
 
+## Word Meanings Docs
+
+- Word meanings RFC and contract: `RFC_WORD_MEANINGS_METADATA.md`
+- Implementation backlog and milestones: `BACKLOG_WORD_MEANINGS_METADATA.md`
+- Authoring cookbook, rollout config, fallback behavior, and v1 limitations: `WORD_MEANINGS_AUTHORING_GUIDE.md`
+
 ## Deployment (Free Tier)
 
 ### Frontend (Vercel)
@@ -236,10 +242,6 @@ Modern browsers with ES2020+ support:
 - Chrome/Edge 90+
 - Firefox 88+
 - Safari 14+
-
-## License
-
-[Add your license information here]
 
 ### Use Cases
 - **Thematic Compilations**: Collect verses on a theme from multiple scriptures
@@ -364,7 +366,7 @@ SELECT COUNT(*) FROM content_nodes WHERE content_text IS NOT NULL;
 **Code Formatting:**
 ```bash
 # Backend
-black backend/ && isort backend/
+black . && isort .
 
 # Frontend
 cd web && npm run lint
@@ -397,7 +399,7 @@ kill -9 $(lsof -ti:3000)  # Frontend
 ```
 
 **CORS errors:**
-Check `backend/main.py` includes your frontend origin in CORS config.
+Check `main.py` includes your frontend origin in CORS config.
 
 ## Tech Stack
 
@@ -408,7 +410,7 @@ Check `backend/main.py` includes your frontend origin in CORS config.
 
 ## License
 
-[Add license information]
+License is currently not declared in-repo. Add a project license before public distribution.
 
 ---
 
