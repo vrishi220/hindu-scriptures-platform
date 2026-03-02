@@ -206,7 +206,27 @@ books (id, book_name, book_code, metadata)
   "translations": {
     "english": "..."
   },
-  "word_meanings": {},
+  "word_meanings": {
+    "version": "1.0",
+    "rows": [
+      {
+        "id": "wm_001",
+        "order": 1,
+        "source": {
+          "language": "sa",
+          "script_text": "धर्मक्षेत्रे",
+          "transliteration": {
+            "iast": "dharmakṣetre"
+          }
+        },
+        "meanings": {
+          "en": {
+            "text": "in the field of dharma"
+          }
+        }
+      }
+    ]
+  },
   "metadata": {}
 }
 ```
@@ -286,5 +306,5 @@ curl http://localhost:8000/api/books
 
 ---
 
-*Last updated: February 15, 2025*  
-*Status: Ready for production with real data sources*
+*Last updated: March 2, 2026*  
+*Status: Ready for local/demo use; production readiness depends on your chosen real data sources and deployment settings.*

@@ -53,6 +53,7 @@ from models.user import User
 from services import get_db
 from services.license_policy import classify_license_action, normalize_license
 from services.metadata_defaults import ensure_default_metadata_binding_for_draft
+from services.transliteration import devanagari_to_iast, latin_to_devanagari
 
 router = APIRouter(tags=["draft_books"])
 logger = logging.getLogger(__name__)
@@ -857,6 +858,351 @@ def _normalize_devanagari_text(value: str) -> str:
     return "\n".join(normalized_lines).strip()
 
 
+def _resolve_word_meanings_runtime_config(resolved_metadata: dict | None) -> tuple[str, str, bool]:
+    preferred_mode = "script"
+    preferred_scheme = "iast"
+    allow_runtime_generation = True
+
+    if not isinstance(resolved_metadata, dict):
+        return preferred_mode, preferred_scheme, allow_runtime_generation
+
+    word_meanings_metadata = resolved_metadata.get("word_meanings")
+    source_metadata = (
+        word_meanings_metadata.get("source")
+        if isinstance(word_meanings_metadata, dict)
+        and isinstance(word_meanings_metadata.get("source"), dict)
+        else {}
+    )
+
+    mode_candidates = (
+        resolved_metadata.get("source_display_mode"),
+        source_metadata.get("source_display_mode"),
+        source_metadata.get("preferred_mode"),
+    )
+    for candidate in mode_candidates:
+        if isinstance(candidate, str) and candidate.strip().lower() in {"script", "transliteration"}:
+            preferred_mode = candidate.strip().lower()
+            break
+
+    scheme_candidates = (
+        resolved_metadata.get("preferred_transliteration_scheme"),
+        source_metadata.get("preferred_transliteration_scheme"),
+        source_metadata.get("default_transliteration_scheme"),
+    )
+    for candidate in scheme_candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            preferred_scheme = candidate.strip().lower()
+            break
+
+    runtime_candidates = (
+        resolved_metadata.get("allow_runtime_transliteration_generation"),
+        source_metadata.get("allow_runtime_transliteration_generation"),
+    )
+    for candidate in runtime_candidates:
+        if isinstance(candidate, bool):
+            allow_runtime_generation = candidate
+            break
+
+    return preferred_mode, preferred_scheme, allow_runtime_generation
+
+
+def _resolve_word_meanings_meaning_config(
+    resolved_metadata: dict | None,
+) -> tuple[str, list[str], bool]:
+    preferred_language = "en"
+    fallback_order = ["user_preference", "en", "first_available"]
+    show_badge_when_fallback_used = True
+
+    if not isinstance(resolved_metadata, dict):
+        return preferred_language, fallback_order, show_badge_when_fallback_used
+
+    word_meanings_metadata = resolved_metadata.get("word_meanings")
+    meanings_metadata = (
+        word_meanings_metadata.get("meanings")
+        if isinstance(word_meanings_metadata, dict)
+        and isinstance(word_meanings_metadata.get("meanings"), dict)
+        else {}
+    )
+    rendering_metadata = (
+        word_meanings_metadata.get("rendering")
+        if isinstance(word_meanings_metadata, dict)
+        and isinstance(word_meanings_metadata.get("rendering"), dict)
+        else {}
+    )
+
+    language_candidates = (
+        resolved_metadata.get("meaning_language"),
+        meanings_metadata.get("meaning_language"),
+        meanings_metadata.get("default_language"),
+    )
+    for candidate in language_candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            preferred_language = candidate.strip().lower()
+            break
+
+    raw_fallback_order = meanings_metadata.get("fallback_order")
+    if isinstance(raw_fallback_order, list):
+        parsed_fallback_order = [
+            item.strip().lower()
+            for item in raw_fallback_order
+            if isinstance(item, str) and item.strip()
+        ]
+        if parsed_fallback_order:
+            fallback_order = parsed_fallback_order
+
+    badge_candidate = rendering_metadata.get("show_language_badge_when_fallback_used")
+    if isinstance(badge_candidate, bool):
+        show_badge_when_fallback_used = badge_candidate
+
+    return preferred_language, fallback_order, show_badge_when_fallback_used
+
+
+def _resolve_word_meaning_meaning_text(
+    meanings_payload: dict[str, dict[str, str]],
+    preferred_language: str,
+    fallback_order: list[str],
+    show_badge_when_fallback_used: bool,
+) -> dict[str, object]:
+    if not meanings_payload:
+        return {
+            "language": None,
+            "text": "",
+            "fallback_used": False,
+            "fallback_badge_visible": False,
+        }
+
+    normalized_preferred_language = preferred_language.strip().lower() if preferred_language else "en"
+    selected_language: str | None = None
+    selected_text = ""
+
+    for strategy in fallback_order:
+        normalized_strategy = strategy.strip().lower()
+        if normalized_strategy == "user_preference":
+            preferred_payload = meanings_payload.get(normalized_preferred_language)
+            preferred_text = _as_clean_string(preferred_payload.get("text") if isinstance(preferred_payload, dict) else None)
+            if preferred_text:
+                selected_language = normalized_preferred_language
+                selected_text = preferred_text
+                break
+            continue
+
+        if normalized_strategy == "en":
+            en_payload = meanings_payload.get("en")
+            en_text = _as_clean_string(en_payload.get("text") if isinstance(en_payload, dict) else None)
+            if en_text:
+                selected_language = "en"
+                selected_text = en_text
+                break
+            continue
+
+        if normalized_strategy == "first_available":
+            for language, payload in meanings_payload.items():
+                text_value = _as_clean_string(payload.get("text") if isinstance(payload, dict) else None)
+                if text_value:
+                    selected_language = language
+                    selected_text = text_value
+                    break
+            if selected_language:
+                break
+
+    if not selected_language:
+        for language, payload in meanings_payload.items():
+            text_value = _as_clean_string(payload.get("text") if isinstance(payload, dict) else None)
+            if text_value:
+                selected_language = language
+                selected_text = text_value
+                break
+
+    fallback_used = bool(selected_language and selected_language != normalized_preferred_language)
+    return {
+        "language": selected_language,
+        "text": selected_text,
+        "fallback_used": fallback_used,
+        "fallback_badge_visible": bool(fallback_used and show_badge_when_fallback_used),
+    }
+
+
+def _resolve_word_meaning_source_token(
+    source_payload: dict,
+    preferred_mode: str,
+    preferred_scheme: str,
+    allow_runtime_generation: bool,
+) -> dict[str, object]:
+    source = source_payload if isinstance(source_payload, dict) else {}
+    script_text = _normalize_devanagari_text(_as_clean_string(source.get("script_text")))
+
+    transliteration_payload = (
+        source.get("transliteration") if isinstance(source.get("transliteration"), dict) else {}
+    )
+    transliteration_map: dict[str, str] = {}
+    for raw_scheme, raw_value in transliteration_payload.items():
+        if not isinstance(raw_scheme, str) or not raw_scheme.strip():
+            continue
+        cleaned_value = _as_clean_string(raw_value)
+        if cleaned_value:
+            transliteration_map[raw_scheme.strip().lower()] = cleaned_value
+
+    sorted_transliteration_items = sorted(transliteration_map.items(), key=lambda item: item[0])
+    first_transliteration = sorted_transliteration_items[0] if sorted_transliteration_items else None
+
+    if preferred_mode == "script" and script_text:
+        return {
+            "text": script_text,
+            "mode": "script",
+            "scheme": None,
+            "generated": False,
+        }
+
+    if preferred_mode == "transliteration":
+        preferred_value = transliteration_map.get(preferred_scheme)
+        if preferred_value:
+            return {
+                "text": preferred_value,
+                "mode": "transliteration",
+                "scheme": preferred_scheme,
+                "generated": False,
+            }
+        if first_transliteration:
+            return {
+                "text": first_transliteration[1],
+                "mode": "transliteration",
+                "scheme": first_transliteration[0],
+                "generated": False,
+            }
+
+    preferred_scheme_value = transliteration_map.get(preferred_scheme)
+    if preferred_scheme_value:
+        return {
+            "text": preferred_scheme_value,
+            "mode": "transliteration",
+            "scheme": preferred_scheme,
+            "generated": False,
+        }
+
+    if allow_runtime_generation:
+        if preferred_mode == "script" and not script_text and first_transliteration:
+            generated_script = latin_to_devanagari(first_transliteration[1])
+            if generated_script:
+                return {
+                    "text": generated_script,
+                    "mode": "script",
+                    "scheme": None,
+                    "generated": True,
+                }
+
+        if preferred_mode == "transliteration" and script_text:
+            generated_iast = devanagari_to_iast(script_text)
+            if generated_iast:
+                return {
+                    "text": generated_iast,
+                    "mode": "transliteration",
+                    "scheme": "iast",
+                    "generated": True,
+                }
+
+    if script_text:
+        return {
+            "text": script_text,
+            "mode": "script",
+            "scheme": None,
+            "generated": False,
+        }
+
+    if first_transliteration:
+        return {
+            "text": first_transliteration[1],
+            "mode": "transliteration",
+            "scheme": first_transliteration[0],
+            "generated": False,
+        }
+
+    return {
+        "text": "",
+        "mode": preferred_mode if preferred_mode in {"script", "transliteration"} else "script",
+        "scheme": preferred_scheme if preferred_scheme else "iast",
+        "generated": False,
+    }
+
+
+def _resolve_word_meanings_rows(
+    content_data: dict,
+    resolved_metadata: dict | None = None,
+) -> list[dict[str, object]]:
+    if not isinstance(content_data, dict):
+        return []
+
+    word_meanings_payload = (
+        content_data.get("word_meanings") if isinstance(content_data.get("word_meanings"), dict) else {}
+    )
+    rows = word_meanings_payload.get("rows") if isinstance(word_meanings_payload.get("rows"), list) else []
+    if not rows:
+        return []
+
+    preferred_mode, preferred_scheme, allow_runtime_generation = _resolve_word_meanings_runtime_config(
+        resolved_metadata
+    )
+    (
+        preferred_meaning_language,
+        meaning_fallback_order,
+        show_badge_when_fallback_used,
+    ) = _resolve_word_meanings_meaning_config(resolved_metadata)
+
+    resolved_rows: list[dict[str, object]] = []
+    for index, raw_row in enumerate(rows):
+        if not isinstance(raw_row, dict):
+            continue
+
+        source_payload = raw_row.get("source") if isinstance(raw_row.get("source"), dict) else {}
+        meanings_payload = raw_row.get("meanings") if isinstance(raw_row.get("meanings"), dict) else {}
+        transliteration_payload = (
+            source_payload.get("transliteration")
+            if isinstance(source_payload.get("transliteration"), dict)
+            else {}
+        )
+
+        normalized_meanings: dict[str, dict[str, str]] = {}
+        for language, payload in meanings_payload.items():
+            if not isinstance(language, str) or not language.strip() or not isinstance(payload, dict):
+                continue
+            text_value = _as_clean_string(payload.get("text"))
+            if text_value:
+                normalized_meanings[language.strip().lower()] = {"text": text_value}
+
+        resolved_rows.append(
+            {
+                "id": _as_clean_string(raw_row.get("id")) or f"wm_row_{index + 1}",
+                "order": _safe_int(raw_row.get("order")) or (index + 1),
+                "source": {
+                    "language": _as_clean_string(source_payload.get("language")),
+                    "script_text": _normalize_devanagari_text(_as_clean_string(source_payload.get("script_text"))),
+                    "transliteration": {
+                        key.strip().lower(): _as_clean_string(value)
+                        for key, value in transliteration_payload.items()
+                        if isinstance(key, str)
+                        and key.strip()
+                        and _as_clean_string(value)
+                    },
+                },
+                "meanings": normalized_meanings,
+                "resolved_meaning": _resolve_word_meaning_meaning_text(
+                    meanings_payload=normalized_meanings,
+                    preferred_language=preferred_meaning_language,
+                    fallback_order=meaning_fallback_order,
+                    show_badge_when_fallback_used=show_badge_when_fallback_used,
+                ),
+                "resolved_source": _resolve_word_meaning_source_token(
+                    source_payload=source_payload,
+                    preferred_mode=preferred_mode,
+                    preferred_scheme=preferred_scheme,
+                    allow_runtime_generation=allow_runtime_generation,
+                ),
+            }
+        )
+
+    resolved_rows.sort(key=lambda row: (int(row.get("order") or 0), str(row.get("id") or "")))
+    return resolved_rows
+
+
 def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> ContentNode | None:
     if node is None:
         return None
@@ -894,6 +1240,7 @@ def _build_template_context(
             "transliteration": "",
             "english": "",
             "text": "",
+            "word_meanings_rows": [],
         }
     else:
         content_data = source_node.content_data if isinstance(source_node.content_data, dict) else {}
@@ -969,6 +1316,7 @@ def _build_template_context(
             "transliteration": _as_clean_string(transliteration_text),
             "english": _as_clean_string(english_text),
             "text": _as_clean_string(fallback_text),
+            "word_meanings_rows": _resolve_word_meanings_rows(content_data, resolved_metadata),
         }
 
     metadata_context: dict = {}
@@ -1190,6 +1538,7 @@ def _render_block_content_with_template(
         content[field_name] = value
 
     content["metadata"] = context.get("metadata", {})
+    content["word_meanings_rows"] = context.get("word_meanings_rows", [])
 
     return content, template_source
 
@@ -1221,6 +1570,49 @@ def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettin
 def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
     rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
+
+    def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
+        raw_rows = (
+            resolved_content.get("word_meanings_rows")
+            if isinstance(resolved_content.get("word_meanings_rows"), list)
+            else []
+        )
+
+        rows: list[dict[str, object]] = [row for row in raw_rows if isinstance(row, dict)]
+        if not rows and isinstance(resolved_content.get("word_meanings"), dict):
+            rows = _resolve_word_meanings_rows(
+                resolved_content,
+                resolved_content.get("metadata") if isinstance(resolved_content.get("metadata"), dict) else None,
+            )
+
+        if not rows:
+            return []
+
+        sorted_rows = sorted(
+            rows,
+            key=lambda row: (
+                int(_safe_int(row.get("order")) or 0),
+                str(row.get("id") or ""),
+            ),
+        )
+
+        word_meaning_lines: list[tuple[str, str]] = []
+        for row in sorted_rows:
+            resolved_source = row.get("resolved_source") if isinstance(row.get("resolved_source"), dict) else {}
+            resolved_meaning = row.get("resolved_meaning") if isinstance(row.get("resolved_meaning"), dict) else {}
+
+            source_text = _as_clean_string(resolved_source.get("text"))
+            meaning_text = _as_clean_string(resolved_meaning.get("text"))
+            if not source_text and not meaning_text:
+                continue
+
+            combined_value = " — ".join(part for part in (source_text, meaning_text) if part)
+            label = "Word Meanings" if not word_meaning_lines else ""
+            word_meaning_lines.append((label, combined_value))
+
+        return word_meaning_lines
+
+    word_meaning_lines = _resolve_word_meaning_pdf_lines()
 
     if rendered_lines:
         visible_by_key: dict[str, bool] = {
@@ -1256,7 +1648,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             previous_field_name = field_name or None
 
         if lines:
-            return lines
+            return lines + word_meaning_lines
 
     visible_by_key: dict[str, bool] = {
         "sanskrit": render_settings.show_sanskrit,
@@ -1291,7 +1683,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
         if isinstance(fallback, str) and fallback.strip():
             lines.append(("Text", fallback.strip()))
 
-    return lines
+    return lines + word_meaning_lines
 
 
 def _render_book_preview_template(

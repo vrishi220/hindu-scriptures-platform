@@ -1,0 +1,20 @@
+{
+  "word_meanings": {
+    "version": "1.0",
+    "rows": [
+      {
+        "id": "wm_1299",
+        "order": 1,
+        "source": {
+          "language": "sa",
+          "script_text": "अमान्यः"
+        },
+        "meanings": {
+          "hi": {
+            "text": "केवल हिन्दी अर्थ"
+          }
+        }
+      }
+    ]
+  }
+}

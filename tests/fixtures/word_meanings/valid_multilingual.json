@@ -1,0 +1,26 @@
+{
+  "word_meanings": {
+    "version": "1.0",
+    "rows": [
+      {
+        "id": "wm_1201",
+        "order": 1,
+        "source": {
+          "language": "sa",
+          "script_text": "परीक्षणम्",
+          "transliteration": {
+            "hk": "wm12sourceascii"
+          }
+        },
+        "meanings": {
+          "en": {
+            "text": "wm12meaningenglish"
+          },
+          "hi": {
+            "text": "wm12meaninghindi"
+          }
+        }
+      }
+    ]
+  }
+}

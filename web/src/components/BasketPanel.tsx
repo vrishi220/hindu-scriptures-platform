@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { getMe } from "../lib/authClient";
 
 type BasketItem = {
@@ -150,7 +150,7 @@ export default function BasketPanel({
   const basketItemRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const widgetContainerRef = useRef<HTMLDivElement | null>(null);
 
-  const measureWidgetSize = () => {
+  const measureWidgetSize = useCallback(() => {
     const element = widgetContainerRef.current;
     if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -161,16 +161,16 @@ export default function BasketPanel({
         ? current
         : { width: measuredWidth, height: measuredHeight }
     );
-  };
+  }, []);
 
-  const clampWidgetPosition = (x: number, y: number) => {
+  const clampWidgetPosition = useCallback((x: number, y: number) => {
     const maxX = Math.max(VIEWPORT_PADDING, viewport.width - widgetSize.width - VIEWPORT_PADDING);
     const maxY = Math.max(VIEWPORT_PADDING, viewport.height - widgetSize.height - VIEWPORT_PADDING);
     return {
       x: Math.min(Math.max(VIEWPORT_PADDING, x), maxX),
       y: Math.min(Math.max(VIEWPORT_PADDING, y), maxY),
     };
-  };
+  }, [viewport.width, viewport.height, widgetSize.width, widgetSize.height]);
 
   const panelLeft = Math.min(
     Math.max(VIEWPORT_PADDING, widgetPosition.x + widgetSize.width - PANEL_WIDTH),
@@ -189,7 +189,7 @@ export default function BasketPanel({
       setViewport({ width, height });
       if (!positionInitialized) {
         setWidgetPosition(
-          clampWidgetPosition(width - widgetSize.width - VIEWPORT_PADDING, height - widgetSize.height - 24)
+          clampWidgetPosition(width - VIEWPORT_PADDING, height - 24)
         );
         setPositionInitialized(true);
       } else {
@@ -200,11 +200,11 @@ export default function BasketPanel({
     applyViewport();
     window.addEventListener("resize", applyViewport);
     return () => window.removeEventListener("resize", applyViewport);
-  }, [positionInitialized, widgetSize.width, widgetSize.height]);
+  }, [positionInitialized, measureWidgetSize, clampWidgetPosition]);
 
   useEffect(() => {
     measureWidgetSize();
-  }, [items.length]);
+  }, [items.length, measureWidgetSize]);
 
   useEffect(() => {
     if (!isDraggingWidget) return;
@@ -235,7 +235,7 @@ export default function BasketPanel({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [isDraggingWidget, viewport]);
+  }, [isDraggingWidget, clampWidgetPosition]);
 
   const handleDragStart = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();

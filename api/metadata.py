@@ -387,6 +387,48 @@ def _serialize_binding(binding: MetadataBinding) -> MetadataBindingPublic:
     )
 
 
+def _sanitize_resolved_property_value(
+    *,
+    property_data_type: str,
+    value: object,
+    dropdown_options: list[str] | None,
+) -> dict | str | bool | float | None:
+    if value is None:
+        return None
+
+    if property_data_type == "boolean":
+        return value if isinstance(value, bool) else None
+
+    if property_data_type == "number":
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
+    if property_data_type == "dropdown":
+        if not isinstance(value, str):
+            return None
+        if dropdown_options and value not in dropdown_options:
+            return None
+        return value
+
+    if property_data_type == "date":
+        if isinstance(value, str) and _parse_iso_date(value):
+            return value
+        return None
+
+    if property_data_type == "datetime":
+        if isinstance(value, str) and _parse_iso_datetime(value):
+            return value
+        return None
+
+    if property_data_type == "text":
+        return value if isinstance(value, str) else None
+
+    return None
+
+
 def _resolve_binding_metadata(binding: MetadataBinding, db: Session) -> ResolvedMetadataPublic:
     effective_values: list[ResolvedPropertyValue] = []
     category_name = None
@@ -406,6 +448,12 @@ def _resolve_binding_metadata(binding: MetadataBinding, db: Session) -> Resolved
             else:
                 value = prop.default_value
                 resolved_from = "category_default"
+
+            value = _sanitize_resolved_property_value(
+                property_data_type=prop.property_data_type,
+                value=value,
+                dropdown_options=prop.dropdown_options,
+            )
 
             effective_values.append(
                 ResolvedPropertyValue(
@@ -1372,7 +1420,44 @@ def get_node_book_metadata_binding(
             db.commit()
             db.refresh(binding)
     if not binding:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+        book_binding = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "book",
+                MetadataBinding.entity_id == book_id,
+                MetadataBinding.scope_type == "book",
+            )
+            .first()
+        )
+        if not book_binding:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Metadata binding not found")
+
+        inherited = _resolve_binding_metadata(book_binding, db)
+        return ResolvedMetadataPublic(
+            entity_type="node",
+            entity_id=node_id,
+            scope_type="node",
+            category_id=inherited.category_id,
+            category_name=inherited.category_name,
+            properties=[
+                ResolvedPropertyValue(
+                    property_internal_name=item.property_internal_name,
+                    property_display_name=item.property_display_name,
+                    property_data_type=item.property_data_type,
+                    value=item.value,
+                    resolved_from_scope=(
+                        "book"
+                        if item.resolved_from_scope in {"book", "category_default", None}
+                        else item.resolved_from_scope
+                    ),
+                    resolved_from_category=item.resolved_from_category,
+                )
+                for item in inherited.properties
+            ],
+            property_overrides=inherited.property_overrides,
+            unset_overrides=inherited.unset_overrides,
+            resolved_at=datetime.utcnow().isoformat(),
+        )
 
     return _resolve_binding_metadata(binding, db)
 

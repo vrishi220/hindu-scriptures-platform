@@ -16,6 +16,7 @@ import {
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
 import InlineClearButton from "../../components/InlineClearButton";
+import WordMeaningsEditor from "../../components/WordMeaningsEditor";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -95,6 +96,16 @@ type TreeNode = {
   children?: TreeNode[];
 };
 
+type WordMeaningRow = {
+  id: string;
+  order: number;
+  sourceLanguage: string;
+  sourceScriptText: string;
+  sourceTransliterationIast: string;
+  meanings: Record<string, string>;
+  activeMeaningLanguage: string;
+};
+
 type NodeContent = {
   id: number;
   level_name: string;
@@ -114,6 +125,40 @@ type NodeContent = {
     translations?: {
       english?: string;
     };
+    word_meanings?: {
+      version?: string;
+      rows?: Array<{
+        id?: string;
+        order?: number;
+        source?: {
+          language?: string;
+          script_text?: string;
+          transliteration?: {
+            iast?: string;
+            [scheme: string]: string | undefined;
+          };
+        };
+        meanings?: {
+          en?: {
+            text?: string;
+          };
+          [language: string]: {
+            text?: string;
+          } | undefined;
+        };
+      }>;
+    };
+  } | null;
+  summary_data?: {
+    basic?: {
+      sanskrit?: string;
+      transliteration?: string;
+      translation?: string;
+    };
+    translations?: {
+      english?: string;
+    };
+    [key: string]: unknown;
   } | null;
   metadata_json?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
@@ -139,6 +184,22 @@ type BookPreviewBlock = {
       field?: string;
       label?: string;
       value?: string;
+    }>;
+    word_meanings_rows?: Array<{
+      id?: string;
+      order?: number;
+      resolved_source?: {
+        text?: string;
+        mode?: string | null;
+        scheme?: string | null;
+        generated?: boolean;
+      };
+      resolved_meaning?: {
+        language?: string | null;
+        text?: string;
+        fallback_used?: boolean;
+        fallback_badge_visible?: boolean;
+      };
     }>;
   };
 };
@@ -273,6 +334,378 @@ const DEFAULT_CONTENT_FIELD_LABELS = {
   english: "English",
 } as const;
 
+const WORD_MEANINGS_VERSION = "1.0";
+const WORD_MEANINGS_REQUIRED_LANGUAGE = "en";
+const WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = ["sa", "pi", "hi", "ta"] as const;
+const WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES = ["en", "hi", "ta", "te", "kn", "ml"] as const;
+const WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES = ["iast", "hk", "itrans"] as const;
+const WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES = ["user_preference", "en", "first_available"] as const;
+const WORD_MEANINGS_MAX_ROWS = 400;
+const WORD_MEANINGS_MAX_SOURCE_CHARS = 120;
+const WORD_MEANINGS_MAX_MEANING_CHARS = 400;
+const WORD_MEANINGS_HTML_TAG_PATTERN = /<[^>]+>/;
+const WORD_MEANINGS_FALLBACK_ORDER_DEFAULT = [...WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES];
+
+type WordMeaningsSourceDisplayMode = "script" | "transliteration";
+type WordMeaningsTransliterationScheme =
+  (typeof WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES)[number];
+type WordMeaningsMeaningLanguage = (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number];
+
+type WordMeaningPayloadRow = {
+  id: string;
+  order: number;
+  source: {
+    language: string;
+    script_text?: string;
+    transliteration?: Record<string, string>;
+  };
+  meanings: Record<string, { text: string }>;
+};
+
+const validateWordMeaningsPlainText = (value: unknown, path: string, maxChars: number): string[] => {
+  if (typeof value !== "string") {
+    return [`${path} must be a string`];
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > maxChars) {
+    return [`${path} exceeds max length of ${maxChars}`];
+  }
+  if (WORD_MEANINGS_HTML_TAG_PATTERN.test(trimmed)) {
+    return [`${path} must not contain HTML`];
+  }
+  return [];
+};
+
+const mapWordMeaningRowsForPayload = (rows: WordMeaningRow[]): WordMeaningPayloadRow[] =>
+  rows
+    .map((row, index) => {
+      const sourcePair = autoFillSanskritTransliterationPair(
+        row.sourceScriptText,
+        row.sourceTransliterationIast
+      );
+
+      return {
+        id: row.id.trim() || `wm_row_${index + 1}`,
+        order: Number.isFinite(row.order) && row.order >= 1 ? row.order : index + 1,
+        sourceLanguage: row.sourceLanguage.trim() || "sa",
+        sourceScriptText: sourcePair.sanskrit,
+        sourceTransliterationIast: sourcePair.transliteration,
+        meanings: Object.entries(row.meanings)
+          .map(([language, text]) => [language.trim(), text.trim()] as const)
+          .filter(([language, text]) => language && text)
+          .reduce<Record<string, string>>((acc, [language, text]) => {
+            acc[language] = text;
+            return acc;
+          }, {}),
+      };
+    })
+    .filter(
+      (row) =>
+        row.sourceScriptText ||
+        row.sourceTransliterationIast ||
+        Object.values(row.meanings).some((text) => Boolean(text))
+    )
+    .map((row) => ({
+      id: row.id,
+      order: row.order,
+      source: {
+        language: row.sourceLanguage,
+        script_text: row.sourceScriptText || undefined,
+        transliteration: row.sourceTransliterationIast
+          ? { iast: row.sourceTransliterationIast }
+          : undefined,
+      },
+      meanings: Object.entries(row.meanings).reduce<Record<string, { text: string }>>(
+        (acc, [language, text]) => {
+          acc[language] = { text };
+          return acc;
+        },
+        {}
+      ),
+    }));
+
+const validateWordMeaningPayloadRows = (rows: WordMeaningPayloadRow[]): string[] => {
+  const errors: string[] = [];
+
+  if (rows.length > WORD_MEANINGS_MAX_ROWS) {
+    errors.push(`content_data.word_meanings.rows exceeds max size of ${WORD_MEANINGS_MAX_ROWS}`);
+  }
+
+  const seenIds = new Set<string>();
+  rows.forEach((row, index) => {
+    const rowPath = `content_data.word_meanings.rows[${index}]`;
+
+    if (!row.id.trim()) {
+      errors.push(`${rowPath}.id is required`);
+    }
+
+    const normalizedRowId = row.id.trim();
+    if (normalizedRowId) {
+      if (seenIds.has(normalizedRowId)) {
+        errors.push(`${rowPath}.id must be unique`);
+      }
+      seenIds.add(normalizedRowId);
+    }
+
+    if (!Number.isInteger(row.order) || row.order < 1) {
+      errors.push(`${rowPath}.order must be an integer >= 1`);
+    }
+
+    if (!WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES.includes(row.source.language as (typeof WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES)[number])) {
+      errors.push(
+        `${rowPath}.source.language must be one of ${JSON.stringify([...WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES].sort())}`
+      );
+    }
+
+    let hasSourceForm = false;
+
+    if (row.source.script_text !== undefined) {
+      const sourceTextErrors = validateWordMeaningsPlainText(
+        row.source.script_text,
+        `${rowPath}.source.script_text`,
+        WORD_MEANINGS_MAX_SOURCE_CHARS
+      );
+      errors.push(...sourceTextErrors);
+      if (typeof row.source.script_text === "string" && row.source.script_text.trim()) {
+        hasSourceForm = true;
+      }
+    }
+
+    if (row.source.transliteration !== undefined) {
+      Object.entries(row.source.transliteration).forEach(([scheme, value]) => {
+        if (!scheme.trim()) {
+          errors.push(`${rowPath}.source.transliteration keys must be non-empty strings`);
+          return;
+        }
+        const transliterationErrors = validateWordMeaningsPlainText(
+          value,
+          `${rowPath}.source.transliteration.${scheme}`,
+          WORD_MEANINGS_MAX_SOURCE_CHARS
+        );
+        errors.push(...transliterationErrors);
+        if (typeof value === "string" && value.trim()) {
+          hasSourceForm = true;
+        }
+      });
+    }
+
+    if (!hasSourceForm) {
+      errors.push(
+        `${rowPath}.source requires at least one non-empty form in script_text or transliteration`
+      );
+    }
+
+    const meaningEntries = Object.entries(row.meanings);
+    if (meaningEntries.length === 0) {
+      errors.push(`${rowPath}.meanings must be a non-empty object`);
+    }
+
+    let nonEmptyMeanings = 0;
+    meaningEntries.forEach(([languageCode, payload]) => {
+      if (!languageCode.trim()) {
+        errors.push(`${rowPath}.meanings contains an invalid language key`);
+        return;
+      }
+
+      const meaningTextErrors = validateWordMeaningsPlainText(
+        payload?.text,
+        `${rowPath}.meanings.${languageCode}.text`,
+        WORD_MEANINGS_MAX_MEANING_CHARS
+      );
+      errors.push(...meaningTextErrors);
+      if (typeof payload?.text === "string" && payload.text.trim()) {
+        nonEmptyMeanings += 1;
+      }
+    });
+
+    if (nonEmptyMeanings === 0) {
+      errors.push(`${rowPath}.meanings requires at least one non-empty text value`);
+    }
+
+    const requiredPayload = row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE];
+    if (!requiredPayload) {
+      errors.push(`${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`);
+    } else {
+      const requiredTextErrors = validateWordMeaningsPlainText(
+        requiredPayload.text,
+        `${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text`,
+        WORD_MEANINGS_MAX_MEANING_CHARS
+      );
+      errors.push(...requiredTextErrors);
+      if (!requiredPayload.text.trim()) {
+        errors.push(`${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`);
+      }
+    }
+  });
+
+  return [...new Set(errors)];
+};
+
+const createWordMeaningRowId = () => `wm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+const createEmptyWordMeaningRow = (order: number): WordMeaningRow => ({
+  id: createWordMeaningRowId(),
+  order,
+  sourceLanguage: "sa",
+  sourceScriptText: "",
+  sourceTransliterationIast: "",
+  meanings: {
+    en: "",
+  },
+  activeMeaningLanguage: "en",
+});
+
+const mapWordMeaningsRowsFromContent = (node: NodeContent): WordMeaningRow[] => {
+  const rows = node.content_data?.word_meanings?.rows;
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+
+  return rows.map((row, index) => ({
+    ...(function () {
+      const rawMeanings = row?.meanings;
+      const mapped: Record<string, string> = {};
+      if (rawMeanings && typeof rawMeanings === "object") {
+        Object.entries(rawMeanings).forEach(([language, payload]) => {
+          const text = payload?.text || "";
+          if (typeof language === "string") {
+            mapped[language] = text;
+          }
+        });
+      }
+      if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in mapped)) {
+        mapped[WORD_MEANINGS_REQUIRED_LANGUAGE] = "";
+      }
+      const firstNonEmptyLanguage =
+        Object.entries(mapped).find(([, text]) => text.trim())?.[0] ||
+        WORD_MEANINGS_REQUIRED_LANGUAGE;
+      return {
+        id: typeof row?.id === "string" && row.id.trim() ? row.id.trim() : createWordMeaningRowId(),
+        order:
+          typeof row?.order === "number" && Number.isFinite(row.order) && row.order >= 1
+            ? row.order
+            : index + 1,
+        sourceLanguage:
+          typeof row?.source?.language === "string" && row.source.language.trim()
+            ? row.source.language.trim()
+            : "sa",
+        sourceScriptText: row?.source?.script_text || "",
+        sourceTransliterationIast: row?.source?.transliteration?.iast || "",
+        meanings: mapped,
+        activeMeaningLanguage: firstNonEmptyLanguage,
+      };
+    })(),
+  }));
+};
+
+const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<string> => {
+  if (!book) {
+    return new Set();
+  }
+
+  const metadata =
+    book.metadata_json && typeof book.metadata_json === "object"
+      ? book.metadata_json
+      : book.metadata && typeof book.metadata === "object"
+        ? book.metadata
+        : null;
+
+  const wordMeaningsConfig =
+    metadata &&
+    typeof metadata.word_meanings === "object" &&
+    metadata.word_meanings !== null
+      ? (metadata.word_meanings as Record<string, unknown>)
+      : null;
+
+  const enabledLevels = wordMeaningsConfig?.enabled_levels;
+  if (!Array.isArray(enabledLevels)) {
+    return new Set();
+  }
+
+  return new Set(
+    enabledLevels
+      .filter((level): level is string => typeof level === "string" && level.trim().length > 0)
+      .map((level) => level.trim().toLowerCase())
+  );
+};
+
+const getWordMeaningsRenderingSettingsFromBook = (
+  book: BookDetails | null
+): {
+  sourceDisplayMode: WordMeaningsSourceDisplayMode;
+  preferredScheme: WordMeaningsTransliterationScheme;
+  allowRuntimeGeneration: boolean;
+  meaningLanguage: WordMeaningsMeaningLanguage;
+  fallbackOrder: string[];
+} => {
+  const metadata =
+    book?.metadata_json && typeof book.metadata_json === "object"
+      ? book.metadata_json
+      : book?.metadata && typeof book.metadata === "object"
+        ? book.metadata
+        : null;
+
+  const wordMeaningsConfig =
+    metadata &&
+    typeof metadata.word_meanings === "object" &&
+    metadata.word_meanings !== null
+      ? (metadata.word_meanings as Record<string, unknown>)
+      : null;
+
+  const sourceConfig =
+    wordMeaningsConfig &&
+    typeof wordMeaningsConfig.source === "object" &&
+    wordMeaningsConfig.source !== null
+      ? (wordMeaningsConfig.source as Record<string, unknown>)
+      : {};
+
+  const meaningsConfig =
+    wordMeaningsConfig &&
+    typeof wordMeaningsConfig.meanings === "object" &&
+    wordMeaningsConfig.meanings !== null
+      ? (wordMeaningsConfig.meanings as Record<string, unknown>)
+      : {};
+
+  const rawMode =
+    typeof sourceConfig.source_display_mode === "string"
+      ? sourceConfig.source_display_mode.trim().toLowerCase()
+      : "";
+  const sourceDisplayMode = rawMode === "transliteration" ? "transliteration" : "script";
+
+  const rawScheme =
+    typeof sourceConfig.preferred_transliteration_scheme === "string"
+      ? sourceConfig.preferred_transliteration_scheme.trim().toLowerCase()
+      : "";
+  const preferredScheme =
+    WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.find((option) => option === rawScheme) || "iast";
+
+  const allowRuntimeGeneration =
+    typeof sourceConfig.allow_runtime_transliteration_generation === "boolean"
+      ? sourceConfig.allow_runtime_transliteration_generation
+      : true;
+
+  const rawMeaningLanguage =
+    typeof meaningsConfig.meaning_language === "string"
+      ? meaningsConfig.meaning_language.trim().toLowerCase()
+      : "";
+  const meaningLanguage =
+    WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.find((option) => option === rawMeaningLanguage) || "en";
+
+  const fallbackOrder = Array.isArray(meaningsConfig.fallback_order)
+    ? meaningsConfig.fallback_order
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim().toLowerCase())
+    : [...WORD_MEANINGS_FALLBACK_ORDER_DEFAULT];
+
+  return {
+    sourceDisplayMode,
+    preferredScheme,
+    allowRuntimeGeneration,
+    meaningLanguage,
+    fallbackOrder,
+  };
+};
+
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   source_language: "english",
   transliteration_enabled: true,
@@ -329,6 +762,32 @@ const isBookScopedCategory = (category: MetadataCategory): boolean => {
   return scopes.includes("book") || scopes.includes("all") || scopes.includes("node");
 };
 
+const metadataObjectToDisplayText = (rawValue: unknown): string => {
+  if (rawValue === null || rawValue === undefined) {
+    return "";
+  }
+
+  if (typeof rawValue === "string") {
+    return rawValue;
+  }
+
+  if (typeof rawValue === "number" || typeof rawValue === "boolean") {
+    return String(rawValue);
+  }
+
+  if (typeof rawValue === "object") {
+    if (!Array.isArray(rawValue)) {
+      const textCandidate = (rawValue as Record<string, unknown>).text;
+      if (typeof textCandidate === "string") {
+        return textCandidate;
+      }
+    }
+    return "";
+  }
+
+  return String(rawValue);
+};
+
 const normalizeMetadataValue = (dataType: string, rawValue: unknown): unknown => {
   if (dataType === "boolean") {
     return Boolean(rawValue);
@@ -346,7 +805,7 @@ const normalizeMetadataValue = (dataType: string, rawValue: unknown): unknown =>
     return null;
   }
 
-  const stringValue = String(rawValue);
+  const stringValue = metadataObjectToDisplayText(rawValue);
   if (!stringValue.trim()) {
     return null;
   }
@@ -389,6 +848,46 @@ const filterVisibleMetadataFields = (fields: EffectivePropertyBinding[]): Effect
 
 const getFieldDefaultValue = (field: EffectivePropertyBinding): unknown => {
   return field.default_value ?? null;
+};
+
+const isEmptyMetadataValue = (value: unknown): boolean => {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value === "string") {
+    return value.trim().length === 0;
+  }
+  return false;
+};
+
+const isUsableBindingValueForField = (
+  field: EffectivePropertyBinding,
+  value: unknown
+): boolean => {
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  switch (field.property_data_type) {
+    case "text":
+    case "date":
+    case "datetime":
+    case "dropdown":
+      return typeof value === "string" && value.trim().length > 0;
+    case "number":
+      if (typeof value === "number") {
+        return Number.isFinite(value);
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed.length > 0 && Number.isFinite(Number(trimmed));
+      }
+      return false;
+    case "boolean":
+      return typeof value === "boolean";
+    default:
+      return false;
+  }
 };
 
 const autoFillSanskritTransliterationPair = (
@@ -500,6 +999,7 @@ function ScripturesContent() {
     contentTransliteration: "",
     contentEnglish: "",
     tags: "",
+    wordMeanings: [] as WordMeaningRow[],
   });
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
@@ -515,6 +1015,7 @@ function ScripturesContent() {
     contentTransliteration: "",
     contentEnglish: "",
     tags: "",
+    wordMeanings: [] as WordMeaningRow[],
   });
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -586,6 +1087,18 @@ function ScripturesContent() {
   const [propertiesSaving, setPropertiesSaving] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
   const [propertiesMessage, setPropertiesMessage] = useState<string | null>(null);
+  const [wordMeaningsEnabledLevelSelection, setWordMeaningsEnabledLevelSelection] = useState<Set<string>>(new Set());
+  const [wordMeaningsSourceDisplayModeSelection, setWordMeaningsSourceDisplayModeSelection] =
+    useState<WordMeaningsSourceDisplayMode>("script");
+  const [wordMeaningsPreferredSchemeSelection, setWordMeaningsPreferredSchemeSelection] =
+    useState<WordMeaningsTransliterationScheme>("iast");
+  const [wordMeaningsAllowRuntimeGenerationSelection, setWordMeaningsAllowRuntimeGenerationSelection] =
+    useState(true);
+  const [wordMeaningsMeaningLanguageSelection, setWordMeaningsMeaningLanguageSelection] =
+    useState<WordMeaningsMeaningLanguage>("en");
+  const [wordMeaningsFallbackOrderInput, setWordMeaningsFallbackOrderInput] = useState(
+    WORD_MEANINGS_FALLBACK_ORDER_DEFAULT.join(", ")
+  );
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -742,7 +1255,37 @@ function ScripturesContent() {
     return lines;
   };
 
-  const loadMetadataCategories = async () => {
+  const resolvePreviewWordMeanings = (block: BookPreviewBlock) => {
+    const rows = Array.isArray(block.content.word_meanings_rows)
+      ? block.content.word_meanings_rows
+      : [];
+
+    return rows
+      .map((row, index) => {
+        const sourceText = (row?.resolved_source?.text || "").trim();
+        const meaningText = (row?.resolved_meaning?.text || "").trim();
+        if (!sourceText && !meaningText) {
+          return null;
+        }
+
+        return {
+          key: `${row?.id || "wm"}_${row?.order || index + 1}_${index}`,
+          sourceText,
+          meaningText,
+          meaningLanguage: (row?.resolved_meaning?.language || "").trim().toLowerCase(),
+          fallbackBadgeVisible: Boolean(row?.resolved_meaning?.fallback_badge_visible),
+        };
+      })
+      .filter((row): row is {
+        key: string;
+        sourceText: string;
+        meaningText: string;
+        meaningLanguage: string;
+        fallbackBadgeVisible: boolean;
+      } => Boolean(row));
+  };
+
+  const loadMetadataCategories = async (): Promise<MetadataCategory[]> => {
     setMetadataCategoriesLoading(true);
     try {
       const response = await fetch("/api/metadata/categories", {
@@ -757,9 +1300,14 @@ function ScripturesContent() {
         throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load metadata categories");
       }
       const categories = Array.isArray(payload) ? payload : [];
-      setMetadataCategories(categories.filter((category) => !category.is_deprecated && isBookScopedCategory(category)));
+      const visibleCategories = categories.filter(
+        (category) => !category.is_deprecated && isBookScopedCategory(category)
+      );
+      setMetadataCategories(visibleCategories);
+      return visibleCategories;
     } catch {
       setMetadataCategories([]);
+      return [];
     } finally {
       setMetadataCategoriesLoading(false);
     }
@@ -815,12 +1363,79 @@ function ScripturesContent() {
       translations?: {
         english?: string;
       };
+      [key: string]: unknown;
+    } | null;
+    summary_data?: {
+      basic?: {
+        sanskrit?: string;
+        transliteration?: string;
+        translation?: string;
+      };
+      translations?: {
+        english?: string;
+      };
+      [key: string]: unknown;
     } | null;
   }): Record<string, unknown> => {
     const fallback: Record<string, unknown> = {};
-    const basic = nodePayload.content_data?.basic || {};
-    const englishFromTranslations = nodePayload.content_data?.translations?.english;
-    const englishText = basic.translation || englishFromTranslations;
+    const contentData = toRecord(nodePayload.content_data);
+    const summaryData = toRecord(nodePayload.summary_data);
+    const basic = toRecord(contentData.basic);
+    const summaryBasic = toRecord(summaryData.basic);
+    const translations = toRecord(contentData.translations);
+    const summaryTranslations = toRecord(summaryData.translations);
+    const pickFirstNonEmptyString = (...values: unknown[]): string => {
+      for (const value of values) {
+        if (typeof value === "string" && value.trim()) {
+          return value;
+        }
+      }
+      return "";
+    };
+
+    const sanskritText = pickFirstNonEmptyString(
+      basic.sanskrit,
+      basic.text_sanskrit,
+      contentData.sanskrit,
+      contentData.text_sanskrit,
+      summaryBasic.sanskrit,
+      summaryBasic.text_sanskrit,
+      summaryData.sanskrit,
+      summaryData.text_sanskrit,
+      nodePayload.title_sanskrit
+    );
+    const transliterationText = pickFirstNonEmptyString(
+      basic.transliteration,
+      basic.iast,
+      contentData.transliteration,
+      contentData.iast,
+      contentData.text_transliteration,
+      summaryBasic.transliteration,
+      summaryBasic.iast,
+      summaryData.transliteration,
+      summaryData.iast,
+      summaryData.text_transliteration,
+      nodePayload.title_transliteration
+    );
+    const englishText = pickFirstNonEmptyString(
+      translations.english,
+      translations.en,
+      basic.translation,
+      basic.english,
+      contentData.english,
+      contentData.en,
+      contentData.translation,
+      contentData.text_english,
+      summaryTranslations.english,
+      summaryTranslations.en,
+      summaryBasic.translation,
+      summaryBasic.english,
+      summaryData.english,
+      summaryData.en,
+      summaryData.translation,
+      summaryData.text_english,
+      nodePayload.title_english
+    );
     const normalizedLevel = (nodePayload.level_name || "content")
       .toString()
       .trim()
@@ -837,24 +1452,35 @@ function ScripturesContent() {
     fallback[`${levelSegment}_template_key`] = defaultTemplateKey;
     fallback[`body_${levelSegment}_template_key`] = defaultTemplateKey;
 
-    if (typeof basic.sanskrit === "string" && basic.sanskrit.trim()) {
-      fallback.sanskrit = basic.sanskrit;
-      fallback.verse_sanskrit = basic.sanskrit;
-      fallback.shloka = basic.sanskrit;
+    if (sanskritText) {
+      fallback.sanskrit = sanskritText;
+      fallback.text_sanskrit = sanskritText;
+      fallback.sanskrit_text = sanskritText;
+      fallback.verse_sanskrit = sanskritText;
+      fallback.shloka = sanskritText;
     }
-    if (typeof basic.transliteration === "string" && basic.transliteration.trim()) {
-      fallback.transliteration = basic.transliteration;
-      fallback.verse_transliteration = basic.transliteration;
+    if (transliterationText) {
+      fallback.transliteration = transliterationText;
+      fallback.iast = transliterationText;
+      fallback.text_transliteration = transliterationText;
+      fallback.transliteration_text = transliterationText;
+      fallback.verse_transliteration = transliterationText;
     }
-    if (typeof englishText === "string" && englishText.trim()) {
+    if (englishText) {
       fallback.translation = englishText;
       fallback.english = englishText;
+      fallback.text_english = englishText;
+      fallback.english_text = englishText;
       fallback.english_translation = englishText;
       fallback.verse_translation = englishText;
     }
-    if (typeof nodePayload.sequence_number === "string" && nodePayload.sequence_number.trim()) {
-      fallback.sequence_number = nodePayload.sequence_number;
-      const sequenceMatch = nodePayload.sequence_number.trim().match(/^(\d+)(?:\.(\d+))?/);
+    const sequenceNumberValue =
+      nodePayload.sequence_number !== null && nodePayload.sequence_number !== undefined
+        ? String(nodePayload.sequence_number).trim()
+        : "";
+    if (sequenceNumberValue) {
+      fallback.sequence_number = sequenceNumberValue;
+      const sequenceMatch = sequenceNumberValue.match(/^(\d+)(?:\.(\d+))?/);
       if (sequenceMatch?.[1]) {
         fallback.chapter_number = sequenceMatch[1];
       }
@@ -862,8 +1488,8 @@ function ScripturesContent() {
         fallback.verse_number = sequenceMatch[2];
         fallback.shloka_number = sequenceMatch[2];
       } else {
-        fallback.verse_number = nodePayload.sequence_number;
-        fallback.shloka_number = nodePayload.sequence_number;
+        fallback.verse_number = sequenceNumberValue;
+        fallback.shloka_number = sequenceNumberValue;
       }
     }
     if (typeof nodePayload.title_english === "string" && nodePayload.title_english.trim()) {
@@ -932,14 +1558,26 @@ function ScripturesContent() {
   };
 
   const loadNodeMetadataSnapshot = async (nodeId: number): Promise<Record<string, unknown>> => {
+    const mergePreferNonEmpty = (
+      baseValues: Record<string, unknown>,
+      overlayValues: Record<string, unknown>
+    ): Record<string, unknown> => {
+      const merged: Record<string, unknown> = { ...baseValues };
+      Object.entries(overlayValues).forEach(([key, value]) => {
+        if (!isEmptyMetadataValue(value)) {
+          merged[key] = value;
+        } else if (!(key in merged)) {
+          merged[key] = value;
+        }
+      });
+      return merged;
+    };
+
     if (nodeContent?.id === nodeId) {
       const fromCurrent = toRecord(nodeContent.metadata_json || nodeContent.metadata);
-      if (Object.keys(fromCurrent).length > 0) {
-        return fromCurrent;
-      }
       const derivedFromCurrent = deriveNodeMetadataFallback(nodeContent);
-      if (Object.keys(derivedFromCurrent).length > 0) {
-        return derivedFromCurrent;
+      if (Object.keys(fromCurrent).length > 0 || Object.keys(derivedFromCurrent).length > 0) {
+        return mergePreferNonEmpty(derivedFromCurrent, fromCurrent);
       }
     }
 
@@ -969,14 +1607,27 @@ function ScripturesContent() {
               translations?: {
                 english?: string;
               };
+              [key: string]: unknown;
+            } | null;
+            summary_data?: {
+              basic?: {
+                sanskrit?: string;
+                transliteration?: string;
+                translation?: string;
+              };
+              translations?: {
+                english?: string;
+              };
+              [key: string]: unknown;
             } | null;
           }
         | null;
       const fromMetadata = toRecord(payload?.metadata_json || payload?.metadata);
-      if (Object.keys(fromMetadata).length > 0) {
-        return fromMetadata;
+      const derivedFromPayload = payload ? deriveNodeMetadataFallback(payload) : {};
+      if (Object.keys(fromMetadata).length > 0 || Object.keys(derivedFromPayload).length > 0) {
+        return mergePreferNonEmpty(derivedFromPayload, fromMetadata);
       }
-      return payload ? deriveNodeMetadataFallback(payload) : {};
+      return {};
     } catch {
       return {};
     }
@@ -996,7 +1647,14 @@ function ScripturesContent() {
 
     try {
       const endpoint = propertiesEndpoint(scope, nodeId);
-      const nodeMetadataSnapshot = scope === "node" && nodeId ? await loadNodeMetadataSnapshot(nodeId) : {};
+      const scopedMetadataSnapshot =
+        scope === "node" && nodeId
+          ? await loadNodeMetadataSnapshot(nodeId)
+          : toRecord(currentBook?.metadata_json || currentBook?.metadata);
+
+      const availableCategories =
+        metadataCategories.length > 0 ? metadataCategories : await loadMetadataCategories();
+
       const response = await fetch(endpoint, {
         credentials: "include",
         cache: "no-store",
@@ -1021,9 +1679,15 @@ function ScripturesContent() {
         throw new Error(payload?.detail || "Failed to load metadata properties");
       }
 
-      let categoryId = binding?.category_id ?? readCategoryIdFromMetadata(nodeMetadataSnapshot) ?? null;
+      let categoryId = binding?.category_id ?? readCategoryIdFromMetadata(scopedMetadataSnapshot) ?? null;
       if (!categoryId && scope === "node") {
-        categoryId = await inferCategoryIdFromMetadata(nodeMetadataSnapshot);
+        categoryId = await inferCategoryIdFromMetadata(scopedMetadataSnapshot);
+      }
+      if (!categoryId && scope === "book") {
+        const defaultCategory =
+          availableCategories.find((category) => category.name === "system_default_metadata") ||
+          availableCategories[0];
+        categoryId = defaultCategory?.id ?? null;
       }
       if (!categoryId) {
         setPropertiesCategoryId(null);
@@ -1041,26 +1705,122 @@ function ScripturesContent() {
       });
       if (binding) {
         binding.properties.forEach((item) => {
-          values[item.property_internal_name] = item.value ?? null;
+          const field = visibleEffective.find(
+            (candidate) => candidate.property_internal_name === item.property_internal_name
+          );
+          if (!field) {
+            return;
+          }
+          const nextValue = item.value ?? null;
+          if (!isUsableBindingValueForField(field, nextValue)) {
+            return;
+          }
+          values[item.property_internal_name] = nextValue;
           bindingProvidedKeys.add(item.property_internal_name);
         });
         Object.entries(binding.property_overrides || {}).forEach(([key, value]) => {
+          const field = visibleEffective.find((candidate) => candidate.property_internal_name === key);
+          if (!field) {
+            return;
+          }
+          if (!isUsableBindingValueForField(field, value)) {
+            return;
+          }
           values[key] = value;
           bindingProvidedKeys.add(key);
         });
       }
 
-      Object.entries(nodeMetadataSnapshot).forEach(([key, value]) => {
+      Object.entries(scopedMetadataSnapshot).forEach(([key, value]) => {
         if (!(key in values)) {
           return;
         }
-        if (bindingProvidedKeys.has(key)) {
+        if (bindingProvidedKeys.has(key) && !isEmptyMetadataValue(values[key])) {
           return;
         }
-        if (value !== undefined) {
+        if (value !== undefined && !isEmptyMetadataValue(value)) {
           values[key] = value;
         }
       });
+
+      if (scope === "node") {
+        const pickSnapshotText = (...candidates: string[]): string => {
+          for (const candidate of candidates) {
+            const value = scopedMetadataSnapshot[candidate];
+            if (typeof value === "string" && value.trim()) {
+              return value;
+            }
+          }
+          return "";
+        };
+
+        const sanskritFallback = pickSnapshotText(
+          "sanskrit",
+          "text_sanskrit",
+          "sanskrit_text",
+          "verse_sanskrit",
+          "shloka",
+          "title_sanskrit"
+        );
+        const transliterationFallback = pickSnapshotText(
+          "transliteration",
+          "iast",
+          "text_transliteration",
+          "transliteration_text",
+          "verse_transliteration",
+          "title_transliteration"
+        );
+        const englishFallback = pickSnapshotText(
+          "english",
+          "translation",
+          "text_english",
+          "english_text",
+          "english_translation",
+          "verse_translation",
+          "title_english"
+        );
+        const chapterFallback = pickSnapshotText("chapter_number", "chapter");
+        const verseFallback = pickSnapshotText("verse_number", "shloka_number", "sequence_number");
+
+        visibleEffective.forEach((field) => {
+          const key = field.property_internal_name;
+          if (!isEmptyMetadataValue(values[key])) {
+            return;
+          }
+          const normalized = key.toLowerCase();
+
+          if (sanskritFallback && (normalized.includes("sanskrit") || normalized === "shloka")) {
+            values[key] = sanskritFallback;
+            return;
+          }
+          if (
+            transliterationFallback &&
+            (normalized.includes("transliteration") || normalized.includes("iast"))
+          ) {
+            values[key] = transliterationFallback;
+            return;
+          }
+          if (
+            englishFallback &&
+            (normalized.includes("english") ||
+              (normalized.includes("translation") && !normalized.includes("transliteration")))
+          ) {
+            values[key] = englishFallback;
+            return;
+          }
+          if (chapterFallback && normalized.includes("chapter") && normalized.includes("number")) {
+            values[key] = chapterFallback;
+            return;
+          }
+          if (
+            verseFallback &&
+            (normalized.includes("verse") || normalized.includes("shloka")) &&
+            normalized.includes("number")
+          ) {
+            values[key] = verseFallback;
+          }
+        });
+      }
 
       setPropertiesCategoryId(categoryId);
       setPropertiesEffectiveFields(visibleEffective);
@@ -1113,9 +1873,44 @@ function ScripturesContent() {
     setPropertiesError(null);
   };
 
+  const handleToggleWordMeaningsRolloutLevel = (levelName: string) => {
+    const normalized = levelName.trim().toLowerCase();
+    if (!normalized) return;
+
+    setWordMeaningsEnabledLevelSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(normalized)) {
+        next.delete(normalized);
+      } else {
+        next.add(normalized);
+      }
+      return next;
+    });
+  };
+
   const handleSaveProperties = async () => {
     if (!propertiesCategoryId) {
       setPropertiesError("Select a category before saving");
+      return;
+    }
+
+    const fallbackOrderFromInput = wordMeaningsFallbackOrderInput
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+
+    const invalidFallbackStrategies = fallbackOrderFromInput.filter(
+      (item) =>
+        !WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.includes(
+          item as (typeof WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES)[number]
+        )
+    );
+
+    if (propertiesScope === "book" && invalidFallbackStrategies.length > 0) {
+      setPropertiesError(
+        `Fallback order contains invalid values: ${Array.from(new Set(invalidFallbackStrategies)).join(", "
+        )}. Allowed values: ${WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.join(", ")}`
+      );
       return;
     }
 
@@ -1133,6 +1928,83 @@ function ScripturesContent() {
     setPropertiesMessage(null);
 
     try {
+      if (propertiesScope === "book" && bookId && currentBook) {
+        const existingMetadata =
+          currentBook.metadata_json && typeof currentBook.metadata_json === "object"
+            ? { ...currentBook.metadata_json }
+            : currentBook.metadata && typeof currentBook.metadata === "object"
+              ? { ...currentBook.metadata }
+              : {};
+
+        const existingWordMeanings =
+          existingMetadata.word_meanings && typeof existingMetadata.word_meanings === "object"
+            ? { ...(existingMetadata.word_meanings as Record<string, unknown>) }
+            : {};
+
+        const schemaLevels = Array.isArray(currentBook.schema?.levels)
+          ? currentBook.schema.levels
+          : [];
+
+        const selectedLevels =
+          schemaLevels.length > 0
+            ? schemaLevels.filter((level) =>
+                wordMeaningsEnabledLevelSelection.has(level.trim().toLowerCase())
+              )
+            : Array.from(wordMeaningsEnabledLevelSelection);
+
+        const selectedFallbackOrder =
+          fallbackOrderFromInput.length > 0
+            ? Array.from(new Set(fallbackOrderFromInput))
+            : [...WORD_MEANINGS_FALLBACK_ORDER_DEFAULT];
+
+        const existingSourceConfig =
+          existingWordMeanings.source && typeof existingWordMeanings.source === "object"
+            ? { ...(existingWordMeanings.source as Record<string, unknown>) }
+            : {};
+
+        const existingMeaningsConfig =
+          existingWordMeanings.meanings && typeof existingWordMeanings.meanings === "object"
+            ? { ...(existingWordMeanings.meanings as Record<string, unknown>) }
+            : {};
+
+        existingWordMeanings.enabled_levels = selectedLevels;
+        existingWordMeanings.source = {
+          ...existingSourceConfig,
+          source_display_mode: wordMeaningsSourceDisplayModeSelection,
+          preferred_transliteration_scheme: wordMeaningsPreferredSchemeSelection,
+          allow_runtime_transliteration_generation: wordMeaningsAllowRuntimeGenerationSelection,
+        };
+        existingWordMeanings.meanings = {
+          ...existingMeaningsConfig,
+          meaning_language: wordMeaningsMeaningLanguageSelection,
+          fallback_order: selectedFallbackOrder,
+        };
+        existingMetadata.word_meanings = existingWordMeanings;
+
+        const bookResponse = await fetch(`/api/books/${bookId}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metadata: existingMetadata }),
+        });
+
+        const bookPayload = (await bookResponse.json().catch(() => null)) as
+          | BookDetails
+          | { detail?: string }
+          | null;
+
+        if (!bookResponse.ok) {
+          throw new Error(
+            (bookPayload as { detail?: string } | null)?.detail ||
+              "Failed to save word meanings rollout"
+          );
+        }
+
+        const updatedBook = bookPayload as BookDetails;
+        setCurrentBook(updatedBook);
+        setWordMeaningsEnabledLevelSelection(getWordMeaningsEnabledLevelsFromBook(updatedBook));
+      }
+
       const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
       const response = await fetch(endpoint, {
         method: "POST",
@@ -1258,6 +2130,26 @@ function ScripturesContent() {
   const canUseBookDraftActions = Boolean(authEmail) && Boolean(bookId);
   const canPreviewCurrentBook =
     Boolean(bookId) && (Boolean(authEmail) || isCurrentBookPublic);
+  const activeNodeLevelLabel = formatValue(nodeContent?.level_name) || "Node";
+  const activeNodePropertiesLabel = `${activeNodeLevelLabel} properties`;
+  const activeNodePropertiesTitle = `${activeNodeLevelLabel} Properties`;
+  const activeNodeEditLabel = `Edit ${activeNodeLevelLabel}`;
+  const activeNodeDeleteLabel = `Delete ${activeNodeLevelLabel}`;
+  const currentBookSchemaLevels = Array.isArray(currentBook?.schema?.levels)
+    ? currentBook.schema.levels
+    : [];
+
+  useEffect(() => {
+    if (!showPropertiesModal || propertiesScope !== "book" || !currentBook) return;
+
+    setWordMeaningsEnabledLevelSelection(getWordMeaningsEnabledLevelsFromBook(currentBook));
+    const renderingSettings = getWordMeaningsRenderingSettingsFromBook(currentBook);
+    setWordMeaningsSourceDisplayModeSelection(renderingSettings.sourceDisplayMode);
+    setWordMeaningsPreferredSchemeSelection(renderingSettings.preferredScheme);
+    setWordMeaningsAllowRuntimeGenerationSelection(renderingSettings.allowRuntimeGeneration);
+    setWordMeaningsMeaningLanguageSelection(renderingSettings.meaningLanguage);
+    setWordMeaningsFallbackOrderInput(renderingSettings.fallbackOrder.join(", "));
+  }, [showPropertiesModal, propertiesScope, currentBook]);
 
   const handleTogglePublish = async () => {
     if (!bookId || !currentBook) return;
@@ -2154,6 +3046,31 @@ function ScripturesContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           node_id: scope === "node" ? selectedId ?? undefined : undefined,
+          metadata_bindings: {
+            global: {
+              word_meanings: {
+                source: {
+                  source_display_mode: nextLanguageSettings.show_sanskrit
+                    ? "script"
+                    : "transliteration",
+                  preferred_transliteration_scheme:
+                    nextPreviewTransliterationScript === "harvard_kyoto"
+                      ? "hk"
+                      : nextPreviewTransliterationScript === "itrans"
+                        ? "itrans"
+                        : "iast",
+                  allow_runtime_transliteration_generation: true,
+                },
+                meanings: {
+                  meaning_language: preferences?.source_language === "hindi" ? "hi" : "en",
+                  fallback_order: ["user_preference", "en", "first_available"],
+                },
+                rendering: {
+                  show_language_badge_when_fallback_used: true,
+                },
+              },
+            },
+          },
           render_settings: {
             ...nextLanguageSettings,
             show_metadata: nextShowPreviewDetails,
@@ -2493,6 +3410,7 @@ function ScripturesContent() {
       contentTransliteration: contentBasic?.transliteration || "",
       contentEnglish: englishTranslation,
       tags: node.tags?.join(", ") || "",
+      wordMeanings: mapWordMeaningsRowsFromContent(node),
     };
   };
 
@@ -2507,6 +3425,7 @@ function ScripturesContent() {
     contentTransliteration: string;
     contentEnglish: string;
     tags: string;
+    wordMeanings: WordMeaningRow[];
   }) => {
     const normalized = {
       levelName: value.levelName.trim(),
@@ -2523,12 +3442,14 @@ function ScripturesContent() {
         .map((tag) => tag.trim())
         .filter(Boolean)
         .join(","),
+      wordMeanings: mapWordMeaningRowsForPayload(value.wordMeanings),
     };
 
     if (!normalized.hasContent) {
       normalized.contentSanskrit = "";
       normalized.contentTransliteration = "";
       normalized.contentEnglish = "";
+      normalized.wordMeanings = [];
     }
 
     return normalized;
@@ -2544,6 +3465,45 @@ function ScripturesContent() {
   }
 
   const inlineHasChanges = hasUnsavedInlineChanges();
+
+  const wordMeaningsEnabledLevels = getWordMeaningsEnabledLevelsFromBook(currentBook);
+  const isWordMeaningsEnabledForLevel = (levelName: string | null | undefined) => {
+    const normalizedLevel = (levelName || "").trim().toLowerCase();
+    if (!normalizedLevel || wordMeaningsEnabledLevels.size === 0) {
+      return false;
+    }
+    return wordMeaningsEnabledLevels.has(normalizedLevel);
+  };
+
+  const inlineWordMeaningsEnabled = isWordMeaningsEnabledForLevel(
+    inlineFormData.levelName || nodeContent?.level_name
+  );
+
+  const inlineWordMeaningPayloadRows = inlineFormData.hasContent && inlineWordMeaningsEnabled
+    ? mapWordMeaningRowsForPayload(inlineFormData.wordMeanings)
+    : [];
+  const inlineWordMeaningValidationErrors = inlineFormData.hasContent && inlineWordMeaningsEnabled
+    ? validateWordMeaningPayloadRows(inlineWordMeaningPayloadRows)
+    : [];
+
+  const inlineWordMeaningsMissingRequired =
+    inlineWordMeaningValidationErrors.some((error) =>
+      error.includes(`meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`)
+    );
+
+  const modalWordMeaningsEnabled = isWordMeaningsEnabledForLevel(
+    formData.levelName || actionNode?.level_name
+  );
+  const modalWordMeaningPayloadRows = formData.hasContent && modalWordMeaningsEnabled
+    ? mapWordMeaningRowsForPayload(formData.wordMeanings)
+    : [];
+  const modalWordMeaningValidationErrors = formData.hasContent && modalWordMeaningsEnabled
+    ? validateWordMeaningPayloadRows(modalWordMeaningPayloadRows)
+    : [];
+  const modalWordMeaningsMissingRequired =
+    modalWordMeaningValidationErrors.some((error) =>
+      error.includes(`meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`)
+    );
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -2719,6 +3679,20 @@ function ScripturesContent() {
         contentData.translations = {
           english: formData.contentEnglish || undefined,
         };
+
+        const wordMeaningRows = modalWordMeaningPayloadRows;
+        const validationErrors = validateWordMeaningPayloadRows(wordMeaningRows);
+        if (validationErrors.length > 0) {
+          setActionMessage(`Validation failed: ${validationErrors[0]}`);
+          return;
+        }
+
+        if (modalWordMeaningsEnabled && wordMeaningRows.length > 0) {
+          contentData.word_meanings = {
+            version: WORD_MEANINGS_VERSION,
+            rows: wordMeaningRows,
+          };
+        }
       }
 
       // Calculate level_order based on parent node
@@ -2800,6 +3774,7 @@ function ScripturesContent() {
           contentTransliteration: "",
           contentEnglish: "",
           tags: "",
+          wordMeanings: [],
         });
         // Refresh tree without losing context
         if (bookId) {
@@ -2884,6 +3859,21 @@ function ScripturesContent() {
         contentData.translations = {
           english: inlineFormData.contentEnglish || undefined,
         };
+
+        const wordMeaningRows = inlineWordMeaningPayloadRows;
+
+        const validationErrors = validateWordMeaningPayloadRows(wordMeaningRows);
+        if (validationErrors.length > 0) {
+          setInlineMessage(`Validation failed: ${validationErrors[0]}`);
+          return;
+        }
+
+        if (inlineWordMeaningsEnabled && wordMeaningRows.length > 0) {
+          contentData.word_meanings = {
+            version: WORD_MEANINGS_VERSION,
+            rows: wordMeaningRows,
+          };
+        }
       }
 
       const payload = {
@@ -2972,6 +3962,184 @@ function ScripturesContent() {
     setInlineEditMode(false);
   };
 
+  const updateInlineWordMeaningRows = (rows: WordMeaningRow[]) => {
+    setInlineFormData((prev) => ({
+      ...prev,
+      wordMeanings: rows.map((row, index) => ({
+        ...row,
+        order: index + 1,
+      })),
+    }));
+  };
+
+  const handleAddInlineWordMeaningRow = () => {
+    setInlineFormData((prev) => ({
+      ...prev,
+      wordMeanings: [...prev.wordMeanings, createEmptyWordMeaningRow(prev.wordMeanings.length + 1)],
+    }));
+  };
+
+  const handleRemoveInlineWordMeaningRow = (rowId: string) => {
+    const next = inlineFormData.wordMeanings.filter((row) => row.id !== rowId);
+    updateInlineWordMeaningRows(next);
+  };
+
+  const handleMoveInlineWordMeaningRow = (rowId: string, direction: "up" | "down") => {
+    const index = inlineFormData.wordMeanings.findIndex((row) => row.id === rowId);
+    if (index < 0) return;
+
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= inlineFormData.wordMeanings.length) return;
+
+    const next = [...inlineFormData.wordMeanings];
+    const [item] = next.splice(index, 1);
+    next.splice(targetIndex, 0, item);
+    updateInlineWordMeaningRows(next);
+  };
+
+  const handleInlineWordMeaningChange = (
+    rowId: string,
+    key: "sourceLanguage" | "sourceScriptText" | "sourceTransliterationIast",
+    value: string
+  ) => {
+    setInlineFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) =>
+        row.id === rowId
+          ? {
+              ...row,
+              [key]: value,
+            }
+          : row
+      ),
+    }));
+  };
+
+  const handleSelectInlineMeaningLanguage = (rowId: string, language: string) => {
+    setInlineFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+        return {
+          ...row,
+          activeMeaningLanguage: language,
+          meanings: {
+            ...row.meanings,
+            [language]: row.meanings[language] || "",
+          },
+        };
+      }),
+    }));
+  };
+
+  const handleInlineMeaningTextChange = (rowId: string, language: string, value: string) => {
+    setInlineFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) =>
+        row.id === rowId
+          ? {
+              ...row,
+              meanings: {
+                ...row.meanings,
+                [language]: value,
+              },
+            }
+          : row
+      ),
+    }));
+  };
+
+  const updateModalWordMeaningRows = (rows: WordMeaningRow[]) => {
+    setFormData((prev) => ({
+      ...prev,
+      wordMeanings: rows.map((row, index) => ({
+        ...row,
+        order: index + 1,
+      })),
+    }));
+  };
+
+  const handleAddModalWordMeaningRow = () => {
+    setFormData((prev) => ({
+      ...prev,
+      wordMeanings: [...prev.wordMeanings, createEmptyWordMeaningRow(prev.wordMeanings.length + 1)],
+    }));
+  };
+
+  const handleRemoveModalWordMeaningRow = (rowId: string) => {
+    const next = formData.wordMeanings.filter((row) => row.id !== rowId);
+    updateModalWordMeaningRows(next);
+  };
+
+  const handleMoveModalWordMeaningRow = (rowId: string, direction: "up" | "down") => {
+    const index = formData.wordMeanings.findIndex((row) => row.id === rowId);
+    if (index < 0) return;
+
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= formData.wordMeanings.length) return;
+
+    const next = [...formData.wordMeanings];
+    const [item] = next.splice(index, 1);
+    next.splice(targetIndex, 0, item);
+    updateModalWordMeaningRows(next);
+  };
+
+  const handleModalWordMeaningChange = (
+    rowId: string,
+    key: "sourceLanguage" | "sourceScriptText" | "sourceTransliterationIast",
+    value: string
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) =>
+        row.id === rowId
+          ? {
+              ...row,
+              [key]: value,
+            }
+          : row
+      ),
+    }));
+  };
+
+  const handleSelectModalMeaningLanguage = (rowId: string, language: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+        return {
+          ...row,
+          activeMeaningLanguage: language,
+          meanings: {
+            ...row.meanings,
+            [language]: row.meanings[language] || "",
+          },
+        };
+      }),
+    }));
+  };
+
+  const handleModalMeaningTextChange = (rowId: string, language: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      wordMeanings: prev.wordMeanings.map((row) =>
+        row.id === rowId
+          ? {
+              ...row,
+              meanings: {
+                ...row.meanings,
+                [language]: value,
+              },
+            }
+          : row
+      ),
+    }));
+  };
+
   const renderTree = (nodes: TreeNode[], depth = 0) => {
     // Sort nodes by sequence_number
     const sorted = [...nodes].sort((a, b) => {
@@ -3052,6 +4220,7 @@ function ScripturesContent() {
                   contentTransliteration: "",
                   contentEnglish: "",
                   tags: "",
+                  wordMeanings: [],
                 });
                 setAction("add");
               }}
@@ -3463,6 +4632,7 @@ function ScripturesContent() {
                             contentTransliteration: "",
                             contentEnglish: "",
                             tags: "",
+                            wordMeanings: [],
                           });
                           setAction("add");
                         }}
@@ -3727,7 +4897,7 @@ function ScripturesContent() {
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
                                   <SlidersHorizontal size={14} />
-                                  Node properties
+                                  {activeNodePropertiesLabel}
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -3754,7 +4924,7 @@ function ScripturesContent() {
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
                                   <Pencil size={14} />
-                                  Edit node
+                                  {activeNodeEditLabel}
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -3762,7 +4932,11 @@ function ScripturesContent() {
                                   type="button"
                                   onClick={async () => {
                                     setShowNodeActionsMenu(false);
-                                    if (window.confirm("Delete this node? This cannot be undone.")) {
+                                    if (
+                                      window.confirm(
+                                        `Delete this ${activeNodeLevelLabel}? This cannot be undone.`
+                                      )
+                                    ) {
                                       try {
                                         await fetch(contentPath(`/nodes/${selectedId}`), {
                                           method: "DELETE",
@@ -3779,7 +4953,7 @@ function ScripturesContent() {
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
                                 >
                                   <Trash2 size={14} />
-                                  Delete node
+                                  {activeNodeDeleteLabel}
                                 </button>
                               )}
                             </div>
@@ -4024,6 +5198,22 @@ function ScripturesContent() {
                                 />
                               </div>
                             </div>
+
+                            {inlineWordMeaningsEnabled && (
+                              <WordMeaningsEditor
+                                rows={inlineFormData.wordMeanings}
+                                validationErrors={inlineWordMeaningValidationErrors}
+                                missingRequired={inlineWordMeaningsMissingRequired}
+                                requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
+                                allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
+                                onAddRow={handleAddInlineWordMeaningRow}
+                                onMoveRow={handleMoveInlineWordMeaningRow}
+                                onRemoveRow={handleRemoveInlineWordMeaningRow}
+                                onSourceFieldChange={handleInlineWordMeaningChange}
+                                onSelectMeaningLanguage={handleSelectInlineMeaningLanguage}
+                                onMeaningTextChange={handleInlineMeaningTextChange}
+                              />
+                            )}
                           </div>
                         )}
 
@@ -4051,7 +5241,11 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={() => void handleInlineSave()}
-                            disabled={inlineSubmitting || !inlineHasChanges}
+                            disabled={
+                              inlineSubmitting ||
+                              !inlineHasChanges ||
+                              inlineWordMeaningValidationErrors.length > 0
+                            }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {inlineSubmitting ? "Saving..." : "Save details"}
@@ -4241,7 +5435,7 @@ function ScripturesContent() {
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                    {propertiesScope === "book" ? "Book Properties" : "Node Properties"}
+                    {propertiesScope === "book" ? "Book Properties" : activeNodePropertiesTitle}
                   </h2>
                   <p className="text-sm text-zinc-600">
                     Base properties: Name, Description, Category. Other fields are category metadata properties.
@@ -4324,6 +5518,155 @@ function ScripturesContent() {
                   <p className="text-xs text-zinc-500">Selected category has no metadata properties.</p>
                 )}
 
+                {propertiesScope === "book" && (
+                  <div className="rounded-lg border border-black/10 bg-white p-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Word Meanings Rollout
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-600">
+                      Enable word-to-word meanings for selected levels in this book.
+                    </p>
+                    {currentBookSchemaLevels.length === 0 ? (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        No schema levels available for this book.
+                      </p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {currentBookSchemaLevels.map((level) => {
+                          const normalized = level.trim().toLowerCase();
+                          const checked = wordMeaningsEnabledLevelSelection.has(normalized);
+                          return (
+                            <label
+                              key={level}
+                              className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => handleToggleWordMeaningsRolloutLevel(level)}
+                                disabled={propertiesSaving || propertiesLoading}
+                              />
+                              <span>{level}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs text-zinc-500">
+                      Changes are saved with Save Properties.
+                    </p>
+
+                    <div className="mt-4 border-t border-black/10 pt-3">
+                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Word Meanings Rendering
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        Controls how W2W source and meaning are rendered in preview/export.
+                      </p>
+
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Source Display Mode</span>
+                          <select
+                            value={wordMeaningsSourceDisplayModeSelection}
+                            onChange={(event) => {
+                              setWordMeaningsSourceDisplayModeSelection(
+                                event.target.value === "transliteration" ? "transliteration" : "script"
+                              );
+                              setPropertiesMessage(null);
+                              setPropertiesError(null);
+                            }}
+                            disabled={propertiesSaving || propertiesLoading}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="script">Script</option>
+                            <option value="transliteration">Transliteration</option>
+                          </select>
+                        </label>
+
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preferred Transliteration Scheme</span>
+                          <select
+                            value={wordMeaningsPreferredSchemeSelection}
+                            onChange={(event) => {
+                              const nextValue = event.target.value as (typeof WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES)[number];
+                              setWordMeaningsPreferredSchemeSelection(
+                                WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.includes(nextValue)
+                                  ? nextValue
+                                  : "iast"
+                              );
+                              setPropertiesMessage(null);
+                              setPropertiesError(null);
+                            }}
+                            disabled={propertiesSaving || propertiesLoading}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                          >
+                            {WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.map((scheme) => (
+                              <option key={scheme} value={scheme}>{scheme}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Meaning Language</span>
+                          <select
+                            value={wordMeaningsMeaningLanguageSelection}
+                            onChange={(event) => {
+                              const nextValue = event.target.value as (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number];
+                              setWordMeaningsMeaningLanguageSelection(
+                                WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.includes(nextValue)
+                                  ? nextValue
+                                  : "en"
+                              );
+                              setPropertiesMessage(null);
+                              setPropertiesError(null);
+                            }}
+                            disabled={propertiesSaving || propertiesLoading}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                          >
+                            {WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.map((language) => (
+                              <option key={language} value={language}>{language}</option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Fallback Order</span>
+                          <input
+                            type="text"
+                            value={wordMeaningsFallbackOrderInput}
+                            onChange={(event) => {
+                              setWordMeaningsFallbackOrderInput(event.target.value);
+                              setPropertiesMessage(null);
+                              setPropertiesError(null);
+                            }}
+                            disabled={propertiesSaving || propertiesLoading}
+                            placeholder="user_preference, en, first_available"
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                          />
+                          <span className="text-[11px] text-zinc-500">
+                            Allowed: {WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.join(", ")}
+                          </span>
+                        </label>
+                      </div>
+
+                      <label className="mt-3 inline-flex items-center gap-2 text-xs text-zinc-700">
+                        <input
+                          type="checkbox"
+                          checked={wordMeaningsAllowRuntimeGenerationSelection}
+                          onChange={(event) => {
+                            setWordMeaningsAllowRuntimeGenerationSelection(event.target.checked);
+                            setPropertiesMessage(null);
+                            setPropertiesError(null);
+                          }}
+                          disabled={propertiesSaving || propertiesLoading}
+                        />
+                        <span>Allow runtime transliteration generation</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 {propertiesEffectiveFields.map((field) => {
                   const key = field.property_internal_name;
                   const value = propertiesValues[key];
@@ -4344,11 +5687,12 @@ function ScripturesContent() {
                   }
 
                   if (field.property_data_type === "dropdown") {
+                    const dropdownValue = metadataObjectToDisplayText(value);
                     return (
                       <label key={key} className="flex flex-col gap-1">
                         <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
                         <select
-                          value={typeof value === "string" ? value : ""}
+                          value={dropdownValue}
                           onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
                           className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
                         >
@@ -4405,7 +5749,7 @@ function ScripturesContent() {
 
                   const singleLine = isSingleLineTextMetadataField(field);
                   const isTemplateField = isTemplateMetadataField(field);
-                  const textValue = value === null || value === undefined ? "" : String(value);
+                  const textValue = metadataObjectToDisplayText(value);
 
                   return (
                     <label key={key} className="flex flex-col gap-1">
@@ -4664,6 +6008,7 @@ function ScripturesContent() {
                   ) : (
                     bookPreviewArtifact.sections.body.map((block) => {
                       const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
+                      const wordMeaningRows = resolvePreviewWordMeanings(block);
                       const rawTitle = block.title || "";
                       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
                       const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
@@ -4689,6 +6034,28 @@ function ScripturesContent() {
                               ))
                             )}
                           </div>
+                          {wordMeaningRows.length > 0 && (
+                            <div className="mt-3 rounded-lg border border-black/10 bg-zinc-50/70 p-2.5">
+                              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                                Word Meanings
+                              </div>
+                              <div className="space-y-1.5">
+                                {wordMeaningRows.map((row) => (
+                                  <div key={row.key} className="grid grid-cols-1 gap-1.5 text-sm md:grid-cols-2 md:gap-3">
+                                    <div className="font-medium text-[color:var(--deep)]">{row.sourceText || "—"}</div>
+                                    <div className="text-zinc-700">
+                                      <span>{row.meaningText || "—"}</span>
+                                      {row.fallbackBadgeVisible && row.meaningLanguage && (
+                                        <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-amber-700">
+                                          {row.meaningLanguage}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
                             <div className="mt-2 text-xs text-zinc-500">
                               template: {block.template_key}
@@ -4858,6 +6225,7 @@ function ScripturesContent() {
                   ✕
                 </button>
               </div>
+                            wordMeanings: [],
 
               {!selectedSchema ? (
                 <div className="flex flex-col gap-4">
@@ -4986,7 +6354,7 @@ function ScripturesContent() {
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     {action === "add" 
                       ? `Add ${formData.levelName || "New Node"}` 
-                      : "Edit Node"}
+                      : `Edit ${formatValue(formData.levelName || actionNode?.level_name) || "Node"}`}
                   </h2>
                   <button
                     type="button"
@@ -5230,6 +6598,22 @@ function ScripturesContent() {
                         />
                       </div>
                     </div>
+
+                    {modalWordMeaningsEnabled && (
+                      <WordMeaningsEditor
+                        rows={formData.wordMeanings}
+                        validationErrors={modalWordMeaningValidationErrors}
+                        missingRequired={modalWordMeaningsMissingRequired}
+                        requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
+                        allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
+                        onAddRow={handleAddModalWordMeaningRow}
+                        onMoveRow={handleMoveModalWordMeaningRow}
+                        onRemoveRow={handleRemoveModalWordMeaningRow}
+                        onSourceFieldChange={handleModalWordMeaningChange}
+                        onSelectMeaningLanguage={handleSelectModalMeaningLanguage}
+                        onMeaningTextChange={handleModalMeaningTextChange}
+                      />
+                    )}
                   </div>
                 )}
                 </div>
@@ -5243,7 +6627,7 @@ function ScripturesContent() {
                   <div className="flex gap-2">
                   <button
                     type="submit"
-                    disabled={submitting}
+                    disabled={submitting || modalWordMeaningValidationErrors.length > 0}
                     className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
                   >
                     {submitting ? "Submitting..." : action === "add" ? "Create" : "Save"}
