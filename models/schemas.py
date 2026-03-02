@@ -220,6 +220,7 @@ class ContentNodeBase(BaseModel):
     has_content: bool = False
     content_data: dict | None = None
     summary_data: dict | None = None
+    metadata_json: dict | None = None
     source_attribution: str | None = None
     license_type: str = "CC-BY-SA-4.0"
     original_source_url: str | None = None

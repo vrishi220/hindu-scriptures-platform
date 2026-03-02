@@ -30,7 +30,7 @@ type PropertyCreatePayload = {
   display_name: string;
   data_type: PropertyDataType;
   description: string | null;
-  default_value: string | boolean | number | null;
+  default_value: string | boolean | number | Record<string, unknown> | null;
   is_required: boolean;
   dropdown_options: string[] | null;
 };

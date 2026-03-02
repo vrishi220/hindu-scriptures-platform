@@ -20,10 +20,18 @@ export async function GET(
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
-  const response = await fetch(target.toString(), {
-    headers,
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(target.toString(), {
+      headers,
+      cache: "no-store",
+    });
+  } catch {
+    return NextResponse.json(
+      { detail: "Book service unavailable. Please start the API server and try again." },
+      { status: 503 }
+    );
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
+import InlineClearButton from "../../components/InlineClearButton";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -114,6 +115,8 @@ type NodeContent = {
       english?: string;
     };
   } | null;
+  metadata_json?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
   tags?: string[] | null;
 };
 
@@ -201,6 +204,7 @@ type EffectivePropertyBinding = {
   dropdown_options?: string[] | null;
 };
 
+
 type CategoryEffectiveProperties = {
   category_id: number;
   category_name: string;
@@ -263,6 +267,11 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
 };
 
 const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
+const DEFAULT_CONTENT_FIELD_LABELS = {
+  sanskrit: "Sanskrit",
+  transliteration: "Transliteration",
+  english: "English",
+} as const;
 
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   source_language: "english",
@@ -359,6 +368,70 @@ const valuesEqual = (left: unknown, right: unknown): boolean => {
   }
 };
 
+const isSingleLineTextMetadataField = (field: EffectivePropertyBinding): boolean => {
+  const name = field.property_internal_name.toLowerCase();
+  if (name.includes("template") || name.endsWith("_key") || name.includes("render_key")) {
+    return true;
+  }
+  if (name.includes("language") || name.includes("slug") || name.includes("code")) {
+    return true;
+  }
+  return false;
+};
+
+const isTemplateMetadataField = (field: EffectivePropertyBinding): boolean => {
+  const name = field.property_internal_name.toLowerCase();
+  return name.includes("template") && name.endsWith("_key");
+};
+
+const filterVisibleMetadataFields = (fields: EffectivePropertyBinding[]): EffectivePropertyBinding[] =>
+  fields.filter((field) => field.property_internal_name !== "text");
+
+const getFieldDefaultValue = (field: EffectivePropertyBinding): unknown => {
+  return field.default_value ?? null;
+};
+
+const autoFillSanskritTransliterationPair = (
+  sanskritRaw: string,
+  transliterationRaw: string
+): { sanskrit: string; transliteration: string } => {
+  const sanskrit = sanskritRaw.trim();
+  const transliteration = transliterationRaw.trim();
+
+  if (!sanskrit && !transliteration) {
+    return { sanskrit: "", transliteration: "" };
+  }
+
+  if (sanskrit && transliteration) {
+    return { sanskrit, transliteration };
+  }
+
+  if (!sanskrit && transliteration) {
+    if (hasDevanagariLetters(transliteration)) {
+      return {
+        sanskrit: transliteration,
+        transliteration: transliterateFromDevanagari(transliteration, "iast"),
+      };
+    }
+    return {
+      sanskrit: transliterateFromIast(transliteration, "devanagari"),
+      transliteration,
+    };
+  }
+
+  if (hasDevanagariLetters(sanskrit)) {
+    return {
+      sanskrit,
+      transliteration: transliterateFromDevanagari(sanskrit, "iast"),
+    };
+  }
+
+  return {
+    sanskrit: transliterateFromIast(sanskrit, "devanagari"),
+    transliteration: transliterateFromIast(sanskrit, "iast"),
+  };
+};
+
 const toDatetimeLocalValue = (value: unknown): string => {
   if (typeof value !== "string" || !value.trim()) {
     return "";
@@ -414,8 +487,24 @@ function ScripturesContent() {
   const activeContentRequestId = useRef(0);
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
+  const pendingSavedNodeId = useRef<number | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [formData, setFormData] = useState({
+    levelName: "",
+    titleSanskrit: "",
+    titleTransliteration: "",
+    titleEnglish: "",
+    sequenceNumber: "",
+    hasContent: true,
+    contentSanskrit: "",
+    contentTransliteration: "",
+    contentEnglish: "",
+    tags: "",
+  });
+  const [inlineEditMode, setInlineEditMode] = useState(false);
+  const [inlineSubmitting, setInlineSubmitting] = useState(false);
+  const [inlineMessage, setInlineMessage] = useState<string | null>(null);
+  const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
     titleSanskrit: "",
     titleTransliteration: "",
@@ -487,6 +576,9 @@ function ScripturesContent() {
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
   const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
   const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
+  const [contentFieldLabels, setContentFieldLabels] = useState<Record<string, string>>({
+    ...DEFAULT_CONTENT_FIELD_LABELS,
+  });
   const [showPropertiesModal, setShowPropertiesModal] = useState(false);
   const [propertiesScope, setPropertiesScope] = useState<PropertiesScope>("book");
   const [propertiesNodeId, setPropertiesNodeId] = useState<number | null>(null);
@@ -527,6 +619,10 @@ function ScripturesContent() {
     setShowNodeActionsMenu(false);
   }, [selectedId]);
 
+  useEffect(() => {
+    setInlineMessage(null);
+  }, [selectedId]);
+
   const resolvePreviewContentLines = (
     block: BookPreviewBlock,
     settings?: BookPreviewRenderSettings
@@ -554,6 +650,19 @@ function ScripturesContent() {
           ? "text-sm italic text-zinc-700"
           : "text-sm text-zinc-700";
 
+    const metadataLabelForField = (fieldName: string) => {
+      if (fieldName === "sanskrit") {
+        return contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
+      }
+      if (fieldName === "transliteration") {
+        return contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
+      }
+      if (fieldName === "english") {
+        return contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english;
+      }
+      return "Text";
+    };
+
     const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
     const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
     if (renderedLines.length > 0) {
@@ -576,10 +685,11 @@ function ScripturesContent() {
             : rawValue;
 
         const rawLabel = (line?.label || "").trim();
+        const baseLabel = metadataLabelForField(fieldName);
         const computedLabel =
           fieldName === "transliteration"
-            ? `Transliteration (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
-            : rawLabel;
+            ? `${baseLabel} (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
+            : rawLabel || baseLabel;
         const label = appliedShowPreviewLabels && fieldName !== previousFieldName ? computedLabel : "";
 
         lines.push({
@@ -609,11 +719,11 @@ function ScripturesContent() {
 
       const label = appliedShowPreviewLabels
         ? key === "sanskrit"
-          ? "Sanskrit"
+          ? metadataLabelForField("sanskrit")
           : key === "transliteration"
-            ? `Transliteration (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
+            ? `${metadataLabelForField("transliteration")} (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
             : key === "english"
-              ? "English"
+              ? metadataLabelForField("english")
               : "Text"
         : "";
 
@@ -683,6 +793,195 @@ function ScripturesContent() {
     return `/api/books/${bookId}/nodes/${nodeId}/metadata-binding`;
   };
 
+  const toRecord = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    return value as Record<string, unknown>;
+  };
+
+  const deriveNodeMetadataFallback = (nodePayload: {
+    level_name?: string | null;
+    sequence_number?: string | null;
+    title_english?: string | null;
+    title_sanskrit?: string | null;
+    title_transliteration?: string | null;
+    content_data?: {
+      basic?: {
+        sanskrit?: string;
+        transliteration?: string;
+        translation?: string;
+      };
+      translations?: {
+        english?: string;
+      };
+    } | null;
+  }): Record<string, unknown> => {
+    const fallback: Record<string, unknown> = {};
+    const basic = nodePayload.content_data?.basic || {};
+    const englishFromTranslations = nodePayload.content_data?.translations?.english;
+    const englishText = basic.translation || englishFromTranslations;
+    const normalizedLevel = (nodePayload.level_name || "content")
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    const levelSegment = normalizedLevel || "content";
+    const defaultTemplateKey = `default.body.${levelSegment}.content_item.v1`;
+
+    fallback.render_template_key = defaultTemplateKey;
+    fallback.template_key = defaultTemplateKey;
+    fallback.level_template_key = defaultTemplateKey;
+    fallback.content_template_key = defaultTemplateKey;
+    fallback[`${levelSegment}_template_key`] = defaultTemplateKey;
+    fallback[`body_${levelSegment}_template_key`] = defaultTemplateKey;
+
+    if (typeof basic.sanskrit === "string" && basic.sanskrit.trim()) {
+      fallback.sanskrit = basic.sanskrit;
+      fallback.verse_sanskrit = basic.sanskrit;
+      fallback.shloka = basic.sanskrit;
+    }
+    if (typeof basic.transliteration === "string" && basic.transliteration.trim()) {
+      fallback.transliteration = basic.transliteration;
+      fallback.verse_transliteration = basic.transliteration;
+    }
+    if (typeof englishText === "string" && englishText.trim()) {
+      fallback.translation = englishText;
+      fallback.english = englishText;
+      fallback.english_translation = englishText;
+      fallback.verse_translation = englishText;
+    }
+    if (typeof nodePayload.sequence_number === "string" && nodePayload.sequence_number.trim()) {
+      fallback.sequence_number = nodePayload.sequence_number;
+      const sequenceMatch = nodePayload.sequence_number.trim().match(/^(\d+)(?:\.(\d+))?/);
+      if (sequenceMatch?.[1]) {
+        fallback.chapter_number = sequenceMatch[1];
+      }
+      if (sequenceMatch?.[2]) {
+        fallback.verse_number = sequenceMatch[2];
+        fallback.shloka_number = sequenceMatch[2];
+      } else {
+        fallback.verse_number = nodePayload.sequence_number;
+        fallback.shloka_number = nodePayload.sequence_number;
+      }
+    }
+    if (typeof nodePayload.title_english === "string" && nodePayload.title_english.trim()) {
+      fallback.title_english = nodePayload.title_english;
+    }
+    if (typeof nodePayload.title_sanskrit === "string" && nodePayload.title_sanskrit.trim()) {
+      fallback.title_sanskrit = nodePayload.title_sanskrit;
+    }
+    if (typeof nodePayload.title_transliteration === "string" && nodePayload.title_transliteration.trim()) {
+      fallback.title_transliteration = nodePayload.title_transliteration;
+    }
+
+    return fallback;
+  };
+
+  const readCategoryIdFromMetadata = (metadata: Record<string, unknown>): number | null => {
+    const categoryCandidate = metadata.category_id;
+    if (typeof categoryCandidate === "number" && Number.isFinite(categoryCandidate) && categoryCandidate > 0) {
+      return categoryCandidate;
+    }
+    if (typeof categoryCandidate === "string") {
+      const parsed = Number(categoryCandidate);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return null;
+  };
+
+  const inferCategoryIdFromMetadata = async (metadata: Record<string, unknown>): Promise<number | null> => {
+    const ignoredKeys = new Set(["owner_id", "status", "visibility", "category_id"]);
+    const metadataKeys = Object.keys(metadata).filter((key) => !ignoredKeys.has(key));
+    const candidateCategories = metadataCategories.filter((category) => !category.is_deprecated);
+    if (candidateCategories.length === 0) {
+      return null;
+    }
+
+    if (metadataKeys.length === 0) {
+      return candidateCategories.length === 1 ? candidateCategories[0].id : null;
+    }
+
+    let bestCategoryId: number | null = null;
+    let bestScore = 0;
+
+    for (const category of candidateCategories) {
+      try {
+        const effective = await loadEffectiveProperties(category.id);
+        const effectiveKeys = new Set(effective.map((field) => field.property_internal_name));
+        let score = 0;
+        metadataKeys.forEach((key) => {
+          if (effectiveKeys.has(key)) {
+            score += 1;
+          }
+        });
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestCategoryId = category.id;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return bestScore > 0 ? bestCategoryId : null;
+  };
+
+  const loadNodeMetadataSnapshot = async (nodeId: number): Promise<Record<string, unknown>> => {
+    if (nodeContent?.id === nodeId) {
+      const fromCurrent = toRecord(nodeContent.metadata_json || nodeContent.metadata);
+      if (Object.keys(fromCurrent).length > 0) {
+        return fromCurrent;
+      }
+      const derivedFromCurrent = deriveNodeMetadataFallback(nodeContent);
+      if (Object.keys(derivedFromCurrent).length > 0) {
+        return derivedFromCurrent;
+      }
+    }
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${nodeId}`), {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        return {};
+      }
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            metadata_json?: unknown;
+            metadata?: unknown;
+          level_name?: string | null;
+            sequence_number?: string | null;
+            title_english?: string | null;
+            title_sanskrit?: string | null;
+            title_transliteration?: string | null;
+            content_data?: {
+              basic?: {
+                sanskrit?: string;
+                transliteration?: string;
+                translation?: string;
+              };
+              translations?: {
+                english?: string;
+              };
+            } | null;
+          }
+        | null;
+      const fromMetadata = toRecord(payload?.metadata_json || payload?.metadata);
+      if (Object.keys(fromMetadata).length > 0) {
+        return fromMetadata;
+      }
+      return payload ? deriveNodeMetadataFallback(payload) : {};
+    } catch {
+      return {};
+    }
+  };
+
   const openPropertiesModal = async (scope: PropertiesScope, nodeId: number | null = null) => {
     if (!bookId) return;
     if (scope === "node" && !nodeId) return;
@@ -697,6 +996,7 @@ function ScripturesContent() {
 
     try {
       const endpoint = propertiesEndpoint(scope, nodeId);
+      const nodeMetadataSnapshot = scope === "node" && nodeId ? await loadNodeMetadataSnapshot(nodeId) : {};
       const response = await fetch(endpoint, {
         credentials: "include",
         cache: "no-store",
@@ -721,7 +1021,10 @@ function ScripturesContent() {
         throw new Error(payload?.detail || "Failed to load metadata properties");
       }
 
-      const categoryId = binding?.category_id ?? null;
+      let categoryId = binding?.category_id ?? readCategoryIdFromMetadata(nodeMetadataSnapshot) ?? null;
+      if (!categoryId && scope === "node") {
+        categoryId = await inferCategoryIdFromMetadata(nodeMetadataSnapshot);
+      }
       if (!categoryId) {
         setPropertiesCategoryId(null);
         setPropertiesEffectiveFields([]);
@@ -730,21 +1033,37 @@ function ScripturesContent() {
       }
 
       const effective = await loadEffectiveProperties(categoryId);
+      const visibleEffective = filterVisibleMetadataFields(effective);
       const values: Record<string, unknown> = {};
-      effective.forEach((field) => {
-        values[field.property_internal_name] = field.default_value ?? null;
+      const bindingProvidedKeys = new Set<string>();
+      visibleEffective.forEach((field) => {
+        values[field.property_internal_name] = getFieldDefaultValue(field);
       });
       if (binding) {
         binding.properties.forEach((item) => {
           values[item.property_internal_name] = item.value ?? null;
+          bindingProvidedKeys.add(item.property_internal_name);
         });
         Object.entries(binding.property_overrides || {}).forEach(([key, value]) => {
           values[key] = value;
+          bindingProvidedKeys.add(key);
         });
       }
 
+      Object.entries(nodeMetadataSnapshot).forEach(([key, value]) => {
+        if (!(key in values)) {
+          return;
+        }
+        if (bindingProvidedKeys.has(key)) {
+          return;
+        }
+        if (value !== undefined) {
+          values[key] = value;
+        }
+      });
+
       setPropertiesCategoryId(categoryId);
-      setPropertiesEffectiveFields(effective);
+      setPropertiesEffectiveFields(visibleEffective);
       setPropertiesValues(values);
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to load metadata");
@@ -770,12 +1089,13 @@ function ScripturesContent() {
 
     try {
       const effective = await loadEffectiveProperties(nextCategoryId);
+      const visibleEffective = filterVisibleMetadataFields(effective);
       const values: Record<string, unknown> = {};
-      effective.forEach((field) => {
-        values[field.property_internal_name] = field.default_value ?? null;
+      visibleEffective.forEach((field) => {
+        values[field.property_internal_name] = getFieldDefaultValue(field);
       });
       setPropertiesCategoryId(nextCategoryId);
-      setPropertiesEffectiveFields(effective);
+      setPropertiesEffectiveFields(visibleEffective);
       setPropertiesValues(values);
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to load category metadata properties");
@@ -802,7 +1122,7 @@ function ScripturesContent() {
     const propertyOverrides: Record<string, unknown> = {};
     propertiesEffectiveFields.forEach((field) => {
       const currentValue = normalizeMetadataValue(field.property_data_type, propertiesValues[field.property_internal_name]);
-      const defaultValue = normalizeMetadataValue(field.property_data_type, field.default_value ?? null);
+      const defaultValue = normalizeMetadataValue(field.property_data_type, getFieldDefaultValue(field));
       if (!valuesEqual(currentValue, defaultValue)) {
         propertyOverrides[field.property_internal_name] = currentValue;
       }
@@ -1091,6 +1411,40 @@ function ScripturesContent() {
     }
     void loadMetadataCategories();
   }, [authEmail]);
+
+  useEffect(() => {
+    if (!authEmail || metadataCategories.length === 0) {
+      setContentFieldLabels({ ...DEFAULT_CONTENT_FIELD_LABELS });
+      return;
+    }
+
+    const loadContentFieldLabels = async () => {
+      const defaultCategory = metadataCategories.find((category) => category.name === "system_default_metadata") || metadataCategories[0];
+      if (!defaultCategory) {
+        setContentFieldLabels({ ...DEFAULT_CONTENT_FIELD_LABELS });
+        return;
+      }
+
+      try {
+        const effective = await loadEffectiveProperties(defaultCategory.id);
+        const nextLabels: Record<string, string> = { ...DEFAULT_CONTENT_FIELD_LABELS };
+        effective.forEach((field) => {
+          const internalName = field.property_internal_name;
+          if (!(internalName in nextLabels)) {
+            return;
+          }
+          if (typeof field.property_display_name === "string" && field.property_display_name.trim()) {
+            nextLabels[internalName] = field.property_display_name.trim();
+          }
+        });
+        setContentFieldLabels(nextLabels);
+      } catch {
+        setContentFieldLabels({ ...DEFAULT_CONTENT_FIELD_LABELS });
+      }
+    };
+
+    void loadContentFieldLabels();
+  }, [authEmail, metadataCategories]);
 
   const addCurrentToBasket = () => {
     if (!nodeContent) return;
@@ -1429,7 +1783,8 @@ function ScripturesContent() {
     if (!bookId || !urlInitialized) return;
 
     const nodeParam = searchParams.get("node");
-    const nodeId = nodeParam ? parseInt(nodeParam, 10) : undefined;
+    const nodeIdFromUrl = nodeParam ? parseInt(nodeParam, 10) : undefined;
+    const nodeId = pendingSavedNodeId.current ?? nodeIdFromUrl;
 
     if (lastTreeBookId.current !== bookId) {
       lastTreeBookId.current = bookId;
@@ -1450,6 +1805,9 @@ function ScripturesContent() {
           applySelection(nodeId, path);
         }
         lastAutoSelectNodeId.current = nodeId;
+        if (pendingSavedNodeId.current === nodeId) {
+          pendingSavedNodeId.current = null;
+        }
         return;
       }
 
@@ -1664,6 +2022,19 @@ function ScripturesContent() {
   };
 
   const selectNode = (nodeId: number, syncUrl = true) => {
+    if (nodeId !== selectedId && hasUnsavedInlineChanges()) {
+      const shouldDiscard = window.confirm(
+        "You have unsaved changes in Edit details. Discard changes and continue?"
+      );
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+
+    if (pendingSavedNodeId.current !== null) {
+      pendingSavedNodeId.current = null;
+    }
+
     const syncSelectionUrl = (targetNodeId: number) => {
       if (typeof window === "undefined" || !bookId) return;
       const url = new URL(window.location.href);
@@ -2125,6 +2496,76 @@ function ScripturesContent() {
     };
   };
 
+  const normalizeInlineFormForCompare = (value: {
+    levelName: string;
+    titleSanskrit: string;
+    titleTransliteration: string;
+    titleEnglish: string;
+    sequenceNumber: string;
+    hasContent: boolean;
+    contentSanskrit: string;
+    contentTransliteration: string;
+    contentEnglish: string;
+    tags: string;
+  }) => {
+    const normalized = {
+      levelName: value.levelName.trim(),
+      titleSanskrit: value.titleSanskrit.trim(),
+      titleTransliteration: value.titleTransliteration.trim(),
+      titleEnglish: value.titleEnglish.trim(),
+      sequenceNumber: value.sequenceNumber.trim(),
+      hasContent: Boolean(value.hasContent),
+      contentSanskrit: value.contentSanskrit.trim(),
+      contentTransliteration: value.contentTransliteration.trim(),
+      contentEnglish: value.contentEnglish.trim(),
+      tags: value.tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+        .join(","),
+    };
+
+    if (!normalized.hasContent) {
+      normalized.contentSanskrit = "";
+      normalized.contentTransliteration = "";
+      normalized.contentEnglish = "";
+    }
+
+    return normalized;
+  };
+
+  function hasUnsavedInlineChanges() {
+    if (!inlineEditMode || !nodeContent) {
+      return false;
+    }
+    const baseline = normalizeInlineFormForCompare(buildFormDataFromNode(nodeContent));
+    const current = normalizeInlineFormForCompare(inlineFormData);
+    return JSON.stringify(baseline) !== JSON.stringify(current);
+  }
+
+  const inlineHasChanges = hasUnsavedInlineChanges();
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!inlineHasChanges) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [inlineHasChanges]);
+
+  useEffect(() => {
+    if (nodeContent) {
+      setInlineFormData(buildFormDataFromNode(nodeContent));
+    }
+  }, [nodeContent]);
+
   const normalizeLevelName = (value: string) => value.trim().toLowerCase();
 
   const isLeafLevelName = (levelName: string): boolean => {
@@ -2259,11 +2700,20 @@ function ScripturesContent() {
     setSubmitting(true);
     setActionMessage(null);
     try {
+      const titlePair = autoFillSanskritTransliterationPair(
+        formData.titleSanskrit,
+        formData.titleTransliteration
+      );
+      const contentPair = autoFillSanskritTransliterationPair(
+        formData.contentSanskrit,
+        formData.contentTransliteration
+      );
+
       const contentData: Record<string, unknown> = {};
       if (formData.hasContent) {
         contentData.basic = {
-          sanskrit: formData.contentSanskrit || undefined,
-          transliteration: formData.contentTransliteration || undefined,
+          sanskrit: contentPair.sanskrit || undefined,
+          transliteration: contentPair.transliteration || undefined,
           translation: formData.contentEnglish || undefined,
         };
         contentData.translations = {
@@ -2294,8 +2744,8 @@ function ScripturesContent() {
       const basePayload = {
         level_name: formData.levelName,
         sequence_number: formData.sequenceNumber ? formData.sequenceNumber.trim() : null,
-        title_sanskrit: formData.titleSanskrit || null,
-        title_transliteration: formData.titleTransliteration || null,
+        title_sanskrit: titlePair.sanskrit || null,
+        title_transliteration: titlePair.transliteration || null,
         title_english: formData.titleEnglish || null,
         has_content: formData.hasContent,
         content_data: Object.keys(contentData).length > 0 ? contentData : null,
@@ -2323,8 +2773,18 @@ function ScripturesContent() {
       );
 
       if (response.ok) {
-        const updatedNodeId = action === "add" ? null : actionNode.id;
-        const wasEdit = action === "edit";
+        const preservedNodeId =
+          action === "edit" ? actionNode.id : selectedId ?? actionNode.id;
+
+        pendingSavedNodeId.current = preservedNodeId;
+
+        if (preservedNodeId && typeof window !== "undefined" && bookId) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("book", bookId);
+          url.searchParams.set("node", String(preservedNodeId));
+          window.history.replaceState(window.history.state, "", url.toString());
+        }
+
         // Reset form and close modal
         setAction(null);
         setActionNode(null);
@@ -2352,10 +2812,16 @@ function ScripturesContent() {
               const data = (await response.json()) as TreeNode[];
               setTreeData(data);
               setExpandedIds((prev) => new Set(prev));
-              if (selectedId) {
-                const path = findPath(data, selectedId);
+              if (preservedNodeId) {
+                const path = findPath(data, preservedNodeId);
                 if (path) {
+                  setSelectedId(preservedNodeId);
                   setBreadcrumb(path);
+                  setExpandedIds((prev) => {
+                    const next = new Set(prev);
+                    path.forEach((node) => next.add(node.id));
+                    return next;
+                  });
                 }
               }
             }
@@ -2363,8 +2829,8 @@ function ScripturesContent() {
             setTreeLoading(false);
           }
         }
-        if (wasEdit && updatedNodeId) {
-          await loadNodeContent(updatedNodeId, true);
+        if (preservedNodeId) {
+          await loadNodeContent(preservedNodeId, true);
         }
       } else {
         const errorText = await response.text();
@@ -2390,6 +2856,120 @@ function ScripturesContent() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleInlineSave = async () => {
+    if (!selectedId || !nodeContent) return;
+
+    pendingSavedNodeId.current = selectedId;
+    setInlineSubmitting(true);
+    setInlineMessage(null);
+    try {
+      const titlePair = autoFillSanskritTransliterationPair(
+        inlineFormData.titleSanskrit,
+        inlineFormData.titleTransliteration
+      );
+      const contentPair = autoFillSanskritTransliterationPair(
+        inlineFormData.contentSanskrit,
+        inlineFormData.contentTransliteration
+      );
+
+      const contentData: Record<string, unknown> = {};
+      if (inlineFormData.hasContent) {
+        contentData.basic = {
+          sanskrit: contentPair.sanskrit || undefined,
+          transliteration: contentPair.transliteration || undefined,
+          translation: inlineFormData.contentEnglish || undefined,
+        };
+        contentData.translations = {
+          english: inlineFormData.contentEnglish || undefined,
+        };
+      }
+
+      const payload = {
+        level_name: inlineFormData.levelName,
+        sequence_number: inlineFormData.sequenceNumber
+          ? inlineFormData.sequenceNumber.trim()
+          : null,
+        title_sanskrit: titlePair.sanskrit || null,
+        title_transliteration: titlePair.transliteration || null,
+        title_english: inlineFormData.titleEnglish || null,
+        has_content: inlineFormData.hasContent,
+        content_data: Object.keys(contentData).length > 0 ? contentData : null,
+        tags: inlineFormData.tags
+          ? inlineFormData.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
+          : [],
+      };
+
+      const response = await fetch(contentPath(`/nodes/${selectedId}`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const errData = errorText
+          ? (() => {
+              try {
+                return JSON.parse(errorText);
+              } catch {
+                return errorText;
+              }
+            })()
+          : null;
+        const detail =
+          typeof errData === "string"
+            ? errData
+            : errData?.detail || response.statusText;
+        setInlineMessage(`Save failed (${response.status}): ${detail}`);
+        return;
+      }
+
+      if (bookId) {
+        const treeResponse = await fetch(`/api/books/${bookId}/tree`, {
+          credentials: "include",
+        });
+        if (treeResponse.ok) {
+          const data = (await treeResponse.json()) as TreeNode[];
+          setTreeData(data);
+          const path = findPath(data, selectedId);
+          if (path) {
+            setBreadcrumb(path);
+            setExpandedIds((prev) => {
+              const next = new Set(prev);
+              path.forEach((node) => next.add(node.id));
+              return next;
+            });
+          }
+        }
+      }
+
+      await loadNodeContent(selectedId, true);
+      setInlineMessage("Details saved.");
+      setTimeout(() => setInlineMessage(null), 2000);
+    } catch (err) {
+      pendingSavedNodeId.current = null;
+      setInlineMessage(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setInlineSubmitting(false);
+    }
+  };
+
+  const handleStartInlineEdit = () => {
+    if (!nodeContent || !canEditCurrentBook) return;
+    setInlineFormData(buildFormDataFromNode(nodeContent));
+    setInlineMessage(null);
+    setInlineEditMode(true);
+  };
+
+  const handleCancelInlineEdit = () => {
+    if (nodeContent) {
+      setInlineFormData(buildFormDataFromNode(nodeContent));
+    }
+    setInlineMessage(null);
+    setInlineEditMode(false);
   };
 
   const renderTree = (nodes: TreeNode[], depth = 0) => {
@@ -2577,6 +3157,14 @@ function ScripturesContent() {
                 value={bookId}
                 onChange={(event) => {
                   const value = event.target.value;
+                  if (value !== bookId && hasUnsavedInlineChanges()) {
+                    const shouldDiscard = window.confirm(
+                      "You have unsaved changes in Edit details. Discard changes and switch books?"
+                    );
+                    if (!shouldDiscard) {
+                      return;
+                    }
+                  }
                   setBookId(value);
                   // Update URL without node param when changing books
                   if (value) {
@@ -2859,7 +3447,7 @@ function ScripturesContent() {
                             level_name: "BOOK",
                             level_order: 0,
                             sequence_number: undefined,
-                            title_english: books.find(b => b.id.toString() === bookId)?.book_name,
+                            title_english: books.find((b) => b.id.toString() === bookId)?.book_name,
                           };
                           const firstLevel = currentBook.schema?.levels[0] || "";
                           const defaultHasContent = isLeafLevelName(firstLevel);
@@ -3022,6 +3610,18 @@ function ScripturesContent() {
                           Loading...
                         </span>
                       )}
+                      {canEditCurrentBook && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={inlineEditMode ? handleCancelInlineEdit : handleStartInlineEdit}
+                            disabled={inlineSubmitting}
+                            className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {inlineEditMode ? "Cancel edit" : "Edit details"}
+                          </button>
+                        </>
+                      )}
                       <div className="flex items-center gap-1 border-l pl-2 border-black/10">
                         <button
                           type="button"
@@ -3029,7 +3629,7 @@ function ScripturesContent() {
                             const prev = getPreviousSibling();
                             if (prev) selectNode(prev.id);
                           }}
-                          disabled={!getPreviousSibling()}
+                          disabled={inlineHasChanges || !getPreviousSibling()}
                           title="Previous item"
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
                         >
@@ -3041,7 +3641,7 @@ function ScripturesContent() {
                             const next = getNextSibling();
                             if (next) selectNode(next.id);
                           }}
-                          disabled={!getNextSibling()}
+                          disabled={inlineHasChanges || !getNextSibling()}
                           title="Next item"
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
                         >
@@ -3216,147 +3816,408 @@ function ScripturesContent() {
 
 
                     {/* Titles (hide for verses) */}
-                    {!nodeContent.has_content && (
-                      <div className="flex flex-col gap-2">
-                        {getPreferredTitle(nodeContent) && (
-                          <div className="text-xl font-medium text-zinc-900">
-                            {getPreferredTitle(nodeContent)}
+                    {inlineMessage && (
+                      <div
+                        className={`rounded-lg border px-3 py-2 text-sm ${
+                          inlineMessage.toLowerCase().includes("saved")
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-red-200 bg-red-50 text-red-700"
+                        }`}
+                      >
+                        {inlineMessage}
+                      </div>
+                    )}
+
+                    {inlineEditMode && canEditCurrentBook && (
+                      <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Level Name</label>
+                            <select
+                              value={inlineFormData.levelName}
+                              onChange={(event) =>
+                                setInlineFormData((prev) => ({ ...prev, levelName: event.target.value }))
+                              }
+                              className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                              required
+                            >
+                              <option value="">Select level</option>
+                              {currentBook?.schema?.levels?.map((level) => (
+                                <option key={level} value={level}>
+                                  {level}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Sequence Number</label>
+                            <input
+                              type="text"
+                              value={inlineFormData.sequenceNumber}
+                              onChange={(event) =>
+                                setInlineFormData((prev) => ({ ...prev, sequenceNumber: event.target.value }))
+                              }
+                              className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (English)</label>
+                          <div className="group relative mt-1">
+                            <input
+                              type="text"
+                              value={inlineFormData.titleEnglish}
+                              onChange={(event) =>
+                                setInlineFormData((prev) => ({ ...prev, titleEnglish: event.target.value }))
+                              }
+                              className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                            <InlineClearButton
+                              visible={Boolean(inlineFormData.titleEnglish)}
+                              onClear={() => setInlineFormData((prev) => ({ ...prev, titleEnglish: "" }))}
+                              ariaLabel="Clear inline title English"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (Sanskrit)</label>
+                            <div className="group relative mt-1">
+                              <input
+                                type="text"
+                                value={inlineFormData.titleSanskrit}
+                                onChange={(event) =>
+                                  setInlineFormData((prev) => ({ ...prev, titleSanskrit: event.target.value }))
+                                }
+                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                              />
+                              <InlineClearButton
+                                visible={Boolean(inlineFormData.titleSanskrit)}
+                                onClear={() =>
+                                  setInlineFormData((prev) => ({ ...prev, titleSanskrit: "" }))
+                                }
+                                ariaLabel="Clear inline title Sanskrit"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Title (Transliteration)
+                            </label>
+                            <div className="group relative mt-1">
+                              <input
+                                type="text"
+                                value={inlineFormData.titleTransliteration}
+                                onChange={(event) =>
+                                  setInlineFormData((prev) => ({
+                                    ...prev,
+                                    titleTransliteration: event.target.value,
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                              />
+                              <InlineClearButton
+                                visible={Boolean(inlineFormData.titleTransliteration)}
+                                onClear={() =>
+                                  setInlineFormData((prev) => ({ ...prev, titleTransliteration: "" }))
+                                }
+                                ariaLabel="Clear inline title transliteration"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm text-zinc-700">
+                          <input
+                            type="checkbox"
+                            checked={inlineFormData.hasContent}
+                            onChange={(event) =>
+                              setInlineFormData((prev) => ({ ...prev, hasContent: event.target.checked }))
+                            }
+                            className="rounded border-black/10"
+                          />
+                          Has content
+                        </label>
+
+                        {inlineFormData.hasContent && (
+                          <div className="flex flex-col gap-3 rounded-lg border border-black/10 bg-blue-50/30 p-3">
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
+                              </label>
+                              <div className="group relative mt-1">
+                                <textarea
+                                  rows={3}
+                                  value={inlineFormData.contentSanskrit}
+                                  onChange={(event) =>
+                                    setInlineFormData((prev) => ({
+                                      ...prev,
+                                      contentSanskrit: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <InlineClearButton
+                                  visible={Boolean(inlineFormData.contentSanskrit)}
+                                  onClear={() =>
+                                    setInlineFormData((prev) => ({ ...prev, contentSanskrit: "" }))
+                                  }
+                                  ariaLabel="Clear inline content Sanskrit"
+                                  position="top"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
+                              </label>
+                              <div className="group relative mt-1">
+                                <textarea
+                                  rows={3}
+                                  value={inlineFormData.contentTransliteration}
+                                  onChange={(event) =>
+                                    setInlineFormData((prev) => ({
+                                      ...prev,
+                                      contentTransliteration: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <InlineClearButton
+                                  visible={Boolean(inlineFormData.contentTransliteration)}
+                                  onClear={() =>
+                                    setInlineFormData((prev) => ({
+                                      ...prev,
+                                      contentTransliteration: "",
+                                    }))
+                                  }
+                                  ariaLabel="Clear inline content transliteration"
+                                  position="top"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
+                              </label>
+                              <div className="group relative mt-1">
+                                <textarea
+                                  rows={3}
+                                  value={inlineFormData.contentEnglish}
+                                  onChange={(event) =>
+                                    setInlineFormData((prev) => ({
+                                      ...prev,
+                                      contentEnglish: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <InlineClearButton
+                                  visible={Boolean(inlineFormData.contentEnglish)}
+                                  onClear={() =>
+                                    setInlineFormData((prev) => ({ ...prev, contentEnglish: "" }))
+                                  }
+                                  ariaLabel="Clear inline content English"
+                                  position="top"
+                                />
+                              </div>
+                            </div>
                           </div>
                         )}
-                        {!showOnlyPreferredScript && showTransliteration &&
-                          (() => {
-                            const renderedTitleTransliteration = renderTransliterationByPreference(
-                              formatValue(nodeContent.title_transliteration)
-                            );
-                            if (
-                              !renderedTitleTransliteration ||
-                              renderedTitleTransliteration === getPreferredTitle(nodeContent)
-                            ) {
-                              return null;
-                            }
-                            return (
-                              <div className="text-lg italic text-zinc-700">
-                                {renderedTitleTransliteration}
+
+                        <div>
+                          <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tags</label>
+                          <div className="group relative mt-1">
+                            <input
+                              type="text"
+                              value={inlineFormData.tags}
+                              onChange={(event) =>
+                                setInlineFormData((prev) => ({ ...prev, tags: event.target.value }))
+                              }
+                              className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                              placeholder="tag1, tag2"
+                            />
+                            <InlineClearButton
+                              visible={Boolean(inlineFormData.tags)}
+                              onClear={() => setInlineFormData((prev) => ({ ...prev, tags: "" }))}
+                              ariaLabel="Clear inline tags"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 border-t border-black/10 pt-3">
+                          <button
+                            type="button"
+                            onClick={() => void handleInlineSave()}
+                            disabled={inlineSubmitting || !inlineHasChanges}
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {inlineSubmitting ? "Saving..." : "Save details"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelInlineEdit}
+                            disabled={inlineSubmitting}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {!inlineEditMode && (
+                      <>
+                        {/* Titles (hide for verses) */}
+                        {!nodeContent.has_content && (
+                          <div className="flex flex-col gap-2">
+                            {getPreferredTitle(nodeContent) && (
+                              <div className="text-xl font-medium text-zinc-900">
+                                {getPreferredTitle(nodeContent)}
                               </div>
-                            );
-                          })()}
-                      </div>
-                    )}
+                            )}
+                            {!showOnlyPreferredScript && showTransliteration &&
+                              (() => {
+                                const renderedTitleTransliteration = renderTransliterationByPreference(
+                                  formatValue(nodeContent.title_transliteration)
+                                );
+                                if (
+                                  !renderedTitleTransliteration ||
+                                  renderedTitleTransliteration === getPreferredTitle(nodeContent)
+                                ) {
+                                  return null;
+                                }
+                                return (
+                                  <div className="text-lg italic text-zinc-700">
+                                    {renderedTitleTransliteration}
+                                  </div>
+                                );
+                              })()}
+                          </div>
+                        )}
 
-                    {/* Content Data */}
-                    {nodeContent.has_content && nodeContent.content_data && (
-                      <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                        {(() => {
-                          const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
-                          const transliterationRaw = formatValue(
-                            nodeContent.content_data?.basic?.transliteration
-                          );
-                          const originalSanskrit =
-                            sanskrit || transliterateFromIast(transliterationRaw, "devanagari");
-                          const transliteration = renderTransliterationByPreference(
-                            transliterationRaw
-                          );
-                          const preferredSanskrit = renderSanskritByPreference(
-                            sanskrit,
-                            transliterationRaw
-                          );
-                          const english = formatValue(
-                            nodeContent.content_data?.translations?.english ||
-                              nodeContent.content_data?.basic?.translation
-                          );
+                        {/* Content Data */}
+                        {nodeContent.has_content && nodeContent.content_data && (
+                          <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
+                            {(() => {
+                              const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
+                              const transliterationRaw = formatValue(
+                                nodeContent.content_data?.basic?.transliteration
+                              );
+                              const originalSanskrit =
+                                sanskrit || transliterateFromIast(transliterationRaw, "devanagari");
+                              const transliteration = renderTransliterationByPreference(
+                                transliterationRaw
+                              );
+                              const preferredSanskrit = renderSanskritByPreference(
+                                sanskrit,
+                                transliterationRaw
+                              );
+                              const english = formatValue(
+                                nodeContent.content_data?.translations?.english ||
+                                  nodeContent.content_data?.basic?.translation
+                              );
+                              const sanskritLabel = contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
+                              const transliterationLabel =
+                                contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
+                              const englishLabel = contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english;
 
-                          const primaryContent =
-                            showOnlyPreferredScript
-                              ? sourceLanguage === "sanskrit"
-                                ? preferredSanskrit || english
-                                : sourceLanguage === "hindi"
-                                ? english || originalSanskrit
-                                : english || originalSanskrit
-                              : originalSanskrit || english;
+                              const primaryContent =
+                                showOnlyPreferredScript
+                                  ? sourceLanguage === "sanskrit"
+                                    ? preferredSanskrit || english
+                                    : sourceLanguage === "hindi"
+                                    ? english || originalSanskrit
+                                    : english || originalSanskrit
+                                  : originalSanskrit || english;
 
-                          const primaryLabel =
-                            showOnlyPreferredScript
-                              ? sourceLanguage === "sanskrit"
-                                ? "Sanskrit"
-                                : sourceLanguage === "hindi"
-                                ? "Hindi/Translation"
-                                : "English Translation"
-                              : "Sanskrit (Original)";
+                              const primaryLabel =
+                                showOnlyPreferredScript
+                                  ? sourceLanguage === "sanskrit"
+                                    ? sanskritLabel
+                                    : sourceLanguage === "hindi"
+                                    ? "Hindi/Translation"
+                                    : englishLabel
+                                  : "Sanskrit (Original)";
 
-                          const showSecondaryTransliteration =
-                            !showOnlyPreferredScript &&
-                            showTransliteration &&
-                            Boolean(transliteration) &&
-                            transliteration !== primaryContent &&
-                            transliteration !== originalSanskrit;
+                              const showSecondaryTransliteration =
+                                !showOnlyPreferredScript &&
+                                showTransliteration &&
+                                Boolean(transliteration) &&
+                                transliteration !== primaryContent &&
+                                transliteration !== originalSanskrit;
 
-                          return (
-                            <>
-                              {primaryContent && (
-                                <div>
-                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    {primaryLabel}
-                                  </div>
-                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
-                                    {primaryContent}
-                                  </div>
-                                </div>
-                              )}
-                              {showSecondaryTransliteration && (
-                                <div>
-                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    Transliteration ({transliterationScriptLabel(transliterationScript)})
-                                  </div>
-                                  <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
-                                    {transliteration}
-                                  </div>
-                                </div>
-                              )}
-                              {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
-                                originalSanskrit &&
-                                originalSanskrit !== primaryContent && (
-                                <div>
-                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    Sanskrit (Original)
-                                  </div>
-                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                    {originalSanskrit}
-                                  </div>
-                                </div>
-                              )}
-                              {!showOnlyPreferredScript && english && english !== primaryContent && (
-                                <div>
-                                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                    English Translation
-                                  </div>
-                                  <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                    {english}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
-                      </div>
-                    )}
+                              return (
+                                <>
+                                  {primaryContent && (
+                                    <div>
+                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                        {primaryLabel}
+                                      </div>
+                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
+                                        {primaryContent}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {showSecondaryTransliteration && (
+                                    <div>
+                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                        {transliterationLabel} ({transliterationScriptLabel(transliterationScript)})
+                                      </div>
+                                      <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
+                                        {transliteration}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
+                                    originalSanskrit &&
+                                    originalSanskrit !== primaryContent && (
+                                    <div>
+                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                        Sanskrit (Original)
+                                      </div>
+                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                        {originalSanskrit}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {!showOnlyPreferredScript && english && english !== primaryContent && (
+                                    <div>
+                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                        {englishLabel}
+                                      </div>
+                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                        {english}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
 
-                    {/* Tags */}
-                    {nodeContent.tags && nodeContent.tags.length > 0 && (
-                      <div>
-                        <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                          Tags
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {nodeContent.tags.map((tag, idx) => (
-                            <span
-                              key={idx}
-                              className="rounded-full border border-black/10 bg-white/90 px-3 py-1 text-xs text-zinc-600"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
+                        {/* Tags */}
+                        {nodeContent.tags && nodeContent.tags.length > 0 && (
+                          <div>
+                            <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Tags
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {nodeContent.tags.map((tag, idx) => (
+                                <span
+                                  key={idx}
+                                  className="rounded-full border border-black/10 bg-white/90 px-3 py-1 text-xs text-zinc-600"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                   </div>
@@ -3375,8 +4236,8 @@ function ScripturesContent() {
         </section>
 
         {showPropertiesModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:items-center">
+            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -3399,7 +4260,7 @@ function ScripturesContent() {
                 </button>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-3 overflow-y-auto pr-1">
                 <label className="flex flex-col gap-1">
                   <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Name</span>
                   <input
@@ -3542,20 +4403,41 @@ function ScripturesContent() {
                     );
                   }
 
+                  const singleLine = isSingleLineTextMetadataField(field);
+                  const isTemplateField = isTemplateMetadataField(field);
+                  const textValue = value === null || value === undefined ? "" : String(value);
+
                   return (
                     <label key={key} className="flex flex-col gap-1">
                       <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                      <input
-                        type="text"
-                        value={value === null || value === undefined ? "" : String(value)}
-                        onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                      />
+                      {isTemplateField ? (
+                        <select
+                          value={textValue}
+                          disabled
+                          className="rounded-lg border border-black/10 bg-zinc-100 px-3 py-2 text-sm text-zinc-700"
+                        >
+                          <option value={textValue}>{textValue || "Not configured"}</option>
+                        </select>
+                      ) : singleLine ? (
+                        <input
+                          type="text"
+                          value={textValue}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      ) : (
+                        <textarea
+                          value={textValue}
+                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
+                          rows={4}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        />
+                      )}
                     </label>
                   );
                 })}
 
-                <div className="flex items-center gap-2 pt-2">
+                <div className="sticky bottom-0 flex items-center gap-2 border-t border-black/5 bg-white/95 pt-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -4175,15 +5057,22 @@ function ScripturesContent() {
                   <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                     Title (English)
                   </label>
-                  <input
-                    type="text"
-                    value={formData.titleEnglish}
-                    onChange={(e) =>
-                      setFormData({ ...formData, titleEnglish: e.target.value })
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    placeholder="English title"
-                  />
+                  <div className="group relative mt-1">
+                    <input
+                      type="text"
+                      value={formData.titleEnglish}
+                      onChange={(e) =>
+                        setFormData({ ...formData, titleEnglish: e.target.value })
+                      }
+                      className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                      placeholder="English title"
+                    />
+                    <InlineClearButton
+                      visible={Boolean(formData.titleEnglish)}
+                      onClear={() => setFormData((prev) => ({ ...prev, titleEnglish: "" }))}
+                      ariaLabel="Clear title English"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -4191,29 +5080,45 @@ function ScripturesContent() {
                     <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Title (Sanskrit)
                     </label>
-                    <input
-                      type="text"
-                      value={formData.titleSanskrit}
-                      onChange={(e) =>
-                        setFormData({ ...formData, titleSanskrit: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder="Sanskrit title"
-                    />
+                    <div className="group relative mt-1">
+                      <input
+                        type="text"
+                        value={formData.titleSanskrit}
+                        onChange={(e) =>
+                          setFormData({ ...formData, titleSanskrit: e.target.value })
+                        }
+                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                        placeholder="Sanskrit title"
+                      />
+                      <InlineClearButton
+                        visible={Boolean(formData.titleSanskrit)}
+                        onClear={() => setFormData((prev) => ({ ...prev, titleSanskrit: "" }))}
+                        ariaLabel="Clear title Sanskrit"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Title (Transliteration)
                     </label>
-                    <input
-                      type="text"
-                      value={formData.titleTransliteration}
-                      onChange={(e) =>
-                        setFormData({ ...formData, titleTransliteration: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder="Transliteration"
-                    />
+                    <div className="group relative mt-1">
+                      <input
+                        type="text"
+                        value={formData.titleTransliteration}
+                        onChange={(e) =>
+                          setFormData({ ...formData, titleTransliteration: e.target.value })
+                        }
+                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                        placeholder="Transliteration"
+                      />
+                      <InlineClearButton
+                        visible={Boolean(formData.titleTransliteration)}
+                        onClear={() =>
+                          setFormData((prev) => ({ ...prev, titleTransliteration: "" }))
+                        }
+                        ariaLabel="Clear title transliteration"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -4235,62 +5140,95 @@ function ScripturesContent() {
                   <div className="flex flex-col gap-3 rounded-lg border border-black/10 bg-blue-50/30 p-3">
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Sanskrit Text
+                        {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
                       </label>
-                      <textarea
-                        value={formData.contentSanskrit}
-                        onChange={(e) =>
-                          setFormData({ ...formData, contentSanskrit: e.target.value })
-                        }
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="Sanskrit text"
-                        rows={3}
-                      />
+                      <div className="group relative mt-1">
+                        <textarea
+                          value={formData.contentSanskrit}
+                          onChange={(e) =>
+                            setFormData({ ...formData, contentSanskrit: e.target.value })
+                          }
+                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder={contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
+                          rows={3}
+                        />
+                        <InlineClearButton
+                          visible={Boolean(formData.contentSanskrit)}
+                          onClear={() => setFormData((prev) => ({ ...prev, contentSanskrit: "" }))}
+                          ariaLabel="Clear content Sanskrit"
+                          position="top"
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Transliteration
+                        {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
                       </label>
-                      <textarea
-                        value={formData.contentTransliteration}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            contentTransliteration: e.target.value,
-                          })
-                        }
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="Transliteration"
-                        rows={3}
-                      />
+                      <div className="group relative mt-1">
+                        <textarea
+                          value={formData.contentTransliteration}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              contentTransliteration: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder={contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
+                          rows={3}
+                        />
+                        <InlineClearButton
+                          visible={Boolean(formData.contentTransliteration)}
+                          onClear={() =>
+                            setFormData((prev) => ({ ...prev, contentTransliteration: "" }))
+                          }
+                          ariaLabel="Clear content transliteration"
+                          position="top"
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        English Translation
+                        {contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
                       </label>
-                      <textarea
-                        value={formData.contentEnglish}
-                        onChange={(e) =>
-                          setFormData({ ...formData, contentEnglish: e.target.value })
-                        }
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="English translation"
-                        rows={3}
-                      />
+                      <div className="group relative mt-1">
+                        <textarea
+                          value={formData.contentEnglish}
+                          onChange={(e) =>
+                            setFormData({ ...formData, contentEnglish: e.target.value })
+                          }
+                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder={contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
+                          rows={3}
+                        />
+                        <InlineClearButton
+                          visible={Boolean(formData.contentEnglish)}
+                          onClear={() => setFormData((prev) => ({ ...prev, contentEnglish: "" }))}
+                          ariaLabel="Clear content English"
+                          position="top"
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                         Tags (comma-separated)
                       </label>
-                      <input
-                        type="text"
-                        value={formData.tags}
-                        onChange={(e) =>
-                          setFormData({ ...formData, tags: e.target.value })
-                        }
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="tag1, tag2, tag3"
-                      />
+                      <div className="group relative mt-1">
+                        <input
+                          type="text"
+                          value={formData.tags}
+                          onChange={(e) =>
+                            setFormData({ ...formData, tags: e.target.value })
+                          }
+                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder="tag1, tag2, tag3"
+                        />
+                        <InlineClearButton
+                          visible={Boolean(formData.tags)}
+                          onClear={() => setFormData((prev) => ({ ...prev, tags: "" }))}
+                          ariaLabel="Clear tags"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
