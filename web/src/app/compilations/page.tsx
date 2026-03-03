@@ -8,6 +8,13 @@ import UserPreferencesDialog, {
   type UserPreferences,
 } from "../../components/UserPreferencesDialog";
 import { normalizeTransliterationScript } from "../../lib/indicScript";
+import {
+  applyUiPreferencesToDocument,
+  normalizeUiDensity,
+  normalizeUiTheme,
+  persistUiPreferences,
+  readStoredUiPreferences,
+} from "../../lib/uiPreferences";
 
 type CompilationItem = {
   node_id: number;
@@ -119,6 +126,7 @@ export default function CompilationsPage() {
 
   const loadPreferences = async () => {
     try {
+      const storedUi = readStoredUiPreferences();
       const response = await fetch("/api/preferences", { credentials: "include" });
       if (!response.ok) {
         setPreferences(null);
@@ -131,6 +139,8 @@ export default function CompilationsPage() {
           data.transliteration_script
         ),
         show_only_preferred_script: data.show_only_preferred_script ?? false,
+        ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
+        ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
       });
     } catch {
       setPreferences(null);
@@ -142,6 +152,7 @@ export default function CompilationsPage() {
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
+      persistUiPreferences(preferences);
       const response = await fetch("/api/preferences", {
         method: "PATCH",
         credentials: "include",
@@ -172,6 +183,10 @@ export default function CompilationsPage() {
     }
     void loadPreferences();
   }, [authEmail]);
+
+  useEffect(() => {
+    applyUiPreferencesToDocument(preferences);
+  }, [preferences]);
 
   const handleDelete = async (id: number) => {
     if (!confirm("Delete this compilation?")) return;
@@ -273,7 +288,7 @@ export default function CompilationsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between gap-3">
@@ -298,7 +313,7 @@ export default function CompilationsPage() {
 
         {/* Content */}
         {!authEmail ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
             <p className="mb-4 text-zinc-600">Please sign in to view your compilations.</p>
             <button
               onClick={() => router.push("/signin?returnTo=/compilations")}
@@ -308,15 +323,15 @@ export default function CompilationsPage() {
             </button>
           </div>
         ) : loading ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
             <p className="text-zinc-600">Loading compilations...</p>
           </div>
         ) : error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center shadow-lg">
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center shadow-lg">
             <p className="text-red-700">{error}</p>
           </div>
         ) : compilations.length === 0 ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
             <p className="mb-4 text-zinc-600">
               You haven&apos;t saved any compilations yet.
             </p>
@@ -332,13 +347,13 @@ export default function CompilationsPage() {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             {compilations.map((compilation) => (
               <div
                 key={compilation.id}
                 className="rounded-2xl border border-black/10 bg-white/80 shadow-lg transition hover:shadow-xl"
               >
-                <div className="p-6">
+                <div className="p-4">
                   {/* Header */}
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">

@@ -31,6 +31,13 @@ import {
   type TransliterationScriptOption,
   transliterationScriptLabel,
 } from "../../lib/indicScript";
+import {
+  applyUiPreferencesToDocument,
+  normalizeUiDensity,
+  normalizeUiTheme,
+  persistUiPreferences,
+  readStoredUiPreferences,
+} from "../../lib/uiPreferences";
 
 type BookOption = {
   id: number;
@@ -719,6 +726,8 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_show_transliteration: true,
   preview_show_english: true,
   preview_transliteration_script: "iast",
+  ui_theme: "classic",
+  ui_density: "comfortable",
 };
 
 type StoredScripturesPreferences = {
@@ -741,6 +750,8 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   preview_transliteration_script: normalizeTransliterationScript(
     value?.preview_transliteration_script
   ),
+  ui_theme: normalizeUiTheme(value?.ui_theme),
+  ui_density: normalizeUiDensity(value?.ui_density),
 });
 
 const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
@@ -1158,10 +1169,10 @@ function ScripturesContent() {
 
     const lineClassNameForField = (fieldName: string) =>
       fieldName === "sanskrit"
-        ? "text-base text-[color:var(--deep)]"
+        ? "whitespace-pre-wrap text-base leading-relaxed text-[color:var(--deep)]"
         : fieldName === "transliteration"
-          ? "text-sm italic text-zinc-700"
-          : "text-sm text-zinc-700";
+          ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700"
+          : "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700";
 
     const metadataLabelForField = (fieldName: string) => {
       if (fieldName === "sanskrit") {
@@ -1176,7 +1187,14 @@ function ScripturesContent() {
       return "Text";
     };
 
-    const lines: Array<{ key: string; label: string; value: string; className: string }> = [];
+    const lines: Array<{
+      key: string;
+      label: string;
+      value: string;
+      className: string;
+      fieldName: string;
+      isFieldStart: boolean;
+    }> = [];
     const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
     if (renderedLines.length > 0) {
       let previousFieldName = "";
@@ -1203,13 +1221,16 @@ function ScripturesContent() {
           fieldName === "transliteration"
             ? `${baseLabel} (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
             : rawLabel || baseLabel;
-        const label = appliedShowPreviewLabels && fieldName !== previousFieldName ? computedLabel : "";
+        const isFieldStart = fieldName !== previousFieldName;
+        const label = appliedShowPreviewLabels && isFieldStart ? computedLabel : "";
 
         lines.push({
           key: `${fieldName || "line"}-${index}`,
           label,
           value,
           className: lineClassNameForField(fieldName),
+          fieldName,
+          isFieldStart,
         });
 
         previousFieldName = fieldName;
@@ -1242,13 +1263,20 @@ function ScripturesContent() {
 
       const className = lineClassNameForField(key);
 
-      lines.push({ key, label, value, className });
+      lines.push({ key, label, value, className, fieldName: key, isFieldStart: true });
     }
 
     if (lines.length === 0) {
       const fallback = (block.content.text || "").trim();
       if (fallback) {
-        lines.push({ key: "text", label: "Text", value: fallback, className: "text-sm text-zinc-700" });
+        lines.push({
+          key: "text",
+          label: "Text",
+          value: fallback,
+          className: "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700",
+          fieldName: "text",
+          isFieldStart: true,
+        });
       }
     }
 
@@ -2264,11 +2292,16 @@ function ScripturesContent() {
       }
 
       if (!authEmail) {
+        const storedUiPreferences = readStoredUiPreferences();
         const storedRaw = window.localStorage.getItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
         if (storedRaw) {
           try {
             const parsed = JSON.parse(storedRaw) as StoredScripturesPreferences;
             const normalized = normalizePreferences(parsed.preferences ?? parsed);
+            if (storedUiPreferences) {
+              normalized.ui_theme = storedUiPreferences.ui_theme;
+              normalized.ui_density = storedUiPreferences.ui_density;
+            }
             if (typeof parsed.show_only_preferred_script === "boolean") {
               normalized.show_only_preferred_script = parsed.show_only_preferred_script;
             }
@@ -2279,17 +2312,30 @@ function ScripturesContent() {
           }
         }
 
-        setPreferences(DEFAULT_USER_PREFERENCES);
+        setPreferences({
+          ...DEFAULT_USER_PREFERENCES,
+          ...(storedUiPreferences || {}),
+        });
         return;
       }
 
       try {
+        const storedUiPreferences = readStoredUiPreferences();
         const response = await fetch("/api/preferences", { credentials: "include" });
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
-        setPreferences(normalizePreferences(data));
+        const normalized = normalizePreferences(data);
+        if (storedUiPreferences) {
+          normalized.ui_theme = storedUiPreferences.ui_theme;
+          normalized.ui_density = storedUiPreferences.ui_density;
+        }
+        setPreferences(normalized);
       } catch {
-        setPreferences(DEFAULT_USER_PREFERENCES);
+        const storedUiPreferences = readStoredUiPreferences();
+        setPreferences({
+          ...DEFAULT_USER_PREFERENCES,
+          ...(storedUiPreferences || {}),
+        });
       }
     };
 
@@ -2507,6 +2553,7 @@ function ScripturesContent() {
           preferences: preferencesToSave,
         };
         window.localStorage.setItem(LOCAL_SCRIPTURES_PREFERENCES_KEY, JSON.stringify(toStore));
+        persistUiPreferences(preferencesToSave);
       }
 
       if (authEmail) {
@@ -2530,6 +2577,10 @@ function ScripturesContent() {
       setTimeout(() => setPreferencesMessage(null), 2000);
     }
   };
+
+  useEffect(() => {
+    applyUiPreferencesToDocument(preferences);
+  }, [preferences]);
 
   const sourceLanguage = normalizeSourceLanguage(preferences?.source_language);
   const transliterationScript = normalizeTransliterationScript(preferences?.transliteration_script);
@@ -4295,7 +4346,7 @@ function ScripturesContent() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 pt-8 sm:gap-10 sm:px-6 sm:pb-20 sm:pt-12">
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-3 pb-8 pt-6 sm:gap-8 sm:px-4 sm:pb-14 sm:pt-8">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">
             <a
@@ -4316,7 +4367,7 @@ function ScripturesContent() {
           </p>
         </header>
 
-        <section className="rounded-2xl border border-black/10 bg-white/80 p-4 shadow-lg sm:rounded-[32px] sm:p-6">
+        <section className="rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:rounded-[32px] sm:p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -4588,10 +4639,10 @@ function ScripturesContent() {
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:mt-6 sm:gap-6 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:mt-4 sm:gap-4 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
             {/* Tree Section */}
             <div
-              className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-4 lg:flex lg:h-full lg:flex-col ${
+              className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:h-full lg:flex-col ${
                 mobilePanel === "tree" ? "block" : "hidden"
               } lg:block`}
             >
@@ -4680,7 +4731,7 @@ function ScripturesContent() {
 
             {/* Content Section */}
             <div
-              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-4 shadow-lg sm:p-6 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
+              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
                 mobilePanel === "content" ? "block" : "hidden"
               } lg:block`}
             >
@@ -4782,14 +4833,39 @@ function ScripturesContent() {
                       )}
                       {canEditCurrentBook && (
                         <>
-                          <button
-                            type="button"
-                            onClick={inlineEditMode ? handleCancelInlineEdit : handleStartInlineEdit}
-                            disabled={inlineSubmitting}
-                            className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {inlineEditMode ? "Cancel edit" : "Edit details"}
-                          </button>
+                          {inlineEditMode ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void handleInlineSave()}
+                                disabled={
+                                  inlineSubmitting ||
+                                  !inlineHasChanges ||
+                                  inlineWordMeaningValidationErrors.length > 0
+                                }
+                                className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {inlineSubmitting ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelInlineEdit}
+                                disabled={inlineSubmitting}
+                                className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleStartInlineEdit}
+                              disabled={inlineSubmitting}
+                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Edit details
+                            </button>
+                          )}
                         </>
                       )}
                       <div className="flex items-center gap-1 border-l pl-2 border-black/10">
@@ -5248,7 +5324,7 @@ function ScripturesContent() {
                             }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {inlineSubmitting ? "Saving..." : "Save details"}
+                            {inlineSubmitting ? "Saving..." : "Save"}
                           </button>
                           <button
                             type="button"
@@ -5430,8 +5506,8 @@ function ScripturesContent() {
         </section>
 
         {showPropertiesModal && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4 md:items-center">
-            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 md:items-center">
+            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -5781,7 +5857,7 @@ function ScripturesContent() {
                   );
                 })}
 
-                <div className="sticky bottom-0 flex items-center gap-2 border-t border-black/5 bg-white/95 pt-3">
+                <div className="sticky bottom-0 flex items-center gap-2 border-t border-black/5 bg-[color:var(--paper)] pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -5810,50 +5886,50 @@ function ScripturesContent() {
         )}
 
         {showBookPreview && bookPreviewArtifact && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 sm:p-6">
-            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-black/10 bg-white/95 shadow-2xl">
-              <div className="flex items-center justify-between border-b border-black/10 bg-white/95 px-6 py-4">
+          <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
+            <div className="flex h-full w-full flex-col bg-[color:var(--paper)]">
+              <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div>
-                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                  <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
                     {bookPreviewArtifact.preview_scope === "node" ? "Level Preview" : "Book Preview"}
                   </h2>
-                  <p className="text-sm text-zinc-600">
+                  <p className="text-xs text-zinc-600 sm:text-sm">
                     {bookPreviewArtifact.preview_scope === "node"
                       ? `${bookPreviewArtifact.root_title || "Selected level"} • ${bookPreviewArtifact.book_name}`
                       : bookPreviewArtifact.book_name}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setShowPreviewControls((prev) => !prev)}
-                    className="rounded-full border border-black/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-zinc-600 transition hover:border-black/20"
+                    className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
                   >
                     {showPreviewControls ? "Hide Controls" : "Show Controls"}
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowBookPreview(false)}
-                    className="text-2xl text-zinc-400 hover:text-zinc-600"
+                    className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
                   >
                     ✕
                   </button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-6 pb-6 pt-4">
+              <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
                 {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
-                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
                     {bookPreviewArtifact.warnings.join(" ")}
                   </div>
                 )}
 
                 {showPreviewControls && (
-                  <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
-                    <div className="space-y-3">
+                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
+                    <div className="space-y-2">
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -5886,7 +5962,7 @@ function ScripturesContent() {
 
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-zinc-700">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -5979,7 +6055,7 @@ function ScripturesContent() {
                 )}
 
                 {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
-                  <div className="mb-3 rounded-xl border border-black/10 bg-white/90 p-3">
+                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
                     </div>
@@ -5998,9 +6074,9 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                <div className="space-y-2 rounded-2xl border border-black/10 bg-white/80 p-3">
+                <div className="space-y-3">
                   {bookPreviewArtifact.sections.body.length === 0 ? (
-                    <p className="text-sm text-zinc-500">
+                    <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-sm text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node"
                         ? "No previewable content found under this level."
                         : "No previewable content found for this book."}
@@ -6009,23 +6085,41 @@ function ScripturesContent() {
                     bookPreviewArtifact.sections.body.map((block) => {
                       const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
                       const wordMeaningRows = resolvePreviewWordMeanings(block);
+                      const wordMeaningInlineText = wordMeaningRows
+                        .map((row) => {
+                          const source = row.sourceText || "—";
+                          const meaning = row.meaningText || "—";
+                          const fallbackLabel =
+                            row.fallbackBadgeVisible && row.meaningLanguage
+                              ? ` (${row.meaningLanguage})`
+                              : "";
+                          return `${source} : ${meaning}${fallbackLabel}`;
+                        })
+                        .join("; ");
                       const rawTitle = block.title || "";
                       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
                       const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
                       return (
                         <article
                           key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
-                          className="rounded-xl border border-black/10 bg-white p-3"
+                          className="border-b border-black/10 px-1 py-4"
                         >
                           {displayTitle && (
                             <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
                           )}
-                          <div className="mt-2 space-y-1">
+                          <div className="mt-1">
                             {contentLines.length === 0 ? (
                               <p className="text-sm text-zinc-500">No textual content in this block.</p>
                             ) : (
-                              contentLines.map((line) => (
-                                <div key={`${line.key}-${line.value.slice(0, 24)}`}>
+                              contentLines.map((line, lineIndex) => (
+                                <div
+                                  key={`${line.key}-${line.value.slice(0, 24)}`}
+                                  className={
+                                    lineIndex === 0 || !line.isFieldStart
+                                      ? ""
+                                      : "mt-2 border-t border-black/10 pt-2"
+                                  }
+                                >
                                   {line.label && (
                                     <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                                   )}
@@ -6035,25 +6129,10 @@ function ScripturesContent() {
                             )}
                           </div>
                           {wordMeaningRows.length > 0 && (
-                            <div className="mt-3 rounded-lg border border-black/10 bg-zinc-50/70 p-2.5">
-                              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                                Word Meanings
-                              </div>
-                              <div className="space-y-1.5">
-                                {wordMeaningRows.map((row) => (
-                                  <div key={row.key} className="grid grid-cols-1 gap-1.5 text-sm md:grid-cols-2 md:gap-3">
-                                    <div className="font-medium text-[color:var(--deep)]">{row.sourceText || "—"}</div>
-                                    <div className="text-zinc-700">
-                                      <span>{row.meaningText || "—"}</span>
-                                      {row.fallbackBadgeVisible && row.meaningLanguage && (
-                                        <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-amber-700">
-                                          {row.meaningLanguage}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
+                            <div className="mt-2 border-t border-black/10 pt-2">
+                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                                {wordMeaningInlineText}
+                              </p>
                             </div>
                           )}
                           {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
@@ -6087,8 +6166,8 @@ function ScripturesContent() {
 
         {/* Share Manager Modal */}
         {showShareManager && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                   Manage Book Shares
@@ -6203,8 +6282,8 @@ function ScripturesContent() {
 
         {/* Create Book Modal */}
         {showCreateBook && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                   Create New Book
@@ -6347,9 +6426,9 @@ function ScripturesContent() {
 
         {/* Action Modal */}
         {action && actionNode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 overflow-y-auto">
-            <div className="w-full max-w-2xl rounded-3xl border border-black/10 bg-white/95 shadow-2xl my-8 flex flex-col max-h-[calc(100vh-4rem)]">
-              <div className="flex-shrink-0 p-6 pb-4 border-b border-black/10">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3 overflow-y-auto">
+            <div className="my-6 flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
+              <div className="flex-shrink-0 border-b border-black/10 p-4 pb-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     {action === "add" 
@@ -6370,9 +6449,9 @@ function ScripturesContent() {
                 </div>
               </div>
 
-              <form onSubmit={handleModalSubmit} className="flex flex-col flex-1 min-h-0">
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+              <form onSubmit={handleModalSubmit} className="flex min-h-0 flex-1 flex-col">
+                <div className="flex-1 space-y-3 overflow-y-auto p-4">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Level Name
