@@ -10,6 +10,9 @@
   --deep: #2b1f1a;
   --accent: #b33a2f;
   --accent-2: #1f5f74;
+  --ui-surface: rgba(255, 255, 255, 0.9);
+  --ui-surface-muted: rgba(255, 255, 255, 0.8);
+  --ui-border: rgba(0, 0, 0, 0.1);
 }
 
 @theme inline {
@@ -23,6 +26,117 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+body[data-ui-theme="classic"] {
+  --background: #f7f4ef;
+  --foreground: #171412;
+  --paper: #f7f4ef;
+  --sand: #efe8dc;
+  --deep: #2b1f1a;
+  --accent: #b33a2f;
+  --ui-surface: rgba(255, 255, 255, 0.9);
+  --ui-surface-muted: rgba(255, 255, 255, 0.8);
+  --ui-border: rgba(0, 0, 0, 0.1);
+}
+
+body[data-ui-theme="minimal"] {
+  --background: #faf8f4;
+  --foreground: #1a1714;
+  --paper: #faf8f4;
+  --sand: #f3ede3;
+  --deep: #221a17;
+  --accent: #a83a31;
+  --ui-surface: rgba(255, 255, 255, 0.72);
+  --ui-surface-muted: rgba(255, 255, 255, 0.62);
+  --ui-border: rgba(0, 0, 0, 0.04);
+}
+
+body[data-ui-theme="slate"] {
+  --background: #f2f4f7;
+  --foreground: #151b23;
+  --paper: #f2f4f7;
+  --sand: #e9edf3;
+  --deep: #1c2736;
+  --accent: #2e5f93;
+  --accent-2: #375d7a;
+  --ui-surface: rgba(255, 255, 255, 0.92);
+  --ui-surface-muted: rgba(255, 255, 255, 0.84);
+  --ui-border: rgba(17, 24, 39, 0.1);
+}
+
+body[data-ui-theme="minimal"] .border-black\/10 {
+  border-color: transparent !important;
+}
+
+body[data-ui-theme="minimal"] .bg-white\/90,
+body[data-ui-theme="minimal"] .bg-white\/95,
+body[data-ui-theme="minimal"] .bg-white\/80 {
+  background-color: var(--ui-surface) !important;
+}
+
+body[data-ui-theme="minimal"] .shadow-2xl,
+body[data-ui-theme="minimal"] .shadow-xl,
+body[data-ui-theme="minimal"] .shadow-lg {
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08) !important;
+}
+
+body[data-ui-density="compact"] .p-6 {
+  padding: 1rem !important;
+}
+
+body[data-ui-density="compact"] .p-5 {
+  padding: 0.875rem !important;
+}
+
+body[data-ui-density="compact"] .p-4 {
+  padding: 0.75rem !important;
+}
+
+body[data-ui-density="compact"] .p-3 {
+  padding: 0.625rem !important;
+}
+
+body[data-ui-density="compact"] .py-4 {
+  padding-top: 0.625rem !important;
+  padding-bottom: 0.625rem !important;
+}
+
+body[data-ui-density="compact"] .py-3 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+body[data-ui-density="compact"] .py-2 {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+}
+
+body[data-ui-density="compact"] .px-6 {
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+body[data-ui-density="compact"] .px-4 {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+body[data-ui-density="compact"] .px-3 {
+  padding-left: 0.625rem !important;
+  padding-right: 0.625rem !important;
+}
+
+body[data-ui-density="compact"] .gap-4 {
+  gap: 0.75rem !important;
+}
+
+body[data-ui-density="compact"] .gap-6 {
+  gap: 0.875rem !important;
+}
+
+body[data-ui-density="compact"] .gap-3 {
+  gap: 0.5rem !important;
 }
 
 .grainy-bg {

@@ -16,6 +16,13 @@ import UserPreferencesDialog, {
   type UserPreferences,
 } from "../../components/UserPreferencesDialog";
 import { normalizeTransliterationScript } from "../../lib/indicScript";
+import {
+  applyUiPreferencesToDocument,
+  normalizeUiDensity,
+  normalizeUiTheme,
+  persistUiPreferences,
+  readStoredUiPreferences,
+} from "../../lib/uiPreferences";
 
 type DraftBook = {
   id: number;
@@ -449,6 +456,7 @@ function DraftsPageContent() {
 
   const loadPreferences = async () => {
     try {
+      const storedUi = readStoredUiPreferences();
       const response = await fetch("/api/preferences", { credentials: "include" });
       if (!response.ok) {
         setPreferences(null);
@@ -461,6 +469,8 @@ function DraftsPageContent() {
           data.transliteration_script
         ),
         show_only_preferred_script: data.show_only_preferred_script ?? false,
+        ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
+        ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
       });
     } catch {
       setPreferences(null);
@@ -472,6 +482,7 @@ function DraftsPageContent() {
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
+      persistUiPreferences(preferences);
       const response = await fetch("/api/preferences", {
         method: "PATCH",
         credentials: "include",
@@ -494,6 +505,10 @@ function DraftsPageContent() {
       setTimeout(() => setPreferencesMessage(null), 2000);
     }
   };
+
+  useEffect(() => {
+    applyUiPreferencesToDocument(preferences);
+  }, [preferences]);
 
   const loadMetadataCategories = async () => {
     setMetadataCategoriesLoading(true);
@@ -1272,7 +1287,7 @@ function DraftsPageContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
-      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
         <div className="mb-8">
           <div className="flex items-center justify-between gap-3">
             <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">Draft Books</h1>
@@ -1291,7 +1306,7 @@ function DraftsPageContent() {
         </div>
 
         {!authEmail ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
             <p className="mb-4 text-zinc-600">Please sign in to manage draft books.</p>
             <button
               onClick={() => router.push("/signin?returnTo=/drafts")}
@@ -1302,7 +1317,7 @@ function DraftsPageContent() {
           </div>
         ) : (
           <>
-            <form onSubmit={handleCreateDraft} className="mb-6 rounded-2xl border border-black/10 bg-white/85 p-4 shadow-sm sm:p-6">
+            <form onSubmit={handleCreateDraft} className="mb-4 rounded-2xl border border-black/10 bg-white/85 p-3 shadow-sm sm:p-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input
                   type="text"
@@ -1338,19 +1353,19 @@ function DraftsPageContent() {
             )}
 
             {loading ? (
-              <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+              <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
                 <p className="text-zinc-600">Loading drafts...</p>
               </div>
             ) : error ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center shadow-lg">
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center shadow-lg">
                 <p className="text-red-700">{error}</p>
               </div>
             ) : drafts.length === 0 ? (
-              <div className="rounded-2xl border border-black/10 bg-white/80 p-8 text-center shadow-lg">
+              <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
                 <p className="text-zinc-600">No drafts yet. Create your first draft above.</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3">
                 {drafts.map((draft) => {
                   const draftEditor = editorState[draft.id];
                   const snapshots = snapshotsByDraft[draft.id] || [];
@@ -1370,7 +1385,7 @@ function DraftsPageContent() {
                       ref={(element) => {
                         draftCardRefs.current[draft.id] = element;
                       }}
-                      className={`rounded-2xl border bg-white/85 p-4 shadow-sm transition-all sm:p-6 ${
+                      className={`rounded-2xl border bg-white/85 p-3 shadow-sm transition-all sm:p-4 ${
                         highlightedDraftId === draft.id
                           ? "border-emerald-400 ring-2 ring-emerald-200"
                           : "border-black/10"
@@ -2016,8 +2031,8 @@ export default function DraftsPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
-          <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-            <div className="rounded-2xl border border-black/10 bg-white/85 p-6 text-sm text-zinc-600">
+          <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
+            <div className="rounded-2xl border border-black/10 bg-white/85 p-4 text-sm text-zinc-600">
               Loading drafts...
             </div>
           </div>

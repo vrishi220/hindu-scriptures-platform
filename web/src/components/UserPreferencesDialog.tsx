@@ -4,6 +4,12 @@ import {
   isRomanScript,
   normalizeTransliterationScript,
 } from "../lib/indicScript";
+import {
+  normalizeUiDensity,
+  normalizeUiTheme,
+  type UiDensityPreference,
+  type UiThemePreference,
+} from "../lib/uiPreferences";
 
 export type UserPreferences = {
   source_language: string;
@@ -18,6 +24,8 @@ export type UserPreferences = {
   preview_show_transliteration: boolean;
   preview_show_english: boolean;
   preview_transliteration_script: string;
+  ui_theme: UiThemePreference;
+  ui_density: UiDensityPreference;
 };
 
 type UserPreferencesDialogProps = {
@@ -35,10 +43,42 @@ type UserPreferencesFormProps = {
   onChange: (next: UserPreferences) => void;
 };
 
+const THEME_PREVIEWS: Array<{
+  key: UiThemePreference;
+  label: string;
+  bg: string;
+  surface: string;
+  accent: string;
+}> = [
+  {
+    key: "classic",
+    label: "Classic",
+    bg: "#f7f4ef",
+    surface: "#ffffff",
+    accent: "#b33a2f",
+  },
+  {
+    key: "minimal",
+    label: "Minimal",
+    bg: "#faf8f4",
+    surface: "#ffffff",
+    accent: "#a83a31",
+  },
+  {
+    key: "slate",
+    label: "Slate",
+    bg: "#f2f4f7",
+    surface: "#ffffff",
+    accent: "#2e5f93",
+  },
+];
+
 export function UserPreferencesForm({
   preferences,
   onChange,
 }: UserPreferencesFormProps) {
+  const uiTheme = normalizeUiTheme(preferences.ui_theme);
+  const uiDensity = normalizeUiDensity(preferences.ui_density);
   const transliterationEnabled = preferences.transliteration_enabled;
   const transliterationScript = normalizeTransliterationScript(
     preferences.transliteration_script
@@ -47,6 +87,88 @@ export function UserPreferencesForm({
 
   return (
     <div className="grid gap-3">
+      <div className="mt-1 border-t border-black/10 pt-3">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Visual Theme
+        </span>
+      </div>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Theme
+        </span>
+        <select
+          value={uiTheme}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              ui_theme: normalizeUiTheme(event.target.value),
+            })
+          }
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+        >
+          <option value="classic">Classic</option>
+          <option value="minimal">Minimal</option>
+          <option value="slate">Slate</option>
+        </select>
+      </label>
+      <div className="grid grid-cols-3 gap-2">
+        {THEME_PREVIEWS.map((theme) => {
+          const isActive = uiTheme === theme.key;
+          return (
+            <button
+              key={theme.key}
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...preferences,
+                  ui_theme: theme.key,
+                })
+              }
+              className={`rounded-lg border px-2 py-2 text-left transition ${
+                isActive
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10"
+                  : "border-black/10 bg-white hover:bg-zinc-50"
+              }`}
+            >
+              <div
+                className="mb-1.5 rounded-md border border-black/10 p-1"
+                style={{ backgroundColor: theme.bg }}
+              >
+                <div
+                  className="mb-1 h-1.5 rounded"
+                  style={{ backgroundColor: theme.accent }}
+                />
+                <div
+                  className="h-4 rounded border border-black/10"
+                  style={{ backgroundColor: theme.surface }}
+                />
+              </div>
+              <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-700">
+                {theme.label}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+          Density
+        </span>
+        <select
+          value={uiDensity}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              ui_density: normalizeUiDensity(event.target.value),
+            })
+          }
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+        >
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
+      </label>
+
       <label className="flex flex-col gap-1">
         <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
           Source language
@@ -272,7 +394,7 @@ export default function UserPreferencesDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-black/10 bg-white/95 p-6 shadow-2xl">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl bg-[color:var(--paper)] p-6 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
             Display Preferences

@@ -9,6 +9,13 @@ import {
   UserPreferencesForm,
   type UserPreferences,
 } from "@/components/UserPreferencesDialog";
+import {
+  applyUiPreferencesToDocument,
+  normalizeUiDensity,
+  normalizeUiTheme,
+  persistUiPreferences,
+  readStoredUiPreferences,
+} from "@/lib/uiPreferences";
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   source_language: "english",
@@ -23,6 +30,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   preview_show_transliteration: true,
   preview_show_english: true,
   preview_transliteration_script: "iast",
+  ui_theme: "classic",
+  ui_density: "comfortable",
 };
 
 type AuthUser = {
@@ -56,19 +65,31 @@ export default function NavBar() {
     if (preferencesLoading || preferences) return;
     setPreferencesLoading(true);
     try {
+      const storedUi = readStoredUiPreferences();
       const response = await fetch("/api/preferences", { credentials: "include" });
       if (response.ok) {
         const data = (await response.json()) as UserPreferences;
-        setPreferences({ ...DEFAULT_PREFERENCES, ...data });
+        setPreferences({
+          ...DEFAULT_PREFERENCES,
+          ...data,
+          ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
+          ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
+        });
       } else {
-        setPreferences(DEFAULT_PREFERENCES);
+        setPreferences({ ...DEFAULT_PREFERENCES, ...(storedUi || {}) });
       }
     } catch {
-      setPreferences(DEFAULT_PREFERENCES);
+      const storedUi = readStoredUiPreferences();
+      setPreferences({ ...DEFAULT_PREFERENCES, ...(storedUi || {}) });
     } finally {
       setPreferencesLoading(false);
     }
   }, [preferencesLoading, preferences]);
+
+  useEffect(() => {
+    const storedUi = readStoredUiPreferences();
+    applyUiPreferencesToDocument(storedUi);
+  }, []);
 
   useEffect(() => {
     const loadAuth = async (force = false) => {
@@ -77,6 +98,7 @@ export default function NavBar() {
         setAuthUser(null);
         setCanAdmin(false);
         setPreferences(null);
+        applyUiPreferencesToDocument(readStoredUiPreferences());
         return;
       }
       setAuthUser({
@@ -90,6 +112,7 @@ export default function NavBar() {
         email: data.email || "",
       });
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
+      void loadPreferences();
     };
     void loadAuth();
 
@@ -99,7 +122,7 @@ export default function NavBar() {
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [pathname]);
+  }, [pathname, loadPreferences]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -117,6 +140,10 @@ export default function NavBar() {
       void loadPreferences();
     }
   }, [profileOpen, profileTab, loadPreferences]);
+
+  useEffect(() => {
+    applyUiPreferencesToDocument(preferences);
+  }, [preferences]);
 
   const handleSignOut = async () => {
     try {
@@ -181,6 +208,7 @@ export default function NavBar() {
     setPreferencesMessage(null);
     setPreferencesSaving(true);
     try {
+      persistUiPreferences(preferences);
       const response = await fetch("/api/preferences", {
         method: "PATCH",
         credentials: "include",
@@ -192,7 +220,12 @@ export default function NavBar() {
         setPreferencesMessage("Failed to save preferences");
         return;
       }
-      setPreferences({ ...DEFAULT_PREFERENCES, ...(data || {}) });
+      setPreferences({
+        ...DEFAULT_PREFERENCES,
+        ...(data || {}),
+        ui_theme: normalizeUiTheme(preferences.ui_theme),
+        ui_density: normalizeUiDensity(preferences.ui_density),
+      });
       setPreferencesMessage("Preferences saved");
     } catch {
       setPreferencesMessage("Failed to save preferences");

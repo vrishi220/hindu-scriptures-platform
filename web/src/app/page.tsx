@@ -10,6 +10,13 @@ import UserPreferencesDialog, {
   type UserPreferences,
 } from "../components/UserPreferencesDialog";
 import { normalizeTransliterationScript } from "../lib/indicScript";
+import {
+  applyUiPreferencesToDocument,
+  normalizeUiDensity,
+  normalizeUiTheme,
+  persistUiPreferences,
+  readStoredUiPreferences,
+} from "../lib/uiPreferences";
 
 type SearchNode = {
   id: number;
@@ -388,6 +395,7 @@ function HomeContent() {
 
   const loadPreferences = async () => {
     try {
+      const storedUi = readStoredUiPreferences();
       const response = await fetch("/api/preferences", { credentials: "include" });
       if (!response.ok) {
         setPreferences(null);
@@ -400,6 +408,8 @@ function HomeContent() {
           data.transliteration_script
         ),
         show_only_preferred_script: data.show_only_preferred_script ?? false,
+        ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
+        ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
       });
     } catch {
       setPreferences(null);
@@ -411,6 +421,7 @@ function HomeContent() {
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
+      persistUiPreferences(preferences);
       const response = await fetch("/api/preferences", {
         method: "PATCH",
         credentials: "include",
@@ -433,6 +444,10 @@ function HomeContent() {
       setTimeout(() => setPreferencesMessage(null), 2000);
     }
   };
+
+  useEffect(() => {
+    applyUiPreferencesToDocument(preferences);
+  }, [preferences]);
 
 
   useEffect(() => {
@@ -853,9 +868,9 @@ function HomeContent() {
 
   return (
     <div className="grainy-bg min-h-screen">
-      <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-20 px-6 pb-20 pt-10 sm:px-10">
-        <section className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="flex flex-col gap-6 order-2 lg:order-1">
+      <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-14 px-4 pb-14 pt-8 sm:px-6">
+        <section className="grid gap-7 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="order-2 flex flex-col gap-4 lg:order-1">
             {authEmail && preferences && (
               <div className="flex justify-start">
                 <button
@@ -877,7 +892,7 @@ function HomeContent() {
 
             <div
               id="search"
-              className="rounded-3xl border border-black/10 bg-white/70 p-4 shadow-lg"
+              className="rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg"
             >
               <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
                 <div className="flex flex-col gap-4 sm:flex-row">
@@ -985,7 +1000,7 @@ function HomeContent() {
                 </div>
               </form>
               {(error || results.length > 0) && (
-                <div className="mt-6 rounded-2xl border border-black/10 bg-white/90 p-4">
+                <div className="mt-4 rounded-2xl border border-black/10 bg-white/90 p-3">
                   <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-500">
                     <span>Results</span>
                     <span>{total} found</span>
@@ -1009,7 +1024,7 @@ function HomeContent() {
                         return (
                         <div
                           key={result.node.id}
-                          className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
+                          className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-3 transition hover:border-[color:var(--accent)] hover:shadow-md"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
@@ -1094,8 +1109,8 @@ function HomeContent() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-6 order-1 lg:order-2">
-            <div className="rounded-[28px] border border-black/10 bg-white/80 p-6">
+          <div className="order-1 flex flex-col gap-4 lg:order-2">
+            <div className="rounded-[28px] border border-black/10 bg-white/80 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">
                 Library at a glance
               </h4>
@@ -1117,7 +1132,7 @@ function HomeContent() {
               </div>
             </div>
 
-            <div className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg">
+            <div className="rounded-[32px] border border-black/10 bg-white/80 p-4 shadow-lg">
               <div className="flex items-center justify-between">
                 <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                   {verseMode === "daily" ? "Daily Verse" : "Random Verse"}
