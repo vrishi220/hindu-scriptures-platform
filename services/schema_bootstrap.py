@@ -67,6 +67,10 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false;
         """,
         """
+        ALTER TABLE IF EXISTS scripture_schemas
+            ADD COLUMN IF NOT EXISTS level_template_defaults JSONB NOT NULL DEFAULT '{}'::jsonb;
+        """,
+        """
         ALTER TABLE IF EXISTS user_preferences
             ADD COLUMN IF NOT EXISTS preview_show_titles BOOLEAN NOT NULL DEFAULT false,
             ADD COLUMN IF NOT EXISTS preview_show_labels BOOLEAN NOT NULL DEFAULT false,
@@ -268,6 +272,65 @@ def ensure_phase1_schema(database_url: str) -> None:
         );
         """,
         """
+        CREATE TABLE IF NOT EXISTS render_templates (
+            id SERIAL PRIMARY KEY,
+            owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(120) NOT NULL,
+            description TEXT,
+            target_level VARCHAR(120),
+            visibility VARCHAR(20) NOT NULL DEFAULT 'private',
+            is_system BOOLEAN NOT NULL DEFAULT false,
+            system_key VARCHAR(160),
+            liquid_template TEXT NOT NULL,
+            current_version INTEGER NOT NULL DEFAULT 1,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_render_templates_owner_name UNIQUE (owner_id, name)
+        );
+        """,
+        """
+        ALTER TABLE IF EXISTS render_templates
+            ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'private';
+        """,
+        """
+        ALTER TABLE IF EXISTS render_templates
+            ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS system_key VARCHAR(160);
+        """,
+        """
+        ALTER TABLE IF EXISTS render_templates
+            ADD COLUMN IF NOT EXISTS target_schema_id INTEGER;
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS render_template_versions (
+            id SERIAL PRIMARY KEY,
+            template_id INTEGER NOT NULL REFERENCES render_templates(id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            liquid_template TEXT NOT NULL,
+            change_note TEXT,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_render_template_versions_template_version UNIQUE (template_id, version)
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS render_template_assignments (
+            id SERIAL PRIMARY KEY,
+            owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            entity_type VARCHAR(50) NOT NULL,
+            entity_id INTEGER NOT NULL,
+            level_key VARCHAR(120) NOT NULL DEFAULT '',
+            template_id INTEGER NOT NULL REFERENCES render_templates(id) ON DELETE CASCADE,
+            template_version_id INTEGER REFERENCES render_template_versions(id) ON DELETE SET NULL,
+            priority INTEGER NOT NULL DEFAULT 100,
+            is_active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT uq_render_template_assignments_scope UNIQUE (owner_id, entity_type, entity_id, level_key)
+        );
+        """,
+        """
         DO $$
         DECLARE
             default_category_id INTEGER;
@@ -399,6 +462,20 @@ def ensure_phase1_schema(database_url: str) -> None:
         "CREATE INDEX IF NOT EXISTS idx_metadata_bindings_scope_type ON metadata_bindings(scope_type);",
         "CREATE INDEX IF NOT EXISTS idx_category_parents_child_category_id ON category_parents(child_category_id);",
         "CREATE INDEX IF NOT EXISTS idx_category_parents_parent_category_id ON category_parents(parent_category_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_owner_id ON render_templates(owner_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_target_schema_id ON render_templates(target_schema_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_target_level ON render_templates(target_level);",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_visibility ON render_templates(visibility);",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_is_system ON render_templates(is_system);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_render_templates_system_key ON render_templates(system_key) WHERE system_key IS NOT NULL;",
+        "CREATE INDEX IF NOT EXISTS idx_render_templates_is_active ON render_templates(is_active);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_versions_template_id ON render_template_versions(template_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_versions_created_by ON render_template_versions(created_by);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_owner_id ON render_template_assignments(owner_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_scope ON render_template_assignments(entity_type, entity_id, level_key);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_template_id ON render_template_assignments(template_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_template_version_id ON render_template_assignments(template_version_id);",
+        "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_is_active ON render_template_assignments(is_active);",
     ]
 
     try:

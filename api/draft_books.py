@@ -23,6 +23,7 @@ from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.property_system import Category, MetadataBinding
 from models.provenance_record import ProvenanceRecord
+from models.template_library import RenderTemplate, RenderTemplateAssignment, RenderTemplateVersion
 from models.schemas import (
     AdminDraftBookCreate,
     BookPreviewRenderArtifactPublic,
@@ -96,6 +97,8 @@ _METADATA_TEMPLATE_KEY_FALLBACK_FIELDS = (
     "level_template_key",
     "content_template_key",
 )
+
+_CUSTOM_TEMPLATE_KEY_PATTERN = "custom.template.{template_id}.v{version}.content_item.v1"
 
 
 
@@ -606,6 +609,149 @@ def _extract_template_bindings(snapshot_data: dict | None) -> dict:
         "level_template_keys": level_bindings,
         "node_template_keys": node_bindings,
     }
+
+
+def _extract_custom_template_sources(snapshot_data: dict | None) -> dict[str, str]:
+    resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    raw_sources = resolved_data.get("custom_template_sources")
+    if not isinstance(raw_sources, dict):
+        return {}
+
+    sources: dict[str, str] = {}
+    for raw_key, raw_value in raw_sources.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+            continue
+        key = raw_key.strip()
+        source = raw_value.strip()
+        if not key or not source:
+            continue
+        if not _is_valid_template_key(key):
+            continue
+        sources[key] = source
+    return sources
+
+
+def _custom_template_key(template_id: int, version: int) -> str:
+    return _CUSTOM_TEMPLATE_KEY_PATTERN.format(template_id=template_id, version=version)
+
+
+def _can_use_template_for_owner(template: RenderTemplate, owner_id: int) -> bool:
+    if bool(template.is_system) and bool(template.is_active):
+        return True
+    if template.owner_id == owner_id:
+        return True
+    return bool(template.visibility == "published" and template.is_active)
+
+
+def _load_system_template_sources(db: Session) -> dict[str, str]:
+    rows = (
+        db.query(RenderTemplate)
+        .filter(
+            RenderTemplate.is_system.is_(True),
+            RenderTemplate.is_active.is_(True),
+            RenderTemplate.system_key.isnot(None),
+        )
+        .all()
+    )
+    sources: dict[str, str] = {}
+    for row in rows:
+        system_key = _as_clean_string(row.system_key)
+        liquid_template = row.liquid_template if isinstance(row.liquid_template, str) else ""
+        if not system_key or not liquid_template.strip():
+            continue
+        sources[system_key] = liquid_template
+    return sources
+
+
+def _apply_assignment_template_bindings(
+    preview_payload: dict,
+    db: Session,
+    owner_id: int,
+    entity_type: str,
+    entity_id: int,
+) -> None:
+    assignments = (
+        db.query(RenderTemplateAssignment)
+        .filter(
+            RenderTemplateAssignment.owner_id == owner_id,
+            RenderTemplateAssignment.entity_type == entity_type,
+            RenderTemplateAssignment.entity_id == entity_id,
+            RenderTemplateAssignment.is_active.is_(True),
+        )
+        .order_by(
+            RenderTemplateAssignment.level_key.asc(),
+            RenderTemplateAssignment.priority.asc(),
+            RenderTemplateAssignment.id.desc(),
+        )
+        .all()
+    )
+    if not assignments:
+        return
+
+    selected_by_level: dict[str, RenderTemplateAssignment] = {}
+    for assignment in assignments:
+        level_key = assignment.level_key.strip().lower() if isinstance(assignment.level_key, str) and assignment.level_key.strip() else ""
+        if level_key in selected_by_level:
+            continue
+        selected_by_level[level_key] = assignment
+
+    template_ids = sorted({assignment.template_id for assignment in selected_by_level.values()})
+    template_rows = db.query(RenderTemplate).filter(RenderTemplate.id.in_(template_ids)).all()
+    templates_by_id = {template.id: template for template in template_rows}
+
+    requested_version_ids = sorted(
+        {
+            assignment.template_version_id
+            for assignment in selected_by_level.values()
+            if assignment.template_version_id is not None
+        }
+    )
+    versions_by_id: dict[int, RenderTemplateVersion] = {}
+    if requested_version_ids:
+        version_rows = db.query(RenderTemplateVersion).filter(RenderTemplateVersion.id.in_(requested_version_ids)).all()
+        versions_by_id = {version.id: version for version in version_rows}
+
+    level_bindings: dict[str, str] = {}
+    custom_sources: dict[str, str] = {}
+    book_template_key: str | None = None
+
+    for level_key, assignment in selected_by_level.items():
+        template = templates_by_id.get(assignment.template_id)
+        if not template:
+            continue
+        if not _can_use_template_for_owner(template, owner_id):
+            continue
+
+        resolved_version_number = template.current_version or 1
+        resolved_template_source = template.liquid_template
+        if assignment.template_version_id is not None:
+            pinned_version = versions_by_id.get(assignment.template_version_id)
+            if pinned_version and pinned_version.template_id == template.id:
+                resolved_version_number = pinned_version.version
+                resolved_template_source = pinned_version.liquid_template
+
+        template_key = _custom_template_key(template.id, resolved_version_number)
+        custom_sources[template_key] = resolved_template_source
+
+        if level_key:
+            level_bindings[level_key] = template_key
+        else:
+            book_template_key = template_key
+
+    if not custom_sources:
+        return
+
+    generated_bindings: dict = {}
+    if book_template_key:
+        generated_bindings["book_template_key"] = book_template_key
+    if level_bindings:
+        generated_bindings["level_template_keys"] = level_bindings
+
+    _apply_session_template_bindings(preview_payload, generated_bindings)
+
+    existing_sources = _extract_custom_template_sources(preview_payload)
+    merged_sources = {**existing_sources, **custom_sources}
+    preview_payload["custom_template_sources"] = merged_sources
 
 
 def _apply_session_template_bindings(snapshot_payload: dict, session_template_bindings: dict | None) -> None:
@@ -1407,7 +1553,19 @@ def _resolve_liquid_template_source(
     section_name: str,
     level_name: str | None,
     resolved_metadata: dict | None = None,
+    custom_template_sources: dict[str, str] | None = None,
+    system_template_sources: dict[str, str] | None = None,
 ) -> str:
+    if isinstance(custom_template_sources, dict):
+        custom_source = custom_template_sources.get(template_key)
+        if isinstance(custom_source, str) and custom_source.strip():
+            return custom_source
+
+    if isinstance(system_template_sources, dict):
+        system_source = system_template_sources.get(template_key)
+        if isinstance(system_source, str) and system_source.strip():
+            return system_source
+
     registered = _DEFAULT_LIQUID_TEMPLATES.get(template_key)
     if isinstance(registered, str) and registered:
         return registered
@@ -1485,6 +1643,8 @@ def _render_block_content_with_template(
     source_node: ContentNode | None,
     item: dict,
     resolved_metadata: dict | None = None,
+    custom_template_sources: dict[str, str] | None = None,
+    system_template_sources: dict[str, str] | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(source_node, item, resolved_metadata)
     resolved_labels = _resolve_default_template_labels(resolved_metadata)
@@ -1498,6 +1658,8 @@ def _render_block_content_with_template(
         section_name,
         context.get("level_name"),
         resolved_metadata,
+        custom_template_sources,
+        system_template_sources,
     )
     try:
         rendered_lines = _render_liquid_lines(template_source, context, label_to_field)
@@ -1690,6 +1852,8 @@ def _render_book_preview_template(
     preview_payload: dict,
     display_title: str,
     sections: SnapshotRenderSections,
+    custom_template_sources: dict[str, str] | None = None,
+    system_template_sources: dict[str, str] | None = None,
 ) -> BookPreviewTemplatePublic:
     template_bindings = _extract_template_bindings(preview_payload)
     configured_template = _read_template_key(template_bindings.get("book_template_key"))
@@ -1699,6 +1863,8 @@ def _render_book_preview_template(
         section_name="body",
         level_name="book",
         resolved_metadata=None,
+        custom_template_sources=custom_template_sources,
+        system_template_sources=system_template_sources,
     )
 
     child_titles: list[str] = []
@@ -1740,6 +1906,8 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
     source_node_ids: set[int] = set()
     template_bindings = _extract_template_bindings(resolved_data)
     metadata_bindings = _extract_metadata_bindings(resolved_data)
+    custom_template_sources = _extract_custom_template_sources(resolved_data)
+    system_template_sources = _load_system_template_sources(db)
 
     for section_name in section_names:
         raw_section = resolved_data.get(section_name)
@@ -1857,6 +2025,8 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 source_node=source_node,
                 item=item,
                 resolved_metadata=resolved_metadata,
+                custom_template_sources=custom_template_sources,
+                system_template_sources=system_template_sources,
             )
             materialized_blocks.append(
                 SnapshotRenderBlock(
@@ -2680,6 +2850,13 @@ def preview_draft_render(
 
     resolved_snapshot_data = payload.snapshot_data or draft.section_structure or _default_sections()
     preview_payload = dict(resolved_snapshot_data)
+    _apply_assignment_template_bindings(
+        preview_payload=preview_payload,
+        db=db,
+        owner_id=current_user.id,
+        entity_type="draft_book",
+        entity_id=draft.id,
+    )
     _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
     template_warnings = _validate_template_bindings(preview_payload)
     _apply_template_metadata(preview_payload)
@@ -2758,6 +2935,15 @@ def preview_book_render(
     if isinstance(payload.metadata_bindings, dict):
         preview_payload["metadata_bindings"] = payload.metadata_bindings
 
+    if current_user is not None:
+        _apply_assignment_template_bindings(
+            preview_payload=preview_payload,
+            db=db,
+            owner_id=current_user.id,
+            entity_type="book",
+            entity_id=book.id,
+        )
+
     _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
     template_warnings = _validate_template_bindings(preview_payload)
     _apply_template_metadata(preview_payload)
@@ -2766,7 +2952,15 @@ def preview_book_render(
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
     display_title = _book_title_for_preview(root_node) if root_node else book.book_name
-    book_template = _render_book_preview_template(preview_payload, display_title, sections)
+    custom_template_sources = _extract_custom_template_sources(preview_payload)
+    system_template_sources = _load_system_template_sources(db)
+    book_template = _render_book_preview_template(
+        preview_payload,
+        display_title,
+        sections,
+        custom_template_sources=custom_template_sources,
+        system_template_sources=system_template_sources,
+    )
 
     return BookPreviewRenderArtifactPublic(
         book_id=book.id,

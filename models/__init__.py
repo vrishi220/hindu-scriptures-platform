@@ -12,6 +12,7 @@ from models.scripture_schema import ScriptureSchema
 from models.user import User
 from models.user_preference import UserPreference
 from models.compilation import Compilation
+from models.template_library import RenderTemplate, RenderTemplateVersion, RenderTemplateAssignment
 from models.property_system import (
 	Category,
 	CategoryParent,
@@ -33,6 +34,9 @@ __all__ = [
 	"DraftBook",
 	"EditionSnapshot",
 	"ContentNode",
+	"RenderTemplate",
+	"RenderTemplateVersion",
+	"RenderTemplateAssignment",
 	"MetadataBinding",
 	"MediaFile",
 	"PropertyDefinition",

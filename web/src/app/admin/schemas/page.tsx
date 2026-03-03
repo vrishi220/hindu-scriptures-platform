@@ -12,6 +12,19 @@ type Schema = {
   name: string;
   description?: string | null;
   levels: string[];
+  level_template_defaults?: Record<string, number>;
+};
+
+type TemplateOption = {
+  id: number;
+  name: string;
+  target_schema_id?: number | null;
+  target_level?: string | null;
+  visibility: "private" | "published";
+  is_system?: boolean;
+  system_key?: string | null;
+  current_version: number;
+  is_active: boolean;
 };
 
 type BookOption = {
@@ -41,9 +54,12 @@ const getErrorMessage = (raw: string, fallback: string) => {
   return trimmed ? trimmed : fallback;
 };
 
+const normalizeLevel = (value: string) => value.trim().toLowerCase();
+
 export default function SchemaBuilderPage() {
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [books, setBooks] = useState<BookOption[]>([]);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -59,6 +75,7 @@ export default function SchemaBuilderPage() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editLevels, setEditLevels] = useState<string[]>([]);
+  const [editLevelTemplateDefaults, setEditLevelTemplateDefaults] = useState<Record<string, number>>({});
   const [openLevelActionsKey, setOpenLevelActionsKey] = useState<string | null>(null);
   const [showSchemaActionsMenu, setShowSchemaActionsMenu] = useState(false);
   const levelActionsMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -138,11 +155,43 @@ export default function SchemaBuilderPage() {
     }
   };
 
+  const loadTemplates = async () => {
+    try {
+      const response = await fetch("/api/templates/my?include_published=true&include_inactive=false", {
+        credentials: "include",
+      });
+      const raw = await response.text();
+      if (!response.ok) {
+        setTemplates([]);
+        return;
+      }
+      const payload = parsePayload(raw) as TemplateOption[] | null;
+      setTemplates(payload || []);
+    } catch {
+      setTemplates([]);
+    }
+  };
+
   useEffect(() => {
     loadAuth();
     loadSchemas();
     loadBooks();
+    loadTemplates();
   }, []);
+
+  useEffect(() => {
+    setEditLevelTemplateDefaults((prev) => {
+      if (editLevels.length === 0) return {};
+      const allowed = new Set(editLevels.map((level) => level.trim()).filter(Boolean));
+      const next: Record<string, number> = {};
+      Object.entries(prev).forEach(([level, templateId]) => {
+        if (allowed.has(level) && Number.isInteger(templateId) && templateId > 0) {
+          next[level] = templateId;
+        }
+      });
+      return next;
+    });
+  }, [editLevels]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -175,6 +224,7 @@ export default function SchemaBuilderPage() {
     setEditName(schema.name || "");
     setEditDescription(schema.description || "");
     setEditLevels(schema.levels?.length ? schema.levels : [""]);
+    setEditLevelTemplateDefaults(schema.level_template_defaults || {});
     setActivePanel("edit");
   };
 
@@ -270,6 +320,11 @@ export default function SchemaBuilderPage() {
         name: editName.trim(),
         description: editDescription.trim() || null,
         levels: editLevels.map((level) => level.trim()).filter(Boolean),
+        level_template_defaults: Object.fromEntries(
+          Object.entries(editLevelTemplateDefaults).filter(
+            ([level, templateId]) => level.trim() && Number.isInteger(templateId) && templateId > 0
+          )
+        ),
       };
       const response = await fetch(contentPath(`/schemas/${selectedId}`),
         {
@@ -339,6 +394,7 @@ export default function SchemaBuilderPage() {
       setEditName("");
       setEditDescription("");
       setEditLevels([]);
+      setEditLevelTemplateDefaults({});
       setToast({ type: "success", message: "Schema deleted." });
       await loadSchemas();
     } catch (err) {
@@ -646,6 +702,78 @@ export default function SchemaBuilderPage() {
                       </div>
                       {renderLevelEditor(editLevels, setEditLevels, "edit")}
                     </div>
+
+                    <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Level Default Templates
+                      </div>
+                      <p className="mt-2 text-xs text-zinc-600">
+                        Set the default template per level for this schema. Node properties can override per instance.
+                      </p>
+                      <div className="mt-3 flex flex-col gap-3">
+                        {editLevels.map((level, idx) => {
+                          const normalizedLevel = normalizeLevel(level);
+                          const options = templates.filter((template) => {
+                            const templateLevel = normalizeLevel(template.target_level || "");
+                            if (!template.is_active || !selectedId) {
+                              return false;
+                            }
+                            const schemaMatch = template.target_schema_id === selectedId;
+                            const globalSystemMatch = Boolean(template.is_system) && !template.target_schema_id;
+                            if (!schemaMatch && !globalSystemMatch) {
+                              return false;
+                            }
+                            return templateLevel === normalizedLevel;
+                          });
+                          const currentTemplateId =
+                            (level && editLevelTemplateDefaults[level] ? String(editLevelTemplateDefaults[level]) : "");
+
+                          return (
+                            <label key={`${level}-${idx}`} className="flex flex-col gap-1">
+                              <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {level || `Level ${idx + 1}`}
+                              </span>
+                              <select
+                                value={currentTemplateId}
+                                onChange={(event) => {
+                                  const raw = event.target.value;
+                                  setEditLevelTemplateDefaults((prev) => {
+                                    const next = { ...prev };
+                                    if (!level) {
+                                      return next;
+                                    }
+                                    if (!raw) {
+                                      delete next[level];
+                                      return next;
+                                    }
+                                    next[level] = Number(raw);
+                                    return next;
+                                  });
+                                }}
+                                disabled={!level.trim()}
+                                className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-50"
+                              >
+                                <option value="">No default (use built-in fallback)</option>
+                                {options.map((template) => (
+                                  <option key={template.id} value={template.id.toString()}>
+                                    {template.name} (v{template.current_version}, {template.visibility})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3">
+                        <a
+                          href="/templates"
+                          className="text-xs text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
+                        >
+                          Manage templates
+                        </a>
+                      </div>
+                    </div>
+
                     <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
                       {renderPreview(editLevels.filter((level) => level.trim()))}
                       <div className="flex flex-col gap-2">

@@ -69,6 +69,7 @@ type BookDetails = {
     id: number;
     name: string;
     levels: string[];
+    level_template_defaults?: Record<string, number>;
   } | null;
 };
 
@@ -89,6 +90,7 @@ type SchemaOption = {
   name: string;
   description: string | null;
   levels: string[];
+  level_template_defaults?: Record<string, number>;
 };
 
 type TreeNode = {
@@ -292,6 +294,27 @@ type ResolvedMetadata = {
 };
 
 type PropertiesScope = "book" | "node";
+
+type LevelTemplateOption = {
+  id: number;
+  name: string;
+  target_schema_id?: number | null;
+  target_level?: string | null;
+  visibility: "private" | "published";
+  is_system?: boolean;
+  system_key?: string | null;
+  current_version: number;
+  is_active: boolean;
+};
+
+type LevelTemplateAssignment = {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  level_key: string;
+  template_id: number;
+  is_active: boolean;
+};
 
 const formatValue = (value: unknown) => {
   if (typeof value === "string") {
@@ -1113,6 +1136,15 @@ function ScripturesContent() {
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
+  const [propertiesLevelKey, setPropertiesLevelKey] = useState("");
+  const [levelDefaultTemplateKey, setLevelDefaultTemplateKey] = useState("");
+  const [levelTemplates, setLevelTemplates] = useState<LevelTemplateOption[]>([]);
+  const [levelTemplateAssignmentId, setLevelTemplateAssignmentId] = useState<number | null>(null);
+  const [selectedLevelTemplateId, setSelectedLevelTemplateId] = useState("");
+  const [levelTemplatesLoading, setLevelTemplatesLoading] = useState(false);
+  const [levelTemplateSaving, setLevelTemplateSaving] = useState(false);
+  const [levelTemplateError, setLevelTemplateError] = useState<string | null>(null);
+  const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
   const [showBookActionsMenu, setShowBookActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const bookActionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1672,6 +1704,7 @@ function ScripturesContent() {
     setPropertiesSaving(false);
     setPropertiesError(null);
     setPropertiesMessage(null);
+    resetLevelTemplateSelection();
 
     try {
       const endpoint = propertiesEndpoint(scope, nodeId);
@@ -1853,6 +1886,20 @@ function ScripturesContent() {
       setPropertiesCategoryId(categoryId);
       setPropertiesEffectiveFields(visibleEffective);
       setPropertiesValues(values);
+
+      if (scope === "node") {
+        const selectedTreeNode = nodeId ? findNodeById(treeData, nodeId) : null;
+        const normalizedLevelKey = (selectedTreeNode?.level_name || nodeContent?.level_name || "")
+          .trim()
+          .toLowerCase();
+        if (normalizedLevelKey) {
+          setPropertiesLevelKey(normalizedLevelKey);
+          setLevelDefaultTemplateKey(
+            getDefaultTemplateKeyFromSnapshot(scopedMetadataSnapshot, normalizedLevelKey)
+          );
+          await loadLevelTemplateSelection(normalizedLevelKey);
+        }
+      }
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to load metadata");
     } finally {
@@ -1899,6 +1946,184 @@ function ScripturesContent() {
     }));
     setPropertiesMessage(null);
     setPropertiesError(null);
+  };
+
+  const getDefaultTemplateKeyFromSnapshot = (
+    metadataSnapshot: Record<string, unknown>,
+    normalizedLevelKey: string
+  ): string => {
+    const levelSegment = normalizedLevelKey
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+
+    const candidates = [
+      "render_template_key",
+      `${levelSegment}_template_key`,
+      `body_${levelSegment}_template_key`,
+      "level_template_key",
+      "content_template_key",
+      "template_key",
+    ];
+
+    for (const key of candidates) {
+      const value = metadataSnapshot[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    return "";
+  };
+
+  const resetLevelTemplateSelection = () => {
+    setPropertiesLevelKey("");
+    setLevelDefaultTemplateKey("");
+    setLevelTemplates([]);
+    setLevelTemplateAssignmentId(null);
+    setSelectedLevelTemplateId("");
+    setLevelTemplatesLoading(false);
+    setLevelTemplateSaving(false);
+    setLevelTemplateError(null);
+    setLevelTemplateMessage(null);
+  };
+
+  const loadLevelTemplateSelection = async (levelKey: string) => {
+    if (!bookId || !levelKey) {
+      resetLevelTemplateSelection();
+      return;
+    }
+
+    setLevelTemplatesLoading(true);
+    setLevelTemplateError(null);
+    setLevelTemplateMessage(null);
+
+    try {
+      const [templatesRes, assignmentsRes] = await Promise.all([
+        fetch("/api/templates/my?include_published=true&include_inactive=false", {
+          credentials: "include",
+        }),
+        fetch(`/api/templates/assignments/my?entity_type=book&entity_id=${bookId}`, {
+          credentials: "include",
+        }),
+      ]);
+
+      const templatesPayload = (await templatesRes.json().catch(() => null)) as
+        | LevelTemplateOption[]
+        | { detail?: string }
+        | null;
+      if (!templatesRes.ok) {
+        throw new Error((templatesPayload as { detail?: string } | null)?.detail || "Failed to load templates");
+      }
+
+      const assignmentsPayload = (await assignmentsRes.json().catch(() => null)) as
+        | LevelTemplateAssignment[]
+        | { detail?: string }
+        | null;
+      if (!assignmentsRes.ok) {
+        throw new Error((assignmentsPayload as { detail?: string } | null)?.detail || "Failed to load template assignments");
+      }
+
+      const currentSchemaId = Number(currentBook?.schema?.id || 0);
+      const allTemplates = Array.isArray(templatesPayload) ? templatesPayload : [];
+      const templates = allTemplates.filter((template) => {
+        const templateLevel = (template.target_level || "").trim().toLowerCase();
+        if (!template.is_active || templateLevel !== levelKey) {
+          return false;
+        }
+        const schemaMatch = currentSchemaId > 0 && template.target_schema_id === currentSchemaId;
+        const globalSystemMatch = Boolean(template.is_system) && !template.target_schema_id;
+        if (currentSchemaId > 0 && !schemaMatch && !globalSystemMatch) {
+          return false;
+        }
+        return true;
+      });
+
+      const assignment = (Array.isArray(assignmentsPayload) ? assignmentsPayload : []).find(
+        (item) =>
+          item.entity_type === "book" &&
+          item.entity_id === Number(bookId) &&
+          item.is_active &&
+          (item.level_key || "").trim().toLowerCase() === levelKey
+      );
+
+      const schemaDefaults = currentBook?.schema?.level_template_defaults || {};
+      const schemaDefaultEntry = Object.entries(schemaDefaults).find(
+        ([level]) => level.trim().toLowerCase() === levelKey
+      );
+      const schemaDefaultTemplateId = schemaDefaultEntry ? Number(schemaDefaultEntry[1]) : null;
+      if (schemaDefaultTemplateId && Number.isFinite(schemaDefaultTemplateId) && schemaDefaultTemplateId > 0) {
+        const schemaDefaultTemplate = allTemplates.find((item) => item.id === schemaDefaultTemplateId);
+        if (schemaDefaultTemplate) {
+          setLevelDefaultTemplateKey(
+            `${schemaDefaultTemplate.name} (v${schemaDefaultTemplate.current_version}, ${schemaDefaultTemplate.visibility})`
+          );
+        } else {
+          setLevelDefaultTemplateKey(`Template #${schemaDefaultTemplateId}`);
+        }
+      }
+
+      setLevelTemplates(templates);
+      setLevelTemplateAssignmentId(assignment?.id ?? null);
+      setSelectedLevelTemplateId(assignment ? String(assignment.template_id) : "");
+    } catch (err) {
+      setLevelTemplates([]);
+      setLevelTemplateAssignmentId(null);
+      setSelectedLevelTemplateId("");
+      setLevelTemplateError(err instanceof Error ? err.message : "Failed to load level templates");
+    } finally {
+      setLevelTemplatesLoading(false);
+    }
+  };
+
+  const assignLevelTemplate = async () => {
+    if (!bookId || !propertiesLevelKey) {
+      setLevelTemplateError("Open a level properties dialog to assign a template");
+      return;
+    }
+    if (!selectedLevelTemplateId) {
+      setLevelTemplateError("Select a template to assign");
+      return;
+    }
+
+    setLevelTemplateSaving(true);
+    setLevelTemplateError(null);
+    setLevelTemplateMessage(null);
+
+    try {
+      const response = await fetch("/api/templates/assignments", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_type: "book",
+          entity_id: Number(bookId),
+          level_key: propertiesLevelKey,
+          template_id: Number(selectedLevelTemplateId),
+          priority: 100,
+          is_active: true,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | LevelTemplateAssignment
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to assign template");
+      }
+
+      const assignment = payload as LevelTemplateAssignment;
+      setLevelTemplateAssignmentId(assignment.id);
+      setLevelTemplateMessage("Template assigned for this level");
+      setPropertiesMessage("Properties saved");
+    } catch (err) {
+      setLevelTemplateError(err instanceof Error ? err.message : "Failed to assign template");
+    } finally {
+      setLevelTemplateSaving(false);
+    }
   };
 
   const handleToggleWordMeaningsRolloutLevel = (levelName: string) => {
@@ -5560,6 +5785,92 @@ function ScripturesContent() {
                     className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
                   />
                 </label>
+
+                {propertiesScope === "node" && (
+                  <div className="rounded-lg border border-black/10 bg-white p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Level Template</div>
+                        <p className="mt-1 text-xs text-zinc-600">
+                          Schema default: <span className="font-medium">{levelDefaultTemplateKey || "Not configured"}</span>
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-600">
+                          Instance override for level: <span className="font-medium">{propertiesLevelKey || "unknown"}</span>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (propertiesLevelKey) {
+                            void loadLevelTemplateSelection(propertiesLevelKey);
+                          }
+                        }}
+                        disabled={levelTemplatesLoading || levelTemplateSaving || !propertiesLevelKey}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700 disabled:opacity-60"
+                      >
+                        {levelTemplatesLoading ? "Loading..." : "Refresh"}
+                      </button>
+                    </div>
+
+                    <label className="mt-3 flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Template</span>
+                      <select
+                        value={selectedLevelTemplateId}
+                        onChange={(event) => {
+                          setSelectedLevelTemplateId(event.target.value);
+                          setLevelTemplateError(null);
+                          setLevelTemplateMessage(null);
+                        }}
+                        disabled={levelTemplatesLoading || levelTemplateSaving || !propertiesLevelKey}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-60"
+                      >
+                        <option value="">Select template</option>
+                        {levelTemplates.map((template) => (
+                          <option key={template.id} value={template.id.toString()}>
+                            {template.name} (v{template.current_version}, {template.visibility})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void assignLevelTemplate();
+                        }}
+                        disabled={!selectedLevelTemplateId || levelTemplateSaving || !propertiesLevelKey}
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                      >
+                        {levelTemplateSaving
+                          ? "Saving..."
+                          : levelTemplateAssignmentId
+                            ? "Update Assignment"
+                            : "Assign Template"}
+                      </button>
+                      <span className="text-xs text-zinc-500">
+                        {levelTemplateAssignmentId ? "Override active" : "Using schema default"}
+                      </span>
+                      <a
+                        href="/templates"
+                        className="text-xs text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
+                      >
+                        Manage templates
+                      </a>
+                    </div>
+
+                    {levelTemplateError && (
+                      <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                        {levelTemplateError}
+                      </div>
+                    )}
+                    {levelTemplateMessage && (
+                      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                        {levelTemplateMessage}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <label className="flex flex-col gap-1">
                   <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Category</span>

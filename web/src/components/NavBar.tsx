@@ -312,6 +312,18 @@ export default function NavBar() {
               Drafts
             </a>
           )}
+          {authUser && (
+            <a
+              href="/templates"
+              className={`hover:text-[color:var(--accent)] ${
+                isActive("/templates")
+                  ? "font-semibold text-[color:var(--deep)]"
+                  : ""
+              }`}
+            >
+              Templates
+            </a>
+          )}
           <a
             href="/explorer"
             className={`hover:text-[color:var(--accent)] ${
@@ -438,6 +450,19 @@ export default function NavBar() {
                 }`}
               >
                 Drafts
+              </a>
+            )}
+            {authUser && (
+              <a
+                href="/templates"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                  isActive("/templates")
+                    ? "font-semibold text-[color:var(--deep)]"
+                    : "text-zinc-600 hover:text-[color:var(--accent)]"
+                }`}
+              >
+                Templates
               </a>
             )}
             <a

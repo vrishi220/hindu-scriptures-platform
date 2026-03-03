@@ -12,4 +12,5 @@ class ScriptureSchema(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text)
     levels = Column(JSONB, nullable=False)
+    level_template_defaults = Column(JSONB, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

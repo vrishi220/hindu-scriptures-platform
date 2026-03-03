@@ -272,6 +272,7 @@ class ScriptureSchemaBase(BaseModel):
     name: str
     description: str | None = None
     levels: list[str]
+    level_template_defaults: dict[str, int] = Field(default_factory=dict)
 
 
 class ScriptureSchemaCreate(ScriptureSchemaBase):
@@ -282,6 +283,7 @@ class ScriptureSchemaUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     levels: list[str] | None = None
+    level_template_defaults: dict[str, int] | None = None
 
 
 class ScriptureSchemaPublic(ScriptureSchemaBase):

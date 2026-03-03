@@ -439,6 +439,7 @@ def create_schema(
         name=payload.name,
         description=payload.description,
         levels=payload.levels,
+        level_template_defaults=payload.level_template_defaults or {},
     )
     db.add(schema)
     db.commit()
