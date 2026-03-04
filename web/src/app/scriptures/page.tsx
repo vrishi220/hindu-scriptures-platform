@@ -894,6 +894,9 @@ const isEmptyMetadataValue = (value: unknown): boolean => {
   return false;
 };
 
+const normalizeMetadataKey = (value: string): string =>
+  value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+
 const isUsableBindingValueForField = (
   field: EffectivePropertyBinding,
   value: unknown
@@ -1565,24 +1568,60 @@ function ScripturesContent() {
     return fallback;
   };
 
-  const readCategoryIdFromMetadata = (metadata: Record<string, unknown>): number | null => {
-    const categoryCandidate = metadata.category_id;
-    if (typeof categoryCandidate === "number" && Number.isFinite(categoryCandidate) && categoryCandidate > 0) {
-      return categoryCandidate;
-    }
-    if (typeof categoryCandidate === "string") {
-      const parsed = Number(categoryCandidate);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        return parsed;
+  const readCategoryIdFromMetadata = (
+    metadata: Record<string, unknown>,
+    categories: MetadataCategory[]
+  ): number | null => {
+    const categoryIdCandidates = [metadata.category_id, metadata.categoryId];
+    for (const categoryCandidate of categoryIdCandidates) {
+      if (
+        typeof categoryCandidate === "number" &&
+        Number.isFinite(categoryCandidate) &&
+        categoryCandidate > 0
+      ) {
+        return categoryCandidate;
+      }
+      if (typeof categoryCandidate === "string") {
+        const parsed = Number(categoryCandidate);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
       }
     }
+
+    const categoryNameCandidates = [metadata.category_name, metadata.categoryName, metadata.category]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    if (categoryNameCandidates.length === 0) {
+      return null;
+    }
+
+    const categoriesByNormalizedName = new Map<string, number>();
+    categories.forEach((category) => {
+      categoriesByNormalizedName.set(normalizeMetadataKey(category.name), category.id);
+    });
+
+    for (const categoryName of categoryNameCandidates) {
+      const matchedCategoryId = categoriesByNormalizedName.get(normalizeMetadataKey(categoryName));
+      if (matchedCategoryId) {
+        return matchedCategoryId;
+      }
+    }
+
     return null;
   };
 
-  const inferCategoryIdFromMetadata = async (metadata: Record<string, unknown>): Promise<number | null> => {
-    const ignoredKeys = new Set(["owner_id", "status", "visibility", "category_id"]);
-    const metadataKeys = Object.keys(metadata).filter((key) => !ignoredKeys.has(key));
-    const candidateCategories = metadataCategories.filter((category) => !category.is_deprecated);
+  const inferCategoryIdFromMetadata = async (
+    metadata: Record<string, unknown>,
+    categories: MetadataCategory[]
+  ): Promise<number | null> => {
+    const ignoredKeys = new Set(["owner_id", "status", "visibility", "category_id", "category_name", "category"]);
+    const metadataKeys = Object.keys(metadata)
+      .map((key) => normalizeMetadataKey(key))
+      .filter((key) => key && !ignoredKeys.has(key));
+    const candidateCategories = categories.filter((category) => !category.is_deprecated);
     if (candidateCategories.length === 0) {
       return null;
     }
@@ -1597,7 +1636,9 @@ function ScripturesContent() {
     for (const category of candidateCategories) {
       try {
         const effective = await loadEffectiveProperties(category.id);
-        const effectiveKeys = new Set(effective.map((field) => field.property_internal_name));
+        const effectiveKeys = new Set(
+          effective.map((field) => normalizeMetadataKey(field.property_internal_name))
+        );
         let score = 0;
         metadataKeys.forEach((key) => {
           if (effectiveKeys.has(key)) {
@@ -1740,9 +1781,10 @@ function ScripturesContent() {
         throw new Error(payload?.detail || "Failed to load metadata properties");
       }
 
-      let categoryId = binding?.category_id ?? readCategoryIdFromMetadata(scopedMetadataSnapshot) ?? null;
+      let categoryId =
+        binding?.category_id ?? readCategoryIdFromMetadata(scopedMetadataSnapshot, availableCategories) ?? null;
       if (!categoryId && scope === "node") {
-        categoryId = await inferCategoryIdFromMetadata(scopedMetadataSnapshot);
+        categoryId = await inferCategoryIdFromMetadata(scopedMetadataSnapshot, availableCategories);
       }
       if (!categoryId && scope === "book") {
         const defaultCategory =
@@ -1759,6 +1801,10 @@ function ScripturesContent() {
 
       const effective = await loadEffectiveProperties(categoryId);
       const visibleEffective = filterVisibleMetadataFields(effective);
+      const fieldByNormalizedKey = new Map<string, EffectivePropertyBinding>();
+      visibleEffective.forEach((field) => {
+        fieldByNormalizedKey.set(normalizeMetadataKey(field.property_internal_name), field);
+      });
       const values: Record<string, unknown> = {};
       const bindingProvidedKeys = new Set<string>();
       visibleEffective.forEach((field) => {
@@ -1793,14 +1839,16 @@ function ScripturesContent() {
       }
 
       Object.entries(scopedMetadataSnapshot).forEach(([key, value]) => {
-        if (!(key in values)) {
+        const field = fieldByNormalizedKey.get(normalizeMetadataKey(key));
+        if (!field) {
           return;
         }
-        if (bindingProvidedKeys.has(key) && !isEmptyMetadataValue(values[key])) {
+        const internalName = field.property_internal_name;
+        if (bindingProvidedKeys.has(internalName) && !isEmptyMetadataValue(values[internalName])) {
           return;
         }
         if (value !== undefined && !isEmptyMetadataValue(value)) {
-          values[key] = value;
+          values[internalName] = value;
         }
       });
 
