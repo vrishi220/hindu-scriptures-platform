@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MoreVertical, Save, Trash2, TriangleAlert, Upload } from "lucide-react";
+import Link from "next/link";
+import { MoreVertical } from "lucide-react";
 import { getMe } from "@/lib/authClient";
 
 type Toast = {
@@ -13,7 +14,6 @@ type PropertyDefinition = {
   id: number;
   display_name: string;
   internal_name: string;
-  data_type: "text" | "boolean" | "number" | "dropdown" | "date" | "datetime";
   is_deprecated: boolean;
 };
 
@@ -43,6 +43,8 @@ type CategoryCreatePayload = {
   }>;
 };
 
+type ModalMode = "create" | "edit" | "view";
+
 const parsePayload = (raw: string) => {
   if (!raw) return null;
   try {
@@ -60,26 +62,31 @@ const getErrorMessage = (raw: string, fallback: string) => {
 };
 
 export default function MetadataCategoriesAdminPage() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [canAdmin, setCanAdmin] = useState(false);
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [properties, setProperties] = useState<PropertyDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
+  const [openActionsId, setOpenActionsId] = useState<number | null>(null);
+  const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
-  const [createName, setCreateName] = useState("");
-  const [createDescription, setCreateDescription] = useState("");
-  const [createScopes, setCreateScopes] = useState<string[]>(["book"]);
-  const [createParentIds, setCreateParentIds] = useState<number[]>([]);
-  const [createPropertyIds, setCreatePropertyIds] = useState<number[]>([]);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "published" | "deprecated">("all");
 
-  const [selected, setSelected] = useState<Category | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [editScopes, setEditScopes] = useState<string[]>(["book"]);
-  const [editParentIds, setEditParentIds] = useState<number[]>([]);
-  const [showSelectedActionsMenu, setShowSelectedActionsMenu] = useState(false);
-  const selectedActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<ModalMode>("create");
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [scopes, setScopes] = useState<string[]>(["book"]);
+  const [parentIds, setParentIds] = useState<number[]>([]);
+  const [propertyIds, setPropertyIds] = useState<number[]>([]);
 
   const scopeLabelMap: Record<string, string> = {
     all: "All",
@@ -91,25 +98,13 @@ export default function MetadataCategoriesAdminPage() {
 
   const scopeOptions = useMemo(() => {
     const preferredOrder = ["all", "book", "level", "node", "global"];
-    const combined = new Set<string>([...preferredOrder, ...createScopes, ...editScopes]);
+    const combined = new Set<string>(preferredOrder);
     categories.forEach((category) => {
       (category.applicable_scopes || []).forEach((scope) => {
         if (scope) combined.add(scope);
       });
     });
-
-    const preferred = preferredOrder.filter((scope) => combined.has(scope));
-    const extras = Array.from(combined)
-      .filter((scope) => !preferredOrder.includes(scope))
-      .sort((left, right) => left.localeCompare(right));
-
-    return [...preferred, ...extras];
-  }, [categories, createScopes, editScopes]);
-
-  const categoryNameById = useMemo(() => {
-    const map = new Map<number, string>();
-    categories.forEach((category) => map.set(category.id, category.name));
-    return map;
+    return Array.from(combined);
   }, [categories]);
 
   const activeProperties = useMemo(
@@ -117,36 +112,28 @@ export default function MetadataCategoriesAdminPage() {
     [properties]
   );
 
-  useEffect(() => {
-    const onPointerDown = (event: MouseEvent) => {
-      if (!showSelectedActionsMenu || !selectedActionsMenuRef.current) return;
-      const target = event.target as Node;
-      if (!selectedActionsMenuRef.current.contains(target)) {
-        setShowSelectedActionsMenu(false);
-      }
-    };
-
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [showSelectedActionsMenu]);
+  const categoryNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    categories.forEach((category) => map.set(category.id, category.name));
+    return map;
+  }, [categories]);
 
   const ensureAdmin = async () => {
     try {
       const me = await getMe();
-      const canAdmin = Boolean(me?.permissions?.can_admin || me?.role === "admin");
-      setAccessDenied(!canAdmin);
-      return canAdmin;
+      const admin = Boolean(me?.permissions?.can_admin || me?.role === "admin");
+      setCanAdmin(admin);
+      setAccessDenied(!admin);
+      return admin;
     } catch {
       setAccessDenied(true);
+      setCanAdmin(false);
       return false;
     }
   };
 
   const loadAll = async () => {
     setLoading(true);
-    setToast(null);
     try {
       const [categoriesResponse, propertiesResponse] = await Promise.all([
         fetch("/api/metadata/categories", { credentials: "include" }),
@@ -174,17 +161,6 @@ export default function MetadataCategoriesAdminPage() {
 
       setCategories(categoriesPayload);
       setProperties(propertiesPayload);
-
-      if (selected) {
-        const refreshed = categoriesPayload.find((item) => item.id === selected.id) || null;
-        setSelected(refreshed);
-        if (refreshed) {
-          setEditName(refreshed.name || "");
-          setEditDescription(refreshed.description || "");
-          setEditScopes(refreshed.applicable_scopes || ["book"]);
-          setEditParentIds(refreshed.parent_category_ids || []);
-        }
-      }
     } catch (error) {
       setToast({
         type: "error",
@@ -197,12 +173,10 @@ export default function MetadataCategoriesAdminPage() {
 
   useEffect(() => {
     void (async () => {
-      const canProceed = await ensureAdmin();
-      if (canProceed) {
-        await loadAll();
-      }
+      await ensureAdmin();
+      await loadAll();
+      setAuthChecked(true);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -211,16 +185,53 @@ export default function MetadataCategoriesAdminPage() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const getSelectedValues = (event: React.ChangeEvent<HTMLSelectElement>) =>
-    Array.from(event.target.selectedOptions).map((option) => option.value);
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (openActionsId === null) return;
+      const menu = actionMenuRefs.current[openActionsId];
+      const target = event.target as Node;
+      if (menu && !menu.contains(target)) {
+        setOpenActionsId(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, [openActionsId]);
+
+  const filteredCategories = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return categories.filter((category) => {
+      if (statusFilter === "active" && category.is_deprecated) return false;
+      if (statusFilter === "published" && !category.is_published) return false;
+      if (statusFilter === "deprecated" && !category.is_deprecated) return false;
+
+      if (!normalizedQuery) return true;
+      const haystack = [
+        category.name,
+        category.description || "",
+        (category.applicable_scopes || []).join(" "),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [categories, query, statusFilter]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName("");
+    setDescription("");
+    setScopes(["book"]);
+    setParentIds([]);
+    setPropertyIds([]);
+  };
 
   const scopeLabel = (scope: string) => scopeLabelMap[scope] || scope;
 
-  const toggleFromList = (
-    id: number,
-    values: number[],
-    setter: (next: number[]) => void
-  ) => {
+  const toggleFromList = (id: number, values: number[], setter: (next: number[]) => void) => {
     if (values.includes(id)) {
       setter(values.filter((value) => value !== id));
       return;
@@ -228,115 +239,108 @@ export default function MetadataCategoriesAdminPage() {
     setter([...values, id]);
   };
 
-  const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const openCreate = () => {
+    setModalMode("create");
+    resetForm();
+    setModalOpen(true);
+  };
+
+  const openCategory = (item: Category) => {
+    setModalMode(canAdmin ? "edit" : "view");
+    setEditingId(item.id);
+    setName(item.name || "");
+    setDescription(item.description || "");
+    setScopes(item.applicable_scopes || ["book"]);
+    setParentIds(item.parent_category_ids || []);
+    setPropertyIds([]);
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
     setSaving(true);
     setToast(null);
     try {
-      const propertiesPayload = createPropertyIds.map((propertyId, index) => ({
-        property_definition_id: propertyId,
-        order: index,
-        description_override: null,
-        default_override: null,
-        is_required_override: null,
-      }));
+      const isEdit = editingId !== null;
 
-      const payload: CategoryCreatePayload = {
-        name: createName.trim(),
-        description: createDescription.trim() || null,
-        parent_category_ids: createParentIds,
-        applicable_scopes: createScopes,
-        properties: propertiesPayload,
-      };
+      if (isEdit) {
+        const response = await fetch(`/api/metadata/categories/${editingId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim() || null,
+            parent_category_ids: parentIds,
+            applicable_scopes: scopes,
+          }),
+          credentials: "include",
+        });
 
-      const response = await fetch("/api/metadata/categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        credentials: "include",
-      });
-
-      const raw = await response.text();
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAccessDenied(true);
-          return;
+        const raw = await response.text();
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setAccessDenied(true);
+            return;
+          }
+          throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to update category")}`);
         }
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to create category")}`);
+
+        setToast({ type: "success", message: "Category updated." });
+      } else {
+        const propertiesPayload = propertyIds.map((propertyId, index) => ({
+          property_definition_id: propertyId,
+          order: index,
+          description_override: null,
+          default_override: null,
+          is_required_override: null,
+        }));
+
+        const payload: CategoryCreatePayload = {
+          name: name.trim(),
+          description: description.trim() || null,
+          parent_category_ids: parentIds,
+          applicable_scopes: scopes,
+          properties: propertiesPayload,
+        };
+
+        const response = await fetch("/api/metadata/categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          credentials: "include",
+        });
+
+        const raw = await response.text();
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setAccessDenied(true);
+            return;
+          }
+          throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to create category")}`);
+        }
+
+        setToast({ type: "success", message: "Category created." });
       }
 
-      setCreateName("");
-      setCreateDescription("");
-      setCreateScopes(["book"]);
-      setCreateParentIds([]);
-      setCreatePropertyIds([]);
-      setToast({ type: "success", message: "Category created." });
+      setModalOpen(false);
+      resetForm();
       await loadAll();
     } catch (error) {
       setToast({
         type: "error",
-        message: error instanceof Error ? error.message : "Failed to create category",
+        message: error instanceof Error ? error.message : "Failed to save category",
       });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSelectCategory = (item: Category) => {
-    setSelected(item);
-    setEditName(item.name || "");
-    setEditDescription(item.description || "");
-    setEditScopes(item.applicable_scopes || ["book"]);
-    setEditParentIds(item.parent_category_ids || []);
-  };
+  const handleDelete = async (item: Category) => {
+    if (!window.confirm(`Delete category "${item.name}"? This cannot be undone.`)) return;
 
-  const handleUpdateSelected = async () => {
-    if (!selected) return;
-    setSaving(true);
-    setToast(null);
-
-    try {
-      const response = await fetch(`/api/metadata/categories/${selected.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName.trim(),
-          description: editDescription.trim() || null,
-          parent_category_ids: editParentIds,
-          applicable_scopes: editScopes,
-        }),
-        credentials: "include",
-      });
-
-      const raw = await response.text();
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAccessDenied(true);
-          return;
-        }
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to update category")}`);
-      }
-
-      setToast({ type: "success", message: "Category updated." });
-      await loadAll();
-    } catch (error) {
-      setToast({
-        type: "error",
-        message: error instanceof Error ? error.message : "Failed to update category",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteSelected = async () => {
-    if (!selected) return;
-    if (!window.confirm("Delete this category? This cannot be undone.")) return;
-
-    setSaving(true);
+    setDeletingId(item.id);
     setToast(null);
     try {
-      const response = await fetch(`/api/metadata/categories/${selected.id}`, {
+      const response = await fetch(`/api/metadata/categories/${item.id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -349,11 +353,11 @@ export default function MetadataCategoriesAdminPage() {
         throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to delete category")}`);
       }
 
-      setSelected(null);
-      setEditName("");
-      setEditDescription("");
-      setEditScopes(["book"]);
-      setEditParentIds([]);
+      if (editingId === item.id) {
+        setModalOpen(false);
+        resetForm();
+      }
+
       setToast({ type: "success", message: "Category deleted." });
       await loadAll();
     } catch (error) {
@@ -362,17 +366,14 @@ export default function MetadataCategoriesAdminPage() {
         message: error instanceof Error ? error.message : "Failed to delete category",
       });
     } finally {
-      setSaving(false);
+      setDeletingId(null);
     }
   };
 
-  const handlePublishSelected = async () => {
-    if (!selected) return;
-    setSaving(true);
+  const handlePublish = async (item: Category) => {
     setToast(null);
-
     try {
-      const response = await fetch(`/api/metadata/categories/${selected.id}/publish`, {
+      const response = await fetch(`/api/metadata/categories/${item.id}/publish`, {
         method: "POST",
         credentials: "include",
       });
@@ -387,18 +388,13 @@ export default function MetadataCategoriesAdminPage() {
         type: "error",
         message: error instanceof Error ? error.message : "Failed to publish category",
       });
-    } finally {
-      setSaving(false);
     }
   };
 
-  const handleDeprecateSelected = async () => {
-    if (!selected) return;
-    setSaving(true);
+  const handleDeprecate = async (item: Category) => {
     setToast(null);
-
     try {
-      const response = await fetch(`/api/metadata/categories/${selected.id}/deprecate`, {
+      const response = await fetch(`/api/metadata/categories/${item.id}/deprecate`, {
         method: "POST",
         credentials: "include",
       });
@@ -413,311 +409,340 @@ export default function MetadataCategoriesAdminPage() {
         type: "error",
         message: error instanceof Error ? error.message : "Failed to deprecate category",
       });
-    } finally {
-      setSaving(false);
     }
   };
 
+  if (!authChecked) {
+    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
+  }
+
   return (
-    <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
-        <header className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Metadata</p>
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)]">
-            Categories
-          </h1>
-          <p className="max-w-2xl text-sm text-zinc-600">
-            Define metadata categories, parent inheritance, and category property sets.
-          </p>
-          <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-            <a href="/admin" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Users</a>
-            <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Schemas</a>
-            <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Properties</a>
-            <a href="/admin/metadata/categories" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Categories</a>
-          </div>
-        </header>
+    <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold text-zinc-900">Categories</h1>
+        <p className="text-sm text-zinc-600">Manage metadata categories in a searchable table view.</p>
+      </header>
 
-        {toast && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
-              toast.type === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {toast.message}
+      <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+        <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>
+        <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white px-3 py-1">Schemas</a>
+        <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
+        <a href="/admin/metadata/categories" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Categories</a>
+      </div>
+
+      {toast && (
+        <div className={`rounded-lg border px-3 py-2 text-sm ${toast.type === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+          {toast.message}
+        </div>
+      )}
+
+      {accessDenied && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Admin access required.
+          <Link className="ml-2 font-semibold underline" href="/signin">
+            Sign in
+          </Link>
+        </div>
+      )}
+
+      <section className={`rounded-xl border border-black/10 bg-white p-4 space-y-3 ${accessDenied ? "pointer-events-none opacity-60" : ""}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-zinc-900">Categories</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search categories"
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
+            />
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as "all" | "active" | "published" | "deprecated")}
+              className="rounded-lg border border-black/10 px-2 py-1.5 text-sm"
+            >
+              <option value="all">All status</option>
+              <option value="active">Active</option>
+              <option value="published">Published</option>
+              <option value="deprecated">Deprecated</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => void loadAll()}
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+            {canAdmin && (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white"
+              >
+                Create
+              </button>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-zinc-600">Loading...</p>
+        ) : filteredCategories.length === 0 ? (
+          <p className="text-sm text-zinc-600">No categories found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-black/10 text-left text-zinc-600">
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Scopes</th>
+                  <th className="px-3 py-2 font-medium">Version</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCategories.map((item) => {
+                  const canDelete = (!item.is_system && !item.is_published) || deletingId === item.id;
+                  const actions = [
+                    !item.is_published
+                      ? {
+                          key: "publish",
+                          label: "Publish",
+                          onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                            event.stopPropagation();
+                            setOpenActionsId(null);
+                            void handlePublish(item);
+                          },
+                          className: "text-emerald-800 hover:bg-emerald-50",
+                          disabled: false,
+                        }
+                      : null,
+                    !item.is_deprecated
+                      ? {
+                          key: "deprecate",
+                          label: "Deprecate",
+                          onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                            event.stopPropagation();
+                            setOpenActionsId(null);
+                            void handleDeprecate(item);
+                          },
+                          className: "text-amber-800 hover:bg-amber-50",
+                          disabled: false,
+                        }
+                      : null,
+                    canDelete
+                      ? {
+                          key: "delete",
+                          label: deletingId === item.id ? "Deleting…" : "Delete",
+                          onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+                            event.stopPropagation();
+                            setOpenActionsId(null);
+                            void handleDelete(item);
+                          },
+                          className: "text-red-700 hover:bg-red-50",
+                          disabled: deletingId === item.id,
+                        }
+                      : null,
+                  ].filter(Boolean) as Array<{
+                    key: string;
+                    label: string;
+                    onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+                    className: string;
+                    disabled: boolean;
+                  }>;
+
+                  return (
+                  <tr key={item.id} onClick={() => openCategory(item)} className="cursor-pointer border-b border-black/5 hover:bg-zinc-50">
+                    <td className="px-3 py-2 font-medium text-zinc-900">{item.name}</td>
+                    <td className="px-3 py-2 text-zinc-700">{(item.applicable_scopes || []).join(", ") || "—"}</td>
+                    <td className="px-3 py-2 text-zinc-700">v{item.version}</td>
+                    <td className="px-3 py-2 text-zinc-700">
+                      {item.is_deprecated ? "Deprecated" : item.is_published ? "Published" : "Draft"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {canAdmin ? actions.length > 1 ? (
+                        <div
+                          ref={(element) => {
+                            actionMenuRefs.current[item.id] = element;
+                          }}
+                          className="relative"
+                        >
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenActionsId((prev) => (prev === item.id ? null : item.id));
+                            }}
+                            aria-label="Category actions"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          {openActionsId === item.id && (
+                            <div className="absolute right-0 z-40 mt-2 w-44 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              {actions.map((action) => (
+                                <button
+                                  key={action.key}
+                                  type="button"
+                                  onClick={action.onClick}
+                                  disabled={action.disabled}
+                                  className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition ${action.className} disabled:cursor-not-allowed disabled:opacity-50`}
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : actions.length === 1 ? (
+                        <button
+                          type="button"
+                          onClick={actions[0].onClick}
+                          disabled={actions[0].disabled}
+                          className={`rounded-md border px-2.5 py-1 text-xs disabled:opacity-50 ${
+                            actions[0].key === "delete"
+                              ? "border-red-200 text-red-700"
+                              : actions[0].key === "deprecate"
+                              ? "border-amber-200 text-amber-800"
+                              : "border-emerald-200 text-emerald-800"
+                          }`}
+                        >
+                          {actions[0].label}
+                        </button>
+                      ) : null : null}
+                    </td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
           </div>
         )}
+      </section>
 
-        {accessDenied && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
-            Admin access required.
-          </div>
-        )}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-3xl rounded-xl border border-black/10 bg-white p-4 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-zinc-900">
+                {modalMode === "create" ? "Create category" : modalMode === "edit" ? "Edit category" : "View category"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalOpen(false);
+                  resetForm();
+                }}
+                className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
+              >
+                Close
+              </button>
+            </div>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <div className={`rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg ${accessDenied ? "pointer-events-none opacity-60" : ""}`}>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Create category</h2>
-            <form className="mt-4 grid gap-4" onSubmit={handleCreate}>
-              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm text-zinc-700">
                 Name
                 <input
-                  value={createName}
-                  onChange={(event) => setCreateName(event.target.value)}
-                  className="rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-                  required
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  disabled={modalMode === "view"}
+                  className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
                 />
               </label>
-              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+              <label className="text-sm text-zinc-700">
                 Description
-                <textarea
-                  value={createDescription}
-                  onChange={(event) => setCreateDescription(event.target.value)}
-                  className="min-h-[84px] rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                <input
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  disabled={modalMode === "view"}
+                  className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
                 />
               </label>
-              <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                Applicable Scopes
-                <select
-                  multiple
-                  value={createScopes}
-                  onChange={(event) => setCreateScopes(getSelectedValues(event))}
-                  className="min-h-[112px] rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-                  required
-                >
-                  {scopeOptions.map((scope) => (
-                    <option key={scope} value={scope}>
-                      {scopeLabel(scope)}
-                    </option>
+            </div>
+
+            <label className="mt-3 block text-sm text-zinc-700">
+              Applicable scopes
+              <select
+                multiple
+                value={scopes}
+                onChange={(event) =>
+                  setScopes(Array.from(event.target.selectedOptions).map((option) => option.value))
+                }
+                disabled={modalMode === "view"}
+                className="mt-1 min-h-[100px] w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
+              >
+                {scopeOptions.map((scope) => (
+                  <option key={scope} value={scope}>
+                    {scopeLabel(scope)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="mt-3 rounded-lg border border-black/10 p-3">
+              <p className="text-sm font-medium text-zinc-900">Parent categories</p>
+              <div className="mt-2 max-h-32 overflow-auto space-y-2">
+                {categories
+                  .filter((item) => item.id !== editingId)
+                  .map((item) => (
+                    <label key={item.id} className="inline-flex w-full items-center gap-2 text-sm text-zinc-700">
+                      <input
+                        type="checkbox"
+                        checked={parentIds.includes(item.id)}
+                        onChange={() => toggleFromList(item.id, parentIds, setParentIds)}
+                        disabled={modalMode === "view"}
+                      />
+                      {item.name}
+                    </label>
                   ))}
-                </select>
-                <p className="text-[10px] normal-case tracking-normal text-zinc-500">Hold Command/Ctrl to select multiple scopes.</p>
-              </label>
-
-              <div className="grid gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Parent categories</p>
-                <div className="max-h-32 overflow-auto rounded-xl border border-black/10 bg-white/80 p-3">
-                  <div className="grid gap-2">
-                    {categories.map((item) => (
-                      <label key={item.id} className="inline-flex items-center gap-2 text-sm text-zinc-700">
-                        <input
-                          type="checkbox"
-                          checked={createParentIds.includes(item.id)}
-                          onChange={() => toggleFromList(item.id, createParentIds, setCreateParentIds)}
-                          className="h-4 w-4 rounded border-black/20 text-[color:var(--accent)]"
-                        />
-                        {item.name}
-                      </label>
-                    ))}
-                    {!categories.length && <p className="text-xs text-zinc-500">No categories yet.</p>}
-                  </div>
-                </div>
               </div>
-
-              <div className="grid gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Assign properties</p>
-                <div className="max-h-40 overflow-auto rounded-xl border border-black/10 bg-white/80 p-3">
-                  <div className="grid gap-2">
-                    {activeProperties.map((property) => (
-                      <label key={property.id} className="inline-flex items-center gap-2 text-sm text-zinc-700">
-                        <input
-                          type="checkbox"
-                          checked={createPropertyIds.includes(property.id)}
-                          onChange={() => toggleFromList(property.id, createPropertyIds, setCreatePropertyIds)}
-                          className="h-4 w-4 rounded border-black/20 text-[color:var(--accent)]"
-                        />
-                        {property.display_name}
-                        <span className="text-xs text-zinc-500">({property.internal_name})</span>
-                      </label>
-                    ))}
-                    {!activeProperties.length && <p className="text-xs text-zinc-500">No active properties available.</p>}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-xl border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? "Saving..." : "Create Category"}
-              </button>
-            </form>
-          </div>
-
-          <div className={`rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg ${accessDenied ? "pointer-events-none opacity-60" : ""}`}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Categories</h2>
-              <button
-                onClick={() => loadAll()}
-                className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600"
-              >
-                {loading ? "Loading..." : "Refresh"}
-              </button>
             </div>
 
-            <div className="mt-4 grid gap-3">
-              {categories.map((category) => (
-                <button
-                  type="button"
-                  key={category.id}
-                  onClick={() => handleSelectCategory(category)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
-                    selected?.id === category.id
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
-                      : "border-black/10 bg-white/90"
-                  }`}
-                >
-                  <p className="text-sm font-semibold text-[color:var(--deep)]">{category.name}</p>
-                  <p className="text-xs text-zinc-500">v{category.version} · scopes: {(category.applicable_scopes || []).join(", ") || "none"}</p>
-                  {category.parent_category_ids?.length > 0 && (
-                    <p className="mt-1 text-xs text-zinc-500">
-                      parents: {category.parent_category_ids.map((id) => categoryNameById.get(id) || `#${id}`).join(", ")}
-                    </p>
-                  )}
-                  <div className="mt-2 flex gap-2">
-                    {category.is_system && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-zinc-600">System</span>}
-                    {category.is_published && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-emerald-700">Published</span>}
-                    {category.is_deprecated && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-amber-700">Deprecated</span>}
-                  </div>
-                </button>
-              ))}
-              {!categories.length && <p className="text-sm text-zinc-500">No categories yet.</p>}
-            </div>
-
-            {selected && (
-              <div className="mt-6 rounded-2xl border border-black/10 bg-zinc-50/70 p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Edit selected</h3>
-                <div className="mt-3 grid gap-3">
-                  <label className="grid gap-1 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                    Name
-                    <input
-                      value={editName}
-                      onChange={(event) => setEditName(event.target.value)}
-                      disabled={selected.is_published}
-                      className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:bg-zinc-100 disabled:text-zinc-500"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                    Description
-                    <textarea
-                      value={editDescription}
-                      onChange={(event) => setEditDescription(event.target.value)}
-                      disabled={selected.is_published}
-                      className="min-h-[72px] rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:bg-zinc-100 disabled:text-zinc-500"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                    Applicable Scopes
-                    <select
-                      multiple
-                      value={editScopes}
-                      onChange={(event) => setEditScopes(getSelectedValues(event))}
-                      disabled={selected.is_published}
-                      className="min-h-[112px] rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:bg-zinc-100 disabled:text-zinc-500"
-                    >
-                      {scopeOptions.map((scope) => (
-                        <option key={scope} value={scope}>
-                          {scopeLabel(scope)}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] normal-case tracking-normal text-zinc-500">Hold Command/Ctrl to select multiple scopes.</p>
-                  </label>
-
-                  <div className="grid gap-1">
-                    <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Parent categories</p>
-                    <div className="max-h-28 overflow-auto rounded-xl border border-black/10 bg-white/90 p-3">
-                      <div className="grid gap-2">
-                        {categories
-                          .filter((item) => item.id !== selected.id)
-                          .map((item) => (
-                            <label key={item.id} className="inline-flex items-center gap-2 text-sm text-zinc-700">
-                              <input
-                                type="checkbox"
-                                checked={editParentIds.includes(item.id)}
-                                onChange={() => toggleFromList(item.id, editParentIds, setEditParentIds)}
-                                disabled={selected.is_published}
-                                className="h-4 w-4 rounded border-black/20 text-[color:var(--accent)]"
-                              />
-                              {item.name}
-                            </label>
-                          ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <div ref={selectedActionsMenuRef} className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowSelectedActionsMenu((prev) => !prev)}
-                        title="Selected category actions"
-                        aria-label="Selected category actions"
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-                      {showSelectedActionsMenu && (
-                        <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSelectedActionsMenu(false);
-                              void handleUpdateSelected();
-                            }}
-                            disabled={saving || selected.is_published}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Save size={14} />
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSelectedActionsMenu(false);
-                              void handlePublishSelected();
-                            }}
-                            disabled={saving || selected.is_published}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Upload size={14} />
-                            Publish
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSelectedActionsMenu(false);
-                              void handleDeprecateSelected();
-                            }}
-                            disabled={saving || selected.is_deprecated}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-800 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <TriangleAlert size={14} />
-                            Deprecate
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSelectedActionsMenu(false);
-                              void handleDeleteSelected();
-                            }}
-                            disabled={saving || selected.is_system || selected.is_published}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Trash2 size={14} />
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+            {modalMode === "create" && (
+              <div className="mt-3 rounded-lg border border-black/10 p-3">
+                <p className="text-sm font-medium text-zinc-900">Assign properties</p>
+                <div className="mt-2 max-h-40 overflow-auto space-y-2">
+                  {activeProperties.map((property) => (
+                    <label key={property.id} className="inline-flex w-full items-center gap-2 text-sm text-zinc-700">
+                      <input
+                        type="checkbox"
+                        checked={propertyIds.includes(property.id)}
+                        onChange={() => toggleFromList(property.id, propertyIds, setPropertyIds)}
+                      />
+                      {property.display_name}
+                      <span className="text-xs text-zinc-500">({property.internal_name})</span>
+                    </label>
+                  ))}
                 </div>
               </div>
             )}
+
+            {modalMode !== "create" && (
+              <div className="mt-3 rounded-lg border border-black/10 bg-zinc-50 p-3 text-xs text-zinc-600">
+                Property assignments are set at category creation time in this manager.
+              </div>
+            )}
+
+            {editingId && (
+              <div className="mt-3 rounded-lg border border-black/10 p-3 text-sm text-zinc-600">
+                Parent labels: {parentIds.map((id) => categoryNameById.get(id) || `#${id}`).join(", ") || "None"}
+              </div>
+            )}
+
+            {modalMode !== "view" ? (
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !name.trim() || scopes.length === 0}
+                  className="rounded-lg border border-black/10 bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : modalMode === "create" ? "Create" : "Save"}
+                </button>
+              </div>
+            ) : null}
           </div>
-        </section>
-      </main>
-    </div>
+        </div>
+      )}
+    </main>
   );
 }

@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, MoreVertical, Save, Trash2 } from "lucide-react";
 import { contentPath } from "../../../lib/apiPaths";
 import { getMe } from "../../../lib/authClient";
 
@@ -22,7 +20,6 @@ type TemplateOption = {
   target_level?: string | null;
   visibility: "private" | "published";
   is_system?: boolean;
-  system_key?: string | null;
   current_version: number;
   is_active: boolean;
 };
@@ -33,10 +30,20 @@ type BookOption = {
   schema_id?: number | null;
 };
 
+type MePayload = {
+  role?: string | null;
+  permissions?: {
+    can_admin?: boolean;
+    can_edit?: boolean;
+  } | null;
+};
+
 type Toast = {
   type: "success" | "error";
   message: string;
 };
+
+type ModalMode = "create" | "edit" | "view";
 
 const parsePayload = (raw: string) => {
   if (!raw) return null;
@@ -56,30 +63,36 @@ const getErrorMessage = (raw: string, fallback: string) => {
 
 const normalizeLevel = (value: string) => value.trim().toLowerCase();
 
+const parseLevelsInput = (value: string): string[] =>
+  value
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
 export default function SchemaBuilderPage() {
+  const [authChecked, setAuthChecked] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [canAdmin, setCanAdmin] = useState(false);
+
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [books, setBooks] = useState<BookOption[]>([]);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [canAdmin, setCanAdmin] = useState(false);
 
-  const [createName, setCreateName] = useState("");
-  const [createDescription, setCreateDescription] = useState("");
-  const [createLevels, setCreateLevels] = useState<string[]>(["", ""]);
-  const [activePanel, setActivePanel] = useState<"create" | "edit">("edit");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">("all");
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [editLevels, setEditLevels] = useState<string[]>([]);
-  const [editLevelTemplateDefaults, setEditLevelTemplateDefaults] = useState<Record<string, number>>({});
-  const [openLevelActionsKey, setOpenLevelActionsKey] = useState<string | null>(null);
-  const [showSchemaActionsMenu, setShowSchemaActionsMenu] = useState(false);
-  const levelActionsMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const schemaActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<ModalMode>("create");
+  const [editingSchemaId, setEditingSchemaId] = useState<number | null>(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [levelsInput, setLevelsInput] = useState("chapter\nverse");
+  const [levelTemplateDefaults, setLevelTemplateDefaults] = useState<Record<string, string>>({});
 
   const usageCounts = useMemo(() => {
     const counts = new Map<number, number>();
@@ -90,52 +103,61 @@ export default function SchemaBuilderPage() {
     return counts;
   }, [books]);
 
+  const parsedLevels = useMemo(() => parseLevelsInput(levelsInput), [levelsInput]);
+
+  const filteredSchemas = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return schemas.filter((schema) => {
+      const usage = usageCounts.get(schema.id) || 0;
+      if (usageFilter === "used" && usage === 0) return false;
+      if (usageFilter === "unused" && usage > 0) return false;
+
+      if (!normalizedQuery) return true;
+      const haystack = [schema.name, schema.description || "", schema.levels.join(" ")]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [schemas, searchQuery, usageFilter, usageCounts]);
+
   const loadAuth = async () => {
     try {
-      const data = await getMe();
+      const data = (await getMe()) as MePayload | null;
       if (!data) {
-        setCanAdmin(false);
         setAccessDenied(true);
+        setCanEdit(false);
+        setCanAdmin(false);
         return;
       }
-      const allowEdit = Boolean(
-        data.permissions?.can_edit || data.role === "editor" || data.role === "admin"
-      );
-      const allowAdmin = Boolean(
-        data.permissions?.can_admin || data.role === "admin"
-      );
+      const allowEdit = Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin");
+      const allowAdmin = Boolean(data.permissions?.can_admin || data.role === "admin");
+      setCanEdit(allowEdit || allowAdmin);
       setCanAdmin(allowAdmin);
       setAccessDenied(!allowEdit && !allowAdmin);
     } catch {
       setAccessDenied(true);
+      setCanEdit(false);
+      setCanAdmin(false);
     }
   };
 
   const loadSchemas = async () => {
     setLoading(true);
-    setToast(null);
     try {
-      const response = await fetch(contentPath("/schemas"), {
-        credentials: "include",
-      });
+      const response = await fetch(contentPath("/schemas"), { credentials: "include" });
       const raw = await response.text();
-      const payload = parsePayload(raw) as Schema[] | { detail?: string } | null;
+      const payload = parsePayload(raw) as Schema[] | null;
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           setAccessDenied(true);
           setSchemas([]);
           return;
         }
-        throw new Error(
-          `(${response.status}) ${getErrorMessage(raw, "Schemas load failed")}`
-        );
+        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Schemas load failed")}`);
       }
-      setSchemas((payload as Schema[]) || []);
+      setSchemas(payload || []);
     } catch (err) {
-      setToast({
-        type: "error",
-        message: err instanceof Error ? err.message : "Schemas load failed",
-      });
+      setToast({ type: "error", message: err instanceof Error ? err.message : "Schemas load failed" });
     } finally {
       setLoading(false);
     }
@@ -146,6 +168,7 @@ export default function SchemaBuilderPage() {
       const response = await fetch("/api/books", { credentials: "include" });
       const raw = await response.text();
       if (!response.ok) {
+        setBooks([]);
         return;
       }
       const payload = parsePayload(raw) as BookOption[] | null;
@@ -172,26 +195,17 @@ export default function SchemaBuilderPage() {
     }
   };
 
-  useEffect(() => {
-    loadAuth();
-    loadSchemas();
-    loadBooks();
-    loadTemplates();
-  }, []);
+  const loadAll = async () => {
+    await Promise.all([loadSchemas(), loadBooks(), loadTemplates()]);
+  };
 
   useEffect(() => {
-    setEditLevelTemplateDefaults((prev) => {
-      if (editLevels.length === 0) return {};
-      const allowed = new Set(editLevels.map((level) => level.trim()).filter(Boolean));
-      const next: Record<string, number> = {};
-      Object.entries(prev).forEach(([level, templateId]) => {
-        if (allowed.has(level) && Number.isInteger(templateId) && templateId > 0) {
-          next[level] = templateId;
-        }
-      });
-      return next;
-    });
-  }, [editLevels]);
+    void (async () => {
+      await loadAuth();
+      await loadAll();
+      setAuthChecked(true);
+    })();
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -200,183 +214,129 @@ export default function SchemaBuilderPage() {
   }, [toast]);
 
   useEffect(() => {
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (openLevelActionsKey) {
-        const menu = levelActionsMenuRefs.current[openLevelActionsKey];
-        if (menu && !menu.contains(target)) {
-          setOpenLevelActionsKey(null);
+    setLevelTemplateDefaults((prev) => {
+      const allowed = new Set(parsedLevels);
+      const next: Record<string, string> = {};
+      Object.entries(prev).forEach(([level, templateId]) => {
+        if (allowed.has(level) && templateId) {
+          next[level] = templateId;
         }
-      }
-      if (showSchemaActionsMenu && schemaActionsMenuRef.current && !schemaActionsMenuRef.current.contains(target)) {
-        setShowSchemaActionsMenu(false);
-      }
-    };
-
-    document.addEventListener("mousedown", onPointerDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-    };
-  }, [openLevelActionsKey, showSchemaActionsMenu]);
-
-  const handleSelectSchema = (schema: Schema) => {
-    setSelectedId(schema.id);
-    setEditName(schema.name || "");
-    setEditDescription(schema.description || "");
-    setEditLevels(schema.levels?.length ? schema.levels : [""]);
-    setEditLevelTemplateDefaults(schema.level_template_defaults || {});
-    setActivePanel("edit");
-  };
-
-  const handleStartCreate = () => {
-    setSelectedId(null);
-    setActivePanel("create");
-  };
-
-  const updateLevels = (levels: string[], setter: Dispatch<SetStateAction<string[]>>) => {
-    setter(levels);
-  };
-
-  const moveLevel = (
-    index: number,
-    direction: -1 | 1,
-    levels: string[],
-    setter: Dispatch<SetStateAction<string[]>>
-  ) => {
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= levels.length) return;
-    const next = [...levels];
-    const temp = next[index];
-    next[index] = next[nextIndex];
-    next[nextIndex] = temp;
-    setter(next);
-  };
-
-  const removeLevel = (
-    index: number,
-    levels: string[],
-    setter: Dispatch<SetStateAction<string[]>>
-  ) => {
-    const next = levels.filter((_, idx) => idx !== index);
-    setter(next.length ? next : [""]);
-  };
-
-  const addLevel = (levels: string[], setter: Dispatch<SetStateAction<string[]>>) => {
-    setter([...levels, ""]);
-  };
-
-  const handleCreateSchema = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setToast(null);
-    setSaving(true);
-    try {
-      const payload = {
-        name: createName.trim(),
-        description: createDescription.trim() || null,
-        levels: createLevels.map((level) => level.trim()).filter(Boolean),
-      };
-      const response = await fetch(contentPath("/schemas"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        credentials: "include",
       });
-      const raw = await response.text();
-      const data = parsePayload(raw) as Schema | { detail?: string } | null;
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAccessDenied(true);
-          return;
-        }
-        throw new Error(
-          `(${response.status}) ${getErrorMessage(raw, "Schema create failed")}`
+      return next;
+    });
+  }, [parsedLevels]);
+
+  const resetForm = () => {
+    setEditingSchemaId(null);
+    setName("");
+    setDescription("");
+    setLevelsInput("chapter\nverse");
+    setLevelTemplateDefaults({});
+  };
+
+  const openCreate = () => {
+    setModalMode("create");
+    resetForm();
+    setModalOpen(true);
+  };
+
+  const openSchema = (schema: Schema) => {
+    const editable = canEdit;
+    setModalMode(editable ? "edit" : "view");
+    setEditingSchemaId(schema.id);
+    setName(schema.name || "");
+    setDescription(schema.description || "");
+    setLevelsInput((schema.levels || []).join("\n"));
+
+    const defaults: Record<string, string> = {};
+    Object.entries(schema.level_template_defaults || {}).forEach(([level, templateId]) => {
+      defaults[level] = String(templateId);
+    });
+    setLevelTemplateDefaults(defaults);
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    const levels = parseLevelsInput(levelsInput);
+    if (!name.trim() || levels.length === 0) {
+      setToast({ type: "error", message: "Name and at least one level are required." });
+      return;
+    }
+
+    setSaving(true);
+    setToast(null);
+    try {
+      const isEdit = editingSchemaId !== null;
+      const payload: {
+        name: string;
+        description: string | null;
+        levels: string[];
+        level_template_defaults?: Record<string, number>;
+      } = {
+        name: name.trim(),
+        description: description.trim() || null,
+        levels,
+      };
+
+      if (isEdit) {
+        payload.level_template_defaults = Object.fromEntries(
+          Object.entries(levelTemplateDefaults)
+            .filter(([level, templateId]) => Boolean(level.trim() && templateId))
+            .map(([level, templateId]) => [level, Number(templateId)])
         );
       }
-      setCreateName("");
-      setCreateDescription("");
-      setCreateLevels(["", ""]);
-      setToast({ type: "success", message: "Schema created." });
-      await loadSchemas();
-      if (data && (data as Schema).id) {
-        handleSelectSchema(data as Schema);
-        setActivePanel("edit");
-      }
-    } catch (err) {
-      setToast({
-        type: "error",
-        message: err instanceof Error ? err.message : "Schema create failed",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
 
-  const handleUpdateSchema = async () => {
-    if (!selectedId) return;
-    setToast(null);
-    setSaving(true);
-    try {
-      const payload = {
-        name: editName.trim(),
-        description: editDescription.trim() || null,
-        levels: editLevels.map((level) => level.trim()).filter(Boolean),
-        level_template_defaults: Object.fromEntries(
-          Object.entries(editLevelTemplateDefaults).filter(
-            ([level, templateId]) => level.trim() && Number.isInteger(templateId) && templateId > 0
-          )
-        ),
-      };
-      const response = await fetch(contentPath(`/schemas/${selectedId}`),
+      const response = await fetch(
+        isEdit ? contentPath(`/schemas/${editingSchemaId}`) : contentPath("/schemas"),
         {
-          method: "PATCH",
+          method: isEdit ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           credentials: "include",
         }
       );
+
       const raw = await response.text();
-      const data = parsePayload(raw) as Schema | { detail?: string } | null;
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           setAccessDenied(true);
           return;
         }
         throw new Error(
-          `(${response.status}) ${getErrorMessage(raw, "Schema update failed")}`
+          `(${response.status}) ${getErrorMessage(raw, isEdit ? "Schema update failed" : "Schema create failed")}`
         );
       }
-      setToast({ type: "success", message: "Schema updated." });
-      await loadSchemas();
-      if (data && (data as Schema).id) {
-        handleSelectSchema(data as Schema);
-      }
+
+      setToast({ type: "success", message: isEdit ? "Schema updated." : "Schema created." });
+      setModalOpen(false);
+      resetForm();
+      await loadAll();
     } catch (err) {
       setToast({
         type: "error",
-        message: err instanceof Error ? err.message : "Schema update failed",
+        message: err instanceof Error ? err.message : "Failed to save schema",
       });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteSchema = async () => {
-    if (!selectedId) return;
-    
-    const booksUsing = usageCounts.get(selectedId) || 0;
-    if (booksUsing > 0) {
+  const handleDelete = async (schema: Schema) => {
+    const usage = usageCounts.get(schema.id) || 0;
+    if (usage > 0) {
       setToast({
         type: "error",
-        message: `Cannot delete: ${booksUsing} book${booksUsing === 1 ? "" : "s"} use this schema.`,
+        message: `Cannot delete: ${usage} book${usage === 1 ? "" : "s"} use this schema.`,
       });
       return;
     }
-    
-    if (!confirm("Delete this schema? This cannot be undone.")) return;
+
+    if (!window.confirm(`Delete schema "${schema.name}"? This cannot be undone.`)) return;
+
+    setDeletingId(schema.id);
     setToast(null);
-    setSaving(true);
     try {
-      const response = await fetch(contentPath(`/schemas/${selectedId}`), {
+      const response = await fetch(contentPath(`/schemas/${schema.id}`), {
         method: "DELETE",
         credentials: "include",
       });
@@ -386,509 +346,266 @@ export default function SchemaBuilderPage() {
           setAccessDenied(true);
           return;
         }
-        throw new Error(
-          `(${response.status}) ${getErrorMessage(raw, "Schema delete failed")}`
-        );
+        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Schema delete failed")}`);
       }
-      setSelectedId(null);
-      setEditName("");
-      setEditDescription("");
-      setEditLevels([]);
-      setEditLevelTemplateDefaults({});
+
+      if (editingSchemaId === schema.id) {
+        setModalOpen(false);
+        resetForm();
+      }
+
       setToast({ type: "success", message: "Schema deleted." });
-      await loadSchemas();
+      await loadAll();
     } catch (err) {
       setToast({
         type: "error",
         message: err instanceof Error ? err.message : "Schema delete failed",
       });
     } finally {
-      setSaving(false);
+      setDeletingId(null);
     }
   };
 
-  const handleDeleteBook = async (bookId: number, bookName: string) => {
-    if (!confirm(`Delete "${bookName}"? This will delete ALL content in this book.`)) return;
-    setToast(null);
-    setSaving(true);
-    try {
-      const response = await fetch(`/api/books/${bookId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const raw = await response.text();
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAccessDenied(true);
-          return;
-        }
-        throw new Error(
-          `(${response.status}) ${getErrorMessage(raw, "Book delete failed")}`
-        );
-      }
-      setToast({ type: "success", message: "Book deleted." });
-      await loadBooks();
-    } catch (err) {
-      setToast({
-        type: "error",
-        message: err instanceof Error ? err.message : "Book delete failed",
-      });
-    } finally {
-      setSaving(false);
-    }
+  const templateOptionsForLevel = (level: string) => {
+    const normalized = normalizeLevel(level);
+    if (!editingSchemaId) return [];
+
+    return templates.filter((template) => {
+      if (!template.is_active) return false;
+      const templateLevel = normalizeLevel(template.target_level || "");
+      if (templateLevel !== normalized) return false;
+      const schemaMatch = template.target_schema_id === editingSchemaId;
+      const globalSystemMatch = Boolean(template.is_system) && !template.target_schema_id;
+      return schemaMatch || globalSystemMatch;
+    });
   };
 
-  const renderLevelEditor = (levels: string[], setter: Dispatch<SetStateAction<string[]>>, panelKey: "create" | "edit") => (
-    <div className="flex flex-col gap-2">
-      {levels.map((level, idx) => (
-        <div key={idx} className="flex items-center gap-2">
-          <input
-            value={level}
-            onChange={(event) => {
-              const next = [...levels];
-              next[idx] = event.target.value;
-              updateLevels(next, setter);
-            }}
-            placeholder={`Level ${idx + 1}`}
-            className="flex-1 rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-          />
-          <div
-            ref={(element) => {
-              levelActionsMenuRefs.current[`${panelKey}-${idx}`] = element;
-            }}
-            className="relative"
-          >
+  if (!authChecked) {
+    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-xl font-semibold text-zinc-900">Schemas</h1>
+        <p className="text-sm text-zinc-600">Manage scripture schemas in a searchable list view.</p>
+      </header>
+
+      <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+        <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>
+        <a href="/admin/schemas" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Schemas</a>
+        <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
+        <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white px-3 py-1">Categories</a>
+      </div>
+
+      {toast && (
+        <div className={`rounded-lg border px-3 py-2 text-sm ${toast.type === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+          {toast.message}
+        </div>
+      )}
+
+      {accessDenied && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+          Admin or editor access required.
+          <Link className="ml-2 font-semibold underline" href="/signin">
+            Sign in
+          </Link>
+        </div>
+      )}
+
+      <section className={`rounded-xl border border-black/10 bg-white p-4 space-y-3 ${accessDenied ? "pointer-events-none opacity-60" : ""}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-zinc-900">Schemas</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search schemas"
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
+            />
+            <select
+              value={usageFilter}
+              onChange={(event) => setUsageFilter(event.target.value as "all" | "used" | "unused")}
+              className="rounded-lg border border-black/10 px-2 py-1.5 text-sm"
+            >
+              <option value="all">All usage</option>
+              <option value="used">Used by books</option>
+              <option value="unused">Unused</option>
+            </select>
             <button
               type="button"
-              onClick={() => setOpenLevelActionsKey((prev) => (prev === `${panelKey}-${idx}` ? null : `${panelKey}-${idx}`))}
-              aria-label="Level actions"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+              onClick={() => void loadAll()}
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
             >
-              <MoreVertical size={16} />
+              {loading ? "Loading..." : "Refresh"}
             </button>
-            {openLevelActionsKey === `${panelKey}-${idx}` && (
-              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenLevelActionsKey(null);
-                    moveLevel(idx, -1, levels, setter);
-                  }}
-                  disabled={idx === 0}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowUp size={14} />
-                  Move up
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenLevelActionsKey(null);
-                    moveLevel(idx, 1, levels, setter);
-                  }}
-                  disabled={idx === levels.length - 1}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowDown size={14} />
-                  Move down
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenLevelActionsKey(null);
-                    removeLevel(idx, levels, setter);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50"
-                >
-                  <Trash2 size={14} />
-                  Remove
-                </button>
-              </div>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openCreate}
+                className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white"
+              >
+                Create
+              </button>
             )}
           </div>
         </div>
-      ))}
-      <button
-        type="button"
-        onClick={() => addLevel(levels, setter)}
-        className="w-fit rounded-full border border-black/10 bg-white/80 px-4 py-1 text-xs uppercase tracking-[0.18em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-      >
-        + Add level
-      </button>
-    </div>
-  );
 
-  const renderPreview = (levels: string[]) => (
-    <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-        Preview
-      </div>
-      <div className="mt-3 flex flex-col gap-2 text-sm text-zinc-700">
-        {levels.length === 0 && <span>No levels defined.</span>}
-        {levels.map((level, idx) => (
-          <div key={`${level}-${idx}`} className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[color:var(--accent)]" />
-            <span className="font-medium">{level || `Level ${idx + 1}`}</span>
-            {idx < levels.length - 1 && (
-              <span className="text-xs text-zinc-400">-&gt;</span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
-        <header className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Admin</p>
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)]">
-            Schema builder
-          </h1>
-          <p className="max-w-2xl text-sm text-zinc-600">
-            Design hierarchical scripture schemas and keep structure consistent across books.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs uppercase tracking-[0.18em] text-zinc-600">
-            <a href="/admin" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Users</a>
-            <a href="/admin/schemas" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Schemas</a>
-            <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Properties</a>
-            <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white/80 px-3 py-1">Categories</a>
-          </div>
-        </header>
-
-        {toast && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
-              toast.type === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {toast.message}
-          </div>
-        )}
-
-        {accessDenied && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
-            Admin or editor access required. Sign in with an elevated account.
-            <Link className="ml-2 font-semibold text-amber-800 underline" href="/signin">
-              Go to sign in
-            </Link>
-          </div>
-        )}
-
-        <section
-          className={`grid gap-6 lg:grid-cols-[1.1fr_1.4fr] ${
-            accessDenied ? "pointer-events-none opacity-60" : ""
-          }`}
-        >
-          <div className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Schemas
-              </h2>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-500">
-                  {loading ? "Loading..." : `${schemas.length} total`}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleStartCreate}
-                  className="rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 transition hover:border-emerald-500/60"
-                >
-                  + Create
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-col gap-3">
-              {schemas.map((schema) => (
-                <button
-                  key={schema.id}
-                  type="button"
-                  onClick={() => handleSelectSchema(schema)}
-                  className={`rounded-2xl border px-4 py-3 text-left transition ${
-                    selectedId === schema.id
-                      ? "border-[color:var(--accent)] bg-[color:var(--sand)]"
-                      : "border-black/10 bg-white/90 hover:border-[color:var(--accent)]"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-base font-semibold text-[color:var(--deep)]">
-                      {schema.name}
-                    </div>
-                    <div className="text-xs text-zinc-500">
-                      {usageCounts.get(schema.id) || 0} books
-                    </div>
-                  </div>
-                  <div className="mt-1 text-xs text-zinc-500">
-                    {schema.levels?.join(" -> ") || "No levels"}
-                  </div>
-                </button>
-              ))}
-              {schemas.length === 0 && !loading && (
-                <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-zinc-500">
-                  No schemas yet. Create one to get started.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-6">
-            {activePanel === "create" ? (
-              <div className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Create schema
-                </h2>
-                <form className="mt-4 flex flex-col gap-4" onSubmit={handleCreateSchema}>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <input
-                      value={createName}
-                      onChange={(event) => setCreateName(event.target.value)}
-                      placeholder="Schema name"
-                      className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      required
-                    />
-                    <input
-                      value={createDescription}
-                      onChange={(event) => setCreateDescription(event.target.value)}
-                      placeholder="Short description"
-                      className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    />
-                  </div>
-                  <div>
-                    <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Levels
-                    </div>
-                    {renderLevelEditor(createLevels, setCreateLevels, "create")}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-                    {renderPreview(createLevels.filter((level) => level.trim()))}
-                    <button
-                      type="submit"
-                      disabled={saving}
-                      className="rounded-2xl border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold text-white transition disabled:opacity-50"
-                    >
-                      {saving ? "Saving..." : "Create schema"}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            ) : (
-              <div className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg">
-                <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Edit schema
-                </h2>
-                {selectedId ? (
-                  <div className="mt-4 flex flex-col gap-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <input
-                        value={editName}
-                        onChange={(event) => setEditName(event.target.value)}
-                        placeholder="Schema name"
-                        className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        required
-                      />
-                      <input
-                        value={editDescription}
-                        onChange={(event) => setEditDescription(event.target.value)}
-                        placeholder="Short description"
-                        className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                    </div>
-                    <div>
-                      <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Levels
-                      </div>
-                      {renderLevelEditor(editLevels, setEditLevels, "edit")}
-                    </div>
-
-                    <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Level Default Templates
-                      </div>
-                      <p className="mt-2 text-xs text-zinc-600">
-                        Set the default template per level for this schema. Node properties can override per instance.
-                      </p>
-                      <div className="mt-3 flex flex-col gap-3">
-                        {editLevels.map((level, idx) => {
-                          const normalizedLevel = normalizeLevel(level);
-                          const options = templates.filter((template) => {
-                            const templateLevel = normalizeLevel(template.target_level || "");
-                            if (!template.is_active || !selectedId) {
-                              return false;
-                            }
-                            const schemaMatch = template.target_schema_id === selectedId;
-                            const globalSystemMatch = Boolean(template.is_system) && !template.target_schema_id;
-                            if (!schemaMatch && !globalSystemMatch) {
-                              return false;
-                            }
-                            return templateLevel === normalizedLevel;
-                          });
-                          const currentTemplateId =
-                            (level && editLevelTemplateDefaults[level] ? String(editLevelTemplateDefaults[level]) : "");
-
-                          return (
-                            <label key={`${level}-${idx}`} className="flex flex-col gap-1">
-                              <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                {level || `Level ${idx + 1}`}
-                              </span>
-                              <select
-                                value={currentTemplateId}
-                                onChange={(event) => {
-                                  const raw = event.target.value;
-                                  setEditLevelTemplateDefaults((prev) => {
-                                    const next = { ...prev };
-                                    if (!level) {
-                                      return next;
-                                    }
-                                    if (!raw) {
-                                      delete next[level];
-                                      return next;
-                                    }
-                                    next[level] = Number(raw);
-                                    return next;
-                                  });
-                                }}
-                                disabled={!level.trim()}
-                                className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-50"
-                              >
-                                <option value="">No default (use built-in fallback)</option>
-                                {options.map((template) => (
-                                  <option key={template.id} value={template.id.toString()}>
-                                    {template.name} (v{template.current_version}, {template.visibility})
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-3">
-                        <a
-                          href="/templates"
-                          className="text-xs text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
+        {loading ? (
+          <p className="text-sm text-zinc-600">Loading...</p>
+        ) : filteredSchemas.length === 0 ? (
+          <p className="text-sm text-zinc-600">No schemas found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-black/10 text-left text-zinc-600">
+                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium">Levels</th>
+                  <th className="px-3 py-2 font-medium">Books</th>
+                  <th className="px-3 py-2 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSchemas.map((schema) => (
+                  <tr key={schema.id} onClick={() => openSchema(schema)} className="cursor-pointer border-b border-black/5 hover:bg-zinc-50">
+                    <td className="px-3 py-2 font-medium text-zinc-900">{schema.name}</td>
+                    <td className="px-3 py-2 text-zinc-700">{schema.levels.join(" → ") || "—"}</td>
+                    <td className="px-3 py-2 text-zinc-700">{usageCounts.get(schema.id) || 0}</td>
+                    <td className="px-3 py-2">
+                      {canAdmin ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDelete(schema);
+                          }}
+                          disabled={deletingId === schema.id}
+                          className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-700 disabled:opacity-50"
                         >
-                          Manage templates
-                        </a>
-                      </div>
-                    </div>
+                          {deletingId === schema.id ? "Deleting…" : "Delete"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-zinc-500">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-                    <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
-                      {renderPreview(editLevels.filter((level) => level.trim()))}
-                      <div className="flex flex-col gap-2">
-                        <div ref={schemaActionsMenuRef} className="relative ml-auto">
-                          <button
-                            type="button"
-                            onClick={() => setShowSchemaActionsMenu((prev) => !prev)}
-                            title="Schema actions"
-                            aria-label="Schema actions"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-3xl rounded-xl border border-black/10 bg-white p-4 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold text-zinc-900">
+                {modalMode === "create" ? "Create schema" : modalMode === "edit" ? "Edit schema" : "View schema"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setModalOpen(false);
+                  resetForm();
+                }}
+                className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-sm text-zinc-700">
+                Name
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  disabled={modalMode === "view"}
+                  className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
+                />
+              </label>
+              <label className="text-sm text-zinc-700">
+                Description
+                <input
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  disabled={modalMode === "view"}
+                  className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
+                />
+              </label>
+            </div>
+
+            <label className="mt-3 block text-sm text-zinc-700">
+              Levels (one per line)
+              <textarea
+                value={levelsInput}
+                onChange={(event) => setLevelsInput(event.target.value)}
+                disabled={modalMode === "view"}
+                className="mt-1 min-h-[120px] w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
+              />
+            </label>
+
+            {modalMode !== "create" && (
+              <div className="mt-3 rounded-lg border border-black/10 p-3">
+                <h4 className="text-sm font-medium text-zinc-900">Level default templates</h4>
+                <p className="mt-1 text-xs text-zinc-600">Set defaults by level. Node-level properties can still override these.</p>
+                <div className="mt-3 space-y-2">
+                  {parsedLevels.length === 0 ? (
+                    <p className="text-sm text-zinc-600">Add levels to configure defaults.</p>
+                  ) : (
+                    parsedLevels.map((level) => {
+                      const options = templateOptionsForLevel(level);
+                      return (
+                        <label key={level} className="block text-sm text-zinc-700">
+                          {level}
+                          <select
+                            value={levelTemplateDefaults[level] || ""}
+                            onChange={(event) =>
+                              setLevelTemplateDefaults((prev) => ({
+                                ...prev,
+                                [level]: event.target.value,
+                              }))
+                            }
+                            disabled={modalMode === "view"}
+                            className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm disabled:bg-zinc-100"
                           >
-                            <MoreVertical size={16} />
-                          </button>
-                          {showSchemaActionsMenu && (
-                            <div className="absolute right-0 z-40 mt-2 w-52 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setShowSchemaActionsMenu(false);
-                                  void handleUpdateSchema();
-                                }}
-                                disabled={saving}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                <Save size={14} />
-                                {saving ? "Saving..." : "Save changes"}
-                              </button>
-                              {canAdmin && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowSchemaActionsMenu(false);
-                                    void handleDeleteSchema();
-                                  }}
-                                  disabled={saving}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  <Trash2 size={14} />
-                                  Delete schema
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-zinc-500">
-                    Select a schema to edit.
-                  </div>
-                )}
+                            <option value="">No default (built-in fallback)</option>
+                            {options.map((template) => (
+                              <option key={template.id} value={String(template.id)}>
+                                {template.name} (v{template.current_version}, {template.visibility})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="mt-2">
+                  <a href="/templates" className="text-xs text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current">
+                    Manage templates
+                  </a>
+                </div>
               </div>
             )}
-          </div>
-        </section>
 
-        {/* Books Management Section */}
-        {selectedId && (
-          <section
-            className={`rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg ${
-              accessDenied ? "pointer-events-none opacity-60" : ""
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Books using this schema
-              </h2>
-              <span className="text-xs text-zinc-500">
-                {loading ? "Loading..." : `${usageCounts.get(selectedId) || 0} books`}
-              </span>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {books
-                .filter((book) => book.schema_id === selectedId)
-                .map((book) => {
-                  const schema = schemas.find((s) => s.id === book.schema_id);
-                  return (
-                    <div
-                      key={book.id}
-                      className="rounded-2xl border border-black/10 bg-white/90 p-4"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="text-base font-semibold text-[color:var(--deep)]">
-                            {book.book_name}
-                          </div>
-                          <div className="mt-1 text-xs text-zinc-500">
-                            {schema ? schema.name : "No schema"}
-                          </div>
-                        </div>
-                        {canAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBook(book.id, book.book_name)}
-                            disabled={saving}
-                            className="ml-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
-                            title="Delete book"
-                          >
-                            Delete
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              {books.filter((book) => book.schema_id === selectedId).length === 0 && !loading && (
-                <div className="col-span-full rounded-2xl border border-dashed border-black/10 bg-white/60 px-4 py-6 text-sm text-zinc-500">
-                  No books using this schema yet. Create one from the Scriptures page.
-                </div>
-              )}
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
+            {modalMode !== "view" ? (
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !name.trim() || parseLevelsInput(levelsInput).length === 0}
+                  className="rounded-lg border border-black/10 bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : modalMode === "create" ? "Create" : "Save"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
