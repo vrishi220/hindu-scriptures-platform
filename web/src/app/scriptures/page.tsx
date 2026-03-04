@@ -45,6 +45,14 @@ type BookOption = {
   schema_id?: number | null;
   status?: "draft" | "published";
   visibility?: "private" | "public";
+  metadata_json?: {
+    owner_id?: number;
+    [key: string]: unknown;
+  } | null;
+  metadata?: {
+    owner_id?: number;
+    [key: string]: unknown;
+  } | null;
 };
 
 type BookDetails = {
@@ -1157,8 +1165,10 @@ function ScripturesContent() {
   const [levelTemplateError, setLevelTemplateError] = useState<string | null>(null);
   const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
   const [showBookActionsMenu, setShowBookActionsMenu] = useState(false);
+  const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const bookActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1166,6 +1176,9 @@ function ScripturesContent() {
       const target = event.target as Node;
       if (bookActionsMenuRef.current && !bookActionsMenuRef.current.contains(target)) {
         setShowBookActionsMenu(false);
+      }
+      if (bookRowActionsMenuRef.current && !bookRowActionsMenuRef.current.contains(target)) {
+        setOpenBookRowActionsId(null);
       }
       if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
         setShowNodeActionsMenu(false);
@@ -1180,6 +1193,7 @@ function ScripturesContent() {
 
   useEffect(() => {
     setShowBookActionsMenu(false);
+    setOpenBookRowActionsId(null);
   }, [bookId]);
 
   useEffect(() => {
@@ -5064,21 +5078,135 @@ function ScripturesContent() {
                   {paginatedBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
                     return (
-                      <button
+                      <div
                         key={book.id}
-                        type="button"
-                        onClick={() => handleSelectBook(book.id.toString())}
-                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                        className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
                           isSelected
                             ? "bg-[color:var(--sand)]/50 text-[color:var(--accent)]"
                             : "text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        <span className="font-medium">{book.book_name}</span>
-                        <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                          {book.visibility === "private" ? "Private" : "Public"}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectBook(book.id.toString())}
+                          className="flex min-w-0 flex-1 items-center justify-between text-left"
+                        >
+                          <span className="truncate font-medium">{book.book_name}</span>
+                          <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                            {book.visibility === "private" ? "Private" : "Public"}
+                          </span>
+                        </button>
+                        <div
+                          ref={(element) => {
+                            if (openBookRowActionsId === book.id) {
+                              bookRowActionsMenuRef.current = element;
+                            }
+                          }}
+                          className="relative"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
+                              if (!isSelected) {
+                                handleSelectBook(book.id.toString());
+                              }
+                            }}
+                            title="Row actions"
+                            aria-label="Row actions"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            ⋮
+                          </button>
+                          {openBookRowActionsId === book.id && (
+                            <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              {!isSelected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    handleSelectBook(book.id.toString());
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Eye size={14} />
+                                  Open in read mode
+                                </button>
+                              )}
+                              {isSelected && canManageShares && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    void handleOpenShareManager();
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Share2 size={14} />
+                                  Share
+                                </button>
+                              )}
+                              {isSelected && canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    void openPropertiesModal("book");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Pencil size={14} />
+                                  Edit metadata
+                                </button>
+                              )}
+                              {isSelected && canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    void openPropertiesModal("book");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <SlidersHorizontal size={14} />
+                                  Manage properties
+                                </button>
+                              )}
+                              {(canContribute || canEdit || canAdmin) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    router.push("/admin/import");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Upload size={14} />
+                                  Import
+                                </button>
+                              )}
+                              {isSelected && canTogglePublish && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId(null);
+                                    void handleTogglePublish();
+                                  }}
+                                  disabled={bookVisibilitySubmitting}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Upload size={14} />
+                                  {bookVisibilitySubmitting
+                                    ? "Updating..."
+                                    : currentBook?.visibility === "public"
+                                    ? "Unpublish"
+                                    : "Publish"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
