@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getMe } from "../../lib/authClient";
 
 type TemplateVisibility = "private" | "published";
@@ -69,6 +69,8 @@ export default function TemplatesPage() {
   const [templates, setTemplates] = useState<RenderTemplate[]>([]);
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [showDefaultTemplates, setShowDefaultTemplates] = useState(false);
+  const [query, setQuery] = useState("");
+  const [visibilityFilter, setVisibilityFilter] = useState<"all" | TemplateVisibility>("all");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>("create");
@@ -276,8 +278,46 @@ export default function TemplatesPage() {
     ? templates
     : templates.filter((template) => !isDefaultSystemTemplate(template));
 
+  const filteredTemplates = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return visibleTemplates.filter((template) => {
+      if (visibilityFilter !== "all" && template.visibility !== visibilityFilter) {
+        return false;
+      }
+
+      if (!normalizedQuery) {
+        return true;
+      }
+
+      const schemaName = template.target_schema_id
+        ? getSchemaNameById(template.target_schema_id)
+        : inferSchemaNameByLevel(template.target_level);
+
+      const haystack = [
+        template.name,
+        template.description || "",
+        schemaName,
+        template.target_level || "",
+        template.visibility,
+        template.system_key || "",
+        String(template.owner_id),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(normalizedQuery);
+    });
+  }, [
+    visibleTemplates,
+    visibilityFilter,
+    query,
+    getSchemaNameById,
+    inferSchemaNameByLevel,
+  ]);
+
   if (!authChecked) {
-    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
+    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading...</main>;
   }
 
   if (!me) {
@@ -295,7 +335,7 @@ export default function TemplatesPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold text-zinc-900">Templates</h1>
         <p className="text-sm text-zinc-600">
-          Valid templates available to you (your templates + published templates).
+          Manage templates in a searchable table view.
         </p>
       </header>
 
@@ -303,9 +343,24 @@ export default function TemplatesPage() {
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
 
       <section className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-zinc-900">Templates</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search templates"
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
+            />
+            <select
+              value={visibilityFilter}
+              onChange={(event) => setVisibilityFilter(event.target.value as "all" | TemplateVisibility)}
+              className="rounded-lg border border-black/10 px-2 py-1.5 text-sm"
+            >
+              <option value="all">All visibility</option>
+              <option value="private">Private</option>
+              <option value="published">Published</option>
+            </select>
             <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
               <input
                 type="checkbox"
@@ -315,6 +370,13 @@ export default function TemplatesPage() {
               />
               Show default templates
             </label>
+            <button
+              type="button"
+              onClick={() => void loadTemplates()}
+              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -329,9 +391,9 @@ export default function TemplatesPage() {
           </div>
         </div>
         {loading ? (
-          <p className="text-sm text-zinc-600">Loading…</p>
-        ) : visibleTemplates.length === 0 ? (
-          <p className="text-sm text-zinc-600">No templates yet.</p>
+          <p className="text-sm text-zinc-600">Loading...</p>
+        ) : filteredTemplates.length === 0 ? (
+          <p className="text-sm text-zinc-600">No templates found.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
@@ -348,7 +410,7 @@ export default function TemplatesPage() {
                 </tr>
               </thead>
               <tbody>
-            {visibleTemplates.map((item) => (
+            {filteredTemplates.map((item) => (
               <tr
                 key={item.id}
                 onClick={() => startEdit(item)}

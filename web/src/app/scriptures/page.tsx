@@ -1094,6 +1094,7 @@ function ScripturesContent() {
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
+  const [createBookStep, setCreateBookStep] = useState<"schema" | "details">("schema");
   const [bookFormData, setBookFormData] = useState({
     bookName: "",
     bookCode: "",
@@ -1183,6 +1184,60 @@ function ScripturesContent() {
   useEffect(() => {
     setInlineMessage(null);
   }, [selectedId]);
+
+  useEffect(() => {
+    const shouldLockBodyScroll =
+      showPropertiesModal ||
+      showBookPreview ||
+      showShareManager ||
+      showCreateBook ||
+      showPreferencesDialog ||
+      Boolean(action && actionNode);
+
+    if (!shouldLockBodyScroll) {
+      return;
+    }
+
+    const { body, documentElement } = document;
+    const scrollY = window.scrollY;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyPosition = body.style.position;
+    const previousBodyTop = body.style.top;
+    const previousBodyWidth = body.style.width;
+    const previousBodyPaddingRight = body.style.paddingRight;
+    const previousBodyOverscrollBehavior = body.style.overscrollBehavior;
+    const previousHtmlOverscrollBehavior = documentElement.style.overscrollBehavior;
+    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overscrollBehavior = "none";
+    documentElement.style.overscrollBehavior = "none";
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      body.style.position = previousBodyPosition;
+      body.style.top = previousBodyTop;
+      body.style.width = previousBodyWidth;
+      body.style.paddingRight = previousBodyPaddingRight;
+      body.style.overscrollBehavior = previousBodyOverscrollBehavior;
+      documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior;
+      window.scrollTo(0, scrollY);
+    };
+  }, [
+    showPropertiesModal,
+    showBookPreview,
+    showShareManager,
+    showCreateBook,
+    showPreferencesDialog,
+    action,
+    actionNode,
+  ]);
 
   const resolvePreviewContentLines = (
     block: BookPreviewBlock,
@@ -3697,6 +3752,7 @@ function ScripturesContent() {
         // Close modal and reset form
         setShowCreateBook(false);
         setSelectedSchema(null);
+        setCreateBookStep("schema");
         setBookFormData({
           bookName: "",
           bookCode: "",
@@ -4800,6 +4856,8 @@ function ScripturesContent() {
                         onClick={() => {
                           setShowBookActionsMenu(false);
                           loadSchemas();
+                          setSelectedSchema(null);
+                          setCreateBookStep("schema");
                           setShowCreateBook(true);
                         }}
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -6663,8 +6721,8 @@ function ScripturesContent() {
 
         {/* Create Book Modal */}
         {showCreateBook && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
-            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 sm:items-center">
+            <div className="my-3 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:my-6 sm:max-h-[calc(100dvh-3rem)] sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                   Create New Book
@@ -6674,6 +6732,7 @@ function ScripturesContent() {
                   onClick={() => {
                     setShowCreateBook(false);
                     setSelectedSchema(null);
+                    setCreateBookStep("schema");
                     setBookFormData({
                       bookName: "",
                       bookCode: "",
@@ -6685,48 +6744,67 @@ function ScripturesContent() {
                   X
                 </button>
               </div>
-                            wordMeanings: [],
 
-              {!selectedSchema ? (
-                <div className="flex flex-col gap-4">
+              {createBookStep === "schema" ? (
+                <div className="flex min-h-0 flex-1 flex-col gap-4">
                   <p className="text-sm text-zinc-600">
                     Select a schema that defines the structure of your scripture:
                   </p>
-                  <div className="grid gap-3">
-                    {schemas.map((schema) => (
-                      <button
-                        key={schema.id}
-                        type="button"
-                        onClick={() => setSelectedSchema(schema.id)}
-                        className="rounded-2xl border border-black/10 bg-white/90 p-4 text-left transition hover:border-[color:var(--accent)] hover:shadow-md"
-                      >
-                        <div className="font-semibold text-[color:var(--deep)]">
-                          {schema.name}
-                        </div>
-                        {schema.description && (
-                          <div className="mt-1 text-xs text-zinc-600">
-                            {schema.description}
-                          </div>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {schema.levels.map((level, idx) => (
-                            <span
-                              key={idx}
-                              className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs text-zinc-600"
-                            >
-                              {level}
-                            </span>
-                          ))}
-                        </div>
-                      </button>
-                    ))}
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                    <div className="grid gap-3">
+                      {schemas.map((schema) => {
+                        const isSelected = selectedSchema === schema.id;
+                        return (
+                          <button
+                            key={schema.id}
+                            type="button"
+                            onClick={() => setSelectedSchema(schema.id)}
+                            className={`rounded-2xl border bg-white/90 p-4 text-left transition hover:border-[color:var(--accent)] hover:shadow-md ${
+                              isSelected
+                                ? "border-[color:var(--accent)] ring-1 ring-[color:var(--accent)]/40"
+                                : "border-black/10"
+                            }`}
+                          >
+                            <div className="font-semibold text-[color:var(--deep)]">
+                              {schema.name}
+                            </div>
+                            {schema.description && (
+                              <div className="mt-1 text-xs text-zinc-600">
+                                {schema.description}
+                              </div>
+                            )}
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {schema.levels.map((level, idx) => (
+                                <span
+                                  key={idx}
+                                  className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs text-zinc-600"
+                                >
+                                  {level}
+                                </span>
+                              ))}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {schemas.length === 0 && (
+                      <p className="text-sm text-zinc-500">No schemas available</p>
+                    )}
                   </div>
-                  {schemas.length === 0 && (
-                    <p className="text-sm text-zinc-500">No schemas available</p>
-                  )}
+                  <div className="flex items-center justify-end gap-2 border-t border-black/10 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setCreateBookStep("details")}
+                      disabled={!selectedSchema}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <form onSubmit={handleCreateBook} className="flex flex-col gap-4">
+                <form onSubmit={handleCreateBook} className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex-1 space-y-4 overflow-y-auto pr-1">
                   <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
                     <div className="text-xs uppercase tracking-[0.2em] text-blue-700">
                       Selected Schema
@@ -6746,7 +6824,7 @@ function ScripturesContent() {
                       onChange={(e) =>
                         setBookFormData({ ...bookFormData, bookName: e.target.value })
                       }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
                       placeholder="e.g., Bhagavad Gita"
                       required
                     />
@@ -6762,7 +6840,7 @@ function ScripturesContent() {
                       onChange={(e) =>
                         setBookFormData({ ...bookFormData, bookCode: e.target.value })
                       }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
                       placeholder="e.g., GITA_V1"
                     />
                   </div>
@@ -6776,17 +6854,18 @@ function ScripturesContent() {
                       onChange={(e) =>
                         setBookFormData({ ...bookFormData, languagePrimary: e.target.value })
                       }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
                     >
                       <option value="sanskrit">Sanskrit</option>
                       <option value="english">English</option>
                     </select>
                   </div>
+                  </div>
 
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center justify-between gap-2 border-t border-black/10 pt-3">
                     <button
                       type="button"
-                      onClick={() => setSelectedSchema(null)}
+                      onClick={() => setCreateBookStep("schema")}
                       className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
                     >
                       Back
