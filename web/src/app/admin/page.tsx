@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MoreVertical } from "lucide-react";
 import { getMe } from "@/lib/authClient";
+import InlineClearButton from "@/components/InlineClearButton";
 
 type User = {
   id: number;
@@ -435,12 +436,19 @@ export default function AdminPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-zinc-900">Users</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search users"
-              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
-            />
+            <div className="group relative">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search users"
+                className="rounded-lg border border-black/10 px-3 py-1.5 pr-10 text-sm"
+              />
+              <InlineClearButton
+                visible={Boolean(query)}
+                onClear={() => setQuery("")}
+                ariaLabel="Clear user search"
+              />
+            </div>
             <select
               value={roleFilter}
               onChange={(event) => setRoleFilter(event.target.value)}

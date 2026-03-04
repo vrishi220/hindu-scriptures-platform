@@ -3,15 +3,16 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  BookOpen,
+  ChevronsDown,
+  ChevronsUp,
   Eye,
   Link2,
   Pencil,
   Plus,
-  Share2,
   ShoppingBasket,
   SlidersHorizontal,
   Trash2,
-  Upload,
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
@@ -45,6 +46,14 @@ type BookOption = {
   schema_id?: number | null;
   status?: "draft" | "published";
   visibility?: "private" | "public";
+  metadata_json?: {
+    owner_id?: number;
+    [key: string]: unknown;
+  } | null;
+  metadata?: {
+    owner_id?: number;
+    [key: string]: unknown;
+  } | null;
 };
 
 type BookDetails = {
@@ -985,9 +994,12 @@ const toDatetimeLocalValue = (value: unknown): string => {
 };
 
 function ScripturesContent() {
+  const BOOKS_PAGE_SIZE = 10;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
+  const [bookQuery, setBookQuery] = useState("");
+  const [booksPage, setBooksPage] = useState(1);
   const [bookId, setBookId] = useState("");
   const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -1006,10 +1018,10 @@ function ScripturesContent() {
   const [, setAuthStatus] = useState<string | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
+  const [canView, setCanView] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
-  const [bookVisibilitySubmitting, setBookVisibilitySubmitting] = useState(false);
   const [nodeContent, setNodeContent] = useState<NodeContent | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [actionNode, setActionNode] = useState<TreeNode | null>(null);
@@ -1024,7 +1036,8 @@ function ScripturesContent() {
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
-  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
+  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("content");
+  const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
     levelName: "",
     titleSanskrit: "",
@@ -1058,6 +1071,7 @@ function ScripturesContent() {
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
   const [showBookPreview, setShowBookPreview] = useState(false);
+  const [showBrowseBookModal, setShowBrowseBookModal] = useState(false);
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
   const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
   const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
@@ -1088,9 +1102,6 @@ function ScripturesContent() {
   const [showPreviewControls, setShowPreviewControls] = useState(false);
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
-  const [bookBodyAddLoading, setBookBodyAddLoading] = useState(false);
-  const [bookBodyCreateDraftLoading, setBookBodyCreateDraftLoading] = useState(false);
-  const [bookBodyAddMessage, setBookBodyAddMessage] = useState<string | null>(null);
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
@@ -1151,16 +1162,16 @@ function ScripturesContent() {
   const [levelTemplateSaving, setLevelTemplateSaving] = useState(false);
   const [levelTemplateError, setLevelTemplateError] = useState<string | null>(null);
   const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
-  const [showBookActionsMenu, setShowBookActionsMenu] = useState(false);
+  const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
-  const bookActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
-      if (bookActionsMenuRef.current && !bookActionsMenuRef.current.contains(target)) {
-        setShowBookActionsMenu(false);
+      if (bookRowActionsMenuRef.current && !bookRowActionsMenuRef.current.contains(target)) {
+        setOpenBookRowActionsId(null);
       }
       if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
         setShowNodeActionsMenu(false);
@@ -1174,7 +1185,7 @@ function ScripturesContent() {
   }, []);
 
   useEffect(() => {
-    setShowBookActionsMenu(false);
+    setOpenBookRowActionsId(null);
   }, [bookId]);
 
   useEffect(() => {
@@ -2432,6 +2443,7 @@ function ScripturesContent() {
         setAuthEmail(null);
         setAuthUserId(null);
         setAuthStatus("Not authenticated");
+        setCanView(false);
         setCanAdmin(false);
         setCanContribute(false);
         setCanEdit(false);
@@ -2440,6 +2452,8 @@ function ScripturesContent() {
       setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
+      const canViewPermission = (data.permissions as { can_view?: boolean } | undefined)?.can_view;
+      setCanView(Boolean(canViewPermission || data.role === "viewer" || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
@@ -2447,6 +2461,7 @@ function ScripturesContent() {
       setAuthEmail(null);
       setAuthUserId(null);
       setAuthStatus("Auth check failed");
+      setCanView(false);
       setCanAdmin(false);
       setCanContribute(false);
       setCanEdit(false);
@@ -2475,27 +2490,24 @@ function ScripturesContent() {
   const isCurrentBookOwner =
     authUserId !== null && currentBookOwnerId !== null && currentBookOwnerId === authUserId;
   const canEditCurrentBook = Boolean(currentBook) && (canEdit || canAdmin || isCurrentBookOwner);
-  const canDeleteCurrentBook =
-    Boolean(currentBook) &&
-    (canAdmin ||
-      (isCurrentBookOwner && (currentBook?.visibility || "private") !== "public"));
-  const canTogglePublish =
-    Boolean(bookId) &&
-    Boolean(currentBook) &&
-    (canAdmin || isCurrentBookOwner);
-  const canManageShares = canTogglePublish;
-  const isCurrentBookPublic = (currentBook?.visibility || "private") === "public";
-  const canUseBookDraftActions = Boolean(authEmail) && Boolean(bookId);
-  const canPreviewCurrentBook =
-    Boolean(bookId) && (Boolean(authEmail) || isCurrentBookPublic);
+  const canExploreStructure = Boolean(bookId) && authUserId !== null && canView;
+  const isExploreVisible = canExploreStructure && showExploreStructure;
   const activeNodeLevelLabel = formatValue(nodeContent?.level_name) || "Node";
   const activeNodePropertiesLabel = `${activeNodeLevelLabel} properties`;
   const activeNodePropertiesTitle = `${activeNodeLevelLabel} Properties`;
+  const activeNodePreviewLabel = `Preview ${activeNodeLevelLabel}`;
   const activeNodeEditLabel = `Edit ${activeNodeLevelLabel}`;
   const activeNodeDeleteLabel = `Delete ${activeNodeLevelLabel}`;
   const currentBookSchemaLevels = Array.isArray(currentBook?.schema?.levels)
     ? currentBook.schema.levels
     : [];
+
+  useEffect(() => {
+    if (!canExploreStructure && showExploreStructure) {
+      setShowExploreStructure(false);
+      setMobilePanel("content");
+    }
+  }, [canExploreStructure, showExploreStructure]);
 
   useEffect(() => {
     if (!showPropertiesModal || propertiesScope !== "book" || !currentBook) return;
@@ -2508,102 +2520,6 @@ function ScripturesContent() {
     setWordMeaningsMeaningLanguageSelection(renderingSettings.meaningLanguage);
     setWordMeaningsFallbackOrderInput(renderingSettings.fallbackOrder.join(", "));
   }, [showPropertiesModal, propertiesScope, currentBook]);
-
-  const handleTogglePublish = async () => {
-    if (!bookId || !currentBook) return;
-    const isPublic = (currentBook.visibility || "private") === "public";
-    const payload = isPublic
-      ? { status: "draft", visibility: "private" }
-      : { status: "published", visibility: "public" };
-
-    try {
-      setBookVisibilitySubmitting(true);
-      const response = await fetch(`/api/books/${bookId}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const result = (await response.json().catch(() => null)) as
-        | BookDetails
-        | { detail?: string }
-        | null;
-
-      if (!response.ok) {
-        alert(
-          (result as { detail?: string } | null)?.detail ||
-            "Failed to update publish state"
-        );
-        return;
-      }
-
-      const updatedBook = result as BookDetails;
-      setCurrentBook(updatedBook);
-      setBooks((prev) =>
-        prev.map((book) =>
-          book.id.toString() === bookId
-            ? {
-                ...book,
-                status: updatedBook.status,
-                visibility: updatedBook.visibility,
-              }
-            : book
-        )
-      );
-    } catch {
-      alert("Failed to update publish state");
-    } finally {
-      setBookVisibilitySubmitting(false);
-    }
-  };
-
-  const handleDeleteCurrentBook = async () => {
-    if (!bookId || !currentBook) return;
-
-    const isPublic = (currentBook.visibility || "private") === "public";
-    if (isPublic && !canAdmin) {
-      alert("Public books cannot be deleted. Unpublish the book first.");
-      return;
-    }
-
-    if (
-      !window.confirm(
-        `Delete "${currentBook.book_name}"? This will permanently remove all nested content.`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/books/${bookId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { detail?: string }
-        | null;
-
-      if (!response.ok) {
-        alert(payload?.detail || "Failed to delete book");
-        return;
-      }
-
-      setShowBookActionsMenu(false);
-      setShowShareManager(false);
-      setSelectedId(null);
-      setNodeContent(null);
-      setTreeData([]);
-      setExpandedIds(new Set());
-      setBreadcrumb([]);
-      setCurrentBook(null);
-      setBookId("");
-      await loadBooksRefresh();
-      router.replace("/scriptures");
-    } catch {
-      alert("Failed to delete book");
-    }
-  };
 
   useEffect(() => {
     if (!authResolved) return;
@@ -3122,10 +3038,16 @@ function ScripturesContent() {
   useEffect(() => {
     const loadBooks = async () => {
       try {
-        const response = await fetch("/api/books", {
+        const params = new URLSearchParams();
+        const query = bookQuery.trim();
+        if (query) {
+          params.set("q", query);
+        }
+        const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
           credentials: "include",
         });
         if (!response.ok) {
+          setBooks([]);
           return;
         }
         const data = (await response.json()) as BookOption[];
@@ -3134,8 +3056,8 @@ function ScripturesContent() {
         setBooks([]);
       }
     };
-    loadBooks();
-  }, []);
+    void loadBooks();
+  }, [bookQuery]);
 
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
     activeTreeAbortController.current?.abort();
@@ -3190,12 +3112,20 @@ function ScripturesContent() {
       if (autoSelectNodeId) {
         const path = findPath(data, autoSelectNodeId);
         if (path) {
-          applySelection(autoSelectNodeId, path, true);
+          applySelection(autoSelectNodeId, path, true, false, true);
         }
       } else {
-        setSelectedId(null);
-        setBreadcrumb([]);
-        setExpandedIds(new Set());
+        const firstLeafId = findFirstLeafId(data);
+        if (firstLeafId) {
+          const firstLeafPath = findPath(data, firstLeafId);
+          if (firstLeafPath) {
+            applySelection(firstLeafId, firstLeafPath, false, false, true);
+          }
+        } else {
+          setSelectedId(null);
+          setBreadcrumb([]);
+          setExpandedIds(new Set());
+        }
       }
       
       setUrlInitialized(true);
@@ -3223,6 +3153,19 @@ function ScripturesContent() {
         if (childPath) {
           return [node, ...childPath];
         }
+      }
+    }
+    return null;
+  };
+
+  const findFirstLeafId = (nodes: TreeNode[]): number | null => {
+    for (const node of nodes) {
+      if (!node.children || node.children.length === 0) {
+        return node.id;
+      }
+      const nested = findFirstLeafId(node.children);
+      if (nested !== null) {
+        return nested;
       }
     }
     return null;
@@ -3296,7 +3239,8 @@ function ScripturesContent() {
     nodeId: number,
     path: TreeNode[],
     scroll = false,
-    skipLoad = false
+    skipLoad = false,
+    syncUrl = false
   ) => {
     setSelectedId(nodeId);
     setBreadcrumb(path);
@@ -3307,6 +3251,16 @@ function ScripturesContent() {
     });
     if (!skipLoad) {
       loadNodeContent(nodeId);
+    }
+    if (syncUrl && bookId && typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      const currentBook = url.searchParams.get("book") || "";
+      const currentNode = url.searchParams.get("node") || "";
+      if (currentBook !== bookId || currentNode !== String(nodeId)) {
+        url.searchParams.set("book", bookId);
+        url.searchParams.set("node", String(nodeId));
+        window.history.replaceState(window.history.state, "", url.toString());
+      }
     }
     if (scroll) {
       scrollToNode(nodeId);
@@ -3349,7 +3303,7 @@ function ScripturesContent() {
 
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, false, false);
+      applySelection(nodeId, path, false, false, syncUrl);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
@@ -3379,7 +3333,12 @@ function ScripturesContent() {
 
   const loadBooksRefresh = async () => {
     try {
-      const response = await fetch("/api/books", {
+      const params = new URLSearchParams();
+      const query = bookQuery.trim();
+      if (query) {
+        params.set("q", query);
+      }
+      const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
         credentials: "include",
       });
       if (response.ok) {
@@ -3420,13 +3379,9 @@ function ScripturesContent() {
     }
   };
 
-  const handleOpenShareManager = async () => {
-    setShowShareManager(true);
-    await loadBookShares();
-  };
-
-  const handlePreviewBook = async (scope: "book" | "node" = "book") => {
-    if (!bookId) return;
+  const handlePreviewBook = async (scope: "book" | "node" = "book", targetBookId?: string) => {
+    const previewBookId = targetBookId ?? bookId;
+    if (!previewBookId) return;
 
     const nextLanguageSettings = {
       ...bookPreviewLanguageSettings,
@@ -3441,7 +3396,7 @@ function ScripturesContent() {
     setBookPreviewError(null);
 
     try {
-      const response = await fetch(`/api/books/${bookId}/preview/render`, {
+      const response = await fetch(`/api/books/${previewBookId}/preview/render`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -3516,108 +3471,6 @@ function ScripturesContent() {
       setBookPreviewError(err instanceof Error ? err.message : "Failed to render book preview");
     } finally {
       setBookPreviewLoading(false);
-    }
-  };
-
-  const handleAddBookAsDraftBody = async () => {
-    if (!bookId || bookBodyAddLoading) return;
-
-    setBookBodyAddLoading(true);
-    setBookBodyAddMessage(null);
-
-    try {
-      const selectedBookId = Number(bookId);
-      const response = await fetch("/api/cart/items", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          item_id: -selectedBookId,
-          item_type: "library_node",
-          source_book_id: selectedBookId,
-          metadata: {
-            title: currentBook?.book_name || `Book ${selectedBookId}`,
-            book_name: currentBook?.book_name || `Book ${selectedBookId}`,
-            level_name: "book",
-          },
-        }),
-      });
-
-      if (response.status !== 409 && !response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(payload?.detail || "Failed to add book to draft body cart");
-      }
-
-      await loadBasket();
-      setBookBodyAddMessage("Book added as body source. Use Create Draft in Basket.");
-      setTimeout(() => setBookBodyAddMessage(null), 2500);
-    } catch (err) {
-      setBookBodyAddMessage(err instanceof Error ? err.message : "Failed to add book to draft body cart");
-    } finally {
-      setBookBodyAddLoading(false);
-    }
-  };
-
-  const handleCreateDraftFromBookBody = async () => {
-    if (!bookId || bookBodyCreateDraftLoading) return;
-
-    setBookBodyCreateDraftLoading(true);
-    setBookBodyAddMessage(null);
-
-    try {
-      const selectedBookId = Number(bookId);
-      const addResponse = await fetch("/api/cart/items", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          item_id: -selectedBookId,
-          item_type: "library_node",
-          source_book_id: selectedBookId,
-          metadata: {
-            title: currentBook?.book_name || `Book ${selectedBookId}`,
-            book_name: currentBook?.book_name || `Book ${selectedBookId}`,
-            level_name: "book",
-          },
-        }),
-      });
-
-      if (addResponse.status !== 409 && !addResponse.ok) {
-        const addPayload = (await addResponse.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(addPayload?.detail || "Failed to add book to draft body cart");
-      }
-
-      const draftTitle = currentBook?.book_name
-        ? `Draft from ${currentBook.book_name}`
-        : "Draft from Book";
-      const createResponse = await fetch("/api/cart/me/create-draft", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: draftTitle,
-          clear_cart_after_create: true,
-        }),
-      });
-
-      const createPayload = (await createResponse.json().catch(() => null)) as
-        | { id?: number; detail?: string }
-        | null;
-
-      if (!createResponse.ok) {
-        throw new Error(createPayload?.detail || "Failed to create draft from book body");
-      }
-
-      if (typeof createPayload?.id === "number") {
-        window.location.href = `/drafts?draftId=${createPayload.id}`;
-        return;
-      }
-
-      throw new Error("Draft created, but response did not include an id");
-    } catch (err) {
-      setBookBodyAddMessage(err instanceof Error ? err.message : "Failed to create draft from book body");
-    } finally {
-      setBookBodyCreateDraftLoading(false);
     }
   };
 
@@ -4180,7 +4033,6 @@ function ScripturesContent() {
         });
         // Refresh tree without losing context
         if (bookId) {
-          setTreeLoading(true);
           try {
             const response = await fetch(`/api/books/${bookId}/tree`, {
               credentials: "include",
@@ -4694,6 +4546,74 @@ function ScripturesContent() {
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
   const isCopyMessage = authMessage === "Link copied.";
+  const filteredBooks = books;
+  const totalBookPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE));
+  const currentBooksPage = Math.min(booksPage, totalBookPages);
+  const paginatedBooks = filteredBooks.slice(
+    (currentBooksPage - 1) * BOOKS_PAGE_SIZE,
+    currentBooksPage * BOOKS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setBooksPage(1);
+  }, [bookQuery]);
+
+  useEffect(() => {
+    if (booksPage > totalBookPages) {
+      setBooksPage(totalBookPages);
+    }
+  }, [booksPage, totalBookPages]);
+
+  const handleSelectBook = (value: string): boolean => {
+    if (value !== bookId && hasUnsavedInlineChanges()) {
+      const shouldDiscard = window.confirm(
+        "You have unsaved changes in Edit details. Discard changes and switch books?"
+      );
+      if (!shouldDiscard) {
+        return false;
+      }
+    }
+
+    if (value && value === bookId) {
+      setShowExploreStructure(false);
+      setMobilePanel("content");
+      if (!selectedId && treeData.length > 0) {
+        const firstLeafId = findFirstLeafId(treeData);
+        if (firstLeafId) {
+          selectNode(firstLeafId, true);
+        }
+      }
+      return true;
+    }
+
+    setBookId(value);
+    if (value) {
+      router.push(`/scriptures?book=${value}`, { scroll: false });
+    } else {
+      router.push("/scriptures", { scroll: false });
+    }
+    setSelectedId(null);
+    setBreadcrumb([]);
+    setShowExploreStructure(false);
+    setMobilePanel("content");
+    return true;
+  };
+
+  const handlePreviewBookFromRow = async (book: BookOption) => {
+    const nextBookId = book.id.toString();
+    const didSelect = handleSelectBook(nextBookId);
+    if (!didSelect) return;
+    await handlePreviewBook("book", nextBookId);
+  };
+
+  const handleBrowseBookFromRow = (book: BookOption) => {
+    const nextBookId = book.id.toString();
+    const didSelect = handleSelectBook(nextBookId);
+    if (!didSelect) return;
+    setShowExploreStructure(true);
+    setMobilePanel("tree");
+    setShowBrowseBookModal(true);
+  };
 
   return (
     <div className="grainy-bg min-h-screen">
@@ -4714,242 +4634,188 @@ function ScripturesContent() {
             Scripture browser
           </h1>
           <p className="max-w-2xl text-sm text-zinc-600">
-            Explore the canon by book. Select a scripture to see its nested structure.
+            Search and browse books. Use row actions to preview or browse structure.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:rounded-[32px] sm:p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Book
-              </span>
-              <select
-                value={bookId}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value !== bookId && hasUnsavedInlineChanges()) {
-                    const shouldDiscard = window.confirm(
-                      "You have unsaved changes in Edit details. Discard changes and switch books?"
-                    );
-                    if (!shouldDiscard) {
-                      return;
-                    }
-                  }
-                  setBookId(value);
-                  // Update URL without node param when changing books
-                  if (value) {
-                    router.push(`/scriptures?book=${value}`, { scroll: false });
-                  } else {
-                    router.push("/scriptures", { scroll: false });
-                  }
-                  setSelectedId(null);
-                  setBreadcrumb([]);
-                }}
-                className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-              >
-                <option value="">Select a book</option>
-                {books.map((book) => (
-                  <option key={book.id} value={book.id.toString()}>
-                    {book.book_name}
-                    {book.visibility === "private" ? " (Private draft)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {(bookId || canContribute) && (
-              <div ref={bookActionsMenuRef} className="relative">
+        <section className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-zinc-900">Books</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="group relative">
+                <input
+                  type="text"
+                  value={bookQuery}
+                  onChange={(event) => setBookQuery(event.target.value)}
+                  placeholder="Search by book name"
+                  className="rounded-lg border border-black/10 px-3 py-1.5 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                />
+                <InlineClearButton
+                  visible={Boolean(bookQuery)}
+                  onClear={() => setBookQuery("")}
+                  ariaLabel="Clear book search"
+                />
+              </div>
+              {canContribute && (
                 <button
                   type="button"
-                  onClick={() => setShowBookActionsMenu((prev) => !prev)}
-                  title="Book actions"
-                  aria-label="Book actions"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-lg text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                  onClick={() => {
+                    loadSchemas();
+                    setSelectedSchema(null);
+                    setCreateBookStep("schema");
+                    setShowCreateBook(true);
+                  }}
+                  className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white"
                 >
-                  ⋮
+                  <Plus size={14} />
+                  Create
                 </button>
-                {showBookActionsMenu && (
-                  <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                    {bookId && (
-                      <>
-                        {canUseBookDraftActions && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookActionsMenu(false);
-                                void handleAddBookAsDraftBody();
-                              }}
-                              disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <ShoppingBasket size={14} />
-                              {bookBodyAddLoading ? "Adding to basket..." : "Add book as body to basket"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookActionsMenu(false);
-                                void handleCreateDraftFromBookBody();
-                              }}
-                              disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Plus size={14} />
-                              {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowBookActionsMenu(false);
-                            void handlePreviewBook("book");
-                          }}
-                          disabled={bookPreviewLoading || !canPreviewCurrentBook}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Eye size={14} />
-                          {!canPreviewCurrentBook
-                            ? "Preview unavailable"
-                            : bookPreviewLoading
-                            ? previewLoadingMessageWithElapsed
-                            : "Preview book"}
-                        </button>
-                        {selectedId && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowBookActionsMenu(false);
-                              void handlePreviewBook("node");
-                            }}
-                            disabled={bookPreviewLoading || !canPreviewCurrentBook}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            <Eye size={14} />
-                            {bookPreviewLoading ? previewLoadingMessageWithElapsed : "Preview selected level"}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const url = `${window.location.origin}/scriptures?book=${bookId}`;
-                            navigator.clipboard.writeText(url);
-                            setShowBookActionsMenu(false);
-                            setAuthMessage("Link copied.");
-                            setCopyTarget("book");
-                            setTimeout(() => {
-                              setAuthMessage(null);
-                              setCopyTarget(null);
-                            }, 2000);
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                        >
-                          <Link2 size={14} />
-                          Copy book link
-                        </button>
-                      </>
-                    )}
-                    {canContribute && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBookActionsMenu(false);
-                          loadSchemas();
-                          setSelectedSchema(null);
-                          setCreateBookStep("schema");
-                          setShowCreateBook(true);
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        <Plus size={14} />
-                        Create book
-                      </button>
-                    )}
-                    {canTogglePublish && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBookActionsMenu(false);
-                          void handleTogglePublish();
-                        }}
-                        disabled={bookVisibilitySubmitting}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Upload size={14} />
-                        {bookVisibilitySubmitting
-                          ? "Updating visibility..."
-                          : currentBook?.visibility === "public"
-                          ? "Unpublish book"
-                          : "Publish book"}
-                      </button>
-                    )}
-                    {canManageShares && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBookActionsMenu(false);
-                          void handleOpenShareManager();
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        <Share2 size={14} />
-                        Manage sharing
-                      </button>
-                    )}
-                    {canEditCurrentBook && bookId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBookActionsMenu(false);
-                          void openPropertiesModal("book");
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                      >
-                        <SlidersHorizontal size={14} />
-                        Book properties
-                      </button>
-                    )}
-                    {canDeleteCurrentBook && bookId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowBookActionsMenu(false);
-                          void handleDeleteCurrentBook();
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
-                      >
-                        <Trash2 size={14} />
-                        Delete book
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+              )}
+            </div>
             {isCopyMessage && copyTarget === "book" && !showLogin && (
               <div className="rounded-full bg-blue-500 px-3 py-1 text-[10px] text-white shadow">
                 {authMessage}
               </div>
             )}
-            {bookId && currentBook && (
-              <span
-                title={
-                  (currentBook.visibility || "private") === "public"
-                    ? "Visible to all users"
-                    : "Private draft: only you and users you explicitly share this book with can view it"
-                }
-                aria-label={
-                  (currentBook.visibility || "private") === "public"
-                    ? "Public visibility"
-                    : "Private draft visibility: only you and explicitly shared users can view"
-                }
-                className="inline-flex h-9 items-center rounded-full border border-black/10 bg-white/80 px-3 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
-              >
-                {(currentBook.visibility || "private") === "public"
-                  ? "Public"
-                  : "Private draft"}
-              </span>
+          </div>
+
+          <div className="rounded-xl border border-black/10 bg-white">
+            <div className="flex items-center justify-between border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              <span>All books</span>
+              <span>{filteredBooks.length}</span>
+            </div>
+            <div className="max-h-[260px] overflow-y-auto">
+              {filteredBooks.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <p className="text-sm text-zinc-600">No books found.</p>
+                  {bookQuery.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBookQuery("")}
+                      className="rounded-lg border border-black/10 px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      Clear search
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="divide-y divide-black/5">
+                  {paginatedBooks.map((book) => {
+                    const isSelected = bookId === book.id.toString();
+                    const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
+                    const canBrowseBook = authUserId !== null && canView;
+                    const rowActionCount = canBrowseBook ? 1 : 0;
+                    const showRowMenu = rowActionCount > 1;
+                    const showSingleBrowseAction = rowActionCount === 1;
+                    return (
+                      <div
+                        key={book.id}
+                        className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
+                          isSelected
+                            ? "bg-[color:var(--sand)]/50 text-[color:var(--accent)]"
+                            : "text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <div className="flex min-w-0 flex-1 items-center justify-between text-left">
+                          {canPreviewBook ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handlePreviewBookFromRow(book);
+                              }}
+                              className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
+                            >
+                              {book.book_name}
+                            </button>
+                          ) : (
+                            <span className="truncate font-medium">{book.book_name}</span>
+                          )}
+                          <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                            {book.visibility === "private" ? "Private" : "Public"}
+                          </span>
+                        </div>
+                        {showSingleBrowseAction && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleBrowseBookFromRow(book);
+                            }}
+                            title="Browse book"
+                            aria-label="Browse book"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            <BookOpen size={14} />
+                          </button>
+                        )}
+                        {showRowMenu && (
+                          <div
+                            ref={(element) => {
+                              if (openBookRowActionsId === book.id) {
+                                bookRowActionsMenuRef.current = element;
+                              }
+                            }}
+                            className="relative"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
+                              }}
+                              title="Row actions"
+                              aria-label="Row actions"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                            >
+                              ⋮
+                            </button>
+                            {openBookRowActionsId === book.id && (
+                              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                {canBrowseBook && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenBookRowActionsId(null);
+                                      handleBrowseBookFromRow(book);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  >
+                                    <BookOpen size={14} />
+                                    Browse book
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {filteredBooks.length > 0 && (
+              <div className="flex items-center justify-between border-t border-black/10 px-3 py-2 text-xs text-zinc-600">
+                <span>
+                  Page {currentBooksPage} of {totalBookPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBooksPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentBooksPage <= 1}
+                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBooksPage((prev) => Math.min(totalBookPages, prev + 1))}
+                    disabled={currentBooksPage >= totalBookPages}
+                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -4969,41 +4835,35 @@ function ScripturesContent() {
             </div>
           )}
 
-          {bookBodyAddMessage && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {bookBodyAddMessage}
-            </div>
-          )}
+          {showBrowseBookModal && bookId && isExploreVisible && (
+          <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
+            <div className="flex h-full w-full flex-col bg-[color:var(--paper)]">
+              <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
+                    Browse Book
+                  </h2>
+                  <p className="text-xs text-zinc-600 sm:text-sm">
+                    {currentBook?.book_name || books.find((b) => b.id.toString() === bookId)?.book_name || "Selected book"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBrowseBookModal(false);
+                    setShowExploreStructure(false);
+                    setMobilePanel("content");
+                  }}
+                  className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
+                >
+                  ✕
+                </button>
+              </div>
 
-          <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500 lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMobilePanel("tree")}
-              aria-pressed={mobilePanel === "tree"}
-              className={`rounded-full border px-3 py-1 transition ${
-                mobilePanel === "tree"
-                  ? "border-[color:var(--accent)] text-[color:var(--accent)]"
-                  : "border-black/10 bg-white/80"
-              }`}
-            >
-              Tree
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobilePanel("content")}
-              aria-pressed={mobilePanel === "content"}
-              className={`rounded-full border px-3 py-1 transition ${
-                mobilePanel === "content"
-                  ? "border-[color:var(--accent)] text-[color:var(--accent)]"
-                  : "border-black/10 bg-white/80"
-              }`}
-            >
-              Details
-            </button>
-          </div>
-
+              <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
           <div className="mt-3 grid grid-cols-1 gap-3 sm:mt-4 sm:gap-4 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
             {/* Tree Section */}
+            {isExploreVisible && (
             <div
               className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:h-full lg:flex-col ${
                 mobilePanel === "tree" ? "block" : "hidden"
@@ -5020,6 +4880,19 @@ function ScripturesContent() {
                 </div>
                 {bookId && (
                   <div className="mt-2 flex items-center gap-2">
+                    {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handlePreviewBook("book");
+                        }}
+                        title="Preview book"
+                        aria-label="Preview book"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                      >
+                        <Eye size={14} />
+                      </button>
+                    )}
                     {canContribute && currentBook?.schema && (
                       <button
                         type="button"
@@ -5051,9 +4924,10 @@ function ScripturesContent() {
                           setAction("add");
                         }}
                         title={`Add ${currentBook.schema?.levels[0] || "Node"}`}
-                        className="rounded-full border border-green-500/30 bg-green-50 px-2 py-1 text-xs text-green-700 transition hover:border-green-500/60 hover:shadow-md"
+                        aria-label={`Add ${currentBook.schema?.levels[0] || "Node"}`}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-green-500/30 bg-green-50 text-green-700 transition hover:border-green-500/60 hover:shadow-md"
                       >
-                        + Add
+                        <Plus size={14} />
                       </button>
                     )}
                     {currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
@@ -5063,16 +4937,20 @@ function ScripturesContent() {
                           onClick={() =>
                             setExpandedIds(new Set(treeData.map((node) => node.id)))
                           }
-                          className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                          title="Expand all"
+                          aria-label="Expand all"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
                         >
-                          Expand all
+                          <ChevronsDown size={14} />
                         </button>
                         <button
                           type="button"
                           onClick={() => setExpandedIds(new Set())}
-                          className="rounded-full border border-black/10 bg-white/80 px-2 py-1 text-xs transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                          title="Collapse all"
+                          aria-label="Collapse all"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
                         >
-                          Collapse all
+                          <ChevronsUp size={14} />
                         </button>
                       </>
                     )}
@@ -5091,11 +4969,12 @@ function ScripturesContent() {
                 )}
               </div>
             </div>
+            )}
 
             {/* Content Section */}
             <div
-              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
-                mobilePanel === "content" ? "block" : "hidden"
+              className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
+                !isExploreVisible || mobilePanel === "content" ? "block" : "hidden"
               } lg:block`}
             >
               {breadcrumb.length > 0 && (
@@ -5174,7 +5053,6 @@ function ScripturesContent() {
                         return;
                       }
                       event.preventDefault();
-                      setShowBookActionsMenu(false);
                       setShowNodeActionsMenu(true);
                     }}
                   >
@@ -5270,6 +5148,19 @@ function ScripturesContent() {
                           </button>
                           {showNodeActionsMenu && (
                             <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    void handlePreviewBook("node");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Eye size={14} />
+                                  {activeNodePreviewLabel}
+                                </button>
+                              )}
                               {isLeafSelected && authEmail && (
                                 <button
                                   type="button"
@@ -5866,6 +5757,10 @@ function ScripturesContent() {
               ) : null}
             </div>
           </div>
+              </div>
+            </div>
+          </div>
+          )}
         </section>
 
         {showPropertiesModal && (

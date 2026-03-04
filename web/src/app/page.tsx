@@ -847,6 +847,36 @@ function HomeContent() {
     ));
   };
 
+  const featuredBooks = [...books]
+    .sort((left, right) => {
+      const leftVisibility = (left as BookOption & { visibility?: string }).visibility;
+      const rightVisibility = (right as BookOption & { visibility?: string }).visibility;
+      const leftStatus = (left as BookOption & { status?: string }).status;
+      const rightStatus = (right as BookOption & { status?: string }).status;
+
+      const leftPublicRank = leftVisibility === "public" ? 0 : 1;
+      const rightPublicRank = rightVisibility === "public" ? 0 : 1;
+      if (leftPublicRank !== rightPublicRank) {
+        return leftPublicRank - rightPublicRank;
+      }
+
+      const leftPublishedRank = leftStatus === "published" ? 0 : 1;
+      const rightPublishedRank = rightStatus === "published" ? 0 : 1;
+      if (leftPublishedRank !== rightPublishedRank) {
+        return leftPublishedRank - rightPublishedRank;
+      }
+
+      const nameCompare = left.book_name.localeCompare(right.book_name, undefined, {
+        sensitivity: "base",
+      });
+      if (nameCompare !== 0) {
+        return nameCompare;
+      }
+
+      return left.id - right.id;
+    })
+    .slice(0, 6);
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogout = async () => {
     setAuthMessage(null);
@@ -884,226 +914,48 @@ function HomeContent() {
               </div>
             )}
             <h2 className="font-[var(--font-display)] text-4xl leading-tight text-[color:var(--deep)] sm:text-5xl">
-              Search, reflect, discuss, and compose
+              Read, reflect, and explore
             </h2>
             <p className="max-w-xl text-lg text-zinc-700">
               A new editorial platform for scripture library.
             </p>
 
             <div
-              id="search"
+              id="featured-books"
               className="rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg"
             >
-              <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search shloka, theme, or phrase"
-                    className="flex-1 rounded-2xl border border-black/10 bg-white/90 px-4 py-3 text-sm text-zinc-800 outline-none ring-0 focus:border-[color:var(--accent)]"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="rounded-2xl bg-[color:var(--accent)] px-6 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[color:var(--clay)]"
+              <div className="flex items-center justify-between border-b border-black/10 px-2 pb-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Featured Books</p>
+                <a
+                  href="/scriptures"
+                  className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                >
+                  Browse All Books
+                </a>
+              </div>
+              {featuredBooks.length === 0 ? (
+                <div className="px-2 py-6 text-sm text-zinc-600">No books available yet.</div>
+              ) : (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {featuredBooks.map((book) => (
+                    <a
+                      key={book.id}
+                      href={`/scriptures?book=${book.id}`}
+                      className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
                     >
-                      {loading ? "Searching" : "Search"}
-                    </button>
-                    {(query || bookId || levelName || hasContent || results.length > 0) && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setQuery("");
-                          setBookId("");
-                          setLevelName("");
-                          setHasContent(false);
-                          setResults([]);
-                          setTotal(0);
-                          setError(null);
-                          router.push("/", { scroll: false });
-                        }}
-                        className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                        title="Clear search"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="grid gap-3 text-sm text-zinc-700 sm:grid-cols-3">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Book
-                    </span>
-                    <select
-                      value={bookId}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setBookId(value);
-                        // Clear level name when book changes, as it may not be valid for the new book
-                        setLevelName("");
-                        loadTree(value);
-                      }}
-                      className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    >
-                      <option value="">All books</option>
-                      {books.map((book) => (
-                        <option key={book.id} value={book.id.toString()}>
-                          {book.book_name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Level name
-                    </span>
-                    <select
-                      value={levelName}
-                      onChange={(event) => setLevelName(event.target.value)}
-                      className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    >
-                      <option value="">All levels</option>
-                      {bookId && (() => {
-                        const selectedBook = books.find(b => b.id.toString() === bookId);
-                        if (selectedBook?.schema?.levels) {
-                          return selectedBook.schema.levels.map((level) => (
-                            <option key={level} value={level}>
-                              {level}
-                            </option>
-                          ));
-                        }
-                        return null;
-                      })()}
-                      {!bookId && (() => {
-                        const allLevels = new Set<string>();
-                        books.forEach(book => {
-                          book.schema?.levels?.forEach(level => allLevels.add(level));
-                        });
-                        return Array.from(allLevels).sort().map((level) => (
-                          <option key={level} value={level}>
-                            {level}
-                          </option>
-                        ));
-                      })()}
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={hasContent}
-                      onChange={(event) => setHasContent(event.target.checked)}
-                      className="h-4 w-4 rounded border-black/20 text-[color:var(--accent)]"
-                    />
-                    Has content only
-                  </label>
-                </div>
-              </form>
-              {(error || results.length > 0) && (
-                <div className="mt-4 rounded-2xl border border-black/10 bg-white/90 p-3">
-                  <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    <span>Results</span>
-                    <span>{total} found</span>
-                  </div>
-                  {error ? (
-                    <p className="mt-3 text-sm text-[color:var(--accent)]">{error}</p>
-                  ) : (
-                    <div className="mt-4 grid gap-4">
-                      {results.map((result) => {
-                        // Build the destination URL with search context
-                        const searchContext = new URLSearchParams();
-                        searchContext.set("q", query);
-                        if (bookId) searchContext.set("book_id", bookId);
-                        if (levelName) searchContext.set("level_name", levelName);
-                        if (hasContent) searchContext.set("has_content", "true");
-                        
-                        const destinationUrl = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&from=search&searchContext=${encodeURIComponent(searchContext.toString())}`;
-                        const bookName = books.find(b => b.id === result.node.book_id)?.book_name;
-                        const isInBasket = basketItems.some((item) => item.node_id === result.node.id);
-                        
-                        return (
-                        <div
-                          key={result.node.id}
-                          className="block rounded-2xl border border-black/5 bg-[color:var(--sand)] p-3 transition hover:border-[color:var(--accent)] hover:shadow-md"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              {renderBreadcrumb(result, bookName)}
-                            </div>
-                            <div className="flex shrink-0 gap-2">
-                              <div
-                                ref={(el) => {
-                                  if (openResultActionsId === result.node.id) {
-                                    resultActionsMenuRef.current = el;
-                                  }
-                                }}
-                                className="relative"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setOpenResultActionsId((prev) =>
-                                      prev === result.node.id ? null : result.node.id
-                                    )
-                                  }
-                                  title="Result actions"
-                                  aria-label="Result actions"
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                                >
-                                  <MoreVertical size={14} />
-                                </button>
-                                {openResultActionsId === result.node.id && (
-                                  <div className="absolute right-0 z-20 mt-2 w-44 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                                    <a
-                                      href={destinationUrl}
-                                      onClick={() => {
-                                        const scrollY = window.scrollY;
-                                        sessionStorage.setItem("searchScrollY", scrollY.toString());
-                                        setOpenResultActionsId(null);
-                                      }}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                    >
-                                      <Eye size={14} />
-                                      View
-                                    </a>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const bookName = books.find((b) => b.id === result.node.book_id)?.book_name;
-                                        void addToBasket(
-                                          result.node.id,
-                                          result.node.title_english || result.node.title_sanskrit || `Node ${result.node.id}`,
-                                          bookName,
-                                          result.node.level_name
-                                        );
-                                        setOpenResultActionsId(null);
-                                      }}
-                                      disabled={isInBasket}
-                                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      <ShoppingBasket size={14} />
-                                      {isInBasket ? "Already in basket" : "Add to basket"}
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          {result.snippet ? (
-                            <p
-                              className="mt-1 whitespace-pre-wrap text-sm text-zinc-700"
-                              dangerouslySetInnerHTML={{ __html: result.snippet }}
-                            />
-                          ) : (
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">
-                              {result.node.content_data?.translations?.english ||
-                                "No snippet available."}
-                            </p>
-                          )}
-                        </div>
-                      )})}
-                    </div>
-                  )}
+                      <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
+                        {book.book_name}
+                      </p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        {(book as BookOption & { visibility?: string }).visibility === "public"
+                          ? "Public"
+                          : "Private draft"}
+                      </p>
+                      <p className="mt-3 text-xs text-zinc-600">
+                        {book.schema?.name || "Scripture"}
+                      </p>
+                    </a>
+                  ))}
                 </div>
               )}
             </div>

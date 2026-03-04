@@ -4,9 +4,13 @@ import { NextResponse } from "next/server";
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 
-export async function GET() {
+export async function GET(request: Request) {
   const store = await cookies();
   const target = new URL("/api/content/books", API_BASE_URL);
+  const incoming = new URL(request.url);
+  incoming.searchParams.forEach((value, key) => {
+    target.searchParams.set(key, value);
+  });
 
   const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
   const authHeader: Record<string, string> = accessToken

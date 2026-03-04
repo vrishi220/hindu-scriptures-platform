@@ -3932,6 +3932,128 @@ class TestContentCoverageSprintCOV02:
         assert share_response.status_code == status.HTTP_404_NOT_FOUND
         assert "user not found" in share_response.json()["detail"].lower()
 
+    def test_scriptures_action_permission_matrix_for_shared_roles(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        owner_headers = _register_and_login(client)
+        viewer_headers = _register_and_login(client)
+        contributor_headers = _register_and_login(client)
+
+        viewer_me = client.get("/api/users/me", headers=viewer_headers)
+        assert viewer_me.status_code == status.HTTP_200_OK
+        viewer_email = viewer_me.json()["email"]
+
+        contributor_me = client.get("/api/users/me", headers=contributor_headers)
+        assert contributor_me.status_code == status.HTTP_200_OK
+        contributor_email = contributor_me.json()["email"]
+
+        owner_me = client.get("/api/users/me", headers=owner_headers)
+        assert owner_me.status_code == status.HTTP_200_OK
+        owner_email = owner_me.json()["email"]
+
+        category_suffix = uuid4().hex[:8]
+        category_response = client.post(
+            "/api/metadata/categories",
+            headers=admin_headers,
+            json={
+                "name": f"matrix_category_{category_suffix}",
+                "description": "Role matrix category",
+                "applicable_scopes": ["book"],
+                "parent_category_ids": [],
+                "properties": [],
+            },
+        )
+        assert category_response.status_code == status.HTTP_201_CREATED
+        category_id = category_response.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Matrix Schema {uuid4().hex[:8]}",
+                "description": "Schema for scriptures permission matrix",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Matrix Book {uuid4().hex[:6]}",
+                "book_code": f"matrix-book-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        share_viewer_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": viewer_email, "permission": "viewer"},
+            headers=owner_headers,
+        )
+        assert share_viewer_response.status_code == status.HTTP_201_CREATED
+
+        share_contributor_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": contributor_email, "permission": "contributor"},
+            headers=owner_headers,
+        )
+        assert share_contributor_response.status_code == status.HTTP_201_CREATED
+
+        viewer_share_attempt = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": owner_email, "permission": "viewer"},
+            headers=viewer_headers,
+        )
+        assert viewer_share_attempt.status_code == status.HTTP_403_FORBIDDEN
+
+        contributor_share_attempt = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": owner_email, "permission": "viewer"},
+            headers=contributor_headers,
+        )
+        assert contributor_share_attempt.status_code == status.HTTP_403_FORBIDDEN
+
+        viewer_edit_attempt = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"book_name": "Viewer Should Not Edit"},
+            headers=viewer_headers,
+        )
+        assert viewer_edit_attempt.status_code == status.HTTP_403_FORBIDDEN
+
+        contributor_edit_attempt = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"book_name": "Contributor Can Edit"},
+            headers=contributor_headers,
+        )
+        assert contributor_edit_attempt.status_code == status.HTTP_200_OK
+
+        viewer_metadata_bind_attempt = client.post(
+            f"/api/metadata/books/{book_id}/metadata-binding",
+            headers=viewer_headers,
+            json={
+                "category_id": category_id,
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert viewer_metadata_bind_attempt.status_code == status.HTTP_403_FORBIDDEN
+
+        contributor_metadata_bind_attempt = client.post(
+            f"/api/metadata/books/{book_id}/metadata-binding",
+            headers=contributor_headers,
+            json={
+                "category_id": category_id,
+                "property_overrides": {},
+                "unset_overrides": [],
+            },
+        )
+        assert contributor_metadata_bind_attempt.status_code == status.HTTP_200_OK
+
     def test_update_and_delete_share_return_404_when_share_missing(self, client):
         headers = _register_and_login(client)
 
