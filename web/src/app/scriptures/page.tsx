@@ -985,10 +985,12 @@ const toDatetimeLocalValue = (value: unknown): string => {
 };
 
 function ScripturesContent() {
+  const BOOKS_PAGE_SIZE = 10;
   const router = useRouter();
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
   const [bookQuery, setBookQuery] = useState("");
+  const [booksPage, setBooksPage] = useState(1);
   const [bookId, setBookId] = useState("");
   const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -4731,6 +4733,22 @@ function ScripturesContent() {
     }
     return book.book_name.toLowerCase().includes(query);
   });
+  const totalBookPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE));
+  const currentBooksPage = Math.min(booksPage, totalBookPages);
+  const paginatedBooks = filteredBooks.slice(
+    (currentBooksPage - 1) * BOOKS_PAGE_SIZE,
+    currentBooksPage * BOOKS_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setBooksPage(1);
+  }, [bookQuery]);
+
+  useEffect(() => {
+    if (booksPage > totalBookPages) {
+      setBooksPage(totalBookPages);
+    }
+  }, [booksPage, totalBookPages]);
 
   const handleSelectBook = (value: string) => {
     if (value !== bookId && hasUnsavedInlineChanges()) {
@@ -4990,10 +5008,21 @@ function ScripturesContent() {
             </div>
             <div className="max-h-[260px] overflow-y-auto">
               {filteredBooks.length === 0 ? (
-                <p className="py-6 text-center text-sm text-zinc-600">No books found.</p>
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <p className="text-sm text-zinc-600">No books found.</p>
+                  {bookQuery.trim().length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBookQuery("")}
+                      className="rounded-lg border border-black/10 px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      Clear search
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div className="divide-y divide-black/5">
-                  {filteredBooks.map((book) => {
+                  {paginatedBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
                     return (
                       <button
@@ -5016,6 +5045,31 @@ function ScripturesContent() {
                 </div>
               )}
             </div>
+            {filteredBooks.length > 0 && (
+              <div className="flex items-center justify-between border-t border-black/10 px-3 py-2 text-xs text-zinc-600">
+                <span>
+                  Page {currentBooksPage} of {totalBookPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBooksPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentBooksPage <= 1}
+                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBooksPage((prev) => Math.min(totalBookPages, prev + 1))}
+                    disabled={currentBooksPage >= totalBookPages}
+                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {bookPreviewError && (
