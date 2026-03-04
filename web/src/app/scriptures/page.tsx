@@ -2498,7 +2498,7 @@ function ScripturesContent() {
     Boolean(bookId) && (canContribute || canEdit || canAdmin);
   const canPreviewCurrentBook =
     Boolean(bookId) && (Boolean(authEmail) || isCurrentBookPublic);
-  const canExploreStructure = Boolean(bookId) && canView;
+  const canExploreStructure = Boolean(bookId) && authUserId !== null && canView;
   const isExploreVisible = canExploreStructure && showExploreStructure;
   const activeNodeLevelLabel = formatValue(nodeContent?.level_name) || "Node";
   const activeNodePropertiesLabel = `${activeNodeLevelLabel} properties`;
@@ -2508,6 +2508,13 @@ function ScripturesContent() {
   const currentBookSchemaLevels = Array.isArray(currentBook?.schema?.levels)
     ? currentBook.schema.levels
     : [];
+
+  useEffect(() => {
+    if (!canExploreStructure && showExploreStructure) {
+      setShowExploreStructure(false);
+      setMobilePanel("content");
+    }
+  }, [canExploreStructure, showExploreStructure]);
 
   useEffect(() => {
     if (!showPropertiesModal || propertiesScope !== "book" || !currentBook) return;
