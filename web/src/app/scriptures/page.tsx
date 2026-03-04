@@ -4776,34 +4776,40 @@ function ScripturesContent() {
           </p>
         </header>
 
-        <section className="rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:rounded-[32px] sm:p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex flex-1 flex-col gap-1">
-              <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                Book
-              </span>
-              <select
-                value={bookId}
-                onChange={(event) => handleSelectBook(event.target.value)}
-                className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-              >
-                <option value="">Select a book</option>
-                {books.map((book) => (
-                  <option key={book.id} value={book.id.toString()}>
-                    {book.book_name}
-                    {book.visibility === "private" ? " (Private draft)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {(bookId || canContribute) && (
+        <section className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-zinc-900">Books</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={bookQuery}
+                onChange={(event) => setBookQuery(event.target.value)}
+                placeholder="Search by book name"
+                className="rounded-lg border border-black/10 px-3 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+              />
+              {canContribute && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadSchemas();
+                    setSelectedSchema(null);
+                    setCreateBookStep("schema");
+                    setShowCreateBook(true);
+                  }}
+                  className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  <Plus size={14} />
+                  Create
+                </button>
+              )}
+              {bookId && (
               <div ref={bookActionsMenuRef} className="relative">
                 <button
                   type="button"
                   onClick={() => setShowBookActionsMenu((prev) => !prev)}
                   title="Book actions"
                   aria-label="Book actions"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-lg text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white text-lg text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                 >
                   ⋮
                 </button>
@@ -4811,34 +4817,18 @@ function ScripturesContent() {
                   <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
                     {bookId && (
                       <>
-                        {canUseBookDraftActions && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookActionsMenu(false);
-                                void handleAddBookAsDraftBody();
-                              }}
-                              disabled={bookBodyAddLoading || bookBodyCreateDraftLoading}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <ShoppingBasket size={14} />
-                              {bookBodyAddLoading ? "Adding to basket..." : "Add book as body to basket"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookActionsMenu(false);
-                                void handleCreateDraftFromBookBody();
-                              }}
-                              disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <Plus size={14} />
-                              {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
-                            </button>
-                          </>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowBookActionsMenu(false);
+                            void handleCreateDraftFromBookBody();
+                          }}
+                          disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Plus size={14} />
+                          {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -4965,31 +4955,67 @@ function ScripturesContent() {
                   </div>
                 )}
               </div>
-            )}
+              )}
+              {bookId && currentBook && (
+                <span
+                  title={
+                    (currentBook.visibility || "private") === "public"
+                      ? "Visible to all users"
+                      : "Private draft: only you and users you explicitly share this book with can view it"
+                  }
+                  aria-label={
+                    (currentBook.visibility || "private") === "public"
+                      ? "Public visibility"
+                      : "Private draft visibility: only you and explicitly shared users can view"
+                  }
+                  className="inline-flex h-8 items-center rounded-full border border-black/10 bg-white px-3 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
+                >
+                  {(currentBook.visibility || "private") === "public"
+                    ? "Public"
+                    : "Private draft"}
+                </span>
+              )}
+            </div>
             {isCopyMessage && copyTarget === "book" && !showLogin && (
               <div className="rounded-full bg-blue-500 px-3 py-1 text-[10px] text-white shadow">
                 {authMessage}
               </div>
             )}
-            {bookId && currentBook && (
-              <span
-                title={
-                  (currentBook.visibility || "private") === "public"
-                    ? "Visible to all users"
-                    : "Private draft: only you and users you explicitly share this book with can view it"
-                }
-                aria-label={
-                  (currentBook.visibility || "private") === "public"
-                    ? "Public visibility"
-                    : "Private draft visibility: only you and explicitly shared users can view"
-                }
-                className="inline-flex h-9 items-center rounded-full border border-black/10 bg-white/80 px-3 text-[10px] uppercase tracking-[0.2em] text-zinc-600"
-              >
-                {(currentBook.visibility || "private") === "public"
-                  ? "Public"
-                  : "Private draft"}
-              </span>
-            )}
+          </div>
+
+          <div className="rounded-xl border border-black/10 bg-white">
+            <div className="flex items-center justify-between border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              <span>All books</span>
+              <span>{filteredBooks.length}</span>
+            </div>
+            <div className="max-h-[260px] overflow-y-auto">
+              {filteredBooks.length === 0 ? (
+                <p className="py-6 text-center text-sm text-zinc-600">No books found.</p>
+              ) : (
+                <div className="divide-y divide-black/5">
+                  {filteredBooks.map((book) => {
+                    const isSelected = bookId === book.id.toString();
+                    return (
+                      <button
+                        key={book.id}
+                        type="button"
+                        onClick={() => handleSelectBook(book.id.toString())}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                          isSelected
+                            ? "bg-[color:var(--sand)]/50 text-[color:var(--accent)]"
+                            : "text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span className="font-medium">{book.book_name}</span>
+                        <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                          {book.visibility === "private" ? "Private" : "Public"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           {bookPreviewError && (
@@ -5011,40 +5037,6 @@ function ScripturesContent() {
           {bookBodyAddMessage && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {bookBodyAddMessage}
-            </div>
-          )}
-
-          {!bookId && (
-            <div className="mt-4 space-y-3 rounded-2xl border border-black/10 bg-white/90 p-3">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Books</p>
-                <input
-                  type="text"
-                  value={bookQuery}
-                  onChange={(event) => setBookQuery(event.target.value)}
-                  placeholder="Search books"
-                  className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none sm:max-w-xs"
-                />
-              </div>
-              <div className="max-h-[340px] overflow-y-auto">
-                {filteredBooks.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-zinc-600">No books found.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {filteredBooks.map((book) => (
-                      <button
-                        key={book.id}
-                        type="button"
-                        onClick={() => handleSelectBook(book.id.toString())}
-                        className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white px-3 py-2 text-left transition hover:border-[color:var(--accent)] hover:bg-[color:var(--sand)]/40"
-                      >
-                        <span className="text-sm font-medium text-[color:var(--deep)]">{book.book_name}</span>
-                        <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Read</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
