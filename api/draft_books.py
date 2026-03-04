@@ -6,6 +6,7 @@ import re
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from liquid import Template
@@ -429,8 +430,30 @@ def _resolve_node_binding_metadata_for_template(
     db: Session,
     source_book_id: int | None,
     source_node_id: int | None,
+    binding_cache: dict | None = None,
 ) -> dict:
     if not isinstance(source_node_id, int) or source_node_id <= 0:
+        return {}
+
+    if isinstance(binding_cache, dict):
+        scoped_node_bindings = binding_cache.get("node_scoped") if isinstance(binding_cache.get("node_scoped"), dict) else {}
+        global_node_bindings = binding_cache.get("node_global") if isinstance(binding_cache.get("node_global"), dict) else {}
+        book_bindings = binding_cache.get("book_scoped") if isinstance(binding_cache.get("book_scoped"), dict) else {}
+
+        if isinstance(source_book_id, int) and source_book_id > 0:
+            scoped = scoped_node_bindings.get((source_book_id, source_node_id))
+            if isinstance(scoped, dict):
+                return scoped
+
+        global_binding = global_node_bindings.get(source_node_id)
+        if isinstance(global_binding, dict):
+            return global_binding
+
+        if isinstance(source_book_id, int) and source_book_id > 0:
+            book_binding = book_bindings.get(source_book_id)
+            if isinstance(book_binding, dict):
+                return book_binding
+
         return {}
 
     node_binding = None
@@ -483,6 +506,7 @@ def _resolve_block_metadata(
     item: dict,
     source_node: ContentNode | None,
     metadata_bindings: dict,
+    binding_cache: dict | None = None,
 ) -> dict:
     node_scope: dict = {}
     node_binding_map = metadata_bindings.get("node_metadata")
@@ -511,6 +535,7 @@ def _resolve_block_metadata(
         db,
         source_book_id if isinstance(source_book_id, int) else None,
         source_node_id if isinstance(source_node_id, int) else None,
+        binding_cache=binding_cache,
     )
 
     field_scope = _read_metadata_dict(item.get("metadata_overrides"))
@@ -525,6 +550,95 @@ def _resolve_block_metadata(
         node_scope,
         field_scope,
     )
+
+
+def _build_template_binding_metadata_cache(db: Session, items: list[dict]) -> dict:
+    node_ids: set[int] = set()
+    book_ids: set[int] = set()
+
+    for item in items:
+        source_node_id = item.get("source_node_id")
+        source_book_id = item.get("source_book_id")
+        if isinstance(source_node_id, int) and source_node_id > 0:
+            node_ids.add(source_node_id)
+        if isinstance(source_book_id, int) and source_book_id > 0:
+            book_ids.add(source_book_id)
+
+    if not node_ids and not book_ids:
+        return {
+            "node_scoped": {},
+            "node_global": {},
+            "book_scoped": {},
+        }
+
+    flattened_by_binding_id: dict[int, dict] = {}
+
+    def _flatten(binding: MetadataBinding) -> dict:
+        cached = flattened_by_binding_id.get(binding.id)
+        if cached is not None:
+            return cached
+        flattened = _flatten_binding_metadata_for_template(binding, db)
+        flattened_by_binding_id[binding.id] = flattened
+        return flattened
+
+    node_scoped: dict[tuple[int, int], dict] = {}
+    node_global: dict[int, dict] = {}
+    book_scoped: dict[int, dict] = {}
+
+    if node_ids and book_ids:
+        scoped_rows = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.entity_id.in_(sorted(node_ids)),
+                MetadataBinding.root_entity_id.in_(sorted(book_ids)),
+            )
+            .order_by(MetadataBinding.id.asc())
+            .all()
+        )
+        for row in scoped_rows:
+            if row.root_entity_id is None:
+                continue
+            key = (int(row.root_entity_id), int(row.entity_id))
+            node_scoped.setdefault(key, _flatten(row))
+
+    if node_ids:
+        global_rows = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.entity_id.in_(sorted(node_ids)),
+                MetadataBinding.root_entity_id.is_(None),
+            )
+            .order_by(MetadataBinding.id.asc())
+            .all()
+        )
+        for row in global_rows:
+            key = int(row.entity_id)
+            node_global.setdefault(key, _flatten(row))
+
+    if book_ids:
+        book_rows = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "book",
+                MetadataBinding.scope_type == "book",
+                MetadataBinding.entity_id.in_(sorted(book_ids)),
+            )
+            .order_by(MetadataBinding.id.asc())
+            .all()
+        )
+        for row in book_rows:
+            key = int(row.entity_id)
+            book_scoped.setdefault(key, _flatten(row))
+
+    return {
+        "node_scoped": node_scoped,
+        "node_global": node_global,
+        "book_scoped": book_scoped,
+    }
 
 
 def _read_template_key(value: object) -> str | None:
@@ -1433,16 +1547,31 @@ def _resolve_word_meanings_rows(
     return resolved_rows
 
 
-def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> ContentNode | None:
+def _resolve_referenced_source_node(
+    db: Session,
+    node: ContentNode | None,
+    resolved_cache: dict[int, ContentNode | None] | None = None,
+) -> ContentNode | None:
     if node is None:
         return None
 
+    if isinstance(resolved_cache, dict) and node.id in resolved_cache:
+        return resolved_cache[node.id]
+
     resolved = node
+    chain_ids: list[int] = []
     visited_ids: set[int] = set()
     while resolved.referenced_node_id:
         if resolved.id in visited_ids:
             break
         visited_ids.add(resolved.id)
+        chain_ids.append(resolved.id)
+
+        if isinstance(resolved_cache, dict) and resolved.referenced_node_id in resolved_cache:
+            cached = resolved_cache[resolved.referenced_node_id]
+            if cached is not None:
+                resolved = cached
+            break
 
         next_source = (
             db.query(ContentNode)
@@ -1452,6 +1581,11 @@ def _resolve_referenced_source_node(db: Session, node: ContentNode | None) -> Co
         if not next_source:
             break
         resolved = next_source
+
+    if isinstance(resolved_cache, dict):
+        resolved_cache[node.id] = resolved
+        for chain_id in chain_ids:
+            resolved_cache.setdefault(chain_id, resolved)
 
     return resolved
 
@@ -1984,18 +2118,31 @@ def _render_book_preview_template(
 
 
 def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Session) -> SnapshotRenderSections:
+    total_start = perf_counter()
     resolved_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     section_names = ("front", "body", "back")
     section_blocks: dict[str, list[SnapshotRenderBlock]] = {"front": [], "body": [], "back": []}
     source_node_ids: set[int] = set()
+
+    extraction_start = perf_counter()
     template_bindings = _extract_template_bindings(resolved_data)
     metadata_bindings = _extract_metadata_bindings(resolved_data)
     custom_template_sources = _extract_custom_template_sources(resolved_data)
     system_template_sources = _load_system_template_sources(db)
+    extraction_ms = (perf_counter() - extraction_start) * 1000
+
+    timing_by_section: dict[str, dict[str, float | int]] = {}
 
     for section_name in section_names:
+        section_start = perf_counter()
         raw_section = resolved_data.get(section_name)
         if not isinstance(raw_section, list):
+            timing_by_section[section_name] = {
+                "raw_items": 0,
+                "candidates": 0,
+                "blocks": 0,
+                "duration_ms": round((perf_counter() - section_start) * 1000, 2),
+            }
             continue
 
         candidates: list[tuple[tuple[int, int, int, str, int], dict]] = []
@@ -2085,17 +2232,24 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             source_nodes = db.query(ContentNode).filter(ContentNode.id.in_(sorted(source_node_ids))).all()
             source_nodes_by_id = {node.id: node for node in source_nodes}
 
+        binding_cache = _build_template_binding_metadata_cache(
+            db,
+            [item for _, item in candidates],
+        )
+        referenced_node_cache: dict[int, ContentNode | None] = {}
+
         candidates.sort(key=lambda item: item[0])
 
         materialized_blocks: list[SnapshotRenderBlock] = []
         for block_index, (_, item) in enumerate(candidates, start=1):
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
-            source_node = _resolve_referenced_source_node(db, source_node)
+            source_node = _resolve_referenced_source_node(db, source_node, resolved_cache=referenced_node_cache)
             resolved_metadata = _resolve_block_metadata(
                 db=db,
                 item=item,
                 source_node=source_node,
                 metadata_bindings=metadata_bindings,
+                binding_cache=binding_cache,
             )
             template_key = _resolve_block_template_key(
                 section_name=section_name,
@@ -2129,6 +2283,23 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             )
 
         section_blocks[section_name] = materialized_blocks
+        timing_by_section[section_name] = {
+            "raw_items": len(raw_section),
+            "candidates": len(candidates),
+            "blocks": len(materialized_blocks),
+            "duration_ms": round((perf_counter() - section_start) * 1000, 2),
+        }
+
+    total_ms = (perf_counter() - total_start) * 1000
+    logger.info(
+        "preview_render_timing %s",
+        {
+            "stage": "materialize_snapshot_render_sections",
+            "extraction_ms": round(extraction_ms, 2),
+            "total_ms": round(total_ms, 2),
+            "section_timing": timing_by_section,
+        },
+    )
 
     return SnapshotRenderSections(
         front=section_blocks["front"],
@@ -2970,6 +3141,7 @@ def preview_book_render(
     current_user: User | None = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
+    endpoint_start = perf_counter()
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
@@ -3033,18 +3205,37 @@ def preview_book_render(
     template_warnings = _validate_template_bindings(preview_payload)
     _apply_template_metadata(preview_payload)
 
+    section_render_start = perf_counter()
     sections = _materialize_snapshot_render_sections(preview_payload, db)
+    section_render_ms = (perf_counter() - section_render_start) * 1000
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
     display_title = _book_title_for_preview(root_node) if root_node else book.book_name
     custom_template_sources = _extract_custom_template_sources(preview_payload)
     system_template_sources = _load_system_template_sources(db)
+
+    book_template_start = perf_counter()
     book_template = _render_book_preview_template(
         preview_payload,
         display_title,
         sections,
         custom_template_sources=custom_template_sources,
         system_template_sources=system_template_sources,
+    )
+    book_template_ms = (perf_counter() - book_template_start) * 1000
+    total_ms = (perf_counter() - endpoint_start) * 1000
+
+    logger.info(
+        "preview_book_render_timing %s",
+        {
+            "book_id": book.id,
+            "scope": "node" if root_node else "book",
+            "root_node_id": root_node.id if root_node else None,
+            "section_render_ms": round(section_render_ms, 2),
+            "book_template_ms": round(book_template_ms, 2),
+            "total_ms": round(total_ms, 2),
+            "body_blocks": len(sections.body),
+        },
     )
 
     return BookPreviewRenderArtifactPublic(
