@@ -227,6 +227,8 @@ def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int
         allow_anonymous_private_reads=True,
         tolerate_missing_share_table=True,
     )
+    if current_user is None:
+        return computed_rank
     return max(1, computed_rank)
 
 
