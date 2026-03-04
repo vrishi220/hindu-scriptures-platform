@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
@@ -40,6 +40,25 @@ from models.schemas import (
 from models.scripture_schema import ScriptureSchema
 from models.user import User
 from services import get_db
+from services.book_permissions import (
+    BOOK_SHARE_CONTRIBUTOR,
+    BOOK_SHARE_EDITOR,
+    BOOK_SHARE_VIEWER,
+    BOOK_STATUS_DRAFT,
+    BOOK_STATUS_PUBLISHED,
+    BOOK_VISIBILITY_PRIVATE,
+    BOOK_VISIBILITY_PUBLIC,
+    book_access_rank,
+    book_is_visible_to_user,
+    book_owner_id,
+    book_status,
+    book_visibility,
+    ensure_book_edit_access,
+    ensure_book_owner_or_edit_any,
+    ensure_book_view_access,
+    user_can_contribute,
+    user_can_edit_any,
+)
 from services.license_policy import classify_license_action, normalize_license
 from services.transliteration import contains_devanagari, devanagari_to_iast, latin_to_devanagari
 
@@ -50,13 +69,6 @@ MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image"}
-BOOK_STATUS_DRAFT = "draft"
-BOOK_STATUS_PUBLISHED = "published"
-BOOK_VISIBILITY_PRIVATE = "private"
-BOOK_VISIBILITY_PUBLIC = "public"
-BOOK_SHARE_VIEWER = "viewer"
-BOOK_SHARE_CONTRIBUTOR = "contributor"
-BOOK_SHARE_EDITOR = "editor"
 
 
 # Import request/response schemas
@@ -144,50 +156,23 @@ def require_view_permission(
 
 
 def _user_can_contribute(current_user: User) -> bool:
-    perms = getattr(current_user, "permissions", None)
-    if perms is None:
-        return True
-    return bool(
-        perms.get("can_contribute")
-        or perms.get("can_edit")
-        or perms.get("can_admin")
-    )
+    return user_can_contribute(current_user)
 
 
 def _user_can_edit_any(current_user: User) -> bool:
-    perms = getattr(current_user, "permissions", None)
-    if perms is None:
-        return True
-    return bool(perms.get("can_edit") or perms.get("can_admin"))
+    return user_can_edit_any(current_user)
 
 
 def _book_owner_id(book: Book) -> int | None:
-    metadata = book.metadata_json or {}
-    if not isinstance(metadata, dict):
-        return None
-    owner_id = metadata.get("owner_id")
-    try:
-        return int(owner_id) if owner_id is not None else None
-    except (TypeError, ValueError):
-        return None
+    return book_owner_id(book)
 
 
 def _book_status(book: Book) -> str:
-    metadata = book.metadata_json or {}
-    if isinstance(metadata, dict):
-        status = str(metadata.get("status") or "").strip().lower()
-        if status in {BOOK_STATUS_DRAFT, BOOK_STATUS_PUBLISHED}:
-            return status
-    return BOOK_STATUS_DRAFT
+    return book_status(book)
 
 
 def _book_visibility(book: Book) -> str:
-    metadata = book.metadata_json or {}
-    if isinstance(metadata, dict):
-        visibility = str(metadata.get("visibility") or "").strip().lower()
-        if visibility in {BOOK_VISIBILITY_PRIVATE, BOOK_VISIBILITY_PUBLIC}:
-            return visibility
-    return BOOK_VISIBILITY_PRIVATE
+    return book_visibility(book)
 
 
 def _book_word_meanings_level_rollout(book: Book) -> tuple[bool, set[str]]:
@@ -234,63 +219,34 @@ def _ensure_word_meanings_level_is_enabled(book: Book, level_name: str, content_
     )
 
 
-def _share_permission_rank(permission: str | None) -> int:
-    rank_map = {
-        BOOK_SHARE_VIEWER: 1,
-        BOOK_SHARE_CONTRIBUTOR: 2,
-        BOOK_SHARE_EDITOR: 3,
-    }
-    return rank_map.get((permission or "").strip().lower(), 0)
-
-
-def _book_share_permission(db: Session, book_id: int, user_id: int) -> str | None:
-    try:
-        share = (
-            db.query(BookShare)
-            .filter(
-                BookShare.book_id == book_id,
-                BookShare.shared_with_user_id == user_id,
-            )
-            .first()
-        )
-    except ProgrammingError as exc:
-        original = getattr(exc, "orig", None)
-        pgcode = getattr(original, "pgcode", None)
-        if pgcode == "42P01":
-            db.rollback()
-            return None
-        raise
-    if not share:
-        return None
-    return str(share.permission).strip().lower()
-
-
 def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
-    if current_user is None:
-        return 1
-
-    read_rank = 1
-
-    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
-        read_rank = max(read_rank, 1)
-
-    if _user_can_edit_any(current_user):
-        return 3
-
-    if _book_owner_id(book) == current_user.id:
-        return 3
-
-    return max(read_rank, _share_permission_rank(_book_share_permission(db, book.id, current_user.id)))
+    return book_access_rank(
+        db,
+        book,
+        current_user,
+        allow_anonymous_private_reads=True,
+        tolerate_missing_share_table=True,
+    )
 
 
 def _book_is_visible_to_user(db: Session, book: Book, current_user: User | None) -> bool:
-    return _book_access_rank(db, book, current_user) >= 1
+    return book_is_visible_to_user(
+        db,
+        book,
+        current_user,
+        allow_anonymous_private_reads=True,
+        tolerate_missing_share_table=True,
+    )
 
 
 def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
-    if _book_is_visible_to_user(db, book, current_user):
-        return
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    ensure_book_view_access(
+        db,
+        book,
+        current_user,
+        allow_anonymous_private_reads=True,
+        tolerate_missing_share_table=True,
+    )
 
 
 def _book_public_model(book: Book) -> BookPublic:
@@ -397,10 +353,10 @@ def _ensure_can_contribute(current_user: User) -> None:
 
 
 def _ensure_book_edit_access(db: Session, current_user: User, book: Book) -> None:
-    if _book_access_rank(db, book, current_user) >= 2:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
+    ensure_book_edit_access(
+        db,
+        current_user,
+        book,
         detail="You do not have edit access to this book",
     )
 
@@ -731,12 +687,11 @@ def update_book(
     _ensure_book_edit_access(db, current_user, book)
 
     if payload.status is not None or payload.visibility is not None:
-        owner_id = _book_owner_id(book)
-        if owner_id != current_user.id and not _user_can_edit_any(current_user):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the book owner can publish or change visibility",
-            )
+        ensure_book_owner_or_edit_any(
+            current_user,
+            book,
+            detail="Only the book owner can publish or change visibility",
+        )
 
     updates = payload.model_dump(exclude_unset=True)
     metadata = book.metadata_json or {}
@@ -794,11 +749,11 @@ def delete_book(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    owner_id = _book_owner_id(book)
-    is_owner = owner_id is not None and owner_id == current_user.id
-
-    if not _user_can_edit_any(current_user) and not is_owner:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the book owner can delete this book")
+    ensure_book_owner_or_edit_any(
+        current_user,
+        book,
+        detail="Only the book owner can delete this book",
+    )
 
     if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC and not _user_can_edit_any(current_user):
         raise HTTPException(
@@ -821,8 +776,7 @@ def list_book_shares(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_book_owner_or_edit_any(current_user, book)
 
     shares = db.query(BookShare).filter(BookShare.book_id == book_id).order_by(BookShare.id).all()
     users_by_id = {
@@ -849,8 +803,7 @@ def create_or_update_book_share(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_book_owner_or_edit_any(current_user, book)
 
     shared_user = db.query(User).filter(User.email == payload.email).first()
     if not shared_user:
@@ -894,8 +847,7 @@ def update_book_share(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_book_owner_or_edit_any(current_user, book)
 
     share = (
         db.query(BookShare)
@@ -928,8 +880,7 @@ def delete_book_share(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not _user_can_edit_any(current_user) and _book_owner_id(book) != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_book_owner_or_edit_any(current_user, book)
 
     share = (
         db.query(BookShare)

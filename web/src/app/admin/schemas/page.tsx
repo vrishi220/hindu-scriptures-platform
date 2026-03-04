@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { contentPath } from "../../../lib/apiPaths";
 import { getMe } from "../../../lib/authClient";
+import InlineClearButton from "../../../components/InlineClearButton";
 
 type Schema = {
   id: number;
@@ -417,12 +418,19 @@ export default function SchemaBuilderPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-zinc-900">Schemas</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search schemas"
-              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
-            />
+            <div className="group relative">
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search schemas"
+                className="rounded-lg border border-black/10 px-3 py-1.5 pr-10 text-sm"
+              />
+              <InlineClearButton
+                visible={Boolean(searchQuery)}
+                onClear={() => setSearchQuery("")}
+                ariaLabel="Clear schema search"
+              />
+            </div>
             <select
               value={usageFilter}
               onChange={(event) => setUsageFilter(event.target.value as "all" | "used" | "unused")}

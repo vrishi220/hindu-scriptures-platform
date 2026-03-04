@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from api.users import get_current_user, require_permission
 from models.book import Book
-from models.book_share import BookShare
 from models.content_node import ContentNode
 from models.draft_book import DraftBook
 from models.property_system import (
@@ -33,13 +32,17 @@ from models.property_system_schemas import (
 )
 from models.user import User
 from services import get_db
+from services.book_permissions import (
+    book_access_rank,
+    book_owner_id,
+    book_visibility,
+    ensure_book_edit_access,
+    ensure_book_view_access,
+    user_can_edit_any,
+)
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
 logger = logging.getLogger(__name__)
-
-BOOK_VISIBILITY_PRIVATE = "private"
-BOOK_VISIBILITY_PUBLIC = "public"
-
 
 def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
     payload = {
@@ -59,81 +62,27 @@ def _user_can_edit_draft(current_user: User, draft: DraftBook) -> bool:
 
 
 def _user_can_edit_any(current_user: User) -> bool:
-    perms = current_user.permissions or {}
-    return bool(perms.get("can_edit") or perms.get("can_admin"))
+    return user_can_edit_any(current_user)
 
 
 def _book_owner_id(book: Book) -> int | None:
-    metadata = book.metadata_json or {}
-    if not isinstance(metadata, dict):
-        return None
-    owner_id = metadata.get("owner_id")
-    try:
-        return int(owner_id) if owner_id is not None else None
-    except (TypeError, ValueError):
-        return None
+    return book_owner_id(book)
 
 
 def _book_visibility(book: Book) -> str:
-    metadata = book.metadata_json or {}
-    if isinstance(metadata, dict):
-        visibility = str(metadata.get("visibility") or "").strip().lower()
-        if visibility in {BOOK_VISIBILITY_PRIVATE, BOOK_VISIBILITY_PUBLIC}:
-            return visibility
-    return BOOK_VISIBILITY_PRIVATE
-
-
-def _share_permission_rank(permission: str | None) -> int:
-    rank_map = {
-        "viewer": 1,
-        "contributor": 2,
-        "editor": 3,
-    }
-    return rank_map.get((permission or "").strip().lower(), 0)
-
-
-def _book_share_permission(db: Session, book_id: int, user_id: int) -> str | None:
-    share = (
-        db.query(BookShare)
-        .filter(
-            BookShare.book_id == book_id,
-            BookShare.shared_with_user_id == user_id,
-        )
-        .first()
-    )
-    if not share:
-        return None
-    return str(share.permission).strip().lower()
+    return book_visibility(book)
 
 
 def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
-    if current_user is None:
-        return 1 if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC else 0
-
-    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC:
-        read_rank = 1
-    else:
-        read_rank = 0
-
-    if _user_can_edit_any(current_user):
-        return 3
-
-    if _book_owner_id(book) == current_user.id:
-        return 3
-
-    return max(read_rank, _share_permission_rank(_book_share_permission(db, book.id, current_user.id)))
+    return book_access_rank(db, book, current_user)
 
 
 def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
-    if _book_access_rank(db, book, current_user) >= 1:
-        return
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    ensure_book_view_access(db, book, current_user)
 
 
 def _ensure_book_edit_access(db: Session, current_user: User, book: Book) -> None:
-    if _book_access_rank(db, book, current_user) >= 2:
-        return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_book_edit_access(db, current_user, book)
 
 
 def _parse_iso_date(value: str) -> bool:

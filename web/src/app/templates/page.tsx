@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getMe } from "../../lib/authClient";
+import InlineClearButton from "../../components/InlineClearButton";
 
 type TemplateVisibility = "private" | "published";
 
@@ -346,12 +347,19 @@ export default function TemplatesPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-zinc-900">Templates</h2>
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search templates"
-              className="rounded-lg border border-black/10 px-3 py-1.5 text-sm"
-            />
+            <div className="group relative">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search templates"
+                className="rounded-lg border border-black/10 px-3 py-1.5 pr-10 text-sm"
+              />
+              <InlineClearButton
+                visible={Boolean(query)}
+                onClear={() => setQuery("")}
+                ariaLabel="Clear template search"
+              />
+            </div>
             <select
               value={visibilityFilter}
               onChange={(event) => setVisibilityFilter(event.target.value as "all" | TemplateVisibility)}
