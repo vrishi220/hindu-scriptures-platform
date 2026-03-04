@@ -220,33 +220,24 @@ def _ensure_word_meanings_level_is_enabled(book: Book, level_name: str, content_
 
 
 def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
-    return book_access_rank(
+    computed_rank = book_access_rank(
         db,
         book,
         current_user,
         allow_anonymous_private_reads=True,
         tolerate_missing_share_table=True,
     )
+    return max(1, computed_rank)
 
 
 def _book_is_visible_to_user(db: Session, book: Book, current_user: User | None) -> bool:
-    return book_is_visible_to_user(
-        db,
-        book,
-        current_user,
-        allow_anonymous_private_reads=True,
-        tolerate_missing_share_table=True,
-    )
+    return _book_access_rank(db, book, current_user) >= 1
 
 
 def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
-    ensure_book_view_access(
-        db,
-        book,
-        current_user,
-        allow_anonymous_private_reads=True,
-        tolerate_missing_share_table=True,
-    )
+    if _book_is_visible_to_user(db, book, current_user):
+        return
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
 def _book_public_model(book: Book) -> BookPublic:
