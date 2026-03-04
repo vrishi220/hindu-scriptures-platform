@@ -1059,6 +1059,8 @@ function ScripturesContent() {
   const [showCreateBook, setShowCreateBook] = useState(false);
   const [showBookPreview, setShowBookPreview] = useState(false);
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
+  const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
+  const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
@@ -2869,6 +2871,10 @@ function ScripturesContent() {
   const showOnlyPreferredScript = preferences?.show_only_preferred_script ?? false;
   const showTransliteration =
     transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
+  const previewLoadingMessage =
+    bookPreviewLoadingScope === "node" ? "Building level preview..." : "Building book preview...";
+  const previewLoadingElapsedSeconds = Math.floor(bookPreviewLoadingElapsedMs / 1000);
+  const previewLoadingMessageWithElapsed = `${previewLoadingMessage} ${previewLoadingElapsedSeconds}s`;
 
   const renderTransliterationByPreference = (value: string): string => {
     if (!value) return "";
@@ -2910,6 +2916,21 @@ function ScripturesContent() {
     setAppliedBookPreviewLanguageSettings(previewLanguages);
     setAppliedBookPreviewTransliterationScript(previewScript);
   }, [preferences]);
+
+  useEffect(() => {
+    if (!bookPreviewLoading) {
+      setBookPreviewLoadingElapsedMs(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    setBookPreviewLoadingElapsedMs(0);
+    const intervalId = window.setInterval(() => {
+      setBookPreviewLoadingElapsedMs(Date.now() - startedAt);
+    }, 200);
+
+    return () => window.clearInterval(intervalId);
+  }, [bookPreviewLoading]);
 
   const renderSanskritByPreference = (
     sanskritValue: string,
@@ -3360,6 +3381,7 @@ function ScripturesContent() {
     const nextShowPreviewTitles = showPreviewTitles;
     const nextPreviewTransliterationScript = previewTransliterationScript;
 
+    setBookPreviewLoadingScope(scope);
     setBookPreviewLoading(true);
     setBookPreviewError(null);
 
@@ -4735,7 +4757,7 @@ function ScripturesContent() {
                           {!canPreviewCurrentBook
                             ? "Preview unavailable"
                             : bookPreviewLoading
-                            ? "Loading preview..."
+                            ? previewLoadingMessageWithElapsed
                             : "Preview book"}
                         </button>
                         {selectedId && (
@@ -4749,7 +4771,7 @@ function ScripturesContent() {
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Eye size={14} />
-                            {bookPreviewLoading ? "Loading preview..." : "Preview selected level"}
+                            {bookPreviewLoading ? previewLoadingMessageWithElapsed : "Preview selected level"}
                           </button>
                         )}
                         <button
@@ -4876,6 +4898,16 @@ function ScripturesContent() {
           {bookPreviewError && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {bookPreviewError}
+            </div>
+          )}
+
+          {bookPreviewLoading && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-zinc-700">
+              <span
+                aria-hidden
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+              />
+              <span>{previewLoadingMessageWithElapsed}</span>
             </div>
           )}
 
@@ -6277,6 +6309,16 @@ function ScripturesContent() {
               </div>
 
               <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
+                {bookPreviewLoading && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                    <span
+                      aria-hidden
+                      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+                    />
+                    <span>{previewLoadingMessageWithElapsed}</span>
+                  </div>
+                )}
+
                 {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
                   <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
                     {bookPreviewArtifact.warnings.join(" ")}
