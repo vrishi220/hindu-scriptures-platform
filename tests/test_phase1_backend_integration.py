@@ -4675,14 +4675,18 @@ class TestWordMeaningsValidation:
         assert create_response.status_code == status.HTTP_201_CREATED
         node_id = create_response.json()["id"]
 
-        script_search = client.get("/api/search", params={"q": "शब्दपरीक्षणम्"}, headers=headers)
+        script_search = client.get(
+            "/api/search",
+            params={"q": "शब्दपरीक्षणम्", "book_id": book_id},
+            headers=headers,
+        )
         assert script_search.status_code == status.HTTP_200_OK
         script_results = script_search.json().get("results") or []
         assert any(item.get("node", {}).get("id") == node_id for item in script_results)
 
         transliteration_search = client.get(
             "/api/search",
-            params={"q": "wm10sourceascii"},
+            params={"q": "wm10sourceascii", "book_id": book_id},
             headers=headers,
         )
         assert transliteration_search.status_code == status.HTTP_200_OK
@@ -4691,7 +4695,7 @@ class TestWordMeaningsValidation:
 
         meaning_search = client.get(
             "/api/search",
-            params={"q": "wm10meaninghindi"},
+            params={"q": "wm10meaninghindi", "book_id": book_id},
             headers=headers,
         )
         assert meaning_search.status_code == status.HTTP_200_OK
@@ -4767,7 +4771,7 @@ class TestWordMeaningsValidation:
 
         search_source_response = client.get(
             "/api/search",
-            params={"q": "wm12sourceascii"},
+            params={"q": "wm12sourceascii", "book_id": book_id},
             headers=headers,
         )
         assert search_source_response.status_code == status.HTTP_200_OK
@@ -4776,7 +4780,7 @@ class TestWordMeaningsValidation:
 
         search_meaning_response = client.get(
             "/api/search",
-            params={"q": "wm12meaninghindi"},
+            params={"q": "wm12meaninghindi", "book_id": book_id},
             headers=headers,
         )
         assert search_meaning_response.status_code == status.HTTP_200_OK
