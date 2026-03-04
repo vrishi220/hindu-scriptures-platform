@@ -361,15 +361,14 @@ export default function TemplatesPage() {
               <option value="private">Private</option>
               <option value="published">Published</option>
             </select>
-            <label className="inline-flex items-center gap-2 text-sm text-zinc-700">
-              <input
-                type="checkbox"
-                checked={showDefaultTemplates}
-                onChange={(event) => setShowDefaultTemplates(event.target.checked)}
-                className="h-4 w-4 rounded border-black/20"
-              />
-              Show default templates
-            </label>
+            <select
+              value={showDefaultTemplates ? "all" : "hide-default"}
+              onChange={(event) => setShowDefaultTemplates(event.target.value === "all")}
+              className="rounded-lg border border-black/10 px-2 py-1.5 text-sm"
+            >
+              <option value="all">All templates</option>
+              <option value="hide-default">Hide defaults</option>
+            </select>
             <button
               type="button"
               onClick={() => void loadTemplates()}

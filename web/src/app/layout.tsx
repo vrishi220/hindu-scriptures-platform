@@ -28,10 +28,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} antialiased`}>
+      <body className={`${displayFont.variable} ${sansFont.variable} antialiased min-h-screen flex flex-col`}>
         <SessionKeepalive />
         <NavBar />
-        {children}
+        <div className="flex-1">
+          {children}
+        </div>
         <Footer />
       </body>
     </html>
