@@ -496,7 +496,8 @@ export default function NavBar() {
       {profileOpen && authUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
-            <div className="mb-4 flex items-center gap-3">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/10 bg-white text-base font-semibold text-zinc-700">
                 {initials}
               </div>
@@ -504,6 +505,15 @@ export default function NavBar() {
                 <h2 className="text-base font-semibold text-zinc-900">Profile</h2>
                 <p className="text-xs text-zinc-500">Image support can be plugged into this avatar slot.</p>
               </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/90 text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-900"
+                aria-label="Close profile"
+              >
+                ×
+              </button>
             </div>
 
             <div className="mb-4 flex rounded-lg border border-black/10 bg-zinc-50 p-1">
@@ -571,7 +581,7 @@ export default function NavBar() {
                     disabled={profileSaving}
                     className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
                   >
-                    {profileSaving ? "Saving..." : "Save profile"}
+                    {profileSaving ? "Saving..." : "Save"}
                   </button>
                   {profileMessage && (
                     <span className="text-xs text-zinc-600">{profileMessage}</span>
@@ -596,7 +606,7 @@ export default function NavBar() {
                         disabled={preferencesSaving}
                         className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
                       >
-                        {preferencesSaving ? "Saving..." : "Save prefs"}
+                        {preferencesSaving ? "Saving..." : "Save"}
                       </button>
                       {preferencesMessage && (
                         <span className="text-xs text-zinc-600">{preferencesMessage}</span>
@@ -606,16 +616,6 @@ export default function NavBar() {
                 )}
               </div>
             )}
-
-            <div className="mt-4 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setProfileOpen(false)}
-                className="rounded-full border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-800 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}
