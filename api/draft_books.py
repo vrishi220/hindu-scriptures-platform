@@ -15,7 +15,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
-from api.metadata import validate_draft_metadata_bindings_on_publish
+from api.metadata import _resolve_binding_metadata, validate_draft_metadata_bindings_on_publish
 from api.users import get_current_user, get_current_user_optional, require_permission
 from models.book import Book
 from models.book_share import BookShare
@@ -405,7 +405,81 @@ def _merge_metadata_layers(*layers: dict) -> dict:
     return merged
 
 
+def _flatten_binding_metadata_for_template(binding: MetadataBinding, db: Session) -> dict:
+    resolved = _resolve_binding_metadata(binding, db)
+    flattened: dict = {}
+
+    if resolved.category_id is not None:
+        flattened["category_id"] = resolved.category_id
+    if isinstance(resolved.category_name, str) and resolved.category_name.strip():
+        category_name = resolved.category_name.strip()
+        flattened["category_name"] = category_name
+        flattened["category"] = category_name
+
+    for item in resolved.properties:
+        key = item.property_internal_name.strip() if isinstance(item.property_internal_name, str) else ""
+        if not key:
+            continue
+        flattened[key] = item.value
+
+    return flattened
+
+
+def _resolve_node_binding_metadata_for_template(
+    db: Session,
+    source_book_id: int | None,
+    source_node_id: int | None,
+) -> dict:
+    if not isinstance(source_node_id, int) or source_node_id <= 0:
+        return {}
+
+    node_binding = None
+    if isinstance(source_book_id, int) and source_book_id > 0:
+        node_binding = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.entity_id == source_node_id,
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.root_entity_id == source_book_id,
+            )
+            .first()
+        )
+
+    if node_binding is None:
+        node_binding = (
+            db.query(MetadataBinding)
+            .filter(
+                MetadataBinding.entity_type == "node",
+                MetadataBinding.entity_id == source_node_id,
+                MetadataBinding.scope_type == "node",
+                MetadataBinding.root_entity_id.is_(None),
+            )
+            .first()
+        )
+
+    if node_binding is not None:
+        return _flatten_binding_metadata_for_template(node_binding, db)
+
+    if not isinstance(source_book_id, int) or source_book_id <= 0:
+        return {}
+
+    book_binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "book",
+            MetadataBinding.entity_id == source_book_id,
+            MetadataBinding.scope_type == "book",
+        )
+        .first()
+    )
+    if book_binding is None:
+        return {}
+    return _flatten_binding_metadata_for_template(book_binding, db)
+
+
 def _resolve_block_metadata(
+    db: Session,
     item: dict,
     source_node: ContentNode | None,
     metadata_bindings: dict,
@@ -430,6 +504,15 @@ def _resolve_block_metadata(
         book_scope = _read_metadata_dict(metadata_bindings.get("book_metadata"))
 
     global_scope = _read_metadata_dict(metadata_bindings.get("global_metadata"))
+
+    source_node_id = item.get("source_node_id")
+    source_book_id = item.get("source_book_id")
+    resolved_binding_scope = _resolve_node_binding_metadata_for_template(
+        db,
+        source_book_id if isinstance(source_book_id, int) else None,
+        source_node_id if isinstance(source_node_id, int) else None,
+    )
+
     field_scope = _read_metadata_dict(item.get("metadata_overrides"))
     if not field_scope:
         field_scope = _read_metadata_dict(item.get("metadata"))
@@ -438,6 +521,7 @@ def _resolve_block_metadata(
         global_scope,
         book_scope,
         level_scope,
+        resolved_binding_scope,
         node_scope,
         field_scope,
     )
@@ -807,6 +891,13 @@ def _resolve_block_template_key(
             if node_template:
                 return node_template
 
+    level_bindings = template_bindings.get("level_template_keys")
+    if isinstance(level_bindings, dict):
+        if isinstance(level_name, str) and level_name.strip():
+            level_template = _read_template_key(level_bindings.get(level_name.strip().lower()))
+            if level_template:
+                return level_template
+
     metadata_template = _resolve_metadata_template_key(
         section_name=section_name,
         level_name=level_name,
@@ -814,13 +905,6 @@ def _resolve_block_template_key(
     )
     if metadata_template:
         return metadata_template
-
-    level_bindings = template_bindings.get("level_template_keys")
-    if isinstance(level_bindings, dict):
-        if isinstance(level_name, str) and level_name.strip():
-            level_template = _read_template_key(level_bindings.get(level_name.strip().lower()))
-            if level_template:
-                return level_template
 
     source_book_id = item.get("source_book_id")
     if isinstance(source_book_id, int) and source_book_id > 0:
@@ -2008,6 +2092,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
             source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
             source_node = _resolve_referenced_source_node(db, source_node)
             resolved_metadata = _resolve_block_metadata(
+                db=db,
                 item=item,
                 source_node=source_node,
                 metadata_bindings=metadata_bindings,
