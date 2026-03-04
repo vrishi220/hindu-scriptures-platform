@@ -2494,7 +2494,8 @@ function ScripturesContent() {
     (canAdmin || isCurrentBookOwner);
   const canManageShares = canTogglePublish;
   const isCurrentBookPublic = (currentBook?.visibility || "private") === "public";
-  const canUseBookDraftActions = Boolean(authEmail) && Boolean(bookId);
+  const canUseBookDraftActions =
+    Boolean(bookId) && (canContribute || canEdit || canAdmin);
   const canPreviewCurrentBook =
     Boolean(bookId) && (Boolean(authEmail) || isCurrentBookPublic);
   const canExploreStructure = Boolean(bookId) && canView;
@@ -4835,18 +4836,20 @@ function ScripturesContent() {
                   <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
                     {bookId && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowBookActionsMenu(false);
-                            void handleCreateDraftFromBookBody();
-                          }}
-                          disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
-                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Plus size={14} />
-                          {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
-                        </button>
+                        {canUseBookDraftActions && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowBookActionsMenu(false);
+                              void handleCreateDraftFromBookBody();
+                            }}
+                            disabled={bookBodyCreateDraftLoading || bookBodyAddLoading}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Plus size={14} />
+                            {bookBodyCreateDraftLoading ? "Creating draft..." : "Create draft from book"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
