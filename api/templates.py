@@ -142,6 +142,35 @@ def list_my_templates(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[RenderTemplatePublic]:
+    return _list_templates_for_current_user(
+        include_inactive=include_inactive,
+        include_published=include_published,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.get("", response_model=list[RenderTemplatePublic])
+def list_templates(
+    include_inactive: bool = Query(default=False),
+    include_published: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[RenderTemplatePublic]:
+    return _list_templates_for_current_user(
+        include_inactive=include_inactive,
+        include_published=include_published,
+        db=db,
+        current_user=current_user,
+    )
+
+
+def _list_templates_for_current_user(
+    include_inactive: bool,
+    include_published: bool,
+    db: Session,
+    current_user: User,
+) -> list[RenderTemplatePublic]:
     query = db.query(RenderTemplate)
     if include_published:
         query = query.filter(

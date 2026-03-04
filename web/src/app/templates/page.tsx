@@ -122,7 +122,7 @@ export default function TemplatesPage() {
     setError(null);
     try {
       const templatesRes = await fetch(
-        "/api/templates/my?include_published=true&include_inactive=false",
+        "/api/templates?include_published=true&include_inactive=false",
         { credentials: "include" }
       );
 

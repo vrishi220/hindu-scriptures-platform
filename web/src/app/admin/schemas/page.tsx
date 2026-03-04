@@ -157,7 +157,7 @@ export default function SchemaBuilderPage() {
 
   const loadTemplates = async () => {
     try {
-      const response = await fetch("/api/templates/my?include_published=true&include_inactive=false", {
+      const response = await fetch("/api/templates?include_published=true&include_inactive=false", {
         credentials: "include",
       });
       const raw = await response.text();

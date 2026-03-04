@@ -2001,7 +2001,7 @@ function ScripturesContent() {
 
     try {
       const [templatesRes, assignmentsRes] = await Promise.all([
-        fetch("/api/templates/my?include_published=true&include_inactive=false", {
+        fetch("/api/templates?include_published=true&include_inactive=false", {
           credentials: "include",
         }),
         fetch(`/api/templates/assignments/my?entity_type=book&entity_id=${bookId}`, {
