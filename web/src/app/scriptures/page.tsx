@@ -988,6 +988,7 @@ function ScripturesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
+  const [bookQuery, setBookQuery] = useState("");
   const [bookId, setBookId] = useState("");
   const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -1006,6 +1007,7 @@ function ScripturesContent() {
   const [, setAuthStatus] = useState<string | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
+  const [canView, setCanView] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
@@ -1024,7 +1026,8 @@ function ScripturesContent() {
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
-  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
+  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("content");
+  const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
     levelName: "",
     titleSanskrit: "",
@@ -2432,6 +2435,7 @@ function ScripturesContent() {
         setAuthEmail(null);
         setAuthUserId(null);
         setAuthStatus("Not authenticated");
+        setCanView(false);
         setCanAdmin(false);
         setCanContribute(false);
         setCanEdit(false);
@@ -2440,6 +2444,8 @@ function ScripturesContent() {
       setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
+      const canViewPermission = (data.permissions as { can_view?: boolean } | undefined)?.can_view;
+      setCanView(Boolean(canViewPermission || data.role === "viewer" || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
@@ -2447,6 +2453,7 @@ function ScripturesContent() {
       setAuthEmail(null);
       setAuthUserId(null);
       setAuthStatus("Auth check failed");
+      setCanView(false);
       setCanAdmin(false);
       setCanContribute(false);
       setCanEdit(false);
@@ -2488,6 +2495,8 @@ function ScripturesContent() {
   const canUseBookDraftActions = Boolean(authEmail) && Boolean(bookId);
   const canPreviewCurrentBook =
     Boolean(bookId) && (Boolean(authEmail) || isCurrentBookPublic);
+  const canExploreStructure = Boolean(bookId) && canView;
+  const isExploreVisible = canExploreStructure && showExploreStructure;
   const activeNodeLevelLabel = formatValue(nodeContent?.level_name) || "Node";
   const activeNodePropertiesLabel = `${activeNodeLevelLabel} properties`;
   const activeNodePropertiesTitle = `${activeNodeLevelLabel} Properties`;
@@ -3193,9 +3202,17 @@ function ScripturesContent() {
           applySelection(autoSelectNodeId, path, true);
         }
       } else {
-        setSelectedId(null);
-        setBreadcrumb([]);
-        setExpandedIds(new Set());
+        const firstLeafId = findFirstLeafId(data);
+        if (firstLeafId) {
+          const firstLeafPath = findPath(data, firstLeafId);
+          if (firstLeafPath) {
+            applySelection(firstLeafId, firstLeafPath, false);
+          }
+        } else {
+          setSelectedId(null);
+          setBreadcrumb([]);
+          setExpandedIds(new Set());
+        }
       }
       
       setUrlInitialized(true);
@@ -3223,6 +3240,19 @@ function ScripturesContent() {
         if (childPath) {
           return [node, ...childPath];
         }
+      }
+    }
+    return null;
+  };
+
+  const findFirstLeafId = (nodes: TreeNode[]): number | null => {
+    for (const node of nodes) {
+      if (!node.children || node.children.length === 0) {
+        return node.id;
+      }
+      const nested = findFirstLeafId(node.children);
+      if (nested !== null) {
+        return nested;
       }
     }
     return null;
@@ -4694,6 +4724,34 @@ function ScripturesContent() {
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
   const isCopyMessage = authMessage === "Link copied.";
+  const filteredBooks = books.filter((book) => {
+    const query = bookQuery.trim().toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return book.book_name.toLowerCase().includes(query);
+  });
+
+  const handleSelectBook = (value: string) => {
+    if (value !== bookId && hasUnsavedInlineChanges()) {
+      const shouldDiscard = window.confirm(
+        "You have unsaved changes in Edit details. Discard changes and switch books?"
+      );
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+    setBookId(value);
+    if (value) {
+      router.push(`/scriptures?book=${value}`, { scroll: false });
+    } else {
+      router.push("/scriptures", { scroll: false });
+    }
+    setSelectedId(null);
+    setBreadcrumb([]);
+    setShowExploreStructure(false);
+    setMobilePanel("content");
+  };
 
   return (
     <div className="grainy-bg min-h-screen">
@@ -4714,7 +4772,7 @@ function ScripturesContent() {
             Scripture browser
           </h1>
           <p className="max-w-2xl text-sm text-zinc-600">
-            Explore the canon by book. Select a scripture to see its nested structure.
+            Start with books, then read immediately. Use the tree only when you want to explore structure.
           </p>
         </header>
 
@@ -4726,26 +4784,7 @@ function ScripturesContent() {
               </span>
               <select
                 value={bookId}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value !== bookId && hasUnsavedInlineChanges()) {
-                    const shouldDiscard = window.confirm(
-                      "You have unsaved changes in Edit details. Discard changes and switch books?"
-                    );
-                    if (!shouldDiscard) {
-                      return;
-                    }
-                  }
-                  setBookId(value);
-                  // Update URL without node param when changing books
-                  if (value) {
-                    router.push(`/scriptures?book=${value}`, { scroll: false });
-                  } else {
-                    router.push("/scriptures", { scroll: false });
-                  }
-                  setSelectedId(null);
-                  setBreadcrumb([]);
-                }}
+                onChange={(event) => handleSelectBook(event.target.value)}
                 className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
               >
                 <option value="">Select a book</option>
@@ -4975,6 +5014,59 @@ function ScripturesContent() {
             </div>
           )}
 
+          {!bookId && (
+            <div className="mt-4 space-y-3 rounded-2xl border border-black/10 bg-white/90 p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Books</p>
+                <input
+                  type="text"
+                  value={bookQuery}
+                  onChange={(event) => setBookQuery(event.target.value)}
+                  placeholder="Search books"
+                  className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none sm:max-w-xs"
+                />
+              </div>
+              <div className="max-h-[340px] overflow-y-auto">
+                {filteredBooks.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-zinc-600">No books found.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredBooks.map((book) => (
+                      <button
+                        key={book.id}
+                        type="button"
+                        onClick={() => handleSelectBook(book.id.toString())}
+                        className="flex w-full items-center justify-between rounded-xl border border-black/10 bg-white px-3 py-2 text-left transition hover:border-[color:var(--accent)] hover:bg-[color:var(--sand)]/40"
+                      >
+                        <span className="text-sm font-medium text-[color:var(--deep)]">{book.book_name}</span>
+                        <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Read</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {bookId && canExploreStructure && (
+            <div className="mt-4 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowExploreStructure((prev) => {
+                    const next = !prev;
+                    setMobilePanel(next ? "tree" : "content");
+                    return next;
+                  });
+                }}
+                className="rounded-full border border-black/10 bg-white/80 px-3 py-1 text-xs uppercase tracking-[0.2em] text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+              >
+                {isExploreVisible ? "Hide explore" : "Explore structure"}
+              </button>
+            </div>
+          )}
+
+          {bookId && isExploreVisible && (
           <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500 lg:hidden">
             <button
               type="button"
@@ -4986,7 +5078,7 @@ function ScripturesContent() {
                   : "border-black/10 bg-white/80"
               }`}
             >
-              Tree
+              Explore
             </button>
             <button
               type="button"
@@ -4998,12 +5090,15 @@ function ScripturesContent() {
                   : "border-black/10 bg-white/80"
               }`}
             >
-              Details
+              Read
             </button>
           </div>
+          )}
 
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:mt-4 sm:gap-4 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
+          {bookId && (
+          <div className={`mt-3 grid grid-cols-1 gap-3 sm:mt-4 sm:gap-4 ${isExploreVisible ? "lg:grid-cols-3" : ""} lg:h-[calc(100vh-280px)]`}>
             {/* Tree Section */}
+            {isExploreVisible && (
             <div
               className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:h-full lg:flex-col ${
                 mobilePanel === "tree" ? "block" : "hidden"
@@ -5091,11 +5186,12 @@ function ScripturesContent() {
                 )}
               </div>
             </div>
+            )}
 
             {/* Content Section */}
             <div
-              className={`lg:col-span-2 min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
-                mobilePanel === "content" ? "block" : "hidden"
+              className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
+                !isExploreVisible || mobilePanel === "content" ? "block" : "hidden"
               } lg:block`}
             >
               {breadcrumb.length > 0 && (
@@ -5866,6 +5962,7 @@ function ScripturesContent() {
               ) : null}
             </div>
           </div>
+          )}
         </section>
 
         {showPropertiesModal && (
