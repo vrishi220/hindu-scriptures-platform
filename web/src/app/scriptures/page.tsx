@@ -3134,10 +3134,16 @@ function ScripturesContent() {
   useEffect(() => {
     const loadBooks = async () => {
       try {
-        const response = await fetch("/api/books", {
+        const params = new URLSearchParams();
+        const query = bookQuery.trim();
+        if (query) {
+          params.set("q", query);
+        }
+        const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
           credentials: "include",
         });
         if (!response.ok) {
+          setBooks([]);
           return;
         }
         const data = (await response.json()) as BookOption[];
@@ -3146,8 +3152,8 @@ function ScripturesContent() {
         setBooks([]);
       }
     };
-    loadBooks();
-  }, []);
+    void loadBooks();
+  }, [bookQuery]);
 
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
     activeTreeAbortController.current?.abort();
@@ -3412,7 +3418,12 @@ function ScripturesContent() {
 
   const loadBooksRefresh = async () => {
     try {
-      const response = await fetch("/api/books", {
+      const params = new URLSearchParams();
+      const query = bookQuery.trim();
+      if (query) {
+        params.set("q", query);
+      }
+      const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
         credentials: "include",
       });
       if (response.ok) {
@@ -4727,13 +4738,7 @@ function ScripturesContent() {
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
   const isCopyMessage = authMessage === "Link copied.";
-  const filteredBooks = books.filter((book) => {
-    const query = bookQuery.trim().toLowerCase();
-    if (!query) {
-      return true;
-    }
-    return book.book_name.toLowerCase().includes(query);
-  });
+  const filteredBooks = books;
   const totalBookPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE));
   const currentBooksPage = Math.min(booksPage, totalBookPages);
   const paginatedBooks = filteredBooks.slice(

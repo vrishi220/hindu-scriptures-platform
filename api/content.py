@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
@@ -317,6 +317,80 @@ def _book_public_model(book: Book) -> BookPublic:
     return BookPublic.model_validate(payload)
 
 
+def _metadata_string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        values: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                values.append(item)
+        return values
+    return []
+
+
+def _book_search_haystacks(book: Book) -> dict[str, list[str]]:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+
+    title_values = [book.book_name]
+    title_values.extend(_metadata_string_values(metadata.get("title")))
+
+    alt_titles = []
+    alt_titles.extend(_metadata_string_values(metadata.get("alternate_titles")))
+    alt_titles.extend(_metadata_string_values(metadata.get("alternative_titles")))
+    alt_titles.extend(_metadata_string_values(metadata.get("alt_titles")))
+
+    short_descriptions = []
+    short_descriptions.extend(_metadata_string_values(metadata.get("short_description")))
+    short_descriptions.extend(_metadata_string_values(metadata.get("description")))
+    short_descriptions.extend(_metadata_string_values(metadata.get("summary")))
+
+    tags = _metadata_string_values(metadata.get("tags"))
+
+    return {
+        "title": title_values,
+        "alt_titles": alt_titles,
+        "short_description": short_descriptions,
+        "tags": tags,
+    }
+
+
+def _book_relevance_score(book: Book, query: str) -> int:
+    normalized_query = query.strip().lower()
+    if not normalized_query:
+        return 0
+
+    terms = [term for term in normalized_query.split() if term]
+    if not terms:
+        return 0
+
+    fields = _book_search_haystacks(book)
+    score = 0
+
+    weights = {
+        "title": 8,
+        "alt_titles": 5,
+        "short_description": 3,
+        "tags": 4,
+    }
+
+    for field_name, values in fields.items():
+        weight = weights.get(field_name, 1)
+        for raw_value in values:
+            normalized_value = raw_value.strip().lower()
+            if not normalized_value:
+                continue
+
+            if normalized_query in normalized_value:
+                score += weight * 4
+
+            for term in terms:
+                if term in normalized_value:
+                    score += weight
+
+    return score
+
+
 def _ensure_can_contribute(current_user: User) -> None:
     if not _user_can_contribute(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
@@ -496,13 +570,41 @@ def delete_schema(
 
 @router.get("/books", response_model=list[BookPublic])
 def list_books(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[BookPublic]:
-    """List public books and include private drafts only for owners."""
-    books = db.query(Book).order_by(Book.id).all()
+    books = db.query(Book).all()
     visible_books = [book for book in books if _book_is_visible_to_user(db, book, current_user)]
-    return [_book_public_model(item) for item in visible_books]
+
+    query_text = (q or "").strip()
+    if query_text:
+        ranked_books = []
+        for book in visible_books:
+            score = _book_relevance_score(book, query_text)
+            if score > 0:
+                ranked_books.append((book, score))
+
+        ranked_books.sort(
+            key=lambda pair: (
+                -pair[1],
+                -(pair[0].created_at.timestamp() if pair[0].created_at else 0),
+                -pair[0].id,
+            )
+        )
+        page = [pair[0] for pair in ranked_books[offset : offset + limit]]
+        return [_book_public_model(item) for item in page]
+
+    visible_books.sort(
+        key=lambda book: (
+            -(book.created_at.timestamp() if book.created_at else 0),
+            -book.id,
+        )
+    )
+    page = visible_books[offset : offset + limit]
+    return [_book_public_model(item) for item in page]
 
 
 @router.post("/books", response_model=BookPublic, status_code=status.HTTP_201_CREATED)
