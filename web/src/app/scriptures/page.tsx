@@ -5812,7 +5812,7 @@ function ScripturesContent() {
 
         {showPropertiesModal && (
           <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 md:items-center">
-            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+            <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -5829,9 +5829,9 @@ function ScripturesContent() {
                     setPropertiesMessage(null);
                     setPropertiesError(null);
                   }}
-                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                  className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
                 >
-                  ✕
+                  X
                 </button>
               </div>
 
@@ -5868,7 +5868,7 @@ function ScripturesContent() {
 
                 {propertiesScope === "node" && (
                   <div className="rounded-lg border border-black/10 bg-white p-3">
-                    <div className="flex items-center justify-between gap-2">
+                    <div>
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Level Template</div>
                         <p className="mt-1 text-xs text-zinc-600">
@@ -5878,18 +5878,6 @@ function ScripturesContent() {
                           Instance override for level: <span className="font-medium">{propertiesLevelKey || "unknown"}</span>
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (propertiesLevelKey) {
-                            void loadLevelTemplateSelection(propertiesLevelKey);
-                          }
-                        }}
-                        disabled={levelTemplatesLoading || levelTemplateSaving || !propertiesLevelKey}
-                        className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700 disabled:opacity-60"
-                      >
-                        {levelTemplatesLoading ? "Loading..." : "Refresh"}
-                      </button>
                     </div>
 
                     <label className="mt-3 flex flex-col gap-1">
@@ -6020,7 +6008,7 @@ function ScripturesContent() {
                       </div>
                     )}
                     <p className="mt-2 text-xs text-zinc-500">
-                      Changes are saved with Save Properties.
+                      Changes are saved with Save.
                     </p>
 
                     <div className="mt-4 border-t border-black/10 pt-3">
@@ -6248,28 +6236,20 @@ function ScripturesContent() {
                   );
                 })}
 
-                <div className="sticky bottom-0 flex items-center gap-2 border-t border-black/5 bg-[color:var(--paper)] pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleSaveProperties();
-                    }}
-                    disabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
-                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                  >
-                    {propertiesSaving ? "Saving..." : "Save Properties"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void openPropertiesModal(propertiesScope, propertiesNodeId);
-                    }}
-                    disabled={propertiesLoading || propertiesSaving}
-                    className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20 disabled:opacity-50"
-                  >
-                    Refresh
-                  </button>
-                  {propertiesMessage && <span className="text-xs text-emerald-700">{propertiesMessage}</span>}
+                <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-black/5 bg-[color:var(--paper)] pt-2">
+                  <div>{propertiesMessage && <span className="text-xs text-emerald-700">{propertiesMessage}</span>}</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSaveProperties();
+                      }}
+                      disabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                    >
+                      {propertiesSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -6628,7 +6608,7 @@ function ScripturesContent() {
                 </div>
               )}
 
-              <div className="max-h-[45vh] overflow-y-auto rounded-2xl border border-black/10">
+              <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10">
                 {sharesLoading ? (
                   <div className="p-4 text-sm text-zinc-600">Loading shares...</div>
                 ) : bookShares.length === 0 ? (
@@ -6700,9 +6680,9 @@ function ScripturesContent() {
                       languagePrimary: "sanskrit",
                     });
                   }}
-                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                  className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
                 >
-                  ✕
+                  X
                 </button>
               </div>
                             wordMeanings: [],
@@ -6803,7 +6783,7 @@ function ScripturesContent() {
                     </select>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex items-center justify-between gap-2">
                     <button
                       type="button"
                       onClick={() => setSelectedSchema(null)}
@@ -6814,7 +6794,7 @@ function ScripturesContent() {
                     <button
                       type="submit"
                       disabled={bookSubmitting}
-                      className="flex-1 rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
                     >
                       {bookSubmitting ? "Creating..." : "Create Book"}
                     </button>
@@ -6828,7 +6808,7 @@ function ScripturesContent() {
         {/* Action Modal */}
         {action && actionNode && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3 overflow-y-auto">
-            <div className="my-6 flex max-h-[calc(100vh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
+            <div className="my-6 flex max-h-[calc(100dvh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
               <div className="flex-shrink-0 border-b border-black/10 p-4 pb-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -6843,9 +6823,9 @@ function ScripturesContent() {
                       setActionNode(null);
                       setActionMessage(null);
                     }}
-                    className="text-2xl text-zinc-400 hover:text-zinc-600"
+                    className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
                   >
-                    ✕
+                    X
                   </button>
                 </div>
               </div>
@@ -7104,25 +7084,25 @@ function ScripturesContent() {
                       {actionMessage}
                     </div>
                   )}
-                  <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    disabled={submitting || modalWordMeaningValidationErrors.length > 0}
-                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
-                  >
-                    {submitting ? "Submitting..." : action === "add" ? "Create" : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAction(null);
-                      setActionNode(null);
-                      setActionMessage(null);
-                    }}
-                    className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
-                  >
-                    Cancel
-                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAction(null);
+                        setActionNode(null);
+                        setActionMessage(null);
+                      }}
+                      className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submitting || modalWordMeaningValidationErrors.length > 0}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
+                    >
+                      {submitting ? "Submitting..." : action === "add" ? "Create" : "Save"}
+                    </button>
                   </div>
                 </div>
               </form>

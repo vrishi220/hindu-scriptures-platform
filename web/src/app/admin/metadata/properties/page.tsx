@@ -567,7 +567,7 @@ export default function MetadataPropertiesAdminPage() {
 
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-3xl rounded-xl border border-black/10 bg-white p-4 shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-3xl rounded-xl border border-black/10 bg-white p-4 shadow-xl max-h-[90dvh] overflow-y-auto">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-base font-semibold text-zinc-900">
                 {modalMode === "create" ? "Create property" : modalMode === "edit" ? "Edit property" : "View property"}
@@ -580,7 +580,7 @@ export default function MetadataPropertiesAdminPage() {
                 }}
                 className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
               >
-                Close
+                X
               </button>
             </div>
 
