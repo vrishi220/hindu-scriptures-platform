@@ -3208,14 +3208,14 @@ function ScripturesContent() {
       if (autoSelectNodeId) {
         const path = findPath(data, autoSelectNodeId);
         if (path) {
-          applySelection(autoSelectNodeId, path, true);
+          applySelection(autoSelectNodeId, path, true, false, true);
         }
       } else {
         const firstLeafId = findFirstLeafId(data);
         if (firstLeafId) {
           const firstLeafPath = findPath(data, firstLeafId);
           if (firstLeafPath) {
-            applySelection(firstLeafId, firstLeafPath, false);
+            applySelection(firstLeafId, firstLeafPath, false, false, true);
           }
         } else {
           setSelectedId(null);
@@ -3335,7 +3335,8 @@ function ScripturesContent() {
     nodeId: number,
     path: TreeNode[],
     scroll = false,
-    skipLoad = false
+    skipLoad = false,
+    syncUrl = false
   ) => {
     setSelectedId(nodeId);
     setBreadcrumb(path);
@@ -3346,6 +3347,16 @@ function ScripturesContent() {
     });
     if (!skipLoad) {
       loadNodeContent(nodeId);
+    }
+    if (syncUrl && bookId && typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      const currentBook = url.searchParams.get("book") || "";
+      const currentNode = url.searchParams.get("node") || "";
+      if (currentBook !== bookId || currentNode !== String(nodeId)) {
+        url.searchParams.set("book", bookId);
+        url.searchParams.set("node", String(nodeId));
+        window.history.replaceState(window.history.state, "", url.toString());
+      }
     }
     if (scroll) {
       scrollToNode(nodeId);
@@ -3388,7 +3399,7 @@ function ScripturesContent() {
 
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, false, false);
+      applySelection(nodeId, path, false, false, syncUrl);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
@@ -4765,6 +4776,19 @@ function ScripturesContent() {
         return;
       }
     }
+
+    if (value && value === bookId) {
+      setShowExploreStructure(false);
+      setMobilePanel("content");
+      if (!selectedId && treeData.length > 0) {
+        const firstLeafId = findFirstLeafId(treeData);
+        if (firstLeafId) {
+          selectNode(firstLeafId, true);
+        }
+      }
+      return;
+    }
+
     setBookId(value);
     if (value) {
       router.push(`/scriptures?book=${value}`, { scroll: false });
