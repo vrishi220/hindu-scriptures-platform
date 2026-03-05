@@ -4819,14 +4819,10 @@ function ScripturesContent() {
                     const isSelected = bookId === book.id.toString();
                     const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
                     const canBrowseBook = authUserId !== null && canView;
-                    const canCopyPreviewBookLink = canPreviewBook;
-                    const canCopyBrowseBookLink = canBrowseBook;
-                    const rowActionCount =
-                      (canBrowseBook ? 1 : 0) +
-                      (canCopyPreviewBookLink ? 1 : 0) +
-                      (canCopyBrowseBookLink ? 1 : 0);
-                    const showRowMenu = rowActionCount > 1;
-                    const showSingleBrowseAction = rowActionCount === 1;
+                    const canCopyPreviewBookLink = canPreviewBook && !canBrowseBook;
+                    const canCopyBrowseBookLink = false;
+                    const showRowMenu = canCopyPreviewBookLink;
+                    const showSingleBrowseAction = canBrowseBook;
                     return (
                       <div
                         key={book.id}
