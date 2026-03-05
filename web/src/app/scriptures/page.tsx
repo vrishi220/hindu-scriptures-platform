@@ -1036,6 +1036,7 @@ function ScripturesContent() {
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
+  const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("content");
   const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
@@ -1076,6 +1077,7 @@ function ScripturesContent() {
   const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
   const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
+  const [previewLinkMessage, setPreviewLinkMessage] = useState<string | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
     useState<BookPreviewLanguageSettings>({
@@ -3379,9 +3381,87 @@ function ScripturesContent() {
     }
   };
 
+  const buildScripturesBrowsePath = (targetBookId: string, targetNodeId?: number | null) => {
+    const params = new URLSearchParams();
+    params.set("book", targetBookId);
+    if (typeof targetNodeId === "number") {
+      params.set("node", String(targetNodeId));
+    }
+    return `/scriptures?${params.toString()}`;
+  };
+
+  const buildScripturesPreviewPath = (
+    scope: "book" | "node",
+    targetBookId: string,
+    targetNodeId?: number | null
+  ) => {
+    const params = new URLSearchParams();
+    params.set("book", targetBookId);
+    if (scope === "node" && typeof targetNodeId === "number") {
+      params.set("node", String(targetNodeId));
+    }
+    params.set("preview", scope);
+    return `/scriptures?${params.toString()}`;
+  };
+
+  const syncPreviewUrl = (
+    scope: "book" | "node",
+    targetBookId: string,
+    targetNodeId?: number | null
+  ) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("book", targetBookId);
+    if (scope === "node" && typeof targetNodeId === "number") {
+      nextParams.set("node", String(targetNodeId));
+    } else {
+      nextParams.delete("node");
+    }
+    nextParams.set("preview", scope);
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+  };
+
+  const clearPreviewUrl = () => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (!nextParams.has("preview")) {
+      return;
+    }
+    nextParams.delete("preview");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+  };
+
+  const handleClosePreview = () => {
+    setShowBookPreview(false);
+    setPreviewLinkMessage(null);
+    clearPreviewUrl();
+  };
+
+  const handleCopyPreviewPath = async (relativePath: string) => {
+    if (typeof window === "undefined" || !navigator.clipboard) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${relativePath}`);
+      setPreviewLinkMessage("Link copied.");
+      window.setTimeout(() => {
+        setPreviewLinkMessage(null);
+      }, 2000);
+    } catch {
+      setPreviewLinkMessage("Failed to copy link.");
+      window.setTimeout(() => {
+        setPreviewLinkMessage(null);
+      }, 2000);
+    }
+  };
+
   const handlePreviewBook = async (scope: "book" | "node" = "book", targetBookId?: string) => {
     const previewBookId = targetBookId ?? bookId;
     if (!previewBookId) return;
+    const previewNodeId = scope === "node" ? selectedId : null;
+    if (scope === "node" && !previewNodeId) {
+      return;
+    }
 
     const nextLanguageSettings = {
       ...bookPreviewLanguageSettings,
@@ -3465,6 +3545,9 @@ function ScripturesContent() {
       setPreferences(nextPreferences);
       await savePreferences(nextPreferences);
 
+      const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
+      lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
+      syncPreviewUrl(scope, previewBookId, previewNodeId);
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -3473,6 +3556,37 @@ function ScripturesContent() {
       setBookPreviewLoading(false);
     }
   };
+
+  useEffect(() => {
+    const previewParam = searchParams.get("preview");
+    if (previewParam !== "book" && previewParam !== "node") {
+      return;
+    }
+    if (!urlInitialized || !bookId) {
+      return;
+    }
+
+    let previewScope: "book" | "node" = "book";
+    let requestNodeIdPart = "";
+    if (previewParam === "node") {
+      const nodeParam = searchParams.get("node");
+      const requestedNodeId = nodeParam ? Number.parseInt(nodeParam, 10) : NaN;
+      if (!Number.isFinite(requestedNodeId) || selectedId !== requestedNodeId) {
+        return;
+      }
+      previewScope = "node";
+      requestNodeIdPart = `:${requestedNodeId}`;
+    }
+
+    const requestKey = `${previewScope}:${bookId}${requestNodeIdPart}`;
+    if (lastHandledPreviewRequestKey.current === requestKey) {
+      return;
+    }
+    lastHandledPreviewRequestKey.current = requestKey;
+
+    void handlePreviewBook(previewScope, bookId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlInitialized, bookId, selectedId, searchParams]);
 
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4545,6 +4659,7 @@ function ScripturesContent() {
   const isLeafSelected = Boolean(
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
+  const canBrowseCurrentNode = authUserId !== null && canView;
   const isCopyMessage = authMessage === "Link copied.";
   const filteredBooks = books;
   const totalBookPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE));
@@ -4704,7 +4819,12 @@ function ScripturesContent() {
                     const isSelected = bookId === book.id.toString();
                     const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
                     const canBrowseBook = authUserId !== null && canView;
-                    const rowActionCount = canBrowseBook ? 1 : 0;
+                    const canCopyPreviewBookLink = canPreviewBook;
+                    const canCopyBrowseBookLink = canBrowseBook;
+                    const rowActionCount =
+                      (canBrowseBook ? 1 : 0) +
+                      (canCopyPreviewBookLink ? 1 : 0) +
+                      (canCopyBrowseBookLink ? 1 : 0);
                     const showRowMenu = rowActionCount > 1;
                     const showSingleBrowseAction = rowActionCount === 1;
                     return (
@@ -4769,6 +4889,46 @@ function ScripturesContent() {
                             </button>
                             {openBookRowActionsId === book.id && (
                               <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                {canCopyPreviewBookLink && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
+                                      navigator.clipboard.writeText(url);
+                                      setOpenBookRowActionsId(null);
+                                      setAuthMessage("Link copied.");
+                                      setCopyTarget("book");
+                                      setTimeout(() => {
+                                        setAuthMessage(null);
+                                        setCopyTarget(null);
+                                      }, 2000);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  >
+                                    <Link2 size={14} />
+                                    Copy preview link
+                                  </button>
+                                )}
+                                {canCopyBrowseBookLink && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
+                                      navigator.clipboard.writeText(url);
+                                      setOpenBookRowActionsId(null);
+                                      setAuthMessage("Link copied.");
+                                      setCopyTarget("book");
+                                      setTimeout(() => {
+                                        setAuthMessage(null);
+                                        setCopyTarget(null);
+                                      }, 2000);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                  >
+                                    <Link2 size={14} />
+                                    Copy browse link
+                                  </button>
+                                )}
                                 {canBrowseBook && (
                                   <button
                                     type="button"
@@ -4847,17 +5007,43 @@ function ScripturesContent() {
                     {currentBook?.book_name || books.find((b) => b.id.toString() === bookId)?.book_name || "Selected book"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowBrowseBookModal(false);
-                    setShowExploreStructure(false);
-                    setMobilePanel("content");
-                  }}
-                  className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
-                >
-                  ✕
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-full border border-black/10 bg-white/90 p-0.5 lg:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setMobilePanel("tree")}
+                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
+                        mobilePanel === "tree"
+                          ? "bg-[color:var(--accent)] text-white"
+                          : "text-zinc-600 hover:text-zinc-800"
+                      }`}
+                    >
+                      Tree
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobilePanel("content")}
+                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
+                        mobilePanel === "content"
+                          ? "bg-[color:var(--accent)] text-white"
+                          : "text-zinc-600 hover:text-zinc-800"
+                      }`}
+                    >
+                      Content
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowBrowseBookModal(false);
+                      setShowExploreStructure(false);
+                      setMobilePanel("content");
+                    }}
+                    className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
@@ -5016,7 +5202,7 @@ function ScripturesContent() {
                   </div>
                   {selectedId && !isLeafSelected && (
                     <>
-                      {!canEditCurrentBook && (
+                      {!canEditCurrentBook && canBrowseCurrentNode && (
                         <button
                           type="button"
                           onClick={() => {
@@ -5161,6 +5347,26 @@ function ScripturesContent() {
                                   {activeNodePreviewLabel}
                                 </button>
                               )}
+                              {(Boolean(authEmail) || currentBook?.visibility === "public") && selectedId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const url = `${window.location.origin}${buildScripturesPreviewPath("node", bookId, selectedId)}`;
+                                    navigator.clipboard.writeText(url);
+                                    setShowNodeActionsMenu(false);
+                                    setAuthMessage("Link copied.");
+                                    setCopyTarget(isLeafSelected ? "leaf" : "node");
+                                    setTimeout(() => {
+                                      setAuthMessage(null);
+                                      setCopyTarget(null);
+                                    }, 2000);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Link2 size={14} />
+                                  Copy preview link
+                                </button>
+                              )}
                               {isLeafSelected && authEmail && (
                                 <button
                                   type="button"
@@ -5177,11 +5383,11 @@ function ScripturesContent() {
                                     : "Add to basket"}
                                 </button>
                               )}
-                              {isLeafSelected && (
+                              {isLeafSelected && canBrowseCurrentNode && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
+                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId, selectedId)}`;
                                     navigator.clipboard.writeText(url);
                                     setShowNodeActionsMenu(false);
                                     setAuthMessage("Link copied.");
@@ -5194,14 +5400,14 @@ function ScripturesContent() {
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
                                   <Link2 size={14} />
-                                  Copy node link
+                                  Copy browse link
                                 </button>
                               )}
-                              {!isLeafSelected && (
+                              {!isLeafSelected && canBrowseCurrentNode && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
+                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId, selectedId)}`;
                                     navigator.clipboard.writeText(url);
                                     setShowNodeActionsMenu(false);
                                     setAuthMessage("Link copied.");
@@ -5214,7 +5420,7 @@ function ScripturesContent() {
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
                                   <Link2 size={14} />
-                                  Copy node link
+                                  Copy browse link
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -6224,6 +6430,33 @@ function ScripturesContent() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {(() => {
+                    const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+                    const targetNodeId = previewScope === "node" ? selectedId : null;
+                    const previewPath = buildScripturesPreviewPath(previewScope, bookId, targetNodeId);
+                    const browsePath = buildScripturesBrowsePath(bookId, targetNodeId);
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleCopyPreviewPath(previewPath);
+                          }}
+                          className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                        >
+                          Copy Link
+                        </button>
+                        {canBrowseCurrentNode && (
+                          <a
+                            href={browsePath}
+                            className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                          >
+                            Browse
+                          </a>
+                        )}
+                      </>
+                    );
+                  })()}
                   <button
                     type="button"
                     onClick={() => setShowPreviewControls((prev) => !prev)}
@@ -6233,7 +6466,7 @@ function ScripturesContent() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowBookPreview(false)}
+                    onClick={handleClosePreview}
                     className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
                   >
                     ✕
@@ -6242,6 +6475,11 @@ function ScripturesContent() {
               </div>
 
               <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
+                {previewLinkMessage && (
+                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs text-zinc-700">
+                    {previewLinkMessage}
+                  </div>
+                )}
                 {bookPreviewLoading && (
                   <div className="mb-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
                     <span

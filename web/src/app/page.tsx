@@ -940,8 +940,9 @@ function HomeContent() {
                   {featuredBooks.map((book) => (
                     <a
                       key={book.id}
-                      href={`/scriptures?book=${book.id}`}
-                      className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md"
+                      href={`/scriptures?book=${book.id}&preview=book`}
+                      aria-label={`Open preview for ${book.book_name}`}
+                      className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
                     >
                       <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
                         {book.book_name}
@@ -1053,20 +1054,48 @@ function HomeContent() {
                       ? "Today's verse from the library."
                       : "A randomly selected verse."}
                   </p>
-                  <div className="mt-6 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)]">
-                    <p className="font-semibold">{dailyVerse.title}</p>
-                    <p className="mt-2 text-sm text-zinc-700">
-                      {dailyVerse.content || "Content not available"}
-                    </p>
-                    {dailyVerse.book_id > 0 && dailyVerse.node_id && (
-                      <a
-                        href={`/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}`}
-                        className="mt-3 inline-block text-xs text-[color:var(--accent)] hover:underline"
+                  {(() => {
+                    const versePreviewHref =
+                      dailyVerse.book_id > 0 && dailyVerse.node_id
+                        ? `/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}&preview=node`
+                        : null;
+                    return (
+                      <div
+                        className={`mt-6 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)] transition ${
+                          versePreviewHref
+                            ? "cursor-pointer hover:border-[color:var(--accent)] focus-within:border-[color:var(--accent)]"
+                            : ""
+                        }`}
+                        role={versePreviewHref ? "button" : undefined}
+                        tabIndex={versePreviewHref ? 0 : undefined}
+                        onClick={() => {
+                          if (!versePreviewHref) return;
+                          router.push(versePreviewHref);
+                        }}
+                        onKeyDown={(event) => {
+                          if (!versePreviewHref) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(versePreviewHref);
+                          }
+                        }}
                       >
-                        Read more →
-                      </a>
-                    )}
-                  </div>
+                        <p className="font-semibold">{dailyVerse.title}</p>
+                        <p className="mt-2 text-sm text-zinc-700">
+                          {dailyVerse.content || "Content not available"}
+                        </p>
+                        {versePreviewHref && (
+                          <a
+                            href={versePreviewHref}
+                            onClick={(event) => event.stopPropagation()}
+                            className="mt-3 inline-block text-xs text-[color:var(--accent)] hover:underline"
+                          >
+                            Read more →
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
