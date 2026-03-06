@@ -2245,7 +2245,10 @@ def delete_media_bank_asset(
             except ValueError:
                 parsed_asset_id = None
 
-        if parsed_asset_id == asset.id:
+        has_explicit_asset_match = parsed_asset_id == asset.id
+        has_legacy_url_match = row.url == asset.url and row.media_type == asset.media_type
+
+        if has_explicit_asset_match or has_legacy_url_match:
             attached_rows.append(row)
 
     if attached_rows:
@@ -2427,6 +2430,9 @@ def delete_book_thumbnail(
             target_path.unlink()
 
     metadata.pop("thumbnail_url", None)
+    metadata.pop("thumbnailUrl", None)
+    metadata.pop("cover_image_url", None)
+    metadata.pop("coverImageUrl", None)
     metadata.pop("thumbnail_content_type", None)
     metadata.pop("thumbnail_original_filename", None)
     metadata.pop("thumbnail_size_bytes", None)
