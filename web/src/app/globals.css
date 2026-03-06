@@ -193,3 +193,28 @@ body[data-ui-density="compact"] .gap-3 {
     transform: translateY(0px);
   }
 }
+
+.books-scroll-pane {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(115, 115, 115, 0.65) rgba(0, 0, 0, 0.08);
+  scrollbar-gutter: stable both-edges;
+}
+
+.books-scroll-pane::-webkit-scrollbar {
+  width: 10px;
+}
+
+.books-scroll-pane::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 9999px;
+}
+
+.books-scroll-pane::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 82, 0.55);
+  border-radius: 9999px;
+  border: 2px solid rgba(0, 0, 0, 0.06);
+}
+
+.books-scroll-pane::-webkit-scrollbar-thumb:hover {
+  background: rgba(63, 63, 63, 0.7);
+}

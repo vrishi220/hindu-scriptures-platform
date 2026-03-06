@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LayoutGrid, List, MoreVertical } from "lucide-react";
+import { MoreVertical, SlidersHorizontal } from "lucide-react";
 import { getMe } from "@/lib/authClient";
 import InlineClearButton from "@/components/InlineClearButton";
 import ExternalMediaFormModal from "@/components/ExternalMediaFormModal";
@@ -17,6 +17,7 @@ import { resolveMediaUrl } from "@/lib/mediaUrl";
 import { type ExternalMediaType } from "@/lib/externalMedia";
 
 const ADMIN_MEDIA_BANK_VIEW_KEY = "admin_media_bank_browser_view";
+const ADMIN_MEDIA_BANK_DENSITY_KEY = "admin_media_bank_browser_density";
 
 const readStoredBrowserView = (): "list" | "icon" => {
   if (typeof window === "undefined") {
@@ -27,6 +28,32 @@ const readStoredBrowserView = (): "list" | "icon" => {
 
 const normalizeBrowserView = (value: unknown): "list" | "icon" =>
   value === "icon" ? "icon" : "list";
+
+const normalizeBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.min(4, Math.max(0, Math.round(value)));
+    return normalized as 0 | 1 | 2 | 3 | 4;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      const normalized = Math.min(4, Math.max(0, Math.round(parsed)));
+      return normalized as 0 | 1 | 2 | 3 | 4;
+    }
+  }
+  return 0;
+};
+
+const readStoredBrowserDensity = (): { value: 0 | 1 | 2 | 3 | 4; hasStored: boolean } => {
+  if (typeof window === "undefined") {
+    return { value: 0, hasStored: false };
+  }
+  const raw = window.localStorage.getItem(ADMIN_MEDIA_BANK_DENSITY_KEY);
+  if (raw === null) {
+    return { value: 0, hasStored: false };
+  }
+  return { value: normalizeBrowserDensity(raw), hasStored: true };
+};
 
 type MediaAsset = {
   id: number;
@@ -72,6 +99,10 @@ export default function AdminMediaBankPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | string>("all");
   const [browserView, setBrowserView] = useState<"list" | "icon">("list");
+  const [browserDensity, setBrowserDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [densityHydrated, setDensityHydrated] = useState(false);
+  const [hasStoredDensity, setHasStoredDensity] = useState(false);
+  const [showDensityMenu, setShowDensityMenu] = useState(false);
   const [renameId, setRenameId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
@@ -80,6 +111,7 @@ export default function AdminMediaBankPage() {
   const [accountPrefReady, setAccountPrefReady] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const densityMenuRef = useRef<HTMLDivElement | null>(null);
 
   const ensureAdmin = async () => {
     try {
@@ -114,6 +146,13 @@ export default function AdminMediaBankPage() {
   };
 
   useEffect(() => {
+    const storedDensity = readStoredBrowserDensity();
+    setBrowserDensity(storedDensity.value);
+    setHasStoredDensity(storedDensity.hasStored);
+    setDensityHydrated(true);
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       const admin = await ensureAdmin();
       if (admin) {
@@ -126,7 +165,11 @@ export default function AdminMediaBankPage() {
             const payload = (await response.json().catch(() => null)) as {
               admin_media_bank_browser_view?: unknown;
             } | null;
-            setBrowserView(normalizeBrowserView(payload?.admin_media_bank_browser_view));
+            const nextView = normalizeBrowserView(payload?.admin_media_bank_browser_view);
+            setBrowserView(nextView);
+            if (!hasStoredDensity) {
+              setBrowserDensity(nextView === "icon" ? 3 : 0);
+            }
           }
         } catch {
           // no-op: local fallback already loaded
@@ -138,7 +181,7 @@ export default function AdminMediaBankPage() {
       }
       setAuthChecked(true);
     })();
-  }, []);
+  }, [hasStoredDensity]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -148,11 +191,15 @@ export default function AdminMediaBankPage() {
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (openActionsId === null) return;
-      const menu = actionMenuRefs.current[openActionsId];
       const target = event.target as Node;
-      if (menu && !menu.contains(target)) {
-        setOpenActionsId(null);
+      if (openActionsId !== null) {
+        const menu = actionMenuRefs.current[openActionsId];
+        if (menu && !menu.contains(target)) {
+          setOpenActionsId(null);
+        }
+      }
+      if (densityMenuRef.current && !densityMenuRef.current.contains(target)) {
+        setShowDensityMenu(false);
       }
     };
 
@@ -168,6 +215,26 @@ export default function AdminMediaBankPage() {
     }
     window.localStorage.setItem(ADMIN_MEDIA_BANK_VIEW_KEY, browserView);
   }, [browserView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!densityHydrated) {
+      return;
+    }
+    window.localStorage.setItem(ADMIN_MEDIA_BANK_DENSITY_KEY, String(browserDensity));
+  }, [browserDensity, densityHydrated]);
+
+  useEffect(() => {
+    if (!densityHydrated) {
+      return;
+    }
+    const coarseView: "list" | "icon" = browserDensity === 0 ? "list" : "icon";
+    if (coarseView !== browserView) {
+      setBrowserView(coarseView);
+    }
+  }, [browserDensity, browserView, densityHydrated]);
 
   useEffect(() => {
     if (!authChecked || accessDenied || !accountPrefReady) {
@@ -212,6 +279,25 @@ export default function AdminMediaBankPage() {
       return haystack.includes(query);
     });
   }, [assets, searchQuery, typeFilter]);
+
+  const browserGridColumns =
+    browserDensity === 1
+      ? 8
+      : browserDensity === 2
+        ? 6
+        : browserDensity === 3
+          ? 4
+          : 2;
+  const browserDensityLabel =
+    browserDensity === 0
+      ? "List"
+      : browserDensity === 1
+        ? "8 col"
+        : browserDensity === 2
+          ? "6 col"
+          : browserDensity === 3
+            ? "4 col"
+            : "2 col";
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -359,33 +445,44 @@ export default function AdminMediaBankPage() {
                 </option>
               ))}
             </select>
-            <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
+            <div ref={densityMenuRef} className="relative">
               <button
                 type="button"
-                onClick={() => setBrowserView("list")}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                  browserView === "list"
-                    ? "bg-[color:var(--accent)] text-white"
-                    : "text-zinc-600 hover:bg-zinc-50"
-                }`}
-                aria-label="List view"
-                title="List view"
+                onClick={() => setShowDensityMenu((prev) => !prev)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+                aria-label="Open view density"
+                title="View density"
               >
-                <List size={14} />
+                <SlidersHorizontal size={12} />
+                {browserDensityLabel}
               </button>
-              <button
-                type="button"
-                onClick={() => setBrowserView("icon")}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                  browserView === "icon"
-                    ? "bg-[color:var(--accent)] text-white"
-                    : "text-zinc-600 hover:bg-zinc-50"
-                }`}
-                aria-label="Icon view"
-                title="Icon view"
-              >
-                <LayoutGrid size={14} />
-              </button>
+              {showDensityMenu && (
+                <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                  <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                    <span>View density</span>
+                    <span className="font-semibold text-zinc-700">{browserDensityLabel}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={4}
+                    step={1}
+                    value={browserDensity}
+                    onChange={(event) => {
+                      setBrowserDensity(normalizeBrowserDensity(event.target.value));
+                    }}
+                    className="w-full"
+                    aria-label="Media bank view density"
+                  />
+                  <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+                    <span>List</span>
+                    <span>8 col</span>
+                    <span>6 col</span>
+                    <span>4 col</span>
+                    <span>2 col</span>
+                  </div>
+                </div>
+              )}
             </div>
             <input
               ref={uploadInputRef}
@@ -403,7 +500,7 @@ export default function AdminMediaBankPage() {
               type="button"
               onClick={() => uploadInputRef.current?.click()}
               disabled={uploading}
-              className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 disabled:opacity-60"
             >
               {uploading ? "Uploading..." : "Upload"}
             </button>
@@ -434,7 +531,16 @@ export default function AdminMediaBankPage() {
           ) : filteredAssets.length === 0 ? (
             <div className="px-3 py-6 text-sm text-zinc-500">No assets found.</div>
           ) : (
-            <div className={browserView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
+            <div
+              className={browserView === "icon" ? "grid gap-2 p-2" : "divide-y divide-black/5"}
+              style={
+                browserView === "icon"
+                  ? {
+                      gridTemplateColumns: `repeat(${browserGridColumns}, minmax(0, 1fr))`,
+                    }
+                  : undefined
+              }
+            >
               {filteredAssets.map((asset) => {
                 const label = getDisplayName(asset);
                 const isRenaming = renameId === asset.id;
@@ -455,10 +561,10 @@ export default function AdminMediaBankPage() {
                           <img
                             src={resolveMediaUrl(asset.url)}
                             alt={label}
-                            className="h-32 w-full object-cover"
+                            className="aspect-square w-full object-cover"
                           />
                         ) : (
-                          <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                          <div className="flex aspect-square w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
                             {asset.media_type || "media"}
                           </div>
                         )}

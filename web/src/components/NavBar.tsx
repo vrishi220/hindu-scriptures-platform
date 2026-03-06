@@ -242,14 +242,14 @@ export default function NavBar() {
 
   return (
     <nav className="border-b border-black/10 bg-white/80 sticky top-0 z-40">
-      <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
+      <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-6 py-2 sm:py-2.5">
         {/* Left section: Mobile menu button + Logo */}
         <div className="flex items-center gap-2 sm:gap-6">
           {/* Mobile menu button */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="sm:hidden flex h-10 w-10 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-xl font-bold text-zinc-700 hover:bg-black/5 hover:text-[color:var(--accent)] transition"
+            className="sm:hidden flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-xl font-bold text-zinc-700 hover:bg-black/5 hover:text-[color:var(--accent)] transition"
             title="Menu"
           >
             ☰
@@ -262,9 +262,9 @@ export default function NavBar() {
               alt="Hindu Scriptures"
               width={32}
               height={32}
-              className="h-7 sm:h-8 w-7 sm:w-8"
+              className="h-6.5 sm:h-7 w-6.5 sm:w-7"
             />
-            <span className="inline text-sm font-semibold text-[color:var(--deep)]">
+            <span className="inline text-xs sm:text-sm font-semibold text-[color:var(--deep)]">
               Hindu Scriptures
             </span>
           </Link>

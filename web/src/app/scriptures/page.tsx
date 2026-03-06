@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
@@ -505,6 +505,10 @@ const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
 const SCRIPTURES_BOOK_BROWSER_VIEW_KEY = "scriptures_book_browser_view";
 const SCRIPTURES_BOOK_BROWSER_DENSITY_KEY = "scriptures_book_browser_density";
 const SCRIPTURES_MEDIA_MANAGER_VIEW_KEY = "scriptures_media_manager_view";
+const SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY = "scriptures_media_manager_density";
+const SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY = "scriptures_media_manager_density_node";
+const SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY = "scriptures_media_manager_density_book";
+const SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY = "scriptures_media_manager_density_bank";
 const DEFAULT_CONTENT_FIELD_LABELS = {
   sanskrit: "Sanskrit",
   transliteration: "Transliteration",
@@ -538,6 +542,38 @@ const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 => {
     return 0;
   }
   return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY));
+};
+
+const mediaManagerDensityStorageKey = (scope: "node" | "book" | "bank"): string => {
+  if (scope === "book") return SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY;
+  if (scope === "bank") return SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY;
+  return SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY;
+};
+
+const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 | 2 | 3 | 4 => {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  const scopedValue = window.localStorage.getItem(mediaManagerDensityStorageKey(scope));
+  if (scopedValue !== null) {
+    return normalizeBookBrowserDensity(scopedValue);
+  }
+  return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY));
+};
+
+const resolveBookBrowserDensity = (
+  storedDensity: 0 | 1 | 2 | 3 | 4,
+  preferenceDensity: unknown,
+  preferenceView: "list" | "icon"
+): 0 | 1 | 2 | 3 | 4 => {
+  if (storedDensity !== 0) {
+    return storedDensity;
+  }
+  const normalizedPreferenceDensity = normalizeBookBrowserDensity(preferenceDensity);
+  if (preferenceView === "icon" && normalizedPreferenceDensity === 0) {
+    return 3;
+  }
+  return normalizedPreferenceDensity;
 };
 
 const normalizeBrowserView = (value: unknown): "list" | "icon" =>
@@ -1071,6 +1107,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   ui_theme: "classic",
   ui_density: "comfortable",
   scriptures_book_browser_view: "list",
+  scriptures_book_browser_density: 0,
   scriptures_media_manager_view: "list",
   admin_media_bank_browser_view: "list",
 };
@@ -1100,6 +1137,7 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   ui_theme: normalizeUiTheme(value?.ui_theme),
   ui_density: normalizeUiDensity(value?.ui_density),
   scriptures_book_browser_view: normalizeBrowserView(value?.scriptures_book_browser_view),
+  scriptures_book_browser_density: normalizeBookBrowserDensity(value?.scriptures_book_browser_density),
   scriptures_media_manager_view: normalizeBrowserView(value?.scriptures_media_manager_view),
   admin_media_bank_browser_view: normalizeBrowserView(value?.admin_media_bank_browser_view),
 });
@@ -1323,7 +1361,8 @@ function ScripturesContent() {
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
   const [bookQuery, setBookQuery] = useState("");
-  const [bookVisibleCount, setBookVisibleCount] = useState(BOOKS_PAGE_SIZE_LIST);
+  const [bookHasMore, setBookHasMore] = useState(true);
+  const [bookLoadingMore, setBookLoadingMore] = useState(false);
   const [bookId, setBookId] = useState("");
   const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -1370,8 +1409,12 @@ function ScripturesContent() {
   const [mediaManagerTypeFilter, setMediaManagerTypeFilter] = useState("all");
   const [bookBrowserView, setBookBrowserView] = useState<"list" | "icon">("list");
   const [bookBrowserDensity, setBookBrowserDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [bookBrowserDensityHydrated, setBookBrowserDensityHydrated] = useState(false);
   const [showBookBrowserDensityMenu, setShowBookBrowserDensityMenu] = useState(false);
   const [mediaManagerView, setMediaManagerView] = useState<"list" | "icon">("list");
+  const [mediaManagerDensity, setMediaManagerDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [mediaManagerDensityHydrated, setMediaManagerDensityHydrated] = useState(false);
+  const [showMediaManagerDensityMenu, setShowMediaManagerDensityMenu] = useState(false);
   const [showMediaManagerModal, setShowMediaManagerModal] = useState(false);
   const [mediaManagerScope, setMediaManagerScope] = useState<"node" | "book" | "bank">("node");
   const [mediaBankViewMode, setMediaBankViewMode] = useState<"manage" | "pick-node" | "pick-book">("manage");
@@ -1554,7 +1597,14 @@ function ScripturesContent() {
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
-  const booksLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
+  const booksScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const booksLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const activeBooksAbortController = useRef<AbortController | null>(null);
+  const activeBooksRequestId = useRef(0);
+  const bookNextOffsetRef = useRef(0);
+  const bookHasMoreRef = useRef(true);
+  const bookLoadingRef = useRef(false);
   const bookTreeActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -1566,6 +1616,9 @@ function ScripturesContent() {
       }
       if (bookBrowserDensityMenuRef.current && !bookBrowserDensityMenuRef.current.contains(target)) {
         setShowBookBrowserDensityMenu(false);
+      }
+      if (mediaManagerDensityMenuRef.current && !mediaManagerDensityMenuRef.current.contains(target)) {
+        setShowMediaManagerDensityMenu(false);
       }
       if (bookTreeActionsMenuRef.current && !bookTreeActionsMenuRef.current.contains(target)) {
         setShowBookTreeActionsMenu(false);
@@ -1604,15 +1657,37 @@ function ScripturesContent() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
-  }, [bookBrowserDensity]);
+    setBookBrowserDensity(readStoredBookBrowserDensity());
+    setBookBrowserDensityHydrated(true);
+  }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    setMediaManagerDensity(readStoredMediaManagerDensity(mediaManagerScope));
+    setMediaManagerDensityHydrated(true);
+  }, [mediaManagerScope]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!bookBrowserDensityHydrated) {
+      return;
+    }
+    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
+  }, [bookBrowserDensity, bookBrowserDensityHydrated]);
+
+  useEffect(() => {
+    if (!bookBrowserDensityHydrated) {
+      return;
+    }
     const coarseView: "list" | "icon" = bookBrowserDensity === 0 ? "list" : "icon";
     if (coarseView !== bookBrowserView) {
       setBookBrowserView(coarseView);
     }
-  }, [bookBrowserDensity, bookBrowserView]);
+  }, [bookBrowserDensity, bookBrowserView, bookBrowserDensityHydrated]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1620,6 +1695,28 @@ function ScripturesContent() {
     }
     window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY, mediaManagerView);
   }, [mediaManagerView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (!mediaManagerDensityHydrated) {
+      return;
+    }
+    const value = String(mediaManagerDensity);
+    window.localStorage.setItem(mediaManagerDensityStorageKey(mediaManagerScope), value);
+    window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY, value);
+  }, [mediaManagerDensity, mediaManagerDensityHydrated, mediaManagerScope]);
+
+  useEffect(() => {
+    if (!mediaManagerDensityHydrated) {
+      return;
+    }
+    const coarseView: "list" | "icon" = mediaManagerDensity === 0 ? "list" : "icon";
+    if (coarseView !== mediaManagerView) {
+      setMediaManagerView(coarseView);
+    }
+  }, [mediaManagerDensity, mediaManagerView, mediaManagerDensityHydrated]);
 
   useEffect(() => {
     setPreferences((prev) => {
@@ -1633,10 +1730,11 @@ function ScripturesContent() {
       return {
         ...prev,
         scriptures_book_browser_view: bookBrowserView,
+        scriptures_book_browser_density: bookBrowserDensity,
         scriptures_media_manager_view: mediaManagerView,
       };
     });
-  }, [bookBrowserView, mediaManagerView]);
+  }, [bookBrowserView, bookBrowserDensity, mediaManagerView]);
 
   useEffect(() => {
     setInlineMessage(null);
@@ -3011,13 +3109,21 @@ function ScripturesContent() {
             setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
             const storedDensity = readStoredBookBrowserDensity();
             setBookBrowserDensity(
-              storedDensity !== 0
-                ? storedDensity
-                : normalized.scriptures_book_browser_view === "icon"
-                  ? 4
-                  : 0
+              resolveBookBrowserDensity(
+                storedDensity,
+                normalized.scriptures_book_browser_density,
+                normalized.scriptures_book_browser_view ?? "list"
+              )
             );
             setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
+            const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
+            setMediaManagerDensity(
+              resolveBookBrowserDensity(
+                storedMediaDensity,
+                0,
+                normalized.scriptures_media_manager_view ?? "list"
+              )
+            );
             return;
           } catch {
             window.localStorage.removeItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
@@ -3034,13 +3140,21 @@ function ScripturesContent() {
         setBookBrowserView(nextPreferences.scriptures_book_browser_view ?? "list");
         const storedDensity = readStoredBookBrowserDensity();
         setBookBrowserDensity(
-          storedDensity !== 0
-            ? storedDensity
-            : nextPreferences.scriptures_book_browser_view === "icon"
-              ? 4
-              : 0
+          resolveBookBrowserDensity(
+            storedDensity,
+            nextPreferences.scriptures_book_browser_density,
+            nextPreferences.scriptures_book_browser_view ?? "list"
+          )
         );
         setMediaManagerView(nextPreferences.scriptures_media_manager_view ?? "list");
+        const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
+        setMediaManagerDensity(
+          resolveBookBrowserDensity(
+            storedMediaDensity,
+            0,
+            nextPreferences.scriptures_media_manager_view ?? "list"
+          )
+        );
         return;
       }
 
@@ -3058,13 +3172,21 @@ function ScripturesContent() {
         setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
         const storedDensity = readStoredBookBrowserDensity();
         setBookBrowserDensity(
-          storedDensity !== 0
-            ? storedDensity
-            : normalized.scriptures_book_browser_view === "icon"
-              ? 4
-              : 0
+          resolveBookBrowserDensity(
+            storedDensity,
+            normalized.scriptures_book_browser_density,
+            normalized.scriptures_book_browser_view ?? "list"
+          )
         );
         setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
+        const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
+        setMediaManagerDensity(
+          resolveBookBrowserDensity(
+            storedMediaDensity,
+            0,
+            normalized.scriptures_media_manager_view ?? "list"
+          )
+        );
       } catch {
         const storedUiPreferences = readStoredUiPreferences();
         const nextPreferences = {
@@ -3077,13 +3199,21 @@ function ScripturesContent() {
         setBookBrowserView(nextPreferences.scriptures_book_browser_view ?? "list");
         const storedDensity = readStoredBookBrowserDensity();
         setBookBrowserDensity(
-          storedDensity !== 0
-            ? storedDensity
-            : nextPreferences.scriptures_book_browser_view === "icon"
-              ? 4
-              : 0
+          resolveBookBrowserDensity(
+            storedDensity,
+            nextPreferences.scriptures_book_browser_density,
+            nextPreferences.scriptures_book_browser_view ?? "list"
+          )
         );
         setMediaManagerView(nextPreferences.scriptures_media_manager_view ?? "list");
+        const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
+        setMediaManagerDensity(
+          resolveBookBrowserDensity(
+            storedMediaDensity,
+            0,
+            nextPreferences.scriptures_media_manager_view ?? "list"
+          )
+        );
       }
     };
 
@@ -3626,29 +3756,118 @@ function ScripturesContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId, urlInitialized, searchParams.get("node"), treeData]);
 
-  useEffect(() => {
-    const loadBooks = async () => {
+  const loadBooksPage = useCallback(
+    async ({ reset = false }: { reset?: boolean } = {}) => {
+      if (!reset && (!bookHasMoreRef.current || bookLoadingRef.current)) {
+        return;
+      }
+
+      const query = bookQuery.trim();
+      const pageSize =
+        bookBrowserDensity === 0
+          ? BOOKS_PAGE_SIZE_LIST
+          : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4];
+      const offset = reset ? 0 : bookNextOffsetRef.current;
+
+      if (reset) {
+        activeBooksAbortController.current?.abort();
+        setBooks([]);
+        setBookHasMore(true);
+        bookNextOffsetRef.current = 0;
+        bookHasMoreRef.current = true;
+      }
+
+      const abortController = new AbortController();
+      activeBooksAbortController.current = abortController;
+      const requestId = activeBooksRequestId.current + 1;
+      activeBooksRequestId.current = requestId;
+
+      bookLoadingRef.current = true;
+      setBookLoadingMore(true);
       try {
         const params = new URLSearchParams();
-        const query = bookQuery.trim();
         if (query) {
           params.set("q", query);
         }
-        const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
+        params.set("limit", String(pageSize));
+        params.set("offset", String(offset));
+
+        const response = await fetch(`/api/books?${params.toString()}`, {
           credentials: "include",
+          signal: abortController.signal,
         });
-        if (!response.ok) {
-          setBooks([]);
+        if (requestId !== activeBooksRequestId.current) {
           return;
         }
+
+        if (!response.ok) {
+          if (reset) {
+            setBooks([]);
+          }
+          setBookHasMore(false);
+          bookHasMoreRef.current = false;
+          return;
+        }
+
         const data = (await response.json()) as BookOption[];
-        setBooks(data);
-      } catch {
-        setBooks([]);
+        if (requestId !== activeBooksRequestId.current) {
+          return;
+        }
+
+        setBooks((prev) => (reset ? data : [...prev, ...data]));
+        const nextOffset = offset + data.length;
+        bookNextOffsetRef.current = nextOffset;
+
+        const hasMore = data.length === pageSize;
+        setBookHasMore(hasMore);
+        bookHasMoreRef.current = hasMore;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        if (reset) {
+          setBooks([]);
+        }
+        setBookHasMore(false);
+        bookHasMoreRef.current = false;
+      } finally {
+        if (requestId === activeBooksRequestId.current) {
+          bookLoadingRef.current = false;
+          setBookLoadingMore(false);
+          if (!reset) {
+            if (typeof window !== "undefined") {
+              window.requestAnimationFrame(() => {
+                const container = booksScrollContainerRef.current;
+                if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
+                  return;
+                }
+                const distanceToBottom =
+                  container.scrollHeight - (container.scrollTop + container.clientHeight);
+                const threshold = Math.max(240, container.clientHeight * 0.35);
+                if (distanceToBottom <= threshold) {
+                  void loadBooksPage();
+                }
+              });
+            }
+          }
+        }
       }
+    },
+    [bookQuery, bookBrowserDensity]
+  );
+
+  useEffect(() => {
+    const loadBooks = async () => {
+      await loadBooksPage({ reset: true });
     };
     void loadBooks();
-  }, [bookQuery]);
+  }, [bookQuery, loadBooksPage]);
+
+  useEffect(() => {
+    return () => {
+      activeBooksAbortController.current?.abort();
+    };
+  }, []);
 
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
     activeTreeAbortController.current?.abort();
@@ -4953,22 +5172,7 @@ function ScripturesContent() {
   };
 
   const loadBooksRefresh = async () => {
-    try {
-      const params = new URLSearchParams();
-      const query = bookQuery.trim();
-      if (query) {
-        params.set("q", query);
-      }
-      const response = await fetch(`/api/books${params.toString() ? `?${params.toString()}` : ""}`, {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = (await response.json()) as BookOption[];
-        setBooks(data);
-      }
-    } catch {
-      // Ignore errors
-    }
+    await loadBooksPage({ reset: true });
   };
 
   const loadBookShares = async () => {
@@ -6322,63 +6526,123 @@ function ScripturesContent() {
   const isBooksGridView = bookBrowserDensity > 0;
   const booksGridColumns =
     bookBrowserDensity === 1
-      ? 5
+      ? 8
       : bookBrowserDensity === 2
-        ? 4
+        ? 6
         : bookBrowserDensity === 3
-          ? 3
+          ? 4
           : 2;
   const booksDensityLabel =
     bookBrowserDensity === 0
       ? "List"
       : bookBrowserDensity === 1
-        ? "5×5"
+        ? "8 col"
         : bookBrowserDensity === 2
-          ? "4×4"
+          ? "6 col"
           : bookBrowserDensity === 3
-            ? "3×3"
-            : "2×2";
+            ? "4 col"
+            : "2 col";
+  const mediaManagerGridColumns =
+    mediaManagerDensity === 1
+      ? 8
+      : mediaManagerDensity === 2
+        ? 6
+        : mediaManagerDensity === 3
+          ? 4
+          : 2;
+  const mediaManagerDensityLabel =
+    mediaManagerDensity === 0
+      ? "List"
+      : mediaManagerDensity === 1
+        ? "8 col"
+        : mediaManagerDensity === 2
+          ? "6 col"
+          : mediaManagerDensity === 3
+            ? "4 col"
+            : "2 col";
   const filteredBooks = books;
-  const booksPageSize =
-    bookBrowserDensity === 0
-      ? BOOKS_PAGE_SIZE_LIST
-      : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4];
-  const visibleBookCount = Math.min(bookVisibleCount, filteredBooks.length);
-  const visibleBooks = filteredBooks.slice(0, visibleBookCount);
-  const hasMoreBooks = visibleBookCount < filteredBooks.length;
+  const hasMoreBooks = bookHasMore;
+  const loadedBookCount = filteredBooks.length;
+  const isInitialBooksLoad = bookLoadingMore && loadedBookCount === 0;
+
+  const maybeLoadMoreBooks = useCallback(
+    (container: HTMLDivElement | null) => {
+      if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
+        return;
+      }
+
+      const distanceToBottom = container.scrollHeight - (container.scrollTop + container.clientHeight);
+      const threshold = Math.max(240, container.clientHeight * 0.35);
+      if (distanceToBottom <= threshold) {
+        void loadBooksPage();
+      }
+    },
+    [loadBooksPage]
+  );
+
+  const handleBooksScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      maybeLoadMoreBooks(event.currentTarget);
+    },
+    [maybeLoadMoreBooks]
+  );
 
   useEffect(() => {
-    setBookVisibleCount(booksPageSize);
-  }, [bookQuery, bookBrowserDensity]);
-
-  useEffect(() => {
-    if (!hasMoreBooks) {
+    if (typeof window === "undefined") {
       return;
     }
 
-    const target = booksLoadMoreRef.current;
-    if (!target) {
+    const rafId = window.requestAnimationFrame(() => {
+      const container = booksScrollContainerRef.current;
+      if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
+        return;
+      }
+
+      const isScrollable = container.scrollHeight > container.clientHeight + 1;
+      if (!isScrollable) {
+        void loadBooksPage();
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [filteredBooks.length, bookBrowserDensity, loadBooksPage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const root = booksScrollContainerRef.current;
+    const target = booksLoadMoreSentinelRef.current;
+    if (!root || !target) {
       return;
     }
 
     const observer = new IntersectionObserver(
       (entries) => {
-        const [entry] = entries;
+        const entry = entries[0];
         if (!entry?.isIntersecting) {
           return;
         }
-        setBookVisibleCount((prev) => Math.min(prev + booksPageSize, filteredBooks.length));
+        if (!bookHasMoreRef.current || bookLoadingRef.current) {
+          return;
+        }
+        void loadBooksPage();
       },
       {
-        root: null,
-        rootMargin: "320px 0px",
+        root,
+        rootMargin: "280px 0px",
         threshold: 0.01,
       }
     );
 
     observer.observe(target);
-    return () => observer.disconnect();
-  }, [hasMoreBooks, booksPageSize, filteredBooks.length]);
+    return () => {
+      observer.disconnect();
+    };
+  }, [filteredBooks.length, loadBooksPage]);
 
   const handleSelectBook = (value: string): boolean => {
     if (value !== bookId && hasUnsavedInlineChanges()) {
@@ -6432,30 +6696,87 @@ function ScripturesContent() {
     setShowBrowseBookModal(true);
   };
 
+  const mediaManagerItemsLayoutClass = mediaManagerView === "icon" ? "grid gap-2 p-2" : "divide-y divide-black/5";
+  const mediaManagerItemsLayoutStyle =
+    mediaManagerView === "icon"
+      ? {
+          gridTemplateColumns: `repeat(${mediaManagerGridColumns}, minmax(0, 1fr))`,
+        }
+      : undefined;
+
+  const renderMediaManagerSearchInput = (placeholder: string, ariaLabel: string) => (
+    <div className="group relative min-w-[220px] flex-1">
+      <input
+        type="text"
+        value={mediaManagerSearchQuery}
+        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+      />
+      <InlineClearButton
+        visible={Boolean(mediaManagerSearchQuery)}
+        onClear={() => setMediaManagerSearchQuery("")}
+        ariaLabel={ariaLabel}
+      />
+    </div>
+  );
+
+  const renderMediaManagerDensityControl = () => (
+    <div ref={mediaManagerDensityMenuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setShowMediaManagerDensityMenu((prev) => !prev)}
+        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+        aria-label="Open media density"
+        title="Media density"
+      >
+        <SlidersHorizontal size={12} />
+        {mediaManagerDensityLabel}
+      </button>
+      {showMediaManagerDensityMenu && (
+        <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+            <span>Media density</span>
+            <span className="font-semibold text-zinc-700">{mediaManagerDensityLabel}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={4}
+            step={1}
+            value={mediaManagerDensity}
+            onChange={(event) => {
+              setMediaManagerDensity(normalizeBookBrowserDensity(event.target.value));
+            }}
+            className="w-full"
+            aria-label="Media manager density"
+          />
+          <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+            <span>List</span>
+            <span>8 col</span>
+            <span>6 col</span>
+            <span>4 col</span>
+            <span>2 col</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-3 pb-8 pt-6 sm:gap-8 sm:px-4 sm:pb-14 sm:pt-8">
+    <div className="grainy-bg flex h-full min-h-0 flex-col overflow-hidden overscroll-none">
+      <main className="mx-auto flex h-full min-h-0 w-full max-w-none flex-col gap-2 overflow-hidden overscroll-none px-3 pb-2 pt-2 sm:gap-3 sm:px-4 sm:pb-3 sm:pt-3">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">
             <a
               href={searchReturnUrl}
-              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--accent)] bg-white px-4 py-2 text-sm font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)] hover:text-white"
+              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--accent)] bg-white px-3 py-1.5 text-xs font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)] hover:text-white"
             >
               ← Back to Search Results
             </a>
           </div>
         )}
-        <header className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Library</p>
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)]">
-            Scripture browser
-          </h1>
-          <p className="max-w-2xl text-sm text-zinc-600">
-            Search and browse books. Use row actions to preview or browse structure.
-          </p>
-        </header>
-
-        <section className="rounded-xl border border-black/10 bg-white p-4 space-y-3">
+        <section className="flex h-0 min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white px-3 py-2 sm:px-4 sm:py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-zinc-900">Books</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -6472,6 +6793,45 @@ function ScripturesContent() {
                   onClear={() => setBookQuery("")}
                   ariaLabel="Clear book search"
                 />
+              </div>
+              <div ref={bookBrowserDensityMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowBookBrowserDensityMenu((prev) => !prev)}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+                  aria-label="Open view density"
+                  title="View density"
+                >
+                  <SlidersHorizontal size={12} />
+                  {booksDensityLabel}
+                </button>
+                {showBookBrowserDensityMenu && (
+                  <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                    <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                      <span>View density</span>
+                      <span className="font-semibold text-zinc-700">{booksDensityLabel}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={4}
+                      step={1}
+                      value={bookBrowserDensity}
+                      onChange={(event) => {
+                        setBookBrowserDensity(normalizeBookBrowserDensity(event.target.value));
+                      }}
+                      className="w-full"
+                      aria-label="Books view density"
+                    />
+                    <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+                      <span>List</span>
+                      <span>8 col</span>
+                      <span>6 col</span>
+                      <span>4 col</span>
+                      <span>2 col</span>
+                    </div>
+                  </div>
+                )}
               </div>
               {canContribute && (
                 <button
@@ -6497,54 +6857,15 @@ function ScripturesContent() {
             )}
           </div>
 
-          <div className="rounded-xl border border-black/10 bg-white">
-            <div className="flex items-center justify-between border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-              <span>All books</span>
-              <div className="flex items-center gap-2">
-                <span>{filteredBooks.length}</span>
-                <div ref={bookBrowserDensityMenuRef} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowBookBrowserDensityMenu((prev) => !prev)}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
-                    aria-label="Open view density"
-                    title="View density"
-                  >
-                    <SlidersHorizontal size={12} />
-                    {booksDensityLabel}
-                  </button>
-                  {showBookBrowserDensityMenu && (
-                    <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
-                      <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
-                        <span>View density</span>
-                        <span className="font-semibold text-zinc-700">{booksDensityLabel}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={4}
-                        step={1}
-                        value={bookBrowserDensity}
-                        onChange={(event) => {
-                          setBookBrowserDensity(normalizeBookBrowserDensity(event.target.value));
-                        }}
-                        className="w-full"
-                        aria-label="Books view density"
-                      />
-                      <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
-                        <span>List</span>
-                        <span>5×5</span>
-                        <span>4×4</span>
-                        <span>3×3</span>
-                        <span>2×2</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div>
-              {filteredBooks.length === 0 ? (
+          <div className="mt-2 flex h-0 min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white">
+            <div
+              ref={booksScrollContainerRef}
+              className="books-scroll-pane h-0 min-h-0 flex-1 overflow-y-scroll overflow-x-hidden overscroll-contain"
+              onScroll={handleBooksScroll}
+            >
+              {isInitialBooksLoad ? (
+                <div className="flex items-center justify-center py-8 text-sm text-zinc-500">Loading books…</div>
+              ) : filteredBooks.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-center">
                   <p className="text-sm text-zinc-600">No books found.</p>
                   {bookQuery.trim().length > 0 && (
@@ -6559,7 +6880,7 @@ function ScripturesContent() {
                 </div>
               ) : (
                 <div
-                  className={isBooksGridView ? "grid gap-3 p-3" : "divide-y divide-black/5"}
+                  className={isBooksGridView ? "grid gap-2 p-2" : "divide-y divide-black/5"}
                   style={
                     isBooksGridView
                       ? {
@@ -6568,7 +6889,7 @@ function ScripturesContent() {
                       : undefined
                   }
                 >
-                  {visibleBooks.map((book) => {
+                  {filteredBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
                     const thumbnailUrl = getBookThumbnailUrl(book);
                     const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
@@ -6860,18 +7181,10 @@ function ScripturesContent() {
                   })}
                 </div>
               )}
+              {hasMoreBooks && !isInitialBooksLoad && (
+                <div ref={booksLoadMoreSentinelRef} className="h-4 w-full" aria-hidden />
+              )}
             </div>
-            {filteredBooks.length > 0 && (
-              <div className="border-t border-black/10 px-3 py-2 text-xs text-zinc-600">
-                <div className="flex items-center justify-between gap-2">
-                  <span>
-                    Showing {visibleBookCount} of {filteredBooks.length}
-                  </span>
-                  <span>{hasMoreBooks ? "Scroll to load more" : "All books loaded"}</span>
-                </div>
-                {hasMoreBooks && <div ref={booksLoadMoreRef} className="h-4 w-full" aria-hidden />}
-              </div>
-            )}
           </div>
 
           {bookPreviewError && (
@@ -8950,7 +9263,10 @@ function ScripturesContent() {
 
         {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(bookId) : Boolean(selectedId)))) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
-            <div className="w-full max-w-3xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+            <div
+              className="w-full max-w-3xl min-w-[320px] max-h-[92dvh] overflow-auto rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
+              style={{ resize: "both" }}
+            >
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -8976,20 +9292,7 @@ function ScripturesContent() {
               {mediaManagerScope === "book" ? (
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="group relative min-w-[220px] flex-1">
-                      <input
-                        type="text"
-                        value={mediaManagerSearchQuery}
-                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
-                        placeholder="Search media"
-                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                      <InlineClearButton
-                        visible={Boolean(mediaManagerSearchQuery)}
-                        onClear={() => setMediaManagerSearchQuery("")}
-                        ariaLabel="Clear media search"
-                      />
-                    </div>
+                    {renderMediaManagerSearchInput("Search media", "Clear media search")}
                     <select
                       value={mediaManagerTypeFilter}
                       onChange={(event) => setMediaManagerTypeFilter(event.target.value)}
@@ -8998,34 +9301,7 @@ function ScripturesContent() {
                       <option value="all">All types</option>
                       <option value="image">image</option>
                     </select>
-                    <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setMediaManagerView("list")}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                          mediaManagerView === "list"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                        aria-label="List view"
-                        title="List view"
-                      >
-                        <List size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMediaManagerView("icon")}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                          mediaManagerView === "icon"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                        aria-label="Icon view"
-                        title="Icon view"
-                      >
-                        <LayoutGrid size={14} />
-                      </button>
-                    </div>
+                    {renderMediaManagerDensityControl()}
                     <input
                       ref={bookMediaUploadInputRef}
                       type="file"
@@ -9123,7 +9399,10 @@ function ScripturesContent() {
                         return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
                       }
                       return (
-                        <div className={mediaManagerView === "icon" ? "p-2" : "divide-y divide-black/5"}>
+                        <div
+                          className={mediaManagerItemsLayoutClass}
+                          style={mediaManagerItemsLayoutStyle}
+                        >
                           <div
                             className={
                               mediaManagerView === "icon"
@@ -9136,7 +9415,7 @@ function ScripturesContent() {
                                 <img
                                   src={thumbnailUrl}
                                   alt="Book thumbnail"
-                                  className="h-32 w-full object-cover"
+                                  className="aspect-square w-full object-cover"
                                 />
                                 <div className="space-y-2 p-3">
                                   <div className="flex items-start justify-between gap-2">
@@ -9255,50 +9534,10 @@ function ScripturesContent() {
               ) : mediaManagerScope === "bank" ? (
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="group relative min-w-[220px] flex-1">
-                      <input
-                        type="text"
-                        value={mediaManagerSearchQuery}
-                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
-                        placeholder="Search media repo"
-                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                      <InlineClearButton
-                        visible={Boolean(mediaManagerSearchQuery)}
-                        onClear={() => setMediaManagerSearchQuery("")}
-                        ariaLabel="Clear media repo search"
-                      />
-                    </div>
+                    {renderMediaManagerSearchInput("Search media repo", "Clear media repo search")}
                     {mediaBankViewMode === "manage" ? (
                       <>
-                        <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
-                          <button
-                            type="button"
-                            onClick={() => setMediaManagerView("list")}
-                            className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                              mediaManagerView === "list"
-                                ? "bg-[color:var(--accent)] text-white"
-                                : "text-zinc-600 hover:bg-zinc-50"
-                            }`}
-                            aria-label="List view"
-                            title="List view"
-                          >
-                            <List size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMediaManagerView("icon")}
-                            className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                              mediaManagerView === "icon"
-                                ? "bg-[color:var(--accent)] text-white"
-                                : "text-zinc-600 hover:bg-zinc-50"
-                            }`}
-                            aria-label="Icon view"
-                            title="Icon view"
-                          >
-                            <LayoutGrid size={14} />
-                          </button>
-                        </div>
+                        {renderMediaManagerDensityControl()}
                         <input
                           ref={mediaBankUploadInputRef}
                           type="file"
@@ -9315,7 +9554,7 @@ function ScripturesContent() {
                           type="button"
                           onClick={() => mediaBankUploadInputRef.current?.click()}
                           disabled={mediaBankUploading || mediaBankUpdating}
-                          className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition disabled:opacity-50"
                         >
                           {mediaBankUploading ? "Uploading..." : "Upload"}
                         </button>
@@ -9379,7 +9618,10 @@ function ScripturesContent() {
                             <span className="text-right">{mediaBankViewMode === "manage" ? "Actions" : "Pick"}</span>
                           </div>
                         )}
-                        <div className={mediaManagerView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
+                        <div
+                          className={mediaManagerItemsLayoutClass}
+                          style={mediaManagerItemsLayoutStyle}
+                        >
                           {(() => {
                             const filteredAssets = mediaBankAssets.filter((asset) =>
                               mediaAssetMatchesSearch(asset, mediaManagerSearchQuery)
@@ -9410,10 +9652,10 @@ function ScripturesContent() {
                                         <img
                                           src={resolveMediaUrl(asset.url)}
                                           alt={label}
-                                          className="h-32 w-full object-cover"
+                                          className="aspect-square w-full object-cover"
                                         />
                                       ) : (
-                                        <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                        <div className="flex aspect-square w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
                                           {asset.media_type}
                                         </div>
                                       )}
@@ -9587,20 +9829,7 @@ function ScripturesContent() {
               ) : (
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="group relative min-w-[220px] flex-1">
-                      <input
-                        type="text"
-                        value={mediaManagerSearchQuery}
-                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
-                        placeholder="Search media"
-                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                      />
-                      <InlineClearButton
-                        visible={Boolean(mediaManagerSearchQuery)}
-                        onClear={() => setMediaManagerSearchQuery("")}
-                        ariaLabel="Clear media search"
-                      />
-                    </div>
+                    {renderMediaManagerSearchInput("Search media", "Clear media search")}
                     <select
                       value={mediaManagerTypeFilter}
                       onChange={(event) => setMediaManagerTypeFilter(event.target.value)}
@@ -9621,34 +9850,7 @@ function ScripturesContent() {
                           </option>
                         ))}
                     </select>
-                    <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setMediaManagerView("list")}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                          mediaManagerView === "list"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                        aria-label="List view"
-                        title="List view"
-                      >
-                        <List size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMediaManagerView("icon")}
-                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-                          mediaManagerView === "icon"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "text-zinc-600 hover:bg-zinc-50"
-                        }`}
-                        aria-label="Icon view"
-                        title="Icon view"
-                      >
-                        <LayoutGrid size={14} />
-                      </button>
-                    </div>
+                    {renderMediaManagerDensityControl()}
                     <input
                       ref={nodeMediaUploadInputRef}
                       type="file"
@@ -9739,7 +9941,10 @@ function ScripturesContent() {
                             <span className="text-right">Actions</span>
                           </div>
                         )}
-                        <div className={mediaManagerView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
+                        <div
+                          className={mediaManagerItemsLayoutClass}
+                          style={mediaManagerItemsLayoutStyle}
+                        >
                           {(() => {
                             const filteredItems = sortNodeMediaItems(nodeMedia).filter((media) => {
                               const mediaType = (media.media_type || "").trim();
@@ -9776,10 +9981,10 @@ function ScripturesContent() {
                                         <img
                                           src={resolveMediaUrl(media.url)}
                                           alt={label}
-                                          className="h-32 w-full object-cover"
+                                          className="aspect-square w-full object-cover"
                                         />
                                       ) : (
-                                        <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                        <div className="flex aspect-square w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
                                           {mediaType}
                                         </div>
                                       )}

@@ -27,11 +27,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} antialiased min-h-screen flex flex-col`}>
+    <html lang="en" className="h-full">
+      <body className={`${displayFont.variable} ${sansFont.variable} antialiased h-full min-h-screen flex flex-col`}>
         <SessionKeepalive />
         <NavBar />
-        <div className="flex-1">
+        <div className="flex-1 min-h-0">
           {children}
         </div>
         <Footer />
