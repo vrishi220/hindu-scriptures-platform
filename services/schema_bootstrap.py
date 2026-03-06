@@ -83,6 +83,12 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast';
         """,
         """
+        ALTER TABLE IF EXISTS user_preferences
+            ADD COLUMN IF NOT EXISTS scriptures_book_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
+            ADD COLUMN IF NOT EXISTS scriptures_media_manager_view VARCHAR(10) NOT NULL DEFAULT 'list',
+            ADD COLUMN IF NOT EXISTS admin_media_bank_browser_view VARCHAR(10) NOT NULL DEFAULT 'list';
+        """,
+        """
         CREATE TABLE IF NOT EXISTS user_preferences (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -100,6 +106,9 @@ def ensure_phase1_schema(database_url: str) -> None:
             preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
             preview_show_english BOOLEAN NOT NULL DEFAULT true,
             preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
+            scriptures_book_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
+            scriptures_media_manager_view VARCHAR(10) NOT NULL DEFAULT 'list',
+            admin_media_bank_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(),
             UNIQUE(user_id)
