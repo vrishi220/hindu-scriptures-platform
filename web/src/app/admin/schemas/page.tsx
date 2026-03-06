@@ -85,7 +85,7 @@ export default function SchemaBuilderPage() {
   const [toast, setToast] = useState<Toast | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">("all");
+  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">("used");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>("create");
@@ -397,6 +397,7 @@ export default function SchemaBuilderPage() {
         <a href="/admin/schemas" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Schemas</a>
         <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
         <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white px-3 py-1">Categories</a>
+        <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia repo</a>
       </div>
 
       {toast && (
