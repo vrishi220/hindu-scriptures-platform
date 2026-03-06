@@ -8,6 +8,7 @@ import {
   ChevronsUp,
   Eye,
   Link2,
+  MoreVertical,
   Pencil,
   Plus,
   ShoppingBasket,
@@ -39,6 +40,7 @@ import {
   persistUiPreferences,
   readStoredUiPreferences,
 } from "../../lib/uiPreferences";
+import { resolveMediaUrl } from "../../lib/mediaUrl";
 
 type BookOption = {
   id: number;
@@ -181,6 +183,87 @@ type NodeContent = {
   metadata_json?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
   tags?: string[] | null;
+};
+
+type MediaFile = {
+  id: number;
+  node_id: number;
+  media_type: "image" | "audio" | "video" | string;
+  url: string;
+  metadata?: {
+    content_type?: string;
+    original_filename?: string;
+    display_name?: string;
+    asset_id?: number | string;
+    asset_display_name?: string;
+    size_bytes?: number;
+    display_order?: number;
+    is_default?: boolean;
+    [key: string]: unknown;
+  } | null;
+  metadata_json?: {
+    content_type?: string;
+    original_filename?: string;
+    display_name?: string;
+    asset_id?: number | string;
+    asset_display_name?: string;
+    size_bytes?: number;
+    display_order?: number;
+    is_default?: boolean;
+    [key: string]: unknown;
+  } | null;
+  created_at?: string | null;
+};
+
+type MediaAsset = {
+  id: number;
+  media_type: "image" | "audio" | "video" | string;
+  url: string;
+  metadata?: {
+    content_type?: string;
+    original_filename?: string;
+    display_name?: string;
+    size_bytes?: number;
+    [key: string]: unknown;
+  } | null;
+  created_by?: number | null;
+  created_at?: string | null;
+};
+
+type ExternalMediaType = "image" | "audio" | "video" | "link";
+type MediaLinkContext = "bank" | "node" | "book";
+
+type CommentaryEntry = {
+  id: number;
+  node_id: number;
+  author_id?: number | null;
+  work_id?: number | null;
+  content_text: string;
+  language_code: string;
+  display_order: number;
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+  created_at?: string | null;
+};
+
+type CommentaryDisplayItem = {
+  id: number | string;
+  author: string;
+  text: string;
+};
+
+type NodeComment = {
+  id: number;
+  node_id: number;
+  parent_comment_id?: number | null;
+  content_text: string;
+  language_code: string;
+  metadata?: {
+    [key: string]: unknown;
+  } | null;
+  created_by?: number | null;
+  created_at?: string | null;
 };
 
 type BookPreviewBlock = {
@@ -745,12 +828,213 @@ const getWordMeaningsRenderingSettingsFromBook = (
   };
 };
 
+const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | null => {
+  if (!book) {
+    return null;
+  }
+
+  const metadata =
+    book.metadata_json && typeof book.metadata_json === "object"
+      ? book.metadata_json
+      : book.metadata && typeof book.metadata === "object"
+        ? book.metadata
+        : null;
+
+  if (!metadata) {
+    return null;
+  }
+
+  const thumbnailUrlCandidates = [
+    metadata.thumbnail_url,
+    metadata.thumbnailUrl,
+    metadata.cover_image_url,
+    metadata.coverImageUrl,
+  ];
+
+  for (const candidate of thumbnailUrlCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return resolveMediaUrl(candidate);
+    }
+  }
+
+  return null;
+};
+
+const getNodeThumbnailUrl = (mediaItems: MediaFile[]): string | null => {
+  const imageItems = mediaItems.filter((item) => item.media_type === "image" && typeof item.url === "string" && item.url.trim());
+  if (imageItems.length === 0) {
+    return null;
+  }
+  const defaultImage = imageItems.find((item) => {
+    const metadata =
+      item.metadata && typeof item.metadata === "object"
+        ? item.metadata
+        : item.metadata_json && typeof item.metadata_json === "object"
+          ? item.metadata_json
+          : null;
+    return Boolean(metadata?.is_default);
+  });
+  return (defaultImage || imageItems[0]).url;
+};
+
+const getYouTubeEmbedUrl = (rawUrl: string): string | null => {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+
+    if (host === "youtu.be") {
+      const videoId = parsed.pathname.replace(/^\//, "").split("/")[0];
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        const videoId = parsed.searchParams.get("v");
+        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+      }
+
+      if (parsed.pathname.startsWith("/embed/")) {
+        const videoId = parsed.pathname.split("/")[2];
+        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+      }
+
+      if (parsed.pathname.startsWith("/shorts/")) {
+        const videoId = parsed.pathname.split("/")[2];
+        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const getYouTubeVideoId = (rawUrl: string): string | null => {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+
+    if (host === "youtu.be") {
+      const videoId = parsed.pathname.replace(/^\//, "").split("/")[0];
+      return videoId || null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        return parsed.searchParams.get("v") || null;
+      }
+      if (parsed.pathname.startsWith("/embed/") || parsed.pathname.startsWith("/shorts/")) {
+        const videoId = parsed.pathname.split("/")[2];
+        return videoId || null;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const getMediaLookupKey = (mediaType: string | undefined, rawUrl: string): string => {
+  const normalizedType = (mediaType || "").trim().toLowerCase() || "unknown";
+  const trimmedUrl = (rawUrl || "").trim();
+  if (!trimmedUrl) {
+    return `${normalizedType}:`;
+  }
+
+  const youTubeVideoId = getYouTubeVideoId(trimmedUrl);
+  if (youTubeVideoId) {
+    return `${normalizedType}:youtube:${youTubeVideoId.toLowerCase()}`;
+  }
+
+  try {
+    const parsed = new URL(trimmedUrl);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const pathname = decodeURIComponent(parsed.pathname || "").replace(/\/+$/, "");
+    return `${normalizedType}:${host}${pathname}`;
+  } catch {
+    return `${normalizedType}:${trimmedUrl.toLowerCase()}`;
+  }
+};
+
+const inferMediaTypeFromUrl = (rawUrl: string): ExternalMediaType => {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return "link";
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    let host = parsed.hostname.toLowerCase();
+    if (host.startsWith("www.")) {
+      host = host.slice(4);
+    }
+    const path = (parsed.pathname || "").toLowerCase();
+
+    if (anyFileExtension(path, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"])) {
+      return "image";
+    }
+    if (anyFileExtension(path, [".mp3", ".wav", ".ogg", ".aac", ".m4a", ".flac"])) {
+      return "audio";
+    }
+    if (anyFileExtension(path, [".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"])) {
+      return "video";
+    }
+    if (host === "youtube.com" || host === "youtu.be" || host === "m.youtube.com" || host === "music.youtube.com" || host === "vimeo.com" || host === "dailymotion.com") {
+      return "video";
+    }
+
+    return "link";
+  } catch {
+    return "link";
+  }
+};
+
+const anyFileExtension = (value: string, extensions: string[]): boolean =>
+  extensions.some((extension) => value.endsWith(extension));
+
+const inferDisplayNameFromUrl = (rawUrl: string): string => {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return "";
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host === "youtu.be" || host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      return "YouTube Video";
+    }
+    if (host === "vimeo.com") {
+      return "Vimeo Video";
+    }
+    if (host === "dailymotion.com") {
+      return "Dailymotion Video";
+    }
+    const leaf = parsed.pathname.split("/").filter(Boolean).pop();
+    if (leaf) {
+      return decodeURIComponent(leaf);
+    }
+    return parsed.hostname;
+  } catch {
+    return "";
+  }
+};
+
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   source_language: "english",
   transliteration_enabled: true,
   transliteration_script: "iast",
   show_roman_transliteration: true,
   show_only_preferred_script: false,
+  show_media: true,
+  show_commentary: true,
   preview_show_titles: false,
   preview_show_labels: false,
   preview_show_details: false,
@@ -773,6 +1057,8 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   transliteration_script: normalizeTransliterationScript(value?.transliteration_script),
   show_roman_transliteration: value?.show_roman_transliteration ?? true,
   show_only_preferred_script: value?.show_only_preferred_script ?? false,
+  show_media: value?.show_media ?? true,
+  show_commentary: value?.show_commentary ?? true,
   preview_show_titles: value?.preview_show_titles ?? false,
   preview_show_labels: value?.preview_show_labels ?? false,
   preview_show_details: value?.preview_show_details ?? false,
@@ -1024,6 +1310,54 @@ function ScripturesContent() {
   const [canEdit, setCanEdit] = useState(false);
   const [nodeContent, setNodeContent] = useState<NodeContent | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
+  const [nodeMedia, setNodeMedia] = useState<MediaFile[]>([]);
+  const [nodeMediaLoading, setNodeMediaLoading] = useState(false);
+  const [nodeMediaError, setNodeMediaError] = useState<string | null>(null);
+  const [nodeMediaUploading, setNodeMediaUploading] = useState(false);
+  const [nodeMediaUpdating, setNodeMediaUpdating] = useState(false);
+  const [nodeMediaMessage, setNodeMediaMessage] = useState<string | null>(null);
+  const [nodeMediaSearchQuery, setNodeMediaSearchQuery] = useState("");
+  const [mediaBankAssets, setMediaBankAssets] = useState<MediaAsset[]>([]);
+  const [mediaBankLoading, setMediaBankLoading] = useState(false);
+  const [mediaBankError, setMediaBankError] = useState<string | null>(null);
+  const [mediaBankMessage, setMediaBankMessage] = useState<string | null>(null);
+  const [mediaBankUploading, setMediaBankUploading] = useState(false);
+  const [mediaBankUpdating, setMediaBankUpdating] = useState(false);
+  const [mediaLinkFormOpen, setMediaLinkFormOpen] = useState(false);
+  const [mediaLinkFormContext, setMediaLinkFormContext] = useState<MediaLinkContext>("bank");
+  const [mediaLinkFormUrl, setMediaLinkFormUrl] = useState("");
+  const [mediaLinkFormDisplayName, setMediaLinkFormDisplayName] = useState("");
+  const [mediaLinkFormMediaType, setMediaLinkFormMediaType] = useState<"auto" | ExternalMediaType>("auto");
+  const [mediaLinkFormDisplayNameTouched, setMediaLinkFormDisplayNameTouched] = useState(false);
+  const [mediaLinkFormTypeTouched, setMediaLinkFormTypeTouched] = useState(false);
+  const [mediaLinkFormSubmitting, setMediaLinkFormSubmitting] = useState(false);
+  const [bookMediaActionsOpen, setBookMediaActionsOpen] = useState(false);
+  const [nodeMediaActionsOpen, setNodeMediaActionsOpen] = useState(false);
+  const [mediaManagerSearchQuery, setMediaManagerSearchQuery] = useState("");
+  const [mediaManagerTypeFilter, setMediaManagerTypeFilter] = useState("all");
+  const [showMediaManagerModal, setShowMediaManagerModal] = useState(false);
+  const [mediaManagerScope, setMediaManagerScope] = useState<"node" | "book" | "bank">("node");
+  const [mediaBankViewMode, setMediaBankViewMode] = useState<"manage" | "pick-node" | "pick-book">("manage");
+  const [nodeCommentary, setNodeCommentary] = useState<CommentaryEntry[]>([]);
+  const [nodeCommentaryLoading, setNodeCommentaryLoading] = useState(false);
+  const [nodeCommentaryError, setNodeCommentaryError] = useState<string | null>(null);
+  const [nodeComments, setNodeComments] = useState<NodeComment[]>([]);
+  const [nodeCommentsLoading, setNodeCommentsLoading] = useState(false);
+  const [nodeCommentsError, setNodeCommentsError] = useState<string | null>(null);
+  const [nodeCommentEditorOpen, setNodeCommentEditorOpen] = useState(false);
+  const [nodeCommentEditingId, setNodeCommentEditingId] = useState<number | null>(null);
+  const [nodeCommentFormLanguage, setNodeCommentFormLanguage] = useState("en");
+  const [nodeCommentFormText, setNodeCommentFormText] = useState("");
+  const [nodeCommentSubmitting, setNodeCommentSubmitting] = useState(false);
+  const [nodeCommentMessage, setNodeCommentMessage] = useState<string | null>(null);
+  const [commentaryEditorOpen, setCommentaryEditorOpen] = useState(false);
+  const [commentaryEditingId, setCommentaryEditingId] = useState<number | null>(null);
+  const [commentaryFormAuthor, setCommentaryFormAuthor] = useState("");
+  const [commentaryFormWorkTitle, setCommentaryFormWorkTitle] = useState("");
+  const [commentaryFormLanguage, setCommentaryFormLanguage] = useState("en");
+  const [commentaryFormText, setCommentaryFormText] = useState("");
+  const [commentarySubmitting, setCommentarySubmitting] = useState(false);
+  const [commentaryMessage, setCommentaryMessage] = useState<string | null>(null);
   const [actionNode, setActionNode] = useState<TreeNode | null>(null);
   const [action, setAction] = useState<"add" | "edit" | null>(null);
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
@@ -1035,6 +1369,19 @@ function ScripturesContent() {
   const activeContentRequestId = useRef(0);
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
+  const activeNodeMediaRequestId = useRef(0);
+  const activeNodeMediaAbortController = useRef<AbortController | null>(null);
+  const activeNodeMediaNodeId = useRef<number | null>(null);
+  const mediaBankUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const bookThumbnailInputRef = useRef<HTMLInputElement | null>(null);
+  const activeNodeCommentaryRequestId = useRef(0);
+  const activeNodeCommentaryAbortController = useRef<AbortController | null>(null);
+  const activeNodeCommentaryNodeId = useRef<number | null>(null);
+  const activeNodeCommentsRequestId = useRef(0);
+  const activeNodeCommentsAbortController = useRef<AbortController | null>(null);
+  const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("content");
@@ -1072,6 +1419,7 @@ function ScripturesContent() {
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
   const [showBookPreview, setShowBookPreview] = useState(false);
+  const [bookThumbnailUploading, setBookThumbnailUploading] = useState(false);
   const [showBrowseBookModal, setShowBrowseBookModal] = useState(false);
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
   const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
@@ -1165,8 +1513,10 @@ function ScripturesContent() {
   const [levelTemplateError, setLevelTemplateError] = useState<string | null>(null);
   const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
   const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
+  const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookTreeActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1174,6 +1524,9 @@ function ScripturesContent() {
       const target = event.target as Node;
       if (bookRowActionsMenuRef.current && !bookRowActionsMenuRef.current.contains(target)) {
         setOpenBookRowActionsId(null);
+      }
+      if (bookTreeActionsMenuRef.current && !bookTreeActionsMenuRef.current.contains(target)) {
+        setShowBookTreeActionsMenu(false);
       }
       if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
         setShowNodeActionsMenu(false);
@@ -1188,6 +1541,10 @@ function ScripturesContent() {
 
   useEffect(() => {
     setOpenBookRowActionsId(null);
+  }, [bookId]);
+
+  useEffect(() => {
+    setShowBookTreeActionsMenu(false);
   }, [bookId]);
 
   useEffect(() => {
@@ -1816,6 +2173,10 @@ function ScripturesContent() {
     setPropertiesError(null);
     setPropertiesMessage(null);
     resetLevelTemplateSelection();
+
+    if (scope === "node" && nodeId) {
+      void loadNodeMedia(nodeId, true);
+    }
 
     try {
       const endpoint = propertiesEndpoint(scope, nodeId);
@@ -2591,6 +2952,65 @@ function ScripturesContent() {
   }, [authEmail]);
 
   useEffect(() => {
+    if (!selectedId) {
+      activeNodeMediaAbortController.current?.abort();
+      setNodeMedia([]);
+      setNodeMediaError(null);
+      setNodeMediaLoading(false);
+      setNodeMediaUploading(false);
+      setNodeMediaUpdating(false);
+      setNodeMediaMessage(null);
+      setNodeMediaSearchQuery("");
+      if (mediaManagerScope === "node") {
+        setShowMediaManagerModal(false);
+      }
+      activeNodeCommentaryAbortController.current?.abort();
+      setNodeCommentary([]);
+      setNodeCommentaryError(null);
+      setNodeCommentaryLoading(false);
+      activeNodeCommentsAbortController.current?.abort();
+      setNodeComments([]);
+      setNodeCommentsError(null);
+      setNodeCommentsLoading(false);
+      setNodeCommentEditorOpen(false);
+      setNodeCommentEditingId(null);
+      setNodeCommentFormLanguage("en");
+      setNodeCommentFormText("");
+      setNodeCommentMessage(null);
+      setCommentaryEditorOpen(false);
+      setCommentaryEditingId(null);
+      setCommentaryFormAuthor("");
+      setCommentaryFormWorkTitle("");
+      setCommentaryFormLanguage("en");
+      setCommentaryFormText("");
+      setCommentaryMessage(null);
+      return;
+    }
+
+    void loadNodeMedia(selectedId);
+    void loadNodeCommentary(selectedId);
+    void loadNodeComments(selectedId);
+  }, [selectedId, mediaManagerScope]);
+
+  useEffect(() => {
+    if (!showMediaManagerModal) {
+      setMediaBankViewMode("manage");
+      closeMediaLinkForm();
+      setBookMediaActionsOpen(false);
+      setNodeMediaActionsOpen(false);
+      return;
+    }
+    setMediaManagerSearchQuery("");
+    setMediaManagerTypeFilter("all");
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    closeMediaLinkForm();
+    setBookMediaActionsOpen(false);
+    setNodeMediaActionsOpen(false);
+    void loadMediaBankAssets();
+  }, [showMediaManagerModal, mediaManagerScope, selectedId, bookId]);
+
+  useEffect(() => {
     if (!authEmail) {
       setMetadataCategories([]);
       return;
@@ -2842,6 +3262,8 @@ function ScripturesContent() {
   const transliterationEnabled = preferences?.transliteration_enabled ?? true;
   const showRomanTransliteration = preferences?.show_roman_transliteration ?? true;
   const showOnlyPreferredScript = preferences?.show_only_preferred_script ?? false;
+  const showMedia = preferences?.show_media ?? true;
+  const showCommentary = preferences?.show_commentary ?? true;
   const showTransliteration =
     transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
   const previewLoadingMessage =
@@ -3227,6 +3649,1094 @@ function ScripturesContent() {
     }
   };
 
+  const getNodeMediaDisplayOrder = (media: MediaFile): number => {
+    const metadata =
+      media.metadata && typeof media.metadata === "object"
+        ? media.metadata
+        : media.metadata_json && typeof media.metadata_json === "object"
+          ? media.metadata_json
+          : null;
+    const raw = metadata?.display_order;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw;
+    }
+    if (typeof raw === "string") {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return 0;
+  };
+
+  const isNodeMediaDefault = (media: MediaFile): boolean => {
+    const metadata =
+      media.metadata && typeof media.metadata === "object"
+        ? media.metadata
+        : media.metadata_json && typeof media.metadata_json === "object"
+          ? media.metadata_json
+          : null;
+    return Boolean(metadata?.is_default);
+  };
+
+  const sortNodeMediaItems = (items: MediaFile[]): MediaFile[] =>
+    [...items].sort((a, b) => {
+      const typeCompare = (a.media_type || "").localeCompare(b.media_type || "");
+      if (typeCompare !== 0) {
+        return typeCompare;
+      }
+      const defaultCompare = Number(isNodeMediaDefault(b)) - Number(isNodeMediaDefault(a));
+      if (defaultCompare !== 0) {
+        return defaultCompare;
+      }
+      const orderCompare = getNodeMediaDisplayOrder(a) - getNodeMediaDisplayOrder(b);
+      if (orderCompare !== 0) {
+        return orderCompare;
+      }
+      const aCreated = a.created_at ? Date.parse(a.created_at) : 0;
+      const bCreated = b.created_at ? Date.parse(b.created_at) : 0;
+      if (aCreated !== bCreated) {
+        return aCreated - bCreated;
+      }
+      return a.id - b.id;
+    });
+
+  const mediaMatchesSearch = (media: MediaFile, query: string): boolean => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+    const metadata =
+      media.metadata && typeof media.metadata === "object"
+        ? media.metadata
+        : media.metadata_json && typeof media.metadata_json === "object"
+          ? media.metadata_json
+          : null;
+    const originalFilename =
+      typeof metadata?.original_filename === "string" ? metadata.original_filename : "";
+    const haystack = [originalFilename, media.media_type, media.url]
+      .map((value) => value || "")
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalized);
+  };
+
+  const mediaAssetMatchesSearch = (asset: MediaAsset, query: string): boolean => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+    const originalFilename =
+      typeof asset.metadata?.original_filename === "string" ? asset.metadata.original_filename : "";
+    const displayName = typeof asset.metadata?.display_name === "string" ? asset.metadata.display_name : "";
+    const haystack = [displayName, originalFilename, asset.media_type, asset.url]
+      .map((value) => value || "")
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalized);
+  };
+
+  const getNodeMediaLabel = (media: MediaFile): string => {
+    const mediaType = (media.media_type || "").trim();
+    const mediaLookupKey = getMediaLookupKey(mediaType, media.url);
+    const metadata =
+      media.metadata && typeof media.metadata === "object"
+        ? media.metadata
+        : media.metadata_json && typeof media.metadata_json === "object"
+          ? media.metadata_json
+          : null;
+
+    const metadataAssetIdRaw = metadata?.asset_id;
+    const metadataAssetId =
+      typeof metadataAssetIdRaw === "number"
+        ? metadataAssetIdRaw
+        : typeof metadataAssetIdRaw === "string" && metadataAssetIdRaw.trim()
+          ? Number.parseInt(metadataAssetIdRaw, 10)
+          : null;
+
+    const matchingAssetById =
+      typeof metadataAssetId === "number" && Number.isFinite(metadataAssetId)
+        ? mediaBankAssets.find((asset) => asset.id === metadataAssetId)
+        : undefined;
+
+    const matchingAssetByLookup = mediaBankAssets.find((asset) => {
+      const assetType = (asset.media_type || "").trim();
+      if (assetType !== mediaType) {
+        return false;
+      }
+      const assetLookupKey = getMediaLookupKey(assetType, asset.url || "");
+      if (assetLookupKey === mediaLookupKey) {
+        return true;
+      }
+      return (asset.url || "").trim() === (media.url || "").trim();
+    });
+
+    const matchingAsset = matchingAssetById ?? matchingAssetByLookup;
+
+    const repoDisplayName =
+      typeof matchingAsset?.metadata?.display_name === "string" ? matchingAsset.metadata.display_name.trim() : "";
+    if (repoDisplayName) {
+      return repoDisplayName;
+    }
+    const repoFilename =
+      typeof matchingAsset?.metadata?.original_filename === "string"
+        ? matchingAsset.metadata.original_filename.trim()
+        : "";
+    if (repoFilename) {
+      return repoFilename;
+    }
+
+    const directDisplayName = typeof metadata?.display_name === "string" ? metadata.display_name.trim() : "";
+    if (directDisplayName) {
+      return directDisplayName;
+    }
+
+    const directAssetDisplayName =
+      typeof metadata?.asset_display_name === "string" ? metadata.asset_display_name.trim() : "";
+    if (directAssetDisplayName) {
+      return directAssetDisplayName;
+    }
+
+    const directFilename = typeof metadata?.original_filename === "string" ? metadata.original_filename.trim() : "";
+    if (directFilename) {
+      return directFilename;
+    }
+
+    return inferDisplayNameFromUrl(media.url) || `${mediaType || "media"} #${media.id}`;
+  };
+
+  const loadMediaBankAssets = async () => {
+    setMediaBankLoading(true);
+    setMediaBankError(null);
+    try {
+      const response = await fetch(contentPath("/media-bank/assets?limit=1000"), {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Unable to load media repo");
+      }
+      const data = (await response.json()) as MediaAsset[];
+      setMediaBankAssets(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setMediaBankAssets([]);
+      setMediaBankError(err instanceof Error ? err.message : "Unable to load media repo");
+    } finally {
+      setMediaBankLoading(false);
+    }
+  };
+
+  const handleUploadMediaBankAsset = async (file: File) => {
+    setMediaBankUploading(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(contentPath("/media-bank/assets"), {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to upload media asset");
+      }
+      setMediaBankMessage("Media asset uploaded.");
+      await loadMediaBankAssets();
+    } catch (err) {
+      setMediaBankError(err instanceof Error ? err.message : "Failed to upload media asset");
+    } finally {
+      setMediaBankUploading(false);
+    }
+  };
+
+  const openMediaLinkForm = (context: MediaLinkContext) => {
+    setMediaLinkFormContext(context);
+    setMediaLinkFormOpen(true);
+    setMediaLinkFormUrl("");
+    setMediaLinkFormDisplayName("");
+    setMediaLinkFormMediaType("auto");
+    setMediaLinkFormDisplayNameTouched(false);
+    setMediaLinkFormTypeTouched(false);
+  };
+
+  const closeMediaLinkForm = () => {
+    setMediaLinkFormOpen(false);
+    setMediaLinkFormUrl("");
+    setMediaLinkFormDisplayName("");
+    setMediaLinkFormMediaType("auto");
+    setMediaLinkFormDisplayNameTouched(false);
+    setMediaLinkFormTypeTouched(false);
+    setMediaLinkFormSubmitting(false);
+  };
+
+  const createMediaBankLinkAsset = async (
+    url: string,
+    displayName?: string,
+    mediaType?: ExternalMediaType
+  ): Promise<MediaAsset> => {
+    const response = await fetch(contentPath("/media-bank/assets/link"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url,
+        ...(displayName ? { display_name: displayName } : {}),
+        ...(mediaType ? { media_type: mediaType } : {}),
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as MediaAsset | { detail?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload && "detail" in payload ? payload.detail || "Failed to create media link" : "Failed to create media link");
+    }
+    const asset = payload as MediaAsset | null;
+    if (!asset || typeof asset.id !== "number") {
+      throw new Error("Link created but no media asset was returned.");
+    }
+    return asset;
+  };
+
+  const uploadMediaBankAssetAndReturn = async (file: File): Promise<MediaAsset> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await fetch(contentPath("/media-bank/assets"), {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const payload = (await response.json().catch(() => null)) as MediaAsset | { detail?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload && "detail" in payload ? payload.detail || "Failed to upload media asset" : "Failed to upload media asset");
+    }
+    const asset = payload as MediaAsset | null;
+    if (!asset || typeof asset.id !== "number") {
+      throw new Error("Upload succeeded but no media asset was returned.");
+    }
+    return asset;
+  };
+
+  const attachMediaBankAssetToNode = async (assetId: number, nodeId: number): Promise<void> => {
+    const response = await fetch(contentPath(`/media-bank/assets/${assetId}/attach/nodes/${nodeId}`), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_default: false }),
+    });
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.detail || "Failed to attach media asset");
+    }
+  };
+
+  const handleSubmitMediaLinkForm = async () => {
+    const trimmedUrl = mediaLinkFormUrl.trim();
+    if (!trimmedUrl) {
+      setMediaBankError("URL is required.");
+      return;
+    }
+
+    const trimmedDisplayName = mediaLinkFormDisplayName.trim();
+    const explicitType = mediaLinkFormMediaType === "auto" ? undefined : mediaLinkFormMediaType;
+
+    setMediaLinkFormSubmitting(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    setNodeMediaError(null);
+    setNodeMediaMessage(null);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const createdAsset = await createMediaBankLinkAsset(trimmedUrl, trimmedDisplayName || undefined, explicitType);
+
+      if (mediaLinkFormContext === "node") {
+        if (!selectedId) {
+          throw new Error("Select a node first to attach media.");
+        }
+        await attachMediaBankAssetToNode(createdAsset.id, selectedId);
+        setNodeMediaMessage("Link added to repo and attached to node.");
+        await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
+      } else if (mediaLinkFormContext === "book") {
+        setPropertiesMessage("External media added to repo.");
+        await loadMediaBankAssets();
+      } else {
+        setMediaBankMessage("External media link added.");
+        await loadMediaBankAssets();
+      }
+
+      closeMediaLinkForm();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to add external media link";
+      if (mediaLinkFormContext === "node") {
+        setNodeMediaError(message);
+      } else if (mediaLinkFormContext === "book") {
+        setPropertiesError(message);
+      } else {
+        setMediaBankError(message);
+      }
+    } finally {
+      setMediaLinkFormSubmitting(false);
+    }
+  };
+
+  const handleRenameMediaBankAsset = async (asset: MediaAsset) => {
+    const currentName =
+      typeof asset.metadata?.display_name === "string" && asset.metadata.display_name.trim()
+        ? asset.metadata.display_name
+        : typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename.trim()
+          ? asset.metadata.original_filename
+          : `${asset.media_type} #${asset.id}`;
+    const nextName = window.prompt("Rename media asset", currentName);
+    if (nextName === null) {
+      return;
+    }
+    const trimmed = nextName.trim();
+    if (!trimmed) {
+      setMediaBankError("Name cannot be empty.");
+      return;
+    }
+
+    setMediaBankUpdating(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    try {
+      const response = await fetch(contentPath(`/media-bank/assets/${asset.id}`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: trimmed }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to rename media asset");
+      }
+      setMediaBankMessage("Media asset renamed.");
+      await loadMediaBankAssets();
+    } catch (err) {
+      setMediaBankError(err instanceof Error ? err.message : "Failed to rename media asset");
+    } finally {
+      setMediaBankUpdating(false);
+    }
+  };
+
+  const handleDeleteMediaBankAsset = async (assetId: number) => {
+    setMediaBankUpdating(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    try {
+      const response = await fetch(contentPath(`/media-bank/assets/${assetId}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error(
+            "Cannot remove this asset yet. Detach it from all nodes first, then delete it from the multimedia repo."
+          );
+        }
+        throw new Error(payload?.detail || "Failed to delete media asset");
+      }
+      setMediaBankMessage("Media asset removed from repo.");
+      await loadMediaBankAssets();
+    } catch (err) {
+      setMediaBankError(err instanceof Error ? err.message : "Failed to delete media asset");
+    } finally {
+      setMediaBankUpdating(false);
+    }
+  };
+
+  const handleAttachMediaBankAssetToSelectedNode = async (assetId: number): Promise<boolean> => {
+    if (!selectedId) {
+      setMediaBankError("Select a node first to attach media.");
+      return false;
+    }
+
+    setMediaBankUpdating(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    try {
+      await attachMediaBankAssetToNode(assetId, selectedId);
+      setMediaBankMessage("Media asset attached to node.");
+      await loadNodeMedia(selectedId, true);
+      return true;
+    } catch (err) {
+      setMediaBankError(err instanceof Error ? err.message : "Failed to attach media asset");
+      return false;
+    } finally {
+      setMediaBankUpdating(false);
+    }
+  };
+
+  const handleUploadNodeMediaViaBank = async (file: File) => {
+    if (!selectedId) {
+      setNodeMediaError("Select a node first to attach media.");
+      return;
+    }
+
+    setNodeMediaUploading(true);
+    setNodeMediaError(null);
+    setNodeMediaMessage(null);
+    try {
+      const uploadedAsset = await uploadMediaBankAssetAndReturn(file);
+      await attachMediaBankAssetToNode(uploadedAsset.id, selectedId);
+
+      setNodeMediaMessage("Multimedia uploaded to repo and attached to node.");
+      await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
+    } catch (err) {
+      setNodeMediaError(err instanceof Error ? err.message : "Failed to upload multimedia");
+    } finally {
+      setNodeMediaUploading(false);
+    }
+  };
+
+  const handleUploadBookMediaViaBank = async (file: File) => {
+    if (!bookId) {
+      setPropertiesError("Select a book first.");
+      return;
+    }
+
+    setBookThumbnailUploading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+    try {
+      await uploadMediaBankAssetAndReturn(file);
+      setPropertiesMessage("Media uploaded to repo.");
+      await loadMediaBankAssets();
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to upload media");
+    } finally {
+      setBookThumbnailUploading(false);
+    }
+  };
+
+  const loadNodeMedia = async (nodeId: number, force = false) => {
+    if (!force && activeNodeMediaNodeId.current === nodeId) return;
+
+    activeNodeMediaAbortController.current?.abort();
+    const abortController = new AbortController();
+    activeNodeMediaAbortController.current = abortController;
+    const requestId = activeNodeMediaRequestId.current + 1;
+    activeNodeMediaRequestId.current = requestId;
+    activeNodeMediaNodeId.current = nodeId;
+
+    setNodeMediaLoading(true);
+    setNodeMediaError(null);
+    try {
+      const response = await fetch(contentPath(`/nodes/${nodeId}/media?limit=20`), {
+        credentials: "include",
+        signal: abortController.signal,
+      });
+      if (requestId !== activeNodeMediaRequestId.current) return;
+      if (!response.ok) {
+        setNodeMedia([]);
+        setNodeMediaError("Unable to load multimedia for this node.");
+        return;
+      }
+      const data = (await response.json()) as MediaFile[];
+      if (requestId !== activeNodeMediaRequestId.current) return;
+      setNodeMedia(sortNodeMediaItems(Array.isArray(data) ? data : []));
+      setNodeMediaError(null);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      if (requestId !== activeNodeMediaRequestId.current) return;
+      setNodeMedia([]);
+      setNodeMediaError("Unable to load multimedia for this node.");
+    } finally {
+      if (requestId === activeNodeMediaRequestId.current) {
+        setNodeMediaLoading(false);
+        activeNodeMediaNodeId.current = null;
+      }
+    }
+  };
+
+  const handleDeleteNodeMedia = async (mediaId: number) => {
+    if (!selectedId) {
+      return;
+    }
+
+    setNodeMediaError(null);
+    setNodeMediaMessage(null);
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${selectedId}/media/${mediaId}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to delete media");
+      }
+
+      setNodeMediaMessage("Multimedia removed.");
+      await loadNodeMedia(selectedId, true);
+    } catch (err) {
+      setNodeMediaError(err instanceof Error ? err.message : "Failed to delete media");
+    }
+  };
+
+  const handleSetDefaultNodeMedia = async (mediaId: number) => {
+    if (!selectedId) {
+      return;
+    }
+
+    setNodeMediaUpdating(true);
+    setNodeMediaError(null);
+    setNodeMediaMessage(null);
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${selectedId}/media/${mediaId}`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_default: true }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to set default media");
+      }
+
+      setNodeMediaMessage("Default media updated.");
+      await loadNodeMedia(selectedId, true);
+    } catch (err) {
+      setNodeMediaError(err instanceof Error ? err.message : "Failed to set default media");
+    } finally {
+      setNodeMediaUpdating(false);
+    }
+  };
+
+  const handleMoveNodeMedia = async (mediaId: number, direction: "up" | "down") => {
+    if (!selectedId) {
+      return;
+    }
+
+    const targetMedia = nodeMedia.find((item) => item.id === mediaId);
+    if (!targetMedia) {
+      return;
+    }
+
+    const sameType = sortNodeMediaItems(
+      nodeMedia.filter((item) => (item.media_type || "") === (targetMedia.media_type || ""))
+    );
+    const currentIndex = sameType.findIndex((item) => item.id === mediaId);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    const swapIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (swapIndex < 0 || swapIndex >= sameType.length) {
+      return;
+    }
+
+    const reordered = [...sameType];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(swapIndex, 0, moved);
+    const orderedIds = reordered.map((item) => item.id);
+
+    setNodeMediaUpdating(true);
+    setNodeMediaError(null);
+    setNodeMediaMessage(null);
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${selectedId}/media/reorder`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          media_type: targetMedia.media_type,
+          media_ids: orderedIds,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to reorder media");
+      }
+
+      setNodeMediaMessage("Media order updated.");
+      await loadNodeMedia(selectedId, true);
+    } catch (err) {
+      setNodeMediaError(err instanceof Error ? err.message : "Failed to reorder media");
+    } finally {
+      setNodeMediaUpdating(false);
+    }
+  };
+
+  const handleUploadBookThumbnail = async (file: File) => {
+    if (!bookId) {
+      setPropertiesError("Select a book first.");
+      return;
+    }
+
+    setBookThumbnailUploading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(contentPath(`/books/${bookId}/thumbnail`), {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to upload thumbnail");
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                metadata_json: updatedBook.metadata_json,
+                metadata: updatedBook.metadata,
+              }
+            : book
+        )
+      );
+      setPropertiesMessage("Book thumbnail saved.");
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to upload thumbnail");
+    } finally {
+      setBookThumbnailUploading(false);
+    }
+  };
+
+  const handleDeleteBookThumbnail = async () => {
+    if (!bookId) {
+      setPropertiesError("Select a book first.");
+      return;
+    }
+
+    setBookThumbnailUploading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const response = await fetch(contentPath(`/books/${bookId}/thumbnail`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to remove thumbnail");
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                metadata_json: updatedBook.metadata_json,
+                metadata: updatedBook.metadata,
+              }
+            : book
+        )
+      );
+      setPropertiesMessage("Book thumbnail removed.");
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to remove thumbnail");
+    } finally {
+      setBookThumbnailUploading(false);
+    }
+  };
+
+  const openNodeMediaManager = (targetNodeId?: number | null) => {
+    const nextNodeId =
+      typeof targetNodeId === "number" && Number.isFinite(targetNodeId)
+        ? targetNodeId
+        : selectedId;
+
+    if (!nextNodeId) {
+      setNodeMediaError("Select a node first to manage multimedia.");
+      return;
+    }
+
+    if (nextNodeId !== selectedId) {
+      selectNode(nextNodeId);
+    }
+
+    void loadNodeMedia(nextNodeId, true);
+    setMediaManagerScope("node");
+    setShowMediaManagerModal(true);
+  };
+
+  const handleSetBookThumbnailFromMediaBankAsset = async (asset: MediaAsset): Promise<boolean> => {
+    if (!bookId) {
+      setPropertiesError("Select a book first.");
+      return false;
+    }
+
+    setBookThumbnailUploading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const existingMetadata =
+        currentBook?.metadata_json && typeof currentBook.metadata_json === "object"
+          ? { ...currentBook.metadata_json }
+          : currentBook?.metadata && typeof currentBook.metadata === "object"
+            ? { ...currentBook.metadata }
+            : {};
+
+      const nextMetadata = {
+        ...existingMetadata,
+        thumbnail_url: asset.url,
+        thumbnailUrl: asset.url,
+      };
+
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: nextMetadata }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to set book thumbnail");
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                metadata_json: updatedBook.metadata_json,
+                metadata: updatedBook.metadata,
+              }
+            : book
+        )
+      );
+      setPropertiesMessage("Book thumbnail set from repo.");
+      return true;
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : "Failed to set book thumbnail");
+      return false;
+    } finally {
+      setBookThumbnailUploading(false);
+    }
+  };
+
+  const loadNodeCommentary = async (nodeId: number, force = false) => {
+    if (!force && activeNodeCommentaryNodeId.current === nodeId) return;
+
+    activeNodeCommentaryAbortController.current?.abort();
+    const abortController = new AbortController();
+    activeNodeCommentaryAbortController.current = abortController;
+    const requestId = activeNodeCommentaryRequestId.current + 1;
+    activeNodeCommentaryRequestId.current = requestId;
+    activeNodeCommentaryNodeId.current = nodeId;
+
+    setNodeCommentaryLoading(true);
+    setNodeCommentaryError(null);
+    try {
+      const response = await fetch(contentPath(`/nodes/${nodeId}/commentary?limit=100`), {
+        credentials: "include",
+        signal: abortController.signal,
+      });
+      if (requestId !== activeNodeCommentaryRequestId.current) return;
+      if (!response.ok) {
+        setNodeCommentary([]);
+        setNodeCommentaryError("Unable to load commentary for this node.");
+        return;
+      }
+      const data = (await response.json()) as CommentaryEntry[];
+      if (requestId !== activeNodeCommentaryRequestId.current) return;
+      setNodeCommentary(Array.isArray(data) ? data : []);
+      setNodeCommentaryError(null);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      if (requestId !== activeNodeCommentaryRequestId.current) return;
+      setNodeCommentary([]);
+      setNodeCommentaryError("Unable to load commentary for this node.");
+    } finally {
+      if (requestId === activeNodeCommentaryRequestId.current) {
+        setNodeCommentaryLoading(false);
+        activeNodeCommentaryNodeId.current = null;
+      }
+    }
+  };
+
+  const loadNodeComments = async (nodeId: number, force = false) => {
+    if (!force && activeNodeCommentsNodeId.current === nodeId) return;
+
+    activeNodeCommentsAbortController.current?.abort();
+    const abortController = new AbortController();
+    activeNodeCommentsAbortController.current = abortController;
+    const requestId = activeNodeCommentsRequestId.current + 1;
+    activeNodeCommentsRequestId.current = requestId;
+    activeNodeCommentsNodeId.current = nodeId;
+
+    setNodeCommentsLoading(true);
+    setNodeCommentsError(null);
+    try {
+      const response = await fetch(contentPath(`/nodes/${nodeId}/comments?limit=200`), {
+        credentials: "include",
+        signal: abortController.signal,
+      });
+      if (requestId !== activeNodeCommentsRequestId.current) return;
+      if (!response.ok) {
+        setNodeComments([]);
+        setNodeCommentsError("Unable to load comments for this node.");
+        return;
+      }
+      const data = (await response.json()) as NodeComment[];
+      if (requestId !== activeNodeCommentsRequestId.current) return;
+      setNodeComments(Array.isArray(data) ? data : []);
+      setNodeCommentsError(null);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
+      if (requestId !== activeNodeCommentsRequestId.current) return;
+      setNodeComments([]);
+      setNodeCommentsError("Unable to load comments for this node.");
+    } finally {
+      if (requestId === activeNodeCommentsRequestId.current) {
+        setNodeCommentsLoading(false);
+        activeNodeCommentsNodeId.current = null;
+      }
+    }
+  };
+
+  const resetNodeCommentEditor = () => {
+    setNodeCommentEditingId(null);
+    setNodeCommentFormLanguage("en");
+    setNodeCommentFormText("");
+  };
+
+  const openCreateNodeCommentEditor = () => {
+    resetNodeCommentEditor();
+    setNodeCommentEditorOpen(true);
+    setNodeCommentMessage(null);
+  };
+
+  const openEditNodeCommentEditor = (entry: NodeComment) => {
+    setNodeCommentEditingId(entry.id);
+    setNodeCommentFormLanguage((entry.language_code || "en").trim().toLowerCase() || "en");
+    setNodeCommentFormText(entry.content_text || "");
+    setNodeCommentEditorOpen(true);
+    setNodeCommentMessage(null);
+  };
+
+  const handleSubmitNodeComment = async () => {
+    if (!selectedId) return;
+    const trimmedText = nodeCommentFormText.trim();
+    if (!trimmedText) {
+      setNodeCommentMessage("Comment text is required.");
+      return;
+    }
+
+    const trimmedLanguage = nodeCommentFormLanguage.trim().toLowerCase() || "en";
+
+    setNodeCommentSubmitting(true);
+    setNodeCommentMessage(null);
+    try {
+      const endpoint =
+        nodeCommentEditingId !== null
+          ? contentPath(`/nodes/${selectedId}/comments/${nodeCommentEditingId}`)
+          : contentPath(`/nodes/${selectedId}/comments`);
+      const payload =
+        nodeCommentEditingId !== null
+          ? {
+              content_text: trimmedText,
+              language_code: trimmedLanguage,
+            }
+          : {
+              node_id: selectedId,
+              content_text: trimmedText,
+              language_code: trimmedLanguage,
+            };
+
+      const response = await fetch(endpoint, {
+        method: nodeCommentEditingId !== null ? "PATCH" : "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(result?.detail || "Unable to save comment.");
+      }
+
+      await loadNodeComments(selectedId, true);
+      resetNodeCommentEditor();
+      setNodeCommentEditorOpen(false);
+      setNodeCommentMessage("Comment saved.");
+    } catch (err) {
+      setNodeCommentMessage(err instanceof Error ? err.message : "Unable to save comment.");
+    } finally {
+      setNodeCommentSubmitting(false);
+    }
+  };
+
+  const handleDeleteNodeComment = async (commentId: number) => {
+    if (!selectedId) return;
+    if (!window.confirm("Delete this comment?")) return;
+
+    setNodeCommentSubmitting(true);
+    setNodeCommentMessage(null);
+    try {
+      const response = await fetch(contentPath(`/nodes/${selectedId}/comments/${commentId}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(result?.detail || "Unable to delete comment.");
+      }
+
+      await loadNodeComments(selectedId, true);
+      if (nodeCommentEditingId === commentId) {
+        resetNodeCommentEditor();
+      }
+      setNodeCommentMessage("Comment deleted.");
+    } catch (err) {
+      setNodeCommentMessage(err instanceof Error ? err.message : "Unable to delete comment.");
+    } finally {
+      setNodeCommentSubmitting(false);
+    }
+  };
+
+  const resetCommentaryEditor = () => {
+    setCommentaryEditingId(null);
+    setCommentaryFormAuthor("");
+    setCommentaryFormWorkTitle("");
+    setCommentaryFormLanguage("en");
+    setCommentaryFormText("");
+  };
+
+  const openCreateCommentaryEditor = () => {
+    resetCommentaryEditor();
+    setCommentaryEditorOpen(true);
+    setCommentaryMessage(null);
+  };
+
+  const openEditCommentaryEditor = (entry: CommentaryEntry) => {
+    const metadata =
+      entry.metadata && typeof entry.metadata === "object"
+        ? (entry.metadata as Record<string, unknown>)
+        : {};
+    const author = typeof metadata.author === "string" ? metadata.author : "";
+    const workTitle = typeof metadata.work_title === "string" ? metadata.work_title : "";
+
+    setCommentaryEditingId(entry.id);
+    setCommentaryFormAuthor(author);
+    setCommentaryFormWorkTitle(workTitle);
+    setCommentaryFormLanguage((entry.language_code || "en").trim().toLowerCase() || "en");
+    setCommentaryFormText(entry.content_text || "");
+    setCommentaryEditorOpen(true);
+    setCommentaryMessage(null);
+  };
+
+  const handleSubmitCommentary = async () => {
+    if (!selectedId) return;
+    const trimmedText = commentaryFormText.trim();
+    if (!trimmedText) {
+      setCommentaryMessage("Commentary text is required.");
+      return;
+    }
+
+    const trimmedLanguage = commentaryFormLanguage.trim().toLowerCase() || "en";
+    const trimmedAuthor = commentaryFormAuthor.trim();
+    const trimmedWorkTitle = commentaryFormWorkTitle.trim();
+    const metadata: Record<string, unknown> = {};
+    if (trimmedAuthor) metadata.author = trimmedAuthor;
+    if (trimmedWorkTitle) metadata.work_title = trimmedWorkTitle;
+
+    setCommentarySubmitting(true);
+    setCommentaryMessage(null);
+    try {
+      const endpoint =
+        commentaryEditingId !== null
+          ? contentPath(`/nodes/${selectedId}/commentary/${commentaryEditingId}`)
+          : contentPath(`/nodes/${selectedId}/commentary`);
+      const payload =
+        commentaryEditingId !== null
+          ? {
+              content_text: trimmedText,
+              language_code: trimmedLanguage,
+              metadata,
+            }
+          : {
+              node_id: selectedId,
+              content_text: trimmedText,
+              language_code: trimmedLanguage,
+              metadata,
+            };
+
+      const response = await fetch(endpoint, {
+        method: commentaryEditingId !== null ? "PATCH" : "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(result?.detail || "Unable to save commentary.");
+      }
+
+      await loadNodeCommentary(selectedId, true);
+      resetCommentaryEditor();
+      setCommentaryEditorOpen(false);
+      setCommentaryMessage("Commentary saved.");
+    } catch (err) {
+      setCommentaryMessage(err instanceof Error ? err.message : "Unable to save commentary.");
+    } finally {
+      setCommentarySubmitting(false);
+    }
+  };
+
+  const handleDeleteCommentary = async (entryId: number) => {
+    if (!selectedId) return;
+    if (!window.confirm("Delete this commentary entry?")) return;
+
+    setCommentarySubmitting(true);
+    setCommentaryMessage(null);
+    try {
+      const response = await fetch(contentPath(`/nodes/${selectedId}/commentary/${entryId}`), {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(result?.detail || "Unable to delete commentary.");
+      }
+
+      await loadNodeCommentary(selectedId, true);
+      if (commentaryEditingId === entryId) {
+        resetCommentaryEditor();
+      }
+      setCommentaryMessage("Commentary deleted.");
+    } catch (err) {
+      setCommentaryMessage(err instanceof Error ? err.message : "Unable to delete commentary.");
+    } finally {
+      setCommentarySubmitting(false);
+    }
+  };
+
   const scrollToNode = (nodeId: number) => {
     if (typeof window === "undefined") return;
     window.requestAnimationFrame(() => {
@@ -3387,6 +4897,7 @@ function ScripturesContent() {
     if (typeof targetNodeId === "number") {
       params.set("node", String(targetNodeId));
     }
+    params.set("browse", "1");
     return `/scriptures?${params.toString()}`;
   };
 
@@ -3416,7 +4927,22 @@ function ScripturesContent() {
     } else {
       nextParams.delete("node");
     }
+    nextParams.delete("browse");
     nextParams.set("preview", scope);
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+  };
+
+  const syncBrowseUrl = (targetBookId: string, targetNodeId?: number | null) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("book", targetBookId);
+    if (typeof targetNodeId === "number") {
+      nextParams.set("node", String(targetNodeId));
+    } else {
+      nextParams.delete("node");
+    }
+    nextParams.delete("preview");
+    nextParams.set("browse", "1");
     const nextQuery = nextParams.toString();
     router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
   };
@@ -3427,6 +4953,16 @@ function ScripturesContent() {
       return;
     }
     nextParams.delete("preview");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+  };
+
+  const clearBrowseUrl = () => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (!nextParams.has("browse")) {
+      return;
+    }
+    nextParams.delete("browse");
     const nextQuery = nextParams.toString();
     router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
   };
@@ -3587,6 +5123,19 @@ function ScripturesContent() {
     void handlePreviewBook(previewScope, bookId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlInitialized, bookId, selectedId, searchParams]);
+
+  useEffect(() => {
+    const browseParam = searchParams.get("browse");
+    if (browseParam !== "1") {
+      return;
+    }
+    if (!urlInitialized || !bookId || !canExploreStructure) {
+      return;
+    }
+    setShowExploreStructure(true);
+    setShowBrowseBookModal(true);
+    setMobilePanel("tree");
+  }, [urlInitialized, bookId, canExploreStructure, searchParams]);
 
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -4725,6 +6274,7 @@ function ScripturesContent() {
     const nextBookId = book.id.toString();
     const didSelect = handleSelectBook(nextBookId);
     if (!didSelect) return;
+    syncBrowseUrl(nextBookId);
     setShowExploreStructure(true);
     setMobilePanel("tree");
     setShowBrowseBookModal(true);
@@ -4817,6 +6367,7 @@ function ScripturesContent() {
                 <div className="divide-y divide-black/5">
                   {paginatedBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
+                    const thumbnailUrl = getBookThumbnailUrl(book);
                     const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
                     const canBrowseBook = authUserId !== null && canView;
                     const canCopyPreviewBookLink = canPreviewBook && !canBrowseBook;
@@ -4833,19 +6384,30 @@ function ScripturesContent() {
                         }`}
                       >
                         <div className="flex min-w-0 flex-1 items-center justify-between text-left">
-                          {canPreviewBook ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handlePreviewBookFromRow(book);
-                              }}
-                              className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
-                            >
-                              {book.book_name}
-                            </button>
-                          ) : (
-                            <span className="truncate font-medium">{book.book_name}</span>
-                          )}
+                          <div className="flex min-w-0 items-center gap-2">
+                            {thumbnailUrl ? (
+                              <img
+                                src={thumbnailUrl}
+                                alt={`${book.book_name} thumbnail`}
+                                className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 object-cover"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 bg-zinc-100" />
+                            )}
+                            {canPreviewBook ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handlePreviewBookFromRow(book);
+                                }}
+                                className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
+                              >
+                                {book.book_name}
+                              </button>
+                            ) : (
+                              <span className="truncate font-medium">{book.book_name}</span>
+                            )}
+                          </div>
                           <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                             {book.visibility === "private" ? "Private" : "Public"}
                           </span>
@@ -5034,6 +6596,7 @@ function ScripturesContent() {
                       setShowBrowseBookModal(false);
                       setShowExploreStructure(false);
                       setMobilePanel("content");
+                      clearBrowseUrl();
                     }}
                     className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
                   >
@@ -5062,56 +6625,97 @@ function ScripturesContent() {
                 </div>
                 {bookId && (
                   <div className="mt-2 flex items-center gap-2">
-                    {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                    <div ref={bookTreeActionsMenuRef} className="relative">
                       <button
                         type="button"
-                        onClick={() => {
-                          void handlePreviewBook("book");
-                        }}
-                        title="Preview book"
-                        aria-label="Preview book"
+                        onClick={() => setShowBookTreeActionsMenu((prev) => !prev)}
+                        title="Book tree actions"
+                        aria-label="Book tree actions"
                         className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
                       >
-                        <Eye size={14} />
+                        ⋮
                       </button>
-                    )}
-                    {canContribute && currentBook?.schema && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Create a virtual "book" node to use as parent
-                          const virtualBook: TreeNode = {
-                            id: parseInt(bookId, 10),
-                            level_name: "BOOK",
-                            level_order: 0,
-                            sequence_number: undefined,
-                            title_english: books.find((b) => b.id.toString() === bookId)?.book_name,
-                          };
-                          const firstLevel = currentBook.schema?.levels[0] || "";
-                          const defaultHasContent = isLeafLevelName(firstLevel);
-                          setActionNode(virtualBook);
-                          setFormData({
-                            levelName: firstLevel,
-                            titleSanskrit: "",
-                            titleTransliteration: "",
-                            titleEnglish: "",
-                            sequenceNumber: "",
-                            hasContent: defaultHasContent,
-                            contentSanskrit: "",
-                            contentTransliteration: "",
-                            contentEnglish: "",
-                            tags: "",
-                            wordMeanings: [],
-                          });
-                          setAction("add");
-                        }}
-                        title={`Add ${currentBook.schema?.levels[0] || "Node"}`}
-                        aria-label={`Add ${currentBook.schema?.levels[0] || "Node"}`}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-green-500/30 bg-green-50 text-green-700 transition hover:border-green-500/60 hover:shadow-md"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    )}
+                      {showBookTreeActionsMenu && (
+                        <div className="absolute left-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                          {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                void handlePreviewBook("book");
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <Eye size={14} />
+                              Preview book
+                            </button>
+                          )}
+                          {canContribute && currentBook?.schema && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                const virtualBook: TreeNode = {
+                                  id: parseInt(bookId, 10),
+                                  level_name: "BOOK",
+                                  level_order: 0,
+                                  sequence_number: undefined,
+                                  title_english: books.find((b) => b.id.toString() === bookId)?.book_name,
+                                };
+                                const firstLevel = currentBook.schema?.levels[0] || "";
+                                const defaultHasContent = isLeafLevelName(firstLevel);
+                                setActionNode(virtualBook);
+                                setFormData({
+                                  levelName: firstLevel,
+                                  titleSanskrit: "",
+                                  titleTransliteration: "",
+                                  titleEnglish: "",
+                                  sequenceNumber: "",
+                                  hasContent: defaultHasContent,
+                                  contentSanskrit: "",
+                                  contentTransliteration: "",
+                                  contentEnglish: "",
+                                  tags: "",
+                                  wordMeanings: [],
+                                });
+                                setAction("add");
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <Plus size={14} />
+                              Add {currentBook.schema?.levels[0] || "Node"}
+                            </button>
+                          )}
+                          {canEditCurrentBook && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                setMediaManagerScope("book");
+                                setShowMediaManagerModal(true);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <Plus size={14} />
+                              Manage multimedia
+                            </button>
+                          )}
+                          {canEditCurrentBook && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                void openPropertiesModal("book");
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              <SlidersHorizontal size={14} />
+                              Book Properties
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     {currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
                       <>
                         <button
@@ -5417,6 +7021,46 @@ function ScripturesContent() {
                                 >
                                   <Link2 size={14} />
                                   Copy browse link
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    openNodeMediaManager(selectedId);
+                                  }}
+                                    disabled={nodeMediaUploading || nodeMediaUpdating}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Plus size={14} />
+                                    {nodeMediaUploading || nodeMediaUpdating ? "Working..." : "Manage multimedia"}
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    openCreateCommentaryEditor();
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Pencil size={14} />
+                                  Manage commentary
+                                </button>
+                              )}
+                              {authEmail && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
+                                    openCreateNodeCommentEditor();
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Pencil size={14} />
+                                  Add comment
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -5925,6 +7569,518 @@ function ScripturesContent() {
                           </div>
                         )}
 
+                        {showMedia && (nodeMediaLoading || nodeMediaError || nodeMedia.length > 0 || canEditCurrentBook) && (
+                          <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                Multimedia
+                              </div>
+                              {canEditCurrentBook && selectedId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    openNodeMediaManager(selectedId);
+                                  }}
+                                  disabled={nodeMediaUploading || nodeMediaUpdating}
+                                  className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {nodeMediaUploading || nodeMediaUpdating ? "Working..." : "Manage multimedia"}
+                                </button>
+                              )}
+                            </div>
+                            <div className="group relative mb-2">
+                              <input
+                                type="text"
+                                value={nodeMediaSearchQuery}
+                                onChange={(event) => setNodeMediaSearchQuery(event.target.value)}
+                                placeholder="Filter media"
+                                className="w-full rounded-lg border border-black/10 bg-white px-3 py-1.5 pr-10 text-xs outline-none focus:border-[color:var(--accent)]"
+                              />
+                              <InlineClearButton
+                                visible={Boolean(nodeMediaSearchQuery)}
+                                onClear={() => setNodeMediaSearchQuery("")}
+                                ariaLabel="Clear media filter"
+                              />
+                            </div>
+                            {nodeMediaMessage && (
+                              <p className="mb-2 text-xs text-zinc-600">{nodeMediaMessage}</p>
+                            )}
+                            {nodeMediaLoading && (
+                              <p className="text-sm text-zinc-600">Loading multimedia...</p>
+                            )}
+                            {!nodeMediaLoading && nodeMediaError && (
+                              <p className="text-sm text-red-600">{nodeMediaError}</p>
+                            )}
+                            {!nodeMediaLoading && !nodeMediaError && nodeMedia.length > 0 && (
+                              <div className="flex flex-col gap-4">
+                                {Object.entries(
+                                  nodeMedia.reduce<Record<string, MediaFile[]>>((acc, item) => {
+                                    const key = item.media_type || "other";
+                                    if (!acc[key]) {
+                                      acc[key] = [];
+                                    }
+                                    acc[key].push(item);
+                                    return acc;
+                                  }, {})
+                                )
+                                  .sort(([a], [b]) => a.localeCompare(b))
+                                  .map(([mediaType, items]) => {
+                                    const sortedItems = sortNodeMediaItems(items);
+                                    const filteredItems = sortedItems.filter((media) =>
+                                      mediaMatchesSearch(media, nodeMediaSearchQuery)
+                                    );
+                                    if (filteredItems.length === 0) {
+                                      return null;
+                                    }
+                                    return (
+                                      <div key={mediaType} className="rounded-xl border border-black/10 bg-white p-3">
+                                        <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">
+                                          {mediaType}
+                                        </div>
+                                        <div className="flex flex-col gap-3">
+                                          {filteredItems.map((media, index) => {
+                                            const mediaUrl = resolveMediaUrl(media.url);
+                                            const mediaMetadata =
+                                              media.metadata && typeof media.metadata === "object"
+                                                ? media.metadata
+                                                : media.metadata_json && typeof media.metadata_json === "object"
+                                                  ? media.metadata_json
+                                                  : null;
+                                            const label =
+                                              typeof mediaMetadata?.original_filename === "string" && mediaMetadata.original_filename
+                                                ? mediaMetadata.original_filename
+                                                : `${media.media_type} #${media.id}`;
+                                            const isDefault = isNodeMediaDefault(media);
+
+                                            return (
+                                              <div key={media.id} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5">
+                                                {media.media_type === "image" ? (
+                                                  <img
+                                                    src={mediaUrl}
+                                                    alt={label}
+                                                    className="max-h-[260px] w-full rounded-lg border border-black/10 object-contain"
+                                                  />
+                                                ) : media.media_type === "audio" ? (
+                                                  <audio controls className="w-full">
+                                                    <source src={mediaUrl} />
+                                                  </audio>
+                                                ) : media.media_type === "video" ? (
+                                                  (() => {
+                                                    const youtubeEmbedUrl = getYouTubeEmbedUrl(media.url);
+                                                    if (youtubeEmbedUrl) {
+                                                      return (
+                                                        <iframe
+                                                          src={youtubeEmbedUrl}
+                                                          title={label}
+                                                          className="h-[260px] w-full rounded-lg border border-black/10"
+                                                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                                          referrerPolicy="strict-origin-when-cross-origin"
+                                                          allowFullScreen
+                                                        />
+                                                      );
+                                                    }
+
+                                                    return (
+                                                      <video controls className="max-h-[260px] w-full rounded-lg border border-black/10">
+                                                        <source src={mediaUrl} />
+                                                      </video>
+                                                    );
+                                                  })()
+                                                ) : (
+                                                  <a
+                                                    href={mediaUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="text-sm text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
+                                                  >
+                                                    Open media: {label}
+                                                  </a>
+                                                )}
+
+                                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                                  <div className="text-xs text-zinc-500">
+                                                    {label}
+                                                    {isDefault ? " • Default" : ""}
+                                                  </div>
+                                                  {canEditCurrentBook && (
+                                                    <div className="flex flex-wrap items-center gap-1">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          void handleMoveNodeMedia(media.id, "up");
+                                                        }}
+                                                        disabled={nodeMediaUpdating || index === 0}
+                                                        className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                                                      >
+                                                        Up
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          void handleMoveNodeMedia(media.id, "down");
+                                                        }}
+                                                        disabled={nodeMediaUpdating || index === filteredItems.length - 1}
+                                                        className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                                                      >
+                                                        Down
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          void handleSetDefaultNodeMedia(media.id);
+                                                        }}
+                                                        disabled={nodeMediaUpdating || isDefault}
+                                                        className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                                                      >
+                                                        Set Default
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          void handleDeleteNodeMedia(media.id);
+                                                        }}
+                                                        disabled={nodeMediaUpdating}
+                                                        className="inline-flex items-center gap-1 rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 disabled:opacity-50"
+                                                      >
+                                                        <Trash2 size={11} />
+                                                        Remove
+                                                      </button>
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                            {!nodeMediaLoading && !nodeMediaError && nodeMedia.length === 0 && (
+                              <p className="text-sm text-zinc-500">No multimedia attached to this node.</p>
+                            )}
+                          </div>
+                        )}
+
+                        {showCommentary && (() => {
+                          const apiEntries: CommentaryDisplayItem[] = nodeCommentary
+                            .filter((entry) => typeof entry.content_text === "string" && entry.content_text.trim())
+                            .map((entry) => {
+                              const metadata =
+                                entry.metadata && typeof entry.metadata === "object"
+                                  ? entry.metadata
+                                  : null;
+                              const metadataAuthor =
+                                metadata && typeof metadata.author === "string" && metadata.author.trim()
+                                  ? metadata.author.trim()
+                                  : "";
+                              const metadataWork =
+                                metadata && typeof metadata.work_title === "string" && metadata.work_title.trim()
+                                  ? metadata.work_title.trim()
+                                  : "";
+                              const author = metadataAuthor || metadataWork || "Commentary";
+
+                              return {
+                                id: entry.id,
+                                author,
+                                text: entry.content_text,
+                              };
+                            });
+
+                          const metadata =
+                            (nodeContent.metadata_json && typeof nodeContent.metadata_json === "object"
+                              ? nodeContent.metadata_json
+                              : nodeContent.metadata && typeof nodeContent.metadata === "object"
+                                ? nodeContent.metadata
+                                : {}) as Record<string, unknown>;
+                          const metadataCommentary = metadata.commentary;
+                          const metadataEntries: CommentaryDisplayItem[] = Array.isArray(metadataCommentary)
+                            ? metadataCommentary
+                                .map((item, idx) => {
+                                  if (!item || typeof item !== "object") return null;
+                                  const entry = item as Record<string, unknown>;
+                                  const author = typeof entry.author === "string" ? entry.author : "Commentary";
+                                  const text = typeof entry.text === "string" ? entry.text : "";
+                                  if (!text.trim()) return null;
+                                  return { id: `metadata-${idx}`, author, text } as CommentaryDisplayItem;
+                                })
+                                .filter((item): item is CommentaryDisplayItem => Boolean(item))
+                            : [];
+
+                          const apiEditableEntries = nodeCommentary.filter(
+                            (entry) => typeof entry.content_text === "string" && entry.content_text.trim()
+                          );
+
+                          const displayEntries = apiEntries.length > 0 ? apiEntries : metadataEntries;
+                          if (!nodeCommentaryLoading && !nodeCommentaryError && displayEntries.length === 0) {
+                            return null;
+                          }
+
+                          return (
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                  Commentary
+                                </div>
+                                {canEditCurrentBook && (
+                                  <button
+                                    type="button"
+                                    onClick={openCreateCommentaryEditor}
+                                    disabled={commentarySubmitting}
+                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Add
+                                  </button>
+                                )}
+                              </div>
+                              {nodeCommentaryLoading && (
+                                <p className="text-sm text-zinc-600">Loading commentary...</p>
+                              )}
+                              {!nodeCommentaryLoading && nodeCommentaryError && (
+                                <p className="text-sm text-red-600">{nodeCommentaryError}</p>
+                              )}
+                              {commentaryMessage && (
+                                <p className="mb-2 text-xs text-zinc-600">{commentaryMessage}</p>
+                              )}
+                              {canEditCurrentBook && commentaryEditorOpen && (
+                                <div className="mb-3 space-y-2 rounded-lg border border-black/10 bg-white p-3">
+                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                    <input
+                                      type="text"
+                                      value={commentaryFormAuthor}
+                                      onChange={(event) => setCommentaryFormAuthor(event.target.value)}
+                                      placeholder="Author"
+                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={commentaryFormWorkTitle}
+                                      onChange={(event) => setCommentaryFormWorkTitle(event.target.value)}
+                                      placeholder="Work"
+                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={commentaryFormLanguage}
+                                      onChange={(event) => setCommentaryFormLanguage(event.target.value)}
+                                      placeholder="Language code"
+                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
+                                    />
+                                  </div>
+                                  <textarea
+                                    rows={4}
+                                    value={commentaryFormText}
+                                    onChange={(event) => setCommentaryFormText(event.target.value)}
+                                    placeholder="Commentary text"
+                                    className="w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                                  />
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCommentaryEditorOpen(false);
+                                        resetCommentaryEditor();
+                                      }}
+                                      disabled={commentarySubmitting}
+                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSubmitCommentary();
+                                      }}
+                                      disabled={commentarySubmitting || !commentaryFormText.trim()}
+                                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {commentarySubmitting
+                                        ? "Saving..."
+                                        : commentaryEditingId !== null
+                                          ? "Update"
+                                          : "Save"}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              {!nodeCommentaryLoading && !nodeCommentaryError && displayEntries.length > 0 && (
+                                <div className="space-y-3">
+                                  {apiEntries.length > 0
+                                    ? apiEditableEntries.map((entry) => {
+                                        const entryMetadata =
+                                          entry.metadata && typeof entry.metadata === "object"
+                                            ? (entry.metadata as Record<string, unknown>)
+                                            : {};
+                                        const author =
+                                          typeof entryMetadata.author === "string" && entryMetadata.author.trim()
+                                            ? entryMetadata.author.trim()
+                                            : typeof entryMetadata.work_title === "string" && entryMetadata.work_title.trim()
+                                              ? entryMetadata.work_title.trim()
+                                              : "Commentary";
+                                        return (
+                                          <div key={entry.id} className="rounded-lg border border-black/10 bg-white p-2.5">
+                                            <div className="flex items-center justify-between gap-2">
+                                              <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">{author}</div>
+                                              {canEditCurrentBook && (
+                                                <div className="flex items-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => openEditCommentaryEditor(entry)}
+                                                    disabled={commentarySubmitting}
+                                                    className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50"
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      void handleDeleteCommentary(entry.id);
+                                                    }}
+                                                    disabled={commentarySubmitting}
+                                                    className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                                  >
+                                                    Delete
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </div>
+                                            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{entry.content_text}</p>
+                                          </div>
+                                        );
+                                      })
+                                    : displayEntries.map((entry) => (
+                                        <div key={entry.id}>
+                                          <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">{entry.author}</div>
+                                          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{entry.text}</p>
+                                        </div>
+                                      ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {(nodeCommentsLoading || nodeCommentsError || nodeComments.length > 0 || Boolean(authEmail)) && (
+                          <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                Comments
+                              </div>
+                              {authEmail && (
+                                <button
+                                  type="button"
+                                  onClick={openCreateNodeCommentEditor}
+                                  disabled={nodeCommentSubmitting}
+                                  className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Add
+                                </button>
+                              )}
+                            </div>
+                            {nodeCommentsLoading && (
+                              <p className="text-sm text-zinc-600">Loading comments...</p>
+                            )}
+                            {!nodeCommentsLoading && nodeCommentsError && (
+                              <p className="text-sm text-red-600">{nodeCommentsError}</p>
+                            )}
+                            {nodeCommentMessage && (
+                              <p className="mb-2 text-xs text-zinc-600">{nodeCommentMessage}</p>
+                            )}
+                            {authEmail && nodeCommentEditorOpen && (
+                              <div className="mb-3 space-y-2 rounded-lg border border-black/10 bg-white p-3">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                  <input
+                                    type="text"
+                                    value={nodeCommentFormLanguage}
+                                    onChange={(event) => setNodeCommentFormLanguage(event.target.value)}
+                                    placeholder="Language code"
+                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
+                                  />
+                                </div>
+                                <textarea
+                                  rows={4}
+                                  value={nodeCommentFormText}
+                                  onChange={(event) => setNodeCommentFormText(event.target.value)}
+                                  placeholder="Comment text"
+                                  className="w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNodeCommentEditorOpen(false);
+                                      resetNodeCommentEditor();
+                                    }}
+                                    disabled={nodeCommentSubmitting}
+                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void handleSubmitNodeComment();
+                                    }}
+                                    disabled={nodeCommentSubmitting || !nodeCommentFormText.trim()}
+                                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {nodeCommentSubmitting
+                                      ? "Saving..."
+                                      : nodeCommentEditingId !== null
+                                        ? "Update"
+                                        : "Save"}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {!nodeCommentsLoading && !nodeCommentsError && nodeComments.length > 0 && (
+                              <div className="space-y-3">
+                                {nodeComments.map((entry) => {
+                                  const canManageComment =
+                                    canEditCurrentBook ||
+                                    (authUserId !== null && entry.created_by === authUserId);
+
+                                  return (
+                                    <div key={entry.id} className="rounded-lg border border-black/10 bg-white p-2.5">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">
+                                          {entry.created_by ? `User ${entry.created_by}` : "Comment"}
+                                        </div>
+                                        {canManageComment && (
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => openEditNodeCommentEditor(entry)}
+                                              disabled={nodeCommentSubmitting}
+                                              className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void handleDeleteNodeComment(entry.id);
+                                              }}
+                                              disabled={nodeCommentSubmitting}
+                                              className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+                                            >
+                                              Delete
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                                        {entry.content_text}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Tags */}
                         {nodeContent.tags && nodeContent.tags.length > 0 && (
                           <div>
@@ -6131,6 +8287,41 @@ function ScripturesContent() {
                 {propertiesScope === "book" && (
                   <div className="rounded-lg border border-black/10 bg-white p-3">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Book Thumbnail
+                    </div>
+                    <div className="mt-2 flex items-start gap-3">
+                      {getBookThumbnailUrl(currentBook) ? (
+                        <img
+                          src={getBookThumbnailUrl(currentBook) || ""}
+                          alt="Book thumbnail"
+                          className="h-20 w-20 rounded-lg border border-black/10 object-cover"
+                        />
+                      ) : (
+                        <div className="h-20 w-20 rounded-lg border border-black/10 bg-zinc-100" />
+                      )}
+                      <div className="flex flex-col items-start gap-2">
+                        <p className="text-xs text-zinc-600">
+                          {getBookThumbnailUrl(currentBook)
+                            ? "Thumbnail is managed in Multimedia Manager."
+                            : "No thumbnail set for this book."}
+                        </p>
+                        {canEditCurrentBook && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMediaManagerScope("book");
+                              setShowMediaManagerModal(true);
+                            }}
+                            className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700"
+                          >
+                            Manage multimedia
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 border-t border-black/10 pt-3">
+                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Word Meanings Rollout
                     </div>
                     <p className="mt-1 text-xs text-zinc-600">
@@ -6274,6 +8465,7 @@ function ScripturesContent() {
                         <span>Allow runtime transliteration generation</span>
                       </label>
                     </div>
+                    </div>
                   </div>
                 )}
 
@@ -6407,6 +8599,794 @@ function ScripturesContent() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(bookId) : Boolean(selectedId)))) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+            <div className="w-full max-w-3xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    Manage Multimedia
+                  </h2>
+                  <p className="text-sm text-zinc-600">
+                    {mediaManagerScope === "book"
+                      ? "Book media manager"
+                      : mediaManagerScope === "bank"
+                        ? "Multimedia repo"
+                        : "Node media manager"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMediaManagerModal(false)}
+                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {mediaManagerScope === "book" ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="group relative min-w-[220px] flex-1">
+                      <input
+                        type="text"
+                        value={mediaManagerSearchQuery}
+                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
+                        placeholder="Search media"
+                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                      />
+                      <InlineClearButton
+                        visible={Boolean(mediaManagerSearchQuery)}
+                        onClear={() => setMediaManagerSearchQuery("")}
+                        ariaLabel="Clear media search"
+                      />
+                    </div>
+                    <select
+                      value={mediaManagerTypeFilter}
+                      onChange={(event) => setMediaManagerTypeFilter(event.target.value)}
+                      className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    >
+                      <option value="all">All types</option>
+                      <option value="image">image</option>
+                    </select>
+                    <input
+                      ref={bookMediaUploadInputRef}
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.currentTarget.value = "";
+                        if (!file) return;
+                        void handleUploadBookMediaViaBank(file);
+                      }}
+                    />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setBookMediaActionsOpen((prev) => !prev)}
+                        disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                        aria-label="More media actions"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {bookMediaActionsOpen && (
+                        <div className="absolute right-0 top-10 z-20 min-w-[260px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBookMediaActionsOpen(false);
+                              bookMediaUploadInputRef.current?.click();
+                            }}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Upload
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBookMediaActionsOpen(false);
+                              openMediaLinkForm("book");
+                            }}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Add external
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBookMediaActionsOpen(false);
+                              setMediaBankViewMode("pick-book");
+                              setMediaManagerScope("bank");
+                            }}
+                            disabled={mediaBankUploading || mediaBankUpdating || bookThumbnailUploading || mediaLinkFormSubmitting}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Add from repo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+
+                  {propertiesError && (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {propertiesError}
+                    </div>
+                  )}
+                  {propertiesMessage && (
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {propertiesMessage}
+                    </div>
+                  )}
+
+                  <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10 bg-white">
+                    <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                      <span>Name</span>
+                      <span>Type</span>
+                      <span>Is default</span>
+                      <span className="text-right">Actions</span>
+                    </div>
+                    {(() => {
+                      const thumbnailUrl = getBookThumbnailUrl(currentBook);
+                      if (!thumbnailUrl) {
+                        return <div className="px-3 py-6 text-sm text-zinc-500">No multimedia attached to this book.</div>;
+                      }
+                      const query = mediaManagerSearchQuery.trim().toLowerCase();
+                      const rowLabel = "Book Thumbnail";
+                      const haystack = `${rowLabel} image ${thumbnailUrl}`.toLowerCase();
+                      const matchesType = mediaManagerTypeFilter === "all" || mediaManagerTypeFilter === "image";
+                      if (!matchesType || (query && !haystack.includes(query))) {
+                        return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
+                      }
+                      return (
+                        <div className="divide-y divide-black/5">
+                          <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{rowLabel}</div>
+                              <div className="mt-1">
+                                <img
+                                  src={thumbnailUrl}
+                                  alt="Book thumbnail"
+                                  className="h-12 w-12 rounded-md border border-black/10 object-cover"
+                                />
+                              </div>
+                            </div>
+                            <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">image</span>
+                            <span className="text-xs text-zinc-600">Yes</span>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                aria-label="Move up"
+                                title="Move up"
+                              >
+                                <ChevronsUp size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                aria-label="Move down"
+                                title="Move down"
+                              >
+                                <ChevronsDown size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled
+                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                aria-label="Set default"
+                                title="Set default"
+                              >
+                                <SlidersHorizontal size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleDeleteBookThumbnail();
+                                }}
+                                disabled={bookThumbnailUploading}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                aria-label="Remove"
+                                title="Remove"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              ) : mediaManagerScope === "bank" ? (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="group relative min-w-[220px] flex-1">
+                      <input
+                        type="text"
+                        value={mediaManagerSearchQuery}
+                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
+                        placeholder="Search media repo"
+                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                      />
+                      <InlineClearButton
+                        visible={Boolean(mediaManagerSearchQuery)}
+                        onClear={() => setMediaManagerSearchQuery("")}
+                        ariaLabel="Clear media repo search"
+                      />
+                    </div>
+                    {mediaBankViewMode === "manage" ? (
+                      <>
+                        <input
+                          ref={mediaBankUploadInputRef}
+                          type="file"
+                          accept="image/*,audio/*,video/*"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.currentTarget.value = "";
+                            if (!file) return;
+                            void handleUploadMediaBankAsset(file);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => mediaBankUploadInputRef.current?.click()}
+                          disabled={mediaBankUploading || mediaBankUpdating}
+                          className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                        >
+                          {mediaBankUploading ? "Uploading..." : "Upload"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            openMediaLinkForm("bank");
+                          }}
+                          disabled={mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting}
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition disabled:opacity-50"
+                        >
+                          Add Link
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextScope = mediaBankViewMode === "pick-book" ? "book" : "node";
+                          setMediaBankViewMode("manage");
+                          setMediaManagerScope(nextScope);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                      >
+                        Back
+                      </button>
+                    )}
+                  </div>
+
+
+                  {(mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book") && (
+                    <div className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                      {mediaBankViewMode === "pick-book"
+                        ? "Pick an image item for the book default image, or use Back to return."
+                        : "Pick an item to attach to the selected node, or use Back to return."}
+                    </div>
+                  )}
+
+                  {mediaBankError && (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {mediaBankError}
+                    </div>
+                  )}
+                  {mediaBankMessage && (
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {mediaBankMessage}
+                    </div>
+                  )}
+
+                  <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10 bg-white">
+                    {mediaBankLoading ? (
+                      <div className="px-3 py-6 text-sm text-zinc-600">Loading multimedia repo...</div>
+                    ) : mediaBankAssets.length === 0 ? (
+                      <div className="px-3 py-6 text-sm text-zinc-500">No media assets in repo.</div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                          <span>Name</span>
+                          <span>Type</span>
+                          <span className="text-right">{mediaBankViewMode === "manage" ? "Actions" : "Pick"}</span>
+                        </div>
+                        <div className="divide-y divide-black/5">
+                          {(() => {
+                            const filteredAssets = mediaBankAssets.filter((asset) =>
+                              mediaAssetMatchesSearch(asset, mediaManagerSearchQuery)
+                            );
+                            if (filteredAssets.length === 0) {
+                              return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
+                            }
+
+                            return filteredAssets.map((asset) => {
+                              const label =
+                                typeof asset.metadata?.display_name === "string" && asset.metadata.display_name
+                                  ? asset.metadata.display_name
+                                  : typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename
+                                    ? asset.metadata.original_filename
+                                    : `${asset.media_type} #${asset.id}`;
+                              return (
+                                <div key={asset.id} className="grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium">{label}</div>
+                                    {asset.media_type === "image" ? (
+                                      <img
+                                        src={resolveMediaUrl(asset.url)}
+                                        alt={label}
+                                        className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
+                                      />
+                                    ) : (
+                                      <div className="mt-1 truncate text-xs text-zinc-500">{asset.url}</div>
+                                    )}
+                                  </div>
+                                  <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type}</span>
+                                  <div className="flex items-center justify-end gap-1">
+                                    {mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book" ? (
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          if (mediaBankViewMode === "pick-book") {
+                                            const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
+                                            if (picked) {
+                                              setMediaBankViewMode("manage");
+                                              setMediaManagerScope("book");
+                                            }
+                                            return;
+                                          }
+
+                                          const attached = await handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                          if (attached) {
+                                            setMediaBankViewMode("manage");
+                                            setMediaManagerScope("node");
+                                          }
+                                        }}
+                                        disabled={
+                                          mediaBankUpdating ||
+                                          mediaBankUploading ||
+                                          bookThumbnailUploading ||
+                                          (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
+                                          (mediaBankViewMode === "pick-node" && !selectedId)
+                                        }
+                                        className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                      >
+                                        Pick
+                                      </button>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleRenameMediaBankAsset(asset);
+                                          }}
+                                          disabled={mediaBankUpdating || mediaBankUploading}
+                                          className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                        >
+                                          Rename
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                          }}
+                                          disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
+                                          className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                        >
+                                          Attach
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleDeleteMediaBankAsset(asset.id);
+                                          }}
+                                          disabled={mediaBankUpdating || mediaBankUploading}
+                                          className="rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 disabled:opacity-50"
+                                        >
+                                          Remove
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="group relative min-w-[220px] flex-1">
+                      <input
+                        type="text"
+                        value={mediaManagerSearchQuery}
+                        onChange={(event) => setMediaManagerSearchQuery(event.target.value)}
+                        placeholder="Search media"
+                        className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                      />
+                      <InlineClearButton
+                        visible={Boolean(mediaManagerSearchQuery)}
+                        onClear={() => setMediaManagerSearchQuery("")}
+                        ariaLabel="Clear media search"
+                      />
+                    </div>
+                    <select
+                      value={mediaManagerTypeFilter}
+                      onChange={(event) => setMediaManagerTypeFilter(event.target.value)}
+                      className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    >
+                      <option value="all">All types</option>
+                      {Array.from(
+                        new Set(
+                          nodeMedia
+                            .map((item) => (item.media_type || "").trim())
+                            .filter((item) => item.length > 0)
+                        )
+                      )
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                    </select>
+                    <input
+                      ref={nodeMediaUploadInputRef}
+                      type="file"
+                      className="hidden"
+                      accept="image/*,audio/*,video/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.currentTarget.value = "";
+                        if (!file) return;
+                        void handleUploadNodeMediaViaBank(file);
+                      }}
+                    />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setNodeMediaActionsOpen((prev) => !prev)}
+                        disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                        aria-label="More media actions"
+                      >
+                        <MoreVertical size={16} />
+                      </button>
+                      {nodeMediaActionsOpen && (
+                        <div className="absolute right-0 top-10 z-20 min-w-[250px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNodeMediaActionsOpen(false);
+                              nodeMediaUploadInputRef.current?.click();
+                            }}
+                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Upload
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNodeMediaActionsOpen(false);
+                              openMediaLinkForm("node");
+                            }}
+                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Add external
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNodeMediaActionsOpen(false);
+                              setMediaBankViewMode("pick-node");
+                              setMediaManagerScope("bank");
+                            }}
+                            disabled={mediaBankUploading || mediaBankUpdating}
+                            className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                          >
+                            Add from repo
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+
+                  {nodeMediaError && (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {nodeMediaError}
+                    </div>
+                  )}
+                  {nodeMediaMessage && (
+                    <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {nodeMediaMessage}
+                    </div>
+                  )}
+
+                  <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10 bg-white">
+                    {nodeMediaLoading ? (
+                      <div className="px-3 py-6 text-sm text-zinc-600">Loading multimedia...</div>
+                    ) : nodeMedia.length === 0 ? (
+                      <div className="px-3 py-6 text-sm text-zinc-500">No multimedia attached to this node.</div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                          <span>Name</span>
+                          <span>Type</span>
+                          <span>Is default</span>
+                          <span className="text-right">Actions</span>
+                        </div>
+                        <div className="divide-y divide-black/5">
+                          {(() => {
+                            const filteredItems = sortNodeMediaItems(nodeMedia).filter((media) => {
+                              const mediaType = (media.media_type || "").trim();
+                              const matchesType =
+                                mediaManagerTypeFilter === "all" || mediaType === mediaManagerTypeFilter;
+                              return matchesType && mediaMatchesSearch(media, mediaManagerSearchQuery);
+                            });
+
+                            if (filteredItems.length === 0) {
+                              return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
+                            }
+
+                            return filteredItems.map((media) => {
+                              const mediaType = media.media_type || "other";
+                              const label = getNodeMediaLabel(media);
+                              const isDefault = isNodeMediaDefault(media);
+                              const sameType = sortNodeMediaItems(
+                                nodeMedia.filter((item) => (item.media_type || "") === mediaType)
+                              );
+                              const sameTypeIndex = sameType.findIndex((item) => item.id === media.id);
+
+                              return (
+                                <div key={media.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium">{label}</div>
+                                    {mediaType === "image" ? (
+                                      <img
+                                        src={resolveMediaUrl(media.url)}
+                                        alt={label}
+                                        className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
+                                      />
+                                    ) : (
+                                      <div className="mt-1 truncate text-xs text-zinc-500">{media.url}</div>
+                                    )}
+                                  </div>
+                                  <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{mediaType}</span>
+                                  <span className="text-xs text-zinc-600">
+                                    {isDefault ? "Yes" : "No"}
+                                  </span>
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleMoveNodeMedia(media.id, "up");
+                                      }}
+                                      disabled={nodeMediaUpdating || sameTypeIndex <= 0}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Move up"
+                                      title="Move up"
+                                    >
+                                      <ChevronsUp size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleMoveNodeMedia(media.id, "down");
+                                      }}
+                                      disabled={nodeMediaUpdating || sameTypeIndex === sameType.length - 1}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Move down"
+                                      title="Move down"
+                                    >
+                                      <ChevronsDown size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleSetDefaultNodeMedia(media.id);
+                                      }}
+                                      disabled={nodeMediaUpdating || isDefault}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Set default"
+                                      title="Set default"
+                                    >
+                                      <SlidersHorizontal size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleDeleteNodeMedia(media.id);
+                                      }}
+                                      disabled={nodeMediaUpdating}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                      aria-label="Remove"
+                                      title="Remove"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {mediaLinkFormOpen && (
+                (() => {
+                  const previewUrl = mediaLinkFormUrl.trim();
+                  const inferredType = inferMediaTypeFromUrl(previewUrl);
+                  const effectiveType = mediaLinkFormMediaType === "auto" ? inferredType : mediaLinkFormMediaType;
+                  const youTubeEmbedUrl = effectiveType === "video" ? getYouTubeEmbedUrl(previewUrl) : null;
+
+                  return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-3" onClick={closeMediaLinkForm}>
+                  <div
+                    className="w-full max-w-xl rounded-2xl border border-black/10 bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="mb-4 flex items-center justify-between">
+                      <div>
+                        <h3 className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">Add External Media</h3>
+                        <p className="text-sm text-zinc-600">
+                          {mediaLinkFormContext === "book"
+                            ? "Add an external media link to repo for this book."
+                            : mediaLinkFormContext === "node"
+                              ? "Add an external media link to repo and attach to this node."
+                              : "Add an external media link to repo."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeMediaLinkForm}
+                        disabled={mediaLinkFormSubmitting}
+                        className="text-2xl text-zinc-400 hover:text-zinc-600 disabled:opacity-50"
+                        aria-label="Close add external form"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_0.8fr]">
+                      <label className="text-xs text-zinc-600">
+                        URL
+                        <input
+                          type="url"
+                          value={mediaLinkFormUrl}
+                          onChange={(event) => {
+                            const nextUrl = event.target.value;
+                            setMediaLinkFormUrl(nextUrl);
+                            if (!mediaLinkFormDisplayNameTouched) {
+                              setMediaLinkFormDisplayName(inferDisplayNameFromUrl(nextUrl));
+                            }
+                            if (!mediaLinkFormTypeTouched) {
+                              setMediaLinkFormMediaType(inferMediaTypeFromUrl(nextUrl));
+                            }
+                          }}
+                          placeholder="https://..."
+                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        />
+                      </label>
+                      <label className="text-xs text-zinc-600">
+                        Display name
+                        <input
+                          type="text"
+                          value={mediaLinkFormDisplayName}
+                          onChange={(event) => {
+                            setMediaLinkFormDisplayNameTouched(true);
+                            setMediaLinkFormDisplayName(event.target.value);
+                          }}
+                          placeholder="Auto"
+                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        />
+                      </label>
+                      <label className="text-xs text-zinc-600">
+                        Type
+                        <select
+                          value={mediaLinkFormMediaType}
+                          onChange={(event) => {
+                            setMediaLinkFormTypeTouched(true);
+                            setMediaLinkFormMediaType(event.target.value as "auto" | ExternalMediaType);
+                          }}
+                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        >
+                          <option value="auto">Auto ({inferMediaTypeFromUrl(mediaLinkFormUrl)})</option>
+                          <option value="image">image</option>
+                          <option value="audio">audio</option>
+                          <option value="video">video</option>
+                          <option value="link">link</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    {previewUrl && (
+                      <div className="mt-4 rounded-lg border border-black/10 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.12em] text-zinc-500">
+                          <span>Preview</span>
+                          <span>{effectiveType}</span>
+                        </div>
+                        {effectiveType === "image" ? (
+                          <img
+                            src={previewUrl}
+                            alt={mediaLinkFormDisplayName.trim() || "External media preview"}
+                            className="max-h-56 w-full rounded-md border border-black/10 object-contain"
+                          />
+                        ) : effectiveType === "audio" ? (
+                          <audio controls className="w-full">
+                            <source src={previewUrl} />
+                          </audio>
+                        ) : effectiveType === "video" && youTubeEmbedUrl ? (
+                          <iframe
+                            src={youTubeEmbedUrl}
+                            title="External video preview"
+                            className="aspect-video w-full rounded-md border border-black/10"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                          />
+                        ) : (
+                          <a
+                            href={previewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate text-sm text-[color:var(--accent)] hover:underline"
+                          >
+                            {previewUrl}
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={closeMediaLinkForm}
+                        disabled={mediaLinkFormSubmitting}
+                        className="rounded border border-black/10 bg-white px-3 py-1.5 text-sm text-zinc-700 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleSubmitMediaLinkForm();
+                        }}
+                        disabled={mediaLinkFormSubmitting || !mediaLinkFormUrl.trim()}
+                        className="rounded border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                      >
+                        {mediaLinkFormSubmitting ? "Adding..." : "Add"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                  );
+                })()
+              )}
             </div>
           </div>
         )}
