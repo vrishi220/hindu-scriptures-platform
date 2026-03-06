@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
+import ExternalMediaFormModal from "../../components/ExternalMediaFormModal";
 import InlineClearButton from "../../components/InlineClearButton";
 import WordMeaningsEditor from "../../components/WordMeaningsEditor";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
@@ -40,6 +41,18 @@ import {
   persistUiPreferences,
   readStoredUiPreferences,
 } from "../../lib/uiPreferences";
+import {
+  inferDisplayNameFromUrl,
+  type ExternalMediaType,
+} from "../../lib/externalMedia";
+import {
+  createMediaBankLinkAsset as createMediaBankLinkAssetRequest,
+  deleteMediaBankAsset,
+  listMediaBankAssets,
+  MediaBankClientError,
+  renameMediaBankAsset,
+  uploadMediaBankAsset,
+} from "../../lib/mediaBankClient";
 import { resolveMediaUrl } from "../../lib/mediaUrl";
 
 type BookOption = {
@@ -230,7 +243,6 @@ type MediaAsset = {
   created_at?: string | null;
 };
 
-type ExternalMediaType = "image" | "audio" | "video" | "link";
 type MediaLinkContext = "bank" | "node" | "book";
 
 type CommentaryEntry = {
@@ -423,6 +435,44 @@ const formatValue = (value: unknown) => {
     }
   }
   return "";
+};
+
+const normalizeErrorValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const parts = value.map((entry) => normalizeErrorValue(entry)).filter(Boolean);
+    return parts.join("; ");
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.msg === "string" && record.msg.trim()) {
+      return record.msg.trim();
+    }
+    if (typeof record.message === "string" && record.message.trim()) {
+      return record.message.trim();
+    }
+    if ("detail" in record) {
+      const nested = normalizeErrorValue(record.detail);
+      if (nested) return nested;
+    }
+    return formatValue(value);
+  }
+  return "";
+};
+
+const getErrorMessageFromPayload = (payload: unknown, fallback: string): string => {
+  if (payload && typeof payload === "object" && "detail" in payload) {
+    const detail = normalizeErrorValue((payload as { detail?: unknown }).detail);
+    if (detail) return detail;
+  }
+  const generic = normalizeErrorValue(payload);
+  return generic || fallback;
 };
 
 const parseSequenceNumber = (value: unknown) => {
@@ -874,7 +924,7 @@ const getNodeThumbnailUrl = (mediaItems: MediaFile[]): string | null => {
           : null;
     return Boolean(metadata?.is_default);
   });
-  return (defaultImage || imageItems[0]).url;
+  return resolveMediaUrl((defaultImage || imageItems[0]).url);
 };
 
 const getYouTubeEmbedUrl = (rawUrl: string): string | null => {
@@ -963,67 +1013,6 @@ const getMediaLookupKey = (mediaType: string | undefined, rawUrl: string): strin
     return `${normalizedType}:${host}${pathname}`;
   } catch {
     return `${normalizedType}:${trimmedUrl.toLowerCase()}`;
-  }
-};
-
-const inferMediaTypeFromUrl = (rawUrl: string): ExternalMediaType => {
-  if (!rawUrl || typeof rawUrl !== "string") {
-    return "link";
-  }
-
-  try {
-    const parsed = new URL(rawUrl);
-    let host = parsed.hostname.toLowerCase();
-    if (host.startsWith("www.")) {
-      host = host.slice(4);
-    }
-    const path = (parsed.pathname || "").toLowerCase();
-
-    if (anyFileExtension(path, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif"])) {
-      return "image";
-    }
-    if (anyFileExtension(path, [".mp3", ".wav", ".ogg", ".aac", ".m4a", ".flac"])) {
-      return "audio";
-    }
-    if (anyFileExtension(path, [".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi"])) {
-      return "video";
-    }
-    if (host === "youtube.com" || host === "youtu.be" || host === "m.youtube.com" || host === "music.youtube.com" || host === "vimeo.com" || host === "dailymotion.com") {
-      return "video";
-    }
-
-    return "link";
-  } catch {
-    return "link";
-  }
-};
-
-const anyFileExtension = (value: string, extensions: string[]): boolean =>
-  extensions.some((extension) => value.endsWith(extension));
-
-const inferDisplayNameFromUrl = (rawUrl: string): string => {
-  if (!rawUrl || typeof rawUrl !== "string") {
-    return "";
-  }
-  try {
-    const parsed = new URL(rawUrl);
-    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
-    if (host === "youtu.be" || host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
-      return "YouTube Video";
-    }
-    if (host === "vimeo.com") {
-      return "Vimeo Video";
-    }
-    if (host === "dailymotion.com") {
-      return "Dailymotion Video";
-    }
-    const leaf = parsed.pathname.split("/").filter(Boolean).pop();
-    if (leaf) {
-      return decodeURIComponent(leaf);
-    }
-    return parsed.hostname;
-  } catch {
-    return "";
   }
 };
 
@@ -1323,14 +1312,9 @@ function ScripturesContent() {
   const [mediaBankMessage, setMediaBankMessage] = useState<string | null>(null);
   const [mediaBankUploading, setMediaBankUploading] = useState(false);
   const [mediaBankUpdating, setMediaBankUpdating] = useState(false);
-  const [mediaLinkFormOpen, setMediaLinkFormOpen] = useState(false);
-  const [mediaLinkFormContext, setMediaLinkFormContext] = useState<MediaLinkContext>("bank");
-  const [mediaLinkFormUrl, setMediaLinkFormUrl] = useState("");
-  const [mediaLinkFormDisplayName, setMediaLinkFormDisplayName] = useState("");
-  const [mediaLinkFormMediaType, setMediaLinkFormMediaType] = useState<"auto" | ExternalMediaType>("auto");
-  const [mediaLinkFormDisplayNameTouched, setMediaLinkFormDisplayNameTouched] = useState(false);
-  const [mediaLinkFormTypeTouched, setMediaLinkFormTypeTouched] = useState(false);
-  const [mediaLinkFormSubmitting, setMediaLinkFormSubmitting] = useState(false);
+  const [externalMediaFormOpen, setExternalMediaFormOpen] = useState(false);
+  const [externalMediaFormContext, setExternalMediaFormContext] = useState<MediaLinkContext>("bank");
+  const [externalMediaFormSubmitting, setExternalMediaFormSubmitting] = useState(false);
   const [bookMediaActionsOpen, setBookMediaActionsOpen] = useState(false);
   const [nodeMediaActionsOpen, setNodeMediaActionsOpen] = useState(false);
   const [mediaManagerSearchQuery, setMediaManagerSearchQuery] = useState("");
@@ -2995,7 +2979,8 @@ function ScripturesContent() {
   useEffect(() => {
     if (!showMediaManagerModal) {
       setMediaBankViewMode("manage");
-      closeMediaLinkForm();
+      setExternalMediaFormOpen(false);
+      setExternalMediaFormSubmitting(false);
       setBookMediaActionsOpen(false);
       setNodeMediaActionsOpen(false);
       return;
@@ -3004,7 +2989,8 @@ function ScripturesContent() {
     setMediaManagerTypeFilter("all");
     setMediaBankError(null);
     setMediaBankMessage(null);
-    closeMediaLinkForm();
+    setExternalMediaFormOpen(false);
+    setExternalMediaFormSubmitting(false);
     setBookMediaActionsOpen(false);
     setNodeMediaActionsOpen(false);
     void loadMediaBankAssets();
@@ -3809,15 +3795,8 @@ function ScripturesContent() {
     setMediaBankLoading(true);
     setMediaBankError(null);
     try {
-      const response = await fetch(contentPath("/media-bank/assets?limit=1000"), {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(payload?.detail || "Unable to load media repo");
-      }
-      const data = (await response.json()) as MediaAsset[];
-      setMediaBankAssets(Array.isArray(data) ? data : []);
+      const data = await listMediaBankAssets(300);
+      setMediaBankAssets(Array.isArray(data) ? (data as MediaAsset[]) : []);
     } catch (err) {
       setMediaBankAssets([]);
       setMediaBankError(err instanceof Error ? err.message : "Unable to load media repo");
@@ -3831,17 +3810,7 @@ function ScripturesContent() {
     setMediaBankError(null);
     setMediaBankMessage(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch(contentPath("/media-bank/assets"), {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to upload media asset");
-      }
+      await uploadMediaBankAsset(file);
       setMediaBankMessage("Media asset uploaded.");
       await loadMediaBankAssets();
     } catch (err) {
@@ -3852,23 +3821,8 @@ function ScripturesContent() {
   };
 
   const openMediaLinkForm = (context: MediaLinkContext) => {
-    setMediaLinkFormContext(context);
-    setMediaLinkFormOpen(true);
-    setMediaLinkFormUrl("");
-    setMediaLinkFormDisplayName("");
-    setMediaLinkFormMediaType("auto");
-    setMediaLinkFormDisplayNameTouched(false);
-    setMediaLinkFormTypeTouched(false);
-  };
-
-  const closeMediaLinkForm = () => {
-    setMediaLinkFormOpen(false);
-    setMediaLinkFormUrl("");
-    setMediaLinkFormDisplayName("");
-    setMediaLinkFormMediaType("auto");
-    setMediaLinkFormDisplayNameTouched(false);
-    setMediaLinkFormTypeTouched(false);
-    setMediaLinkFormSubmitting(false);
+    setExternalMediaFormContext(context);
+    setExternalMediaFormOpen(true);
   };
 
   const createMediaBankLinkAsset = async (
@@ -3876,40 +3830,19 @@ function ScripturesContent() {
     displayName?: string,
     mediaType?: ExternalMediaType
   ): Promise<MediaAsset> => {
-    const response = await fetch(contentPath("/media-bank/assets/link"), {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url,
-        ...(displayName ? { display_name: displayName } : {}),
-        ...(mediaType ? { media_type: mediaType } : {}),
-      }),
+    const asset = await createMediaBankLinkAssetRequest({
+      url,
+      displayName,
+      mediaType,
     });
-    const payload = (await response.json().catch(() => null)) as MediaAsset | { detail?: string } | null;
-    if (!response.ok) {
-      throw new Error(payload && "detail" in payload ? payload.detail || "Failed to create media link" : "Failed to create media link");
-    }
-    const asset = payload as MediaAsset | null;
     if (!asset || typeof asset.id !== "number") {
       throw new Error("Link created but no media asset was returned.");
     }
-    return asset;
+    return asset as MediaAsset;
   };
 
   const uploadMediaBankAssetAndReturn = async (file: File): Promise<MediaAsset> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const response = await fetch(contentPath("/media-bank/assets"), {
-      method: "POST",
-      credentials: "include",
-      body: formData,
-    });
-    const payload = (await response.json().catch(() => null)) as MediaAsset | { detail?: string } | null;
-    if (!response.ok) {
-      throw new Error(payload && "detail" in payload ? payload.detail || "Failed to upload media asset" : "Failed to upload media asset");
-    }
-    const asset = payload as MediaAsset | null;
+    const asset = (await uploadMediaBankAsset(file)) as MediaAsset | null;
     if (!asset || typeof asset.id !== "number") {
       throw new Error("Upload succeeded but no media asset was returned.");
     }
@@ -3923,23 +3856,23 @@ function ScripturesContent() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_default: false }),
     });
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
     if (!response.ok) {
-      throw new Error(payload?.detail || "Failed to attach media asset");
+      throw new Error(getErrorMessageFromPayload(payload, "Failed to attach media asset"));
     }
   };
 
-  const handleSubmitMediaLinkForm = async () => {
-    const trimmedUrl = mediaLinkFormUrl.trim();
-    if (!trimmedUrl) {
+  const handleSubmitMediaLinkForm = async (payload: {
+    url: string;
+    displayName?: string;
+    mediaType?: ExternalMediaType;
+  }) => {
+    if (!payload.url.trim()) {
       setMediaBankError("URL is required.");
       return;
     }
 
-    const trimmedDisplayName = mediaLinkFormDisplayName.trim();
-    const explicitType = mediaLinkFormMediaType === "auto" ? undefined : mediaLinkFormMediaType;
-
-    setMediaLinkFormSubmitting(true);
+    setExternalMediaFormSubmitting(true);
     setMediaBankError(null);
     setMediaBankMessage(null);
     setNodeMediaError(null);
@@ -3948,16 +3881,20 @@ function ScripturesContent() {
     setPropertiesMessage(null);
 
     try {
-      const createdAsset = await createMediaBankLinkAsset(trimmedUrl, trimmedDisplayName || undefined, explicitType);
+      const createdAsset = await createMediaBankLinkAsset(
+        payload.url,
+        payload.displayName,
+        payload.mediaType
+      );
 
-      if (mediaLinkFormContext === "node") {
+      if (externalMediaFormContext === "node") {
         if (!selectedId) {
           throw new Error("Select a node first to attach media.");
         }
         await attachMediaBankAssetToNode(createdAsset.id, selectedId);
         setNodeMediaMessage("Link added to repo and attached to node.");
         await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
-      } else if (mediaLinkFormContext === "book") {
+      } else if (externalMediaFormContext === "book") {
         setPropertiesMessage("External media added to repo.");
         await loadMediaBankAssets();
       } else {
@@ -3965,18 +3902,18 @@ function ScripturesContent() {
         await loadMediaBankAssets();
       }
 
-      closeMediaLinkForm();
+      setExternalMediaFormOpen(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to add external media link";
-      if (mediaLinkFormContext === "node") {
+      if (externalMediaFormContext === "node") {
         setNodeMediaError(message);
-      } else if (mediaLinkFormContext === "book") {
+      } else if (externalMediaFormContext === "book") {
         setPropertiesError(message);
       } else {
         setMediaBankError(message);
       }
     } finally {
-      setMediaLinkFormSubmitting(false);
+      setExternalMediaFormSubmitting(false);
     }
   };
 
@@ -4001,16 +3938,7 @@ function ScripturesContent() {
     setMediaBankError(null);
     setMediaBankMessage(null);
     try {
-      const response = await fetch(contentPath(`/media-bank/assets/${asset.id}`), {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: trimmed }),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to rename media asset");
-      }
+      await renameMediaBankAsset(asset.id, trimmed);
       setMediaBankMessage("Media asset renamed.");
       await loadMediaBankAssets();
     } catch (err) {
@@ -4025,23 +3953,17 @@ function ScripturesContent() {
     setMediaBankError(null);
     setMediaBankMessage(null);
     try {
-      const response = await fetch(contentPath(`/media-bank/assets/${assetId}`), {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        if (response.status === 409) {
-          throw new Error(
-            "Cannot remove this asset yet. Detach it from all nodes first, then delete it from the multimedia repo."
-          );
-        }
-        throw new Error(payload?.detail || "Failed to delete media asset");
-      }
+      await deleteMediaBankAsset(assetId);
       setMediaBankMessage("Media asset removed from repo.");
       await loadMediaBankAssets();
     } catch (err) {
-      setMediaBankError(err instanceof Error ? err.message : "Failed to delete media asset");
+      if (err instanceof MediaBankClientError && err.status === 409) {
+        setMediaBankError(
+          "Cannot remove this asset yet. Detach it from all nodes first, then delete it from the multimedia repo."
+        );
+      } else {
+        setMediaBankError(err instanceof Error ? err.message : "Failed to delete media asset");
+      }
     } finally {
       setMediaBankUpdating(false);
     }
@@ -4153,28 +4075,34 @@ function ScripturesContent() {
     }
   };
 
-  const handleDeleteNodeMedia = async (mediaId: number) => {
-    if (!selectedId) {
+  const handleDeleteNodeMedia = async (media: MediaFile) => {
+    const targetNodeId = typeof media.node_id === "number" ? media.node_id : selectedId;
+    if (!targetNodeId) {
       return;
     }
 
+    setNodeMediaUpdating(true);
     setNodeMediaError(null);
     setNodeMediaMessage(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${selectedId}/media/${mediaId}`), {
+      const response = await fetch(contentPath(`/nodes/${targetNodeId}/media/${media.id}`), {
         method: "DELETE",
         credentials: "include",
       });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      const payload = (await response.json().catch(() => null)) as unknown;
       if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to delete media");
+        throw new Error(getErrorMessageFromPayload(payload, "Failed to delete media"));
       }
 
       setNodeMediaMessage("Multimedia removed.");
-      await loadNodeMedia(selectedId, true);
+      if (selectedId === targetNodeId) {
+        await loadNodeMedia(targetNodeId, true);
+      }
     } catch (err) {
       setNodeMediaError(err instanceof Error ? err.message : "Failed to delete media");
+    } finally {
+      setNodeMediaUpdating(false);
     }
   };
 
@@ -6613,12 +6541,12 @@ function ScripturesContent() {
                 </div>
               </div>
 
-              <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:mt-4 sm:gap-4 lg:grid-cols-3 lg:h-[calc(100vh-280px)]">
+                <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl overflow-hidden px-3 pb-4 pt-2 sm:px-4">
+              <div className="grid h-full min-h-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
             {/* Tree Section */}
             {isExploreVisible && (
             <div
-              className={`lg:col-span-1 min-h-0 rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:h-full lg:flex-col ${
+              className={`lg:col-span-1 min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:flex-col ${
                 mobilePanel === "tree" ? "block" : "hidden"
               } lg:block`}
             >
@@ -6767,7 +6695,7 @@ function ScripturesContent() {
 
             {/* Content Section */}
             <div
-              className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 lg:h-full lg:overflow-y-auto lg:overscroll-contain ${
+              className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 overflow-y-auto overscroll-contain ${
                 !isExploreVisible || mobilePanel === "content" ? "block" : "hidden"
               } lg:block`}
             >
@@ -7745,7 +7673,7 @@ function ScripturesContent() {
                                                       <button
                                                         type="button"
                                                         onClick={() => {
-                                                          void handleDeleteNodeMedia(media.id);
+                                                          void handleDeleteNodeMedia(media);
                                                         }}
                                                         disabled={nodeMediaUpdating}
                                                         className="inline-flex items-center gap-1 rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 disabled:opacity-50"
@@ -8677,7 +8605,7 @@ function ScripturesContent() {
                       <button
                         type="button"
                         onClick={() => setBookMediaActionsOpen((prev) => !prev)}
-                        disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                        disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                         aria-label="More media actions"
                       >
@@ -8691,7 +8619,7 @@ function ScripturesContent() {
                               setBookMediaActionsOpen(false);
                               bookMediaUploadInputRef.current?.click();
                             }}
-                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Upload
@@ -8702,7 +8630,7 @@ function ScripturesContent() {
                               setBookMediaActionsOpen(false);
                               openMediaLinkForm("book");
                             }}
-                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !bookId}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Add external
@@ -8714,7 +8642,7 @@ function ScripturesContent() {
                               setMediaBankViewMode("pick-book");
                               setMediaManagerScope("bank");
                             }}
-                            disabled={mediaBankUploading || mediaBankUpdating || bookThumbnailUploading || mediaLinkFormSubmitting}
+                            disabled={mediaBankUploading || mediaBankUpdating || bookThumbnailUploading || externalMediaFormSubmitting}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Add from repo
@@ -8861,7 +8789,7 @@ function ScripturesContent() {
                           onClick={() => {
                             openMediaLinkForm("bank");
                           }}
-                          disabled={mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting}
+                          disabled={mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting}
                           className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition disabled:opacity-50"
                         >
                           Add Link
@@ -9073,7 +9001,7 @@ function ScripturesContent() {
                       <button
                         type="button"
                         onClick={() => setNodeMediaActionsOpen((prev) => !prev)}
-                        disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                        disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !selectedId}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                         aria-label="More media actions"
                       >
@@ -9087,7 +9015,7 @@ function ScripturesContent() {
                               setNodeMediaActionsOpen(false);
                               nodeMediaUploadInputRef.current?.click();
                             }}
-                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !selectedId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Upload
@@ -9098,7 +9026,7 @@ function ScripturesContent() {
                               setNodeMediaActionsOpen(false);
                               openMediaLinkForm("node");
                             }}
-                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || mediaLinkFormSubmitting || !selectedId}
+                            disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !selectedId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Add external
@@ -9225,7 +9153,7 @@ function ScripturesContent() {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        void handleDeleteNodeMedia(media.id);
+                                        void handleDeleteNodeMedia(media);
                                       }}
                                       disabled={nodeMediaUpdating}
                                       className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
@@ -9246,155 +9174,25 @@ function ScripturesContent() {
                 </>
               )}
 
-              {mediaLinkFormOpen && (
-                (() => {
-                  const previewUrl = mediaLinkFormUrl.trim();
-                  const inferredType = inferMediaTypeFromUrl(previewUrl);
-                  const effectiveType = mediaLinkFormMediaType === "auto" ? inferredType : mediaLinkFormMediaType;
-                  const youTubeEmbedUrl = effectiveType === "video" ? getYouTubeEmbedUrl(previewUrl) : null;
-
-                  return (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-3" onClick={closeMediaLinkForm}>
-                  <div
-                    className="w-full max-w-xl rounded-2xl border border-black/10 bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <div className="mb-4 flex items-center justify-between">
-                      <div>
-                        <h3 className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">Add External Media</h3>
-                        <p className="text-sm text-zinc-600">
-                          {mediaLinkFormContext === "book"
-                            ? "Add an external media link to repo for this book."
-                            : mediaLinkFormContext === "node"
-                              ? "Add an external media link to repo and attach to this node."
-                              : "Add an external media link to repo."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={closeMediaLinkForm}
-                        disabled={mediaLinkFormSubmitting}
-                        className="text-2xl text-zinc-400 hover:text-zinc-600 disabled:opacity-50"
-                        aria-label="Close add external form"
-                      >
-                        ✕
-                      </button>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_0.8fr]">
-                      <label className="text-xs text-zinc-600">
-                        URL
-                        <input
-                          type="url"
-                          value={mediaLinkFormUrl}
-                          onChange={(event) => {
-                            const nextUrl = event.target.value;
-                            setMediaLinkFormUrl(nextUrl);
-                            if (!mediaLinkFormDisplayNameTouched) {
-                              setMediaLinkFormDisplayName(inferDisplayNameFromUrl(nextUrl));
-                            }
-                            if (!mediaLinkFormTypeTouched) {
-                              setMediaLinkFormMediaType(inferMediaTypeFromUrl(nextUrl));
-                            }
-                          }}
-                          placeholder="https://..."
-                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                        />
-                      </label>
-                      <label className="text-xs text-zinc-600">
-                        Display name
-                        <input
-                          type="text"
-                          value={mediaLinkFormDisplayName}
-                          onChange={(event) => {
-                            setMediaLinkFormDisplayNameTouched(true);
-                            setMediaLinkFormDisplayName(event.target.value);
-                          }}
-                          placeholder="Auto"
-                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                        />
-                      </label>
-                      <label className="text-xs text-zinc-600">
-                        Type
-                        <select
-                          value={mediaLinkFormMediaType}
-                          onChange={(event) => {
-                            setMediaLinkFormTypeTouched(true);
-                            setMediaLinkFormMediaType(event.target.value as "auto" | ExternalMediaType);
-                          }}
-                          className="mt-1 w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                        >
-                          <option value="auto">Auto ({inferMediaTypeFromUrl(mediaLinkFormUrl)})</option>
-                          <option value="image">image</option>
-                          <option value="audio">audio</option>
-                          <option value="video">video</option>
-                          <option value="link">link</option>
-                        </select>
-                      </label>
-                    </div>
-
-                    {previewUrl && (
-                      <div className="mt-4 rounded-lg border border-black/10 bg-white p-3">
-                        <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-[0.12em] text-zinc-500">
-                          <span>Preview</span>
-                          <span>{effectiveType}</span>
-                        </div>
-                        {effectiveType === "image" ? (
-                          <img
-                            src={previewUrl}
-                            alt={mediaLinkFormDisplayName.trim() || "External media preview"}
-                            className="max-h-56 w-full rounded-md border border-black/10 object-contain"
-                          />
-                        ) : effectiveType === "audio" ? (
-                          <audio controls className="w-full">
-                            <source src={previewUrl} />
-                          </audio>
-                        ) : effectiveType === "video" && youTubeEmbedUrl ? (
-                          <iframe
-                            src={youTubeEmbedUrl}
-                            title="External video preview"
-                            className="aspect-video w-full rounded-md border border-black/10"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            allowFullScreen
-                          />
-                        ) : (
-                          <a
-                            href={previewUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="block truncate text-sm text-[color:var(--accent)] hover:underline"
-                          >
-                            {previewUrl}
-                          </a>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-4 flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={closeMediaLinkForm}
-                        disabled={mediaLinkFormSubmitting}
-                        className="rounded border border-black/10 bg-white px-3 py-1.5 text-sm text-zinc-700 disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleSubmitMediaLinkForm();
-                        }}
-                        disabled={mediaLinkFormSubmitting || !mediaLinkFormUrl.trim()}
-                        className="rounded border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                      >
-                        {mediaLinkFormSubmitting ? "Adding..." : "Add"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                  );
-                })()
-              )}
+              <ExternalMediaFormModal
+                open={externalMediaFormOpen}
+                submitting={externalMediaFormSubmitting}
+                description={
+                  externalMediaFormContext === "book"
+                    ? "Add an external media link to repo for this book."
+                    : externalMediaFormContext === "node"
+                      ? "Add an external media link to repo and attach to this node."
+                      : "Add an external media link to repo."
+                }
+                onClose={() => {
+                  if (!externalMediaFormSubmitting) {
+                    setExternalMediaFormOpen(false);
+                  }
+                }}
+                onSubmit={async (payload) => {
+                  await handleSubmitMediaLinkForm(payload);
+                }}
+              />
             </div>
           </div>
         )}

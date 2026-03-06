@@ -3,9 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MoreVertical } from "lucide-react";
 import { getMe } from "@/lib/authClient";
-import { contentPath } from "@/lib/apiPaths";
 import InlineClearButton from "@/components/InlineClearButton";
+import ExternalMediaFormModal from "@/components/ExternalMediaFormModal";
+import {
+  createMediaBankLinkAsset,
+  deleteMediaBankAsset,
+  listMediaBankAssets,
+  MediaBankClientError,
+  renameMediaBankAsset,
+  uploadMediaBankAsset,
+} from "@/lib/mediaBankClient";
 import { resolveMediaUrl } from "@/lib/mediaUrl";
+import { type ExternalMediaType } from "@/lib/externalMedia";
 
 type MediaAsset = {
   id: number;
@@ -17,22 +26,6 @@ type MediaAsset = {
 type Toast = {
   type: "success" | "error";
   message: string;
-};
-
-const parsePayload = (raw: string) => {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
-};
-
-const getErrorMessage = (raw: string, fallback: string) => {
-  const parsed = parsePayload(raw) as { detail?: string } | null;
-  if (parsed?.detail) return parsed.detail;
-  const trimmed = raw?.trim();
-  return trimmed ? trimmed : fallback;
 };
 
 const getDisplayName = (asset: MediaAsset) => {
@@ -47,15 +40,6 @@ const getDisplayName = (asset: MediaAsset) => {
     metadata && typeof metadata.original_filename === "string" ? metadata.original_filename.trim() : "";
   if (originalName) return originalName;
   return `${asset.media_type || "media"} #${asset.id}`;
-};
-
-const inferMediaTypeFromUrl = (rawUrl: string): "image" | "audio" | "video" | null => {
-  const normalized = rawUrl.trim().toLowerCase();
-  if (!normalized) return null;
-  if (/(\.png|\.jpg|\.jpeg|\.gif|\.webp|\.svg|\.bmp|\.avif)(\?|#|$)/.test(normalized)) return "image";
-  if (/(\.mp3|\.wav|\.ogg|\.aac|\.m4a|\.flac)(\?|#|$)/.test(normalized)) return "audio";
-  if (/(\.mp4|\.webm|\.mov|\.m4v|\.mkv|\.avi)(\?|#|$)/.test(normalized)) return "video";
-  return null;
 };
 
 const isExternalUrl = (rawUrl: string) => {
@@ -78,6 +62,8 @@ export default function AdminMediaBankPage() {
   const [renameId, setRenameId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
+  const [externalFormOpen, setExternalFormOpen] = useState(false);
+  const [externalFormSubmitting, setExternalFormSubmitting] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -96,21 +82,14 @@ export default function AdminMediaBankPage() {
   const loadAssets = async () => {
     setLoading(true);
     try {
-      const response = await fetch(contentPath("/media-bank/assets?limit=300"), {
-        credentials: "include",
-      });
-      const raw = await response.text();
-      const payload = parsePayload(raw) as MediaAsset[] | null;
-      if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          setAccessDenied(true);
-          setAssets([]);
-          return;
-        }
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to load media repo")}`);
-      }
-      setAssets(Array.isArray(payload) ? payload : []);
+      const loadedAssets = await listMediaBankAssets(300);
+      setAssets(Array.isArray(loadedAssets) ? (loadedAssets as MediaAsset[]) : []);
     } catch (error) {
+      if (error instanceof MediaBankClientError && (error.status === 401 || error.status === 403)) {
+        setAccessDenied(true);
+        setAssets([]);
+        return;
+      }
       setToast({
         type: "error",
         message: error instanceof Error ? error.message : "Failed to load media repo",
@@ -175,18 +154,7 @@ export default function AdminMediaBankPage() {
     setUploading(true);
     setToast(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(contentPath("/media-bank/assets"), {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const raw = await response.text();
-      if (!response.ok) {
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Upload failed")}`);
-      }
+      await uploadMediaBankAsset(file);
       setToast({ type: "success", message: "Asset uploaded to multimedia repo." });
       await loadAssets();
     } catch (error) {
@@ -199,45 +167,17 @@ export default function AdminMediaBankPage() {
     }
   };
 
-  const handleAddExternalLink = async () => {
-    const urlInput = window.prompt("External media URL (http/https)");
-    if (urlInput === null) return;
-    const mediaUrl = urlInput.trim();
-    if (!mediaUrl) {
-      setToast({ type: "error", message: "URL is required." });
-      return;
-    }
-
-    const inferredType = inferMediaTypeFromUrl(mediaUrl) || "image";
-    const typeInput = window.prompt("Media type (image, audio, video)", inferredType);
-    if (typeInput === null) return;
-    const mediaType = typeInput.trim().toLowerCase();
-    if (!["image", "audio", "video"].includes(mediaType)) {
-      setToast({ type: "error", message: "Media type must be image, audio, or video." });
-      return;
-    }
-
-    const displayNameInput = window.prompt("Display name (optional)", "");
-    if (displayNameInput === null) return;
-
-    setUploading(true);
+  const handleAddExternalLink = async (payload: {
+    url: string;
+    displayName?: string;
+    mediaType?: ExternalMediaType;
+  }) => {
+    setExternalFormSubmitting(true);
     setToast(null);
     try {
-      const response = await fetch(contentPath("/media-bank/assets/link"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: mediaUrl,
-          media_type: mediaType,
-          display_name: displayNameInput.trim() || null,
-        }),
-      });
-      const raw = await response.text();
-      if (!response.ok) {
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Link creation failed")}`);
-      }
+      await createMediaBankLinkAsset(payload);
       setToast({ type: "success", message: "External media link added." });
+      setExternalFormOpen(false);
       await loadAssets();
     } catch (error) {
       setToast({
@@ -245,7 +185,7 @@ export default function AdminMediaBankPage() {
         message: error instanceof Error ? error.message : "Link creation failed",
       });
     } finally {
-      setUploading(false);
+      setExternalFormSubmitting(false);
     }
   };
 
@@ -259,16 +199,7 @@ export default function AdminMediaBankPage() {
     setUpdatingId(assetId);
     setToast(null);
     try {
-      const response = await fetch(contentPath(`/media-bank/assets/${assetId}`), {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ display_name: nextName }),
-      });
-      const raw = await response.text();
-      if (!response.ok) {
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Rename failed")}`);
-      }
+      await renameMediaBankAsset(assetId, nextName);
       setRenameId(null);
       setRenameValue("");
       setToast({ type: "success", message: "Asset renamed." });
@@ -289,14 +220,7 @@ export default function AdminMediaBankPage() {
     setDeletingId(asset.id);
     setToast(null);
     try {
-      const response = await fetch(contentPath(`/media-bank/assets/${asset.id}`), {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const raw = await response.text();
-      if (!response.ok) {
-        throw new Error(`(${response.status}) ${getErrorMessage(raw, "Delete failed")}`);
-      }
+      await deleteMediaBankAsset(asset.id);
       setToast({ type: "success", message: "Asset deleted." });
       await loadAssets();
     } catch (error) {
@@ -395,12 +319,12 @@ export default function AdminMediaBankPage() {
             <button
               type="button"
               onClick={() => {
-                void handleAddExternalLink();
+                setExternalFormOpen(true);
               }}
-              disabled={uploading}
+              disabled={uploading || externalFormSubmitting}
               className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 disabled:opacity-60"
             >
-              Add link
+              Add external
             </button>
           </div>
         </div>
@@ -531,6 +455,20 @@ export default function AdminMediaBankPage() {
           )}
         </div>
       </section>
+
+      <ExternalMediaFormModal
+        open={externalFormOpen}
+        submitting={externalFormSubmitting}
+        description="Add an external media link to repo."
+        onClose={() => {
+          if (!externalFormSubmitting) {
+            setExternalFormOpen(false);
+          }
+        }}
+        onSubmit={async (payload) => {
+          await handleAddExternalLink(payload);
+        }}
+      />
     </main>
   );
 }
