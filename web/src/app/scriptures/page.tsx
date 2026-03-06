@@ -7,6 +7,8 @@ import {
   ChevronsDown,
   ChevronsUp,
   Eye,
+  LayoutGrid,
+  List,
   Link2,
   MoreVertical,
   Pencil,
@@ -500,11 +502,46 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
 };
 
 const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
+const SCRIPTURES_BOOK_BROWSER_VIEW_KEY = "scriptures_book_browser_view";
+const SCRIPTURES_BOOK_BROWSER_DENSITY_KEY = "scriptures_book_browser_density";
+const SCRIPTURES_MEDIA_MANAGER_VIEW_KEY = "scriptures_media_manager_view";
 const DEFAULT_CONTENT_FIELD_LABELS = {
   sanskrit: "Sanskrit",
   transliteration: "Transliteration",
   english: "English",
 } as const;
+
+const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
+  if (typeof window === "undefined") {
+    return "list";
+  }
+  return window.localStorage.getItem(storageKey) === "icon" ? "icon" : "list";
+};
+
+const normalizeBookBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.min(4, Math.max(0, Math.round(value)));
+    return normalized as 0 | 1 | 2 | 3 | 4;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      const normalized = Math.min(4, Math.max(0, Math.round(parsed)));
+      return normalized as 0 | 1 | 2 | 3 | 4;
+    }
+  }
+  return 0;
+};
+
+const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 => {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY));
+};
+
+const normalizeBrowserView = (value: unknown): "list" | "icon" =>
+  value === "icon" ? "icon" : "list";
 
 const WORD_MEANINGS_VERSION = "1.0";
 const WORD_MEANINGS_REQUIRED_LANGUAGE = "en";
@@ -1033,6 +1070,9 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_transliteration_script: "iast",
   ui_theme: "classic",
   ui_density: "comfortable",
+  scriptures_book_browser_view: "list",
+  scriptures_media_manager_view: "list",
+  admin_media_bank_browser_view: "list",
 };
 
 type StoredScripturesPreferences = {
@@ -1059,6 +1099,9 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   ),
   ui_theme: normalizeUiTheme(value?.ui_theme),
   ui_density: normalizeUiDensity(value?.ui_density),
+  scriptures_book_browser_view: normalizeBrowserView(value?.scriptures_book_browser_view),
+  scriptures_media_manager_view: normalizeBrowserView(value?.scriptures_media_manager_view),
+  admin_media_bank_browser_view: normalizeBrowserView(value?.admin_media_bank_browser_view),
 });
 
 const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
@@ -1269,12 +1312,18 @@ const toDatetimeLocalValue = (value: unknown): string => {
 };
 
 function ScripturesContent() {
-  const BOOKS_PAGE_SIZE = 10;
+  const BOOKS_PAGE_SIZE_LIST = 18;
+  const BOOKS_PAGE_SIZE_BY_DENSITY: Record<1 | 2 | 3 | 4, number> = {
+    1: 25,
+    2: 16,
+    3: 9,
+    4: 4,
+  };
   const router = useRouter();
   const searchParams = useSearchParams();
   const [books, setBooks] = useState<BookOption[]>([]);
   const [bookQuery, setBookQuery] = useState("");
-  const [booksPage, setBooksPage] = useState(1);
+  const [bookVisibleCount, setBookVisibleCount] = useState(BOOKS_PAGE_SIZE_LIST);
   const [bookId, setBookId] = useState("");
   const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -1319,6 +1368,10 @@ function ScripturesContent() {
   const [nodeMediaActionsOpen, setNodeMediaActionsOpen] = useState(false);
   const [mediaManagerSearchQuery, setMediaManagerSearchQuery] = useState("");
   const [mediaManagerTypeFilter, setMediaManagerTypeFilter] = useState("all");
+  const [bookBrowserView, setBookBrowserView] = useState<"list" | "icon">("list");
+  const [bookBrowserDensity, setBookBrowserDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [showBookBrowserDensityMenu, setShowBookBrowserDensityMenu] = useState(false);
+  const [mediaManagerView, setMediaManagerView] = useState<"list" | "icon">("list");
   const [showMediaManagerModal, setShowMediaManagerModal] = useState(false);
   const [mediaManagerScope, setMediaManagerScope] = useState<"node" | "book" | "bank">("node");
   const [mediaBankViewMode, setMediaBankViewMode] = useState<"manage" | "pick-node" | "pick-book">("manage");
@@ -1500,6 +1553,8 @@ function ScripturesContent() {
   const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
+  const booksLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const bookTreeActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -1508,6 +1563,9 @@ function ScripturesContent() {
       const target = event.target as Node;
       if (bookRowActionsMenuRef.current && !bookRowActionsMenuRef.current.contains(target)) {
         setOpenBookRowActionsId(null);
+      }
+      if (bookBrowserDensityMenuRef.current && !bookBrowserDensityMenuRef.current.contains(target)) {
+        setShowBookBrowserDensityMenu(false);
       }
       if (bookTreeActionsMenuRef.current && !bookTreeActionsMenuRef.current.contains(target)) {
         setShowBookTreeActionsMenu(false);
@@ -1534,6 +1592,51 @@ function ScripturesContent() {
   useEffect(() => {
     setShowNodeActionsMenu(false);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_VIEW_KEY, bookBrowserView);
+  }, [bookBrowserView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
+  }, [bookBrowserDensity]);
+
+  useEffect(() => {
+    const coarseView: "list" | "icon" = bookBrowserDensity === 0 ? "list" : "icon";
+    if (coarseView !== bookBrowserView) {
+      setBookBrowserView(coarseView);
+    }
+  }, [bookBrowserDensity, bookBrowserView]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY, mediaManagerView);
+  }, [mediaManagerView]);
+
+  useEffect(() => {
+    setPreferences((prev) => {
+      if (!prev) return prev;
+      if (
+        prev.scriptures_book_browser_view === bookBrowserView &&
+        prev.scriptures_media_manager_view === mediaManagerView
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        scriptures_book_browser_view: bookBrowserView,
+        scriptures_media_manager_view: mediaManagerView,
+      };
+    });
+  }, [bookBrowserView, mediaManagerView]);
 
   useEffect(() => {
     setInlineMessage(null);
@@ -2891,6 +2994,12 @@ function ScripturesContent() {
           try {
             const parsed = JSON.parse(storedRaw) as StoredScripturesPreferences;
             const normalized = normalizePreferences(parsed.preferences ?? parsed);
+            normalized.scriptures_book_browser_view = readStoredBrowserView(
+              SCRIPTURES_BOOK_BROWSER_VIEW_KEY
+            );
+            normalized.scriptures_media_manager_view = readStoredBrowserView(
+              SCRIPTURES_MEDIA_MANAGER_VIEW_KEY
+            );
             if (storedUiPreferences) {
               normalized.ui_theme = storedUiPreferences.ui_theme;
               normalized.ui_density = storedUiPreferences.ui_density;
@@ -2899,16 +3008,39 @@ function ScripturesContent() {
               normalized.show_only_preferred_script = parsed.show_only_preferred_script;
             }
             setPreferences(normalized);
+            setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
+            const storedDensity = readStoredBookBrowserDensity();
+            setBookBrowserDensity(
+              storedDensity !== 0
+                ? storedDensity
+                : normalized.scriptures_book_browser_view === "icon"
+                  ? 4
+                  : 0
+            );
+            setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
             return;
           } catch {
             window.localStorage.removeItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
           }
         }
 
-        setPreferences({
+        const nextPreferences = {
           ...DEFAULT_USER_PREFERENCES,
           ...(storedUiPreferences || {}),
-        });
+          scriptures_book_browser_view: readStoredBrowserView(SCRIPTURES_BOOK_BROWSER_VIEW_KEY),
+          scriptures_media_manager_view: readStoredBrowserView(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY),
+        };
+        setPreferences(nextPreferences);
+        setBookBrowserView(nextPreferences.scriptures_book_browser_view ?? "list");
+        const storedDensity = readStoredBookBrowserDensity();
+        setBookBrowserDensity(
+          storedDensity !== 0
+            ? storedDensity
+            : nextPreferences.scriptures_book_browser_view === "icon"
+              ? 4
+              : 0
+        );
+        setMediaManagerView(nextPreferences.scriptures_media_manager_view ?? "list");
         return;
       }
 
@@ -2923,17 +3055,66 @@ function ScripturesContent() {
           normalized.ui_density = storedUiPreferences.ui_density;
         }
         setPreferences(normalized);
+        setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
+        const storedDensity = readStoredBookBrowserDensity();
+        setBookBrowserDensity(
+          storedDensity !== 0
+            ? storedDensity
+            : normalized.scriptures_book_browser_view === "icon"
+              ? 4
+              : 0
+        );
+        setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
       } catch {
         const storedUiPreferences = readStoredUiPreferences();
-        setPreferences({
+        const nextPreferences = {
           ...DEFAULT_USER_PREFERENCES,
           ...(storedUiPreferences || {}),
-        });
+          scriptures_book_browser_view: readStoredBrowserView(SCRIPTURES_BOOK_BROWSER_VIEW_KEY),
+          scriptures_media_manager_view: readStoredBrowserView(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY),
+        };
+        setPreferences(nextPreferences);
+        setBookBrowserView(nextPreferences.scriptures_book_browser_view ?? "list");
+        const storedDensity = readStoredBookBrowserDensity();
+        setBookBrowserDensity(
+          storedDensity !== 0
+            ? storedDensity
+            : nextPreferences.scriptures_book_browser_view === "icon"
+              ? 4
+              : 0
+        );
+        setMediaManagerView(nextPreferences.scriptures_media_manager_view ?? "list");
       }
     };
 
     loadPreferences();
   }, [authEmail]);
+
+  useEffect(() => {
+    if (!authResolved || !authEmail) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch("/api/preferences", {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scriptures_book_browser_view: bookBrowserView,
+              scriptures_media_manager_view: mediaManagerView,
+            }),
+          });
+        } catch {
+          // no-op: local persistence already applied
+        }
+      })();
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [authResolved, authEmail, bookBrowserView, mediaManagerView]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -6138,23 +6319,66 @@ function ScripturesContent() {
   );
   const canBrowseCurrentNode = authUserId !== null && canView;
   const isCopyMessage = authMessage === "Link copied.";
+  const isBooksGridView = bookBrowserDensity > 0;
+  const booksGridColumns =
+    bookBrowserDensity === 1
+      ? 5
+      : bookBrowserDensity === 2
+        ? 4
+        : bookBrowserDensity === 3
+          ? 3
+          : 2;
+  const booksDensityLabel =
+    bookBrowserDensity === 0
+      ? "List"
+      : bookBrowserDensity === 1
+        ? "5×5"
+        : bookBrowserDensity === 2
+          ? "4×4"
+          : bookBrowserDensity === 3
+            ? "3×3"
+            : "2×2";
   const filteredBooks = books;
-  const totalBookPages = Math.max(1, Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE));
-  const currentBooksPage = Math.min(booksPage, totalBookPages);
-  const paginatedBooks = filteredBooks.slice(
-    (currentBooksPage - 1) * BOOKS_PAGE_SIZE,
-    currentBooksPage * BOOKS_PAGE_SIZE
-  );
+  const booksPageSize =
+    bookBrowserDensity === 0
+      ? BOOKS_PAGE_SIZE_LIST
+      : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4];
+  const visibleBookCount = Math.min(bookVisibleCount, filteredBooks.length);
+  const visibleBooks = filteredBooks.slice(0, visibleBookCount);
+  const hasMoreBooks = visibleBookCount < filteredBooks.length;
 
   useEffect(() => {
-    setBooksPage(1);
-  }, [bookQuery]);
+    setBookVisibleCount(booksPageSize);
+  }, [bookQuery, bookBrowserDensity]);
 
   useEffect(() => {
-    if (booksPage > totalBookPages) {
-      setBooksPage(totalBookPages);
+    if (!hasMoreBooks) {
+      return;
     }
-  }, [booksPage, totalBookPages]);
+
+    const target = booksLoadMoreRef.current;
+    if (!target) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (!entry?.isIntersecting) {
+          return;
+        }
+        setBookVisibleCount((prev) => Math.min(prev + booksPageSize, filteredBooks.length));
+      },
+      {
+        root: null,
+        rootMargin: "320px 0px",
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMoreBooks, booksPageSize, filteredBooks.length]);
 
   const handleSelectBook = (value: string): boolean => {
     if (value !== bookId && hasUnsavedInlineChanges()) {
@@ -6258,10 +6482,11 @@ function ScripturesContent() {
                     setCreateBookStep("schema");
                     setShowCreateBook(true);
                   }}
-                  className="rounded-lg border border-black/10 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50"
+                  aria-label="Create book"
+                  title="Create book"
                 >
                   <Plus size={14} />
-                  Create
                 </button>
               )}
             </div>
@@ -6275,9 +6500,50 @@ function ScripturesContent() {
           <div className="rounded-xl border border-black/10 bg-white">
             <div className="flex items-center justify-between border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
               <span>All books</span>
-              <span>{filteredBooks.length}</span>
+              <div className="flex items-center gap-2">
+                <span>{filteredBooks.length}</span>
+                <div ref={bookBrowserDensityMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowBookBrowserDensityMenu((prev) => !prev)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+                    aria-label="Open view density"
+                    title="View density"
+                  >
+                    <SlidersHorizontal size={12} />
+                    {booksDensityLabel}
+                  </button>
+                  {showBookBrowserDensityMenu && (
+                    <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                        <span>View density</span>
+                        <span className="font-semibold text-zinc-700">{booksDensityLabel}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={4}
+                        step={1}
+                        value={bookBrowserDensity}
+                        onChange={(event) => {
+                          setBookBrowserDensity(normalizeBookBrowserDensity(event.target.value));
+                        }}
+                        className="w-full"
+                        aria-label="Books view density"
+                      />
+                      <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+                        <span>List</span>
+                        <span>5×5</span>
+                        <span>4×4</span>
+                        <span>3×3</span>
+                        <span>2×2</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="max-h-[260px] overflow-y-auto">
+            <div>
               {filteredBooks.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-center">
                   <p className="text-sm text-zinc-600">No books found.</p>
@@ -6292,8 +6558,17 @@ function ScripturesContent() {
                   )}
                 </div>
               ) : (
-                <div className="divide-y divide-black/5">
-                  {paginatedBooks.map((book) => {
+                <div
+                  className={isBooksGridView ? "grid gap-3 p-3" : "divide-y divide-black/5"}
+                  style={
+                    isBooksGridView
+                      ? {
+                          gridTemplateColumns: `repeat(${booksGridColumns}, minmax(0, 1fr))`,
+                        }
+                      : undefined
+                  }
+                >
+                  {visibleBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
                     const thumbnailUrl = getBookThumbnailUrl(book);
                     const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
@@ -6305,132 +6580,280 @@ function ScripturesContent() {
                     return (
                       <div
                         key={book.id}
-                        className={`flex items-center gap-2 px-3 py-2 text-sm transition ${
-                          isSelected
-                            ? "bg-[color:var(--sand)]/50 text-[color:var(--accent)]"
-                            : "text-zinc-700 hover:bg-zinc-50"
+                        className={`flex items-center gap-2 text-sm transition ${
+                          isBooksGridView
+                            ? `relative aspect-square overflow-hidden rounded-xl border border-black/10 ${
+                                isSelected
+                                  ? "bg-[color:var(--sand)]/45 text-[color:var(--accent)]"
+                                  : "bg-white text-zinc-700 hover:border-black/20"
+                              }`
+                            : isSelected
+                              ? "px-3 py-2 bg-[color:var(--sand)]/50 text-[color:var(--accent)]"
+                              : "px-3 py-2 text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
-                        <div className="flex min-w-0 flex-1 items-center justify-between text-left">
-                          <div className="flex min-w-0 items-center gap-2">
-                            {thumbnailUrl ? (
-                              <img
-                                src={thumbnailUrl}
-                                alt={`${book.book_name} thumbnail`}
-                                className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 object-cover"
-                              />
-                            ) : (
-                              <div className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 bg-zinc-100" />
-                            )}
+                        {isBooksGridView ? (
+                          <>
                             {canPreviewBook ? (
                               <button
                                 type="button"
                                 onClick={() => {
                                   void handlePreviewBookFromRow(book);
                                 }}
-                                className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
+                                className="group absolute inset-0 block w-full bg-zinc-100 text-left"
                               >
-                                {book.book_name}
+                                {thumbnailUrl ? (
+                                  <img
+                                    src={thumbnailUrl}
+                                    alt={`${book.book_name} thumbnail`}
+                                    className="h-full w-full object-contain p-2 transition group-hover:scale-[1.01]"
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                                    No thumbnail
+                                  </div>
+                                )}
                               </button>
+                            ) : thumbnailUrl ? (
+                              <img
+                                src={thumbnailUrl}
+                                alt={`${book.book_name} thumbnail`}
+                                className="absolute inset-0 h-full w-full object-contain p-2"
+                              />
                             ) : (
-                              <span className="truncate font-medium">{book.book_name}</span>
+                              <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                                No thumbnail
+                              </div>
                             )}
-                          </div>
-                          <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                            {book.visibility === "private" ? "Private" : "Public"}
-                          </span>
-                        </div>
-                        {showSingleBrowseAction && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleBrowseBookFromRow(book);
-                            }}
-                            title="Browse book"
-                            aria-label="Browse book"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                          >
-                            <BookOpen size={14} />
-                          </button>
-                        )}
-                        {showRowMenu && (
-                          <div
-                            ref={(element) => {
-                              if (openBookRowActionsId === book.id) {
-                                bookRowActionsMenuRef.current = element;
-                              }
-                            }}
-                            className="relative"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
-                              }}
-                              title="Row actions"
-                              aria-label="Row actions"
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                            >
-                              ⋮
-                            </button>
-                            {openBookRowActionsId === book.id && (
-                              <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                                {canCopyPreviewBookLink && (
+
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/55 to-transparent px-3 pb-3 pt-8 text-white">
+                              <div className="flex items-end justify-between gap-2">
+                                <div className="line-clamp-2 text-sm font-semibold">{book.book_name}</div>
+                                <span className="rounded-full border border-white/35 bg-black/25 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-white/90">
+                                  {book.visibility === "private" ? "Private" : "Public"}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5">
+                              {showSingleBrowseAction && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleBrowseBookFromRow(book);
+                                  }}
+                                  title="Browse book"
+                                  aria-label="Browse book"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-black/15 bg-white/90 text-zinc-700 backdrop-blur transition hover:border-black/25 hover:bg-white"
+                                >
+                                  <BookOpen size={14} />
+                                </button>
+                              )}
+                              {showRowMenu && (
+                                <div
+                                  ref={(element) => {
+                                    if (openBookRowActionsId === book.id) {
+                                      bookRowActionsMenuRef.current = element;
+                                    }
+                                  }}
+                                  className="relative"
+                                >
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
-                                      navigator.clipboard.writeText(url);
-                                      setOpenBookRowActionsId(null);
-                                      setAuthMessage("Link copied.");
-                                      setCopyTarget("book");
-                                      setTimeout(() => {
-                                        setAuthMessage(null);
-                                        setCopyTarget(null);
-                                      }, 2000);
+                                      setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
                                     }}
-                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                    title="Row actions"
+                                    aria-label="Row actions"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-black/15 bg-white/90 text-zinc-700 backdrop-blur transition hover:border-black/25 hover:bg-white"
                                   >
-                                    <Link2 size={14} />
-                                    Copy preview link
+                                    ⋮
                                   </button>
+                                  {openBookRowActionsId === book.id && (
+                                    <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                      {canCopyPreviewBookLink && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
+                                            navigator.clipboard.writeText(url);
+                                            setOpenBookRowActionsId(null);
+                                            setAuthMessage("Link copied.");
+                                            setCopyTarget("book");
+                                            setTimeout(() => {
+                                              setAuthMessage(null);
+                                              setCopyTarget(null);
+                                            }, 2000);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                        >
+                                          <Link2 size={14} />
+                                          Copy preview link
+                                        </button>
+                                      )}
+                                      {canCopyBrowseBookLink && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
+                                            navigator.clipboard.writeText(url);
+                                            setOpenBookRowActionsId(null);
+                                            setAuthMessage("Link copied.");
+                                            setCopyTarget("book");
+                                            setTimeout(() => {
+                                              setAuthMessage(null);
+                                              setCopyTarget(null);
+                                            }, 2000);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                        >
+                                          <Link2 size={14} />
+                                          Copy browse link
+                                        </button>
+                                      )}
+                                      {canBrowseBook && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenBookRowActionsId(null);
+                                            handleBrowseBookFromRow(book);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                        >
+                                          <BookOpen size={14} />
+                                          Browse book
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex min-w-0 flex-1 items-center justify-between text-left">
+                              <div className="flex min-w-0 items-center gap-2">
+                                {thumbnailUrl ? (
+                                  <img
+                                    src={thumbnailUrl}
+                                    alt={`${book.book_name} thumbnail`}
+                                    className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 object-cover"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 bg-zinc-100" />
                                 )}
-                                {canCopyBrowseBookLink && (
+                                {canPreviewBook ? (
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
-                                      navigator.clipboard.writeText(url);
-                                      setOpenBookRowActionsId(null);
-                                      setAuthMessage("Link copied.");
-                                      setCopyTarget("book");
-                                      setTimeout(() => {
-                                        setAuthMessage(null);
-                                        setCopyTarget(null);
-                                      }, 2000);
+                                      void handlePreviewBookFromRow(book);
                                     }}
-                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                    className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
                                   >
-                                    <Link2 size={14} />
-                                    Copy browse link
+                                    {book.book_name}
                                   </button>
+                                ) : (
+                                  <span className="truncate font-medium">{book.book_name}</span>
                                 )}
-                                {canBrowseBook && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenBookRowActionsId(null);
-                                      handleBrowseBookFromRow(book);
-                                    }}
-                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                  >
-                                    <BookOpen size={14} />
-                                    Browse book
-                                  </button>
+                              </div>
+                              <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                                {book.visibility === "private" ? "Private" : "Public"}
+                              </span>
+                            </div>
+                            {showSingleBrowseAction && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleBrowseBookFromRow(book);
+                                }}
+                                title="Browse book"
+                                aria-label="Browse book"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                              >
+                                <BookOpen size={14} />
+                              </button>
+                            )}
+                            {showRowMenu && (
+                              <div
+                                ref={(element) => {
+                                  if (openBookRowActionsId === book.id) {
+                                    bookRowActionsMenuRef.current = element;
+                                  }
+                                }}
+                                className="relative"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
+                                  }}
+                                  title="Row actions"
+                                  aria-label="Row actions"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                                >
+                                  ⋮
+                                </button>
+                                {openBookRowActionsId === book.id && (
+                                  <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                    {canCopyPreviewBookLink && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
+                                          navigator.clipboard.writeText(url);
+                                          setOpenBookRowActionsId(null);
+                                          setAuthMessage("Link copied.");
+                                          setCopyTarget("book");
+                                          setTimeout(() => {
+                                            setAuthMessage(null);
+                                            setCopyTarget(null);
+                                          }, 2000);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                      >
+                                        <Link2 size={14} />
+                                        Copy preview link
+                                      </button>
+                                    )}
+                                    {canCopyBrowseBookLink && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
+                                          navigator.clipboard.writeText(url);
+                                          setOpenBookRowActionsId(null);
+                                          setAuthMessage("Link copied.");
+                                          setCopyTarget("book");
+                                          setTimeout(() => {
+                                            setAuthMessage(null);
+                                            setCopyTarget(null);
+                                          }, 2000);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                      >
+                                        <Link2 size={14} />
+                                        Copy browse link
+                                      </button>
+                                    )}
+                                    {canBrowseBook && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenBookRowActionsId(null);
+                                          handleBrowseBookFromRow(book);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                      >
+                                        <BookOpen size={14} />
+                                        Browse book
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             )}
-                          </div>
+                          </>
                         )}
                       </div>
                     );
@@ -6439,28 +6862,14 @@ function ScripturesContent() {
               )}
             </div>
             {filteredBooks.length > 0 && (
-              <div className="flex items-center justify-between border-t border-black/10 px-3 py-2 text-xs text-zinc-600">
-                <span>
-                  Page {currentBooksPage} of {totalBookPages}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setBooksPage((prev) => Math.max(1, prev - 1))}
-                    disabled={currentBooksPage <= 1}
-                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Prev
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBooksPage((prev) => Math.min(totalBookPages, prev + 1))}
-                    disabled={currentBooksPage >= totalBookPages}
-                    className="rounded-md border border-black/10 px-2 py-1 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Next
-                  </button>
+              <div className="border-t border-black/10 px-3 py-2 text-xs text-zinc-600">
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    Showing {visibleBookCount} of {filteredBooks.length}
+                  </span>
+                  <span>{hasMoreBooks ? "Scroll to load more" : "All books loaded"}</span>
                 </div>
+                {hasMoreBooks && <div ref={booksLoadMoreRef} className="h-4 w-full" aria-hidden />}
               </div>
             )}
           </div>
@@ -8589,6 +8998,34 @@ function ScripturesContent() {
                       <option value="all">All types</option>
                       <option value="image">image</option>
                     </select>
+                    <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setMediaManagerView("list")}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                          mediaManagerView === "list"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                        aria-label="List view"
+                        title="List view"
+                      >
+                        <List size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMediaManagerView("icon")}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                          mediaManagerView === "icon"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                        aria-label="Icon view"
+                        title="Icon view"
+                      >
+                        <LayoutGrid size={14} />
+                      </button>
+                    </div>
                     <input
                       ref={bookMediaUploadInputRef}
                       type="file"
@@ -8665,12 +9102,14 @@ function ScripturesContent() {
                   )}
 
                   <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10 bg-white">
-                    <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
-                      <span>Name</span>
-                      <span>Type</span>
-                      <span>Is default</span>
-                      <span className="text-right">Actions</span>
-                    </div>
+                    {mediaManagerView === "list" && (
+                      <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                        <span>Name</span>
+                        <span>Type</span>
+                        <span>Is default</span>
+                        <span className="text-right">Actions</span>
+                      </div>
+                    )}
                     {(() => {
                       const thumbnailUrl = getBookThumbnailUrl(currentBook);
                       if (!thumbnailUrl) {
@@ -8684,61 +9123,129 @@ function ScripturesContent() {
                         return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
                       }
                       return (
-                        <div className="divide-y divide-black/5">
-                          <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">{rowLabel}</div>
-                              <div className="mt-1">
+                        <div className={mediaManagerView === "icon" ? "p-2" : "divide-y divide-black/5"}>
+                          <div
+                            className={
+                              mediaManagerView === "icon"
+                                ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
+                            }
+                          >
+                            {mediaManagerView === "icon" ? (
+                              <>
                                 <img
                                   src={thumbnailUrl}
                                   alt="Book thumbnail"
-                                  className="h-12 w-12 rounded-md border border-black/10 object-cover"
+                                  className="h-32 w-full object-cover"
                                 />
-                              </div>
-                            </div>
-                            <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">image</span>
-                            <span className="text-xs text-zinc-600">Yes</span>
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                disabled
-                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                aria-label="Move up"
-                                title="Move up"
-                              >
-                                <ChevronsUp size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                disabled
-                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                aria-label="Move down"
-                                title="Move down"
-                              >
-                                <ChevronsDown size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                disabled
-                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                aria-label="Set default"
-                                title="Set default"
-                              >
-                                <SlidersHorizontal size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleDeleteBookThumbnail();
-                                }}
-                                disabled={bookThumbnailUploading}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
-                                aria-label="Remove"
-                                title="Remove"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                                <div className="space-y-2 p-3">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="truncate font-medium">{rowLabel}</div>
+                                      <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">image</div>
+                                    </div>
+                                    <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">Default</span>
+                                  </div>
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Move up"
+                                      title="Move up"
+                                    >
+                                      <ChevronsUp size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Move down"
+                                      title="Move down"
+                                    >
+                                      <ChevronsDown size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                      aria-label="Set default"
+                                      title="Set default"
+                                    >
+                                      <SlidersHorizontal size={12} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void handleDeleteBookThumbnail();
+                                      }}
+                                      disabled={bookThumbnailUploading}
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                      aria-label="Remove"
+                                      title="Remove"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="min-w-0">
+                                  <div className="truncate font-medium">{rowLabel}</div>
+                                  <div className="mt-1">
+                                    <img
+                                      src={thumbnailUrl}
+                                      alt="Book thumbnail"
+                                      className="h-12 w-12 rounded-md border border-black/10 object-cover"
+                                    />
+                                  </div>
+                                </div>
+                                <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">image</span>
+                                <span className="text-xs text-zinc-600">Yes</span>
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                    aria-label="Move up"
+                                    title="Move up"
+                                  >
+                                    <ChevronsUp size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                    aria-label="Move down"
+                                    title="Move down"
+                                  >
+                                    <ChevronsDown size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                    aria-label="Set default"
+                                    title="Set default"
+                                  >
+                                    <SlidersHorizontal size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void handleDeleteBookThumbnail();
+                                    }}
+                                    disabled={bookThumbnailUploading}
+                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                    aria-label="Remove"
+                                    title="Remove"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -8764,6 +9271,34 @@ function ScripturesContent() {
                     </div>
                     {mediaBankViewMode === "manage" ? (
                       <>
+                        <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setMediaManagerView("list")}
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                              mediaManagerView === "list"
+                                ? "bg-[color:var(--accent)] text-white"
+                                : "text-zinc-600 hover:bg-zinc-50"
+                            }`}
+                            aria-label="List view"
+                            title="List view"
+                          >
+                            <List size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMediaManagerView("icon")}
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                              mediaManagerView === "icon"
+                                ? "bg-[color:var(--accent)] text-white"
+                                : "text-zinc-600 hover:bg-zinc-50"
+                            }`}
+                            aria-label="Icon view"
+                            title="Icon view"
+                          >
+                            <LayoutGrid size={14} />
+                          </button>
+                        </div>
                         <input
                           ref={mediaBankUploadInputRef}
                           type="file"
@@ -8837,12 +9372,14 @@ function ScripturesContent() {
                       <div className="px-3 py-6 text-sm text-zinc-500">No media assets in repo.</div>
                     ) : (
                       <>
-                        <div className="grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
-                          <span>Name</span>
-                          <span>Type</span>
-                          <span className="text-right">{mediaBankViewMode === "manage" ? "Actions" : "Pick"}</span>
-                        </div>
-                        <div className="divide-y divide-black/5">
+                        {mediaManagerView === "list" && (
+                          <div className="grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                            <span>Name</span>
+                            <span>Type</span>
+                            <span className="text-right">{mediaBankViewMode === "manage" ? "Actions" : "Pick"}</span>
+                          </div>
+                        )}
+                        <div className={mediaManagerView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
                           {(() => {
                             const filteredAssets = mediaBankAssets.filter((asset) =>
                               mediaAssetMatchesSearch(asset, mediaManagerSearchQuery)
@@ -8859,86 +9396,185 @@ function ScripturesContent() {
                                     ? asset.metadata.original_filename
                                     : `${asset.media_type} #${asset.id}`;
                               return (
-                                <div key={asset.id} className="grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
-                                  <div className="min-w-0">
-                                    <div className="truncate font-medium">{label}</div>
-                                    {asset.media_type === "image" ? (
-                                      <img
-                                        src={resolveMediaUrl(asset.url)}
-                                        alt={label}
-                                        className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
-                                      />
-                                    ) : (
-                                      <div className="mt-1 truncate text-xs text-zinc-500">{asset.url}</div>
-                                    )}
-                                  </div>
-                                  <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type}</span>
-                                  <div className="flex items-center justify-end gap-1">
-                                    {mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book" ? (
-                                      <button
-                                        type="button"
-                                        onClick={async () => {
-                                          if (mediaBankViewMode === "pick-book") {
-                                            const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
-                                            if (picked) {
-                                              setMediaBankViewMode("manage");
-                                              setMediaManagerScope("book");
-                                            }
-                                            return;
-                                          }
+                                <div
+                                  key={asset.id}
+                                  className={
+                                    mediaManagerView === "icon"
+                                      ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                      : "grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
+                                  }
+                                >
+                                  {mediaManagerView === "icon" ? (
+                                    <>
+                                      {asset.media_type === "image" ? (
+                                        <img
+                                          src={resolveMediaUrl(asset.url)}
+                                          alt={label}
+                                          className="h-32 w-full object-cover"
+                                        />
+                                      ) : (
+                                        <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                          {asset.media_type}
+                                        </div>
+                                      )}
+                                      <div className="space-y-2 p-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <div className="truncate font-medium">{label}</div>
+                                            <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">{asset.media_type}</div>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-1">
+                                          {mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book" ? (
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                if (mediaBankViewMode === "pick-book") {
+                                                  const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
+                                                  if (picked) {
+                                                    setMediaBankViewMode("manage");
+                                                    setMediaManagerScope("book");
+                                                  }
+                                                  return;
+                                                }
 
-                                          const attached = await handleAttachMediaBankAssetToSelectedNode(asset.id);
-                                          if (attached) {
-                                            setMediaBankViewMode("manage");
-                                            setMediaManagerScope("node");
-                                          }
-                                        }}
-                                        disabled={
-                                          mediaBankUpdating ||
-                                          mediaBankUploading ||
-                                          bookThumbnailUploading ||
-                                          (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
-                                          (mediaBankViewMode === "pick-node" && !selectedId)
-                                        }
-                                        className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                      >
-                                        Pick
-                                      </button>
-                                    ) : (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            void handleRenameMediaBankAsset(asset);
-                                          }}
-                                          disabled={mediaBankUpdating || mediaBankUploading}
-                                          className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                        >
-                                          Rename
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            void handleAttachMediaBankAssetToSelectedNode(asset.id);
-                                          }}
-                                          disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
-                                          className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                        >
-                                          Attach
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            void handleDeleteMediaBankAsset(asset.id);
-                                          }}
-                                          disabled={mediaBankUpdating || mediaBankUploading}
-                                          className="rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 disabled:opacity-50"
-                                        >
-                                          Remove
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
+                                                const attached = await handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                                if (attached) {
+                                                  setMediaBankViewMode("manage");
+                                                  setMediaManagerScope("node");
+                                                }
+                                              }}
+                                              disabled={
+                                                mediaBankUpdating ||
+                                                mediaBankUploading ||
+                                                bookThumbnailUploading ||
+                                                (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
+                                                (mediaBankViewMode === "pick-node" && !selectedId)
+                                              }
+                                              className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                            >
+                                              Pick
+                                            </button>
+                                          ) : (
+                                            <>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void handleRenameMediaBankAsset(asset);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Rename
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
+                                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Attach
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void handleDeleteMediaBankAsset(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-700 disabled:opacity-50"
+                                              >
+                                                Remove
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="min-w-0">
+                                        <div className="truncate font-medium">{label}</div>
+                                        {asset.media_type === "image" ? (
+                                          <img
+                                            src={resolveMediaUrl(asset.url)}
+                                            alt={label}
+                                            className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
+                                          />
+                                        ) : (
+                                          <div className="mt-1 truncate text-xs text-zinc-500">{asset.url}</div>
+                                        )}
+                                      </div>
+                                      <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type}</span>
+                                      <div className="flex items-center justify-end gap-1">
+                                        {mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book" ? (
+                                          <button
+                                            type="button"
+                                            onClick={async () => {
+                                              if (mediaBankViewMode === "pick-book") {
+                                                const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
+                                                if (picked) {
+                                                  setMediaBankViewMode("manage");
+                                                  setMediaManagerScope("book");
+                                                }
+                                                return;
+                                              }
+
+                                              const attached = await handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                              if (attached) {
+                                                setMediaBankViewMode("manage");
+                                                setMediaManagerScope("node");
+                                              }
+                                            }}
+                                            disabled={
+                                              mediaBankUpdating ||
+                                              mediaBankUploading ||
+                                              bookThumbnailUploading ||
+                                              (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
+                                              (mediaBankViewMode === "pick-node" && !selectedId)
+                                            }
+                                            className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                          >
+                                            Pick
+                                          </button>
+                                        ) : (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void handleRenameMediaBankAsset(asset);
+                                              }}
+                                              disabled={mediaBankUpdating || mediaBankUploading}
+                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                            >
+                                              Rename
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                              }}
+                                              disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
+                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                            >
+                                              Attach
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                void handleDeleteMediaBankAsset(asset.id);
+                                              }}
+                                              disabled={mediaBankUpdating || mediaBankUploading}
+                                              className="rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 disabled:opacity-50"
+                                            >
+                                              Remove
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </>
+                                  )}
                                 </div>
                               );
                             });
@@ -8985,6 +9621,34 @@ function ScripturesContent() {
                           </option>
                         ))}
                     </select>
+                    <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setMediaManagerView("list")}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                          mediaManagerView === "list"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                        aria-label="List view"
+                        title="List view"
+                      >
+                        <List size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMediaManagerView("icon")}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                          mediaManagerView === "icon"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "text-zinc-600 hover:bg-zinc-50"
+                        }`}
+                        aria-label="Icon view"
+                        title="Icon view"
+                      >
+                        <LayoutGrid size={14} />
+                      </button>
+                    </div>
                     <input
                       ref={nodeMediaUploadInputRef}
                       type="file"
@@ -9067,13 +9731,15 @@ function ScripturesContent() {
                       <div className="px-3 py-6 text-sm text-zinc-500">No multimedia attached to this node.</div>
                     ) : (
                       <>
-                        <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
-                          <span>Name</span>
-                          <span>Type</span>
-                          <span>Is default</span>
-                          <span className="text-right">Actions</span>
-                        </div>
-                        <div className="divide-y divide-black/5">
+                        {mediaManagerView === "list" && (
+                          <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-zinc-500">
+                            <span>Name</span>
+                            <span>Type</span>
+                            <span>Is default</span>
+                            <span className="text-right">Actions</span>
+                          </div>
+                        )}
+                        <div className={mediaManagerView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
                           {(() => {
                             const filteredItems = sortNodeMediaItems(nodeMedia).filter((media) => {
                               const mediaType = (media.media_type || "").trim();
@@ -9096,73 +9762,159 @@ function ScripturesContent() {
                               const sameTypeIndex = sameType.findIndex((item) => item.id === media.id);
 
                               return (
-                                <div key={media.id} className="grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
-                                  <div className="min-w-0">
-                                    <div className="truncate font-medium">{label}</div>
-                                    {mediaType === "image" ? (
-                                      <img
-                                        src={resolveMediaUrl(media.url)}
-                                        alt={label}
-                                        className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
-                                      />
-                                    ) : (
-                                      <div className="mt-1 truncate text-xs text-zinc-500">{media.url}</div>
-                                    )}
-                                  </div>
-                                  <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{mediaType}</span>
-                                  <span className="text-xs text-zinc-600">
-                                    {isDefault ? "Yes" : "No"}
-                                  </span>
-                                  <div className="flex items-center justify-end gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleMoveNodeMedia(media.id, "up");
-                                      }}
-                                      disabled={nodeMediaUpdating || sameTypeIndex <= 0}
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Move up"
-                                      title="Move up"
-                                    >
-                                      <ChevronsUp size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleMoveNodeMedia(media.id, "down");
-                                      }}
-                                      disabled={nodeMediaUpdating || sameTypeIndex === sameType.length - 1}
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Move down"
-                                      title="Move down"
-                                    >
-                                      <ChevronsDown size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSetDefaultNodeMedia(media.id);
-                                      }}
-                                      disabled={nodeMediaUpdating || isDefault}
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Set default"
-                                      title="Set default"
-                                    >
-                                      <SlidersHorizontal size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleDeleteNodeMedia(media);
-                                      }}
-                                      disabled={nodeMediaUpdating}
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
-                                      aria-label="Remove"
-                                      title="Remove"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
+                                <div
+                                  key={media.id}
+                                  className={
+                                    mediaManagerView === "icon"
+                                      ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                      : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
+                                  }
+                                >
+                                  {mediaManagerView === "icon" ? (
+                                    <>
+                                      {mediaType === "image" ? (
+                                        <img
+                                          src={resolveMediaUrl(media.url)}
+                                          alt={label}
+                                          className="h-32 w-full object-cover"
+                                        />
+                                      ) : (
+                                        <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                          {mediaType}
+                                        </div>
+                                      )}
+                                      <div className="space-y-2 p-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <div className="truncate font-medium">{label}</div>
+                                            <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">{mediaType}</div>
+                                          </div>
+                                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+                                            {isDefault ? "Default" : "Normal"}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              void handleMoveNodeMedia(media.id, "up");
+                                            }}
+                                            disabled={nodeMediaUpdating || sameTypeIndex <= 0}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                            aria-label="Move up"
+                                            title="Move up"
+                                          >
+                                            <ChevronsUp size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              void handleMoveNodeMedia(media.id, "down");
+                                            }}
+                                            disabled={nodeMediaUpdating || sameTypeIndex === sameType.length - 1}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                            aria-label="Move down"
+                                            title="Move down"
+                                          >
+                                            <ChevronsDown size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              void handleSetDefaultNodeMedia(media.id);
+                                            }}
+                                            disabled={nodeMediaUpdating || isDefault}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                            aria-label="Set default"
+                                            title="Set default"
+                                          >
+                                            <SlidersHorizontal size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              void handleDeleteNodeMedia(media);
+                                            }}
+                                            disabled={nodeMediaUpdating}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                            aria-label="Remove"
+                                            title="Remove"
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="min-w-0">
+                                        <div className="truncate font-medium">{label}</div>
+                                        {mediaType === "image" ? (
+                                          <img
+                                            src={resolveMediaUrl(media.url)}
+                                            alt={label}
+                                            className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
+                                          />
+                                        ) : (
+                                          <div className="mt-1 truncate text-xs text-zinc-500">{media.url}</div>
+                                        )}
+                                      </div>
+                                      <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{mediaType}</span>
+                                      <span className="text-xs text-zinc-600">
+                                        {isDefault ? "Yes" : "No"}
+                                      </span>
+                                      <div className="flex items-center justify-end gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleMoveNodeMedia(media.id, "up");
+                                          }}
+                                          disabled={nodeMediaUpdating || sameTypeIndex <= 0}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                          aria-label="Move up"
+                                          title="Move up"
+                                        >
+                                          <ChevronsUp size={12} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleMoveNodeMedia(media.id, "down");
+                                          }}
+                                          disabled={nodeMediaUpdating || sameTypeIndex === sameType.length - 1}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                          aria-label="Move down"
+                                          title="Move down"
+                                        >
+                                          <ChevronsDown size={12} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleSetDefaultNodeMedia(media.id);
+                                          }}
+                                          disabled={nodeMediaUpdating || isDefault}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
+                                          aria-label="Set default"
+                                          title="Set default"
+                                        >
+                                          <SlidersHorizontal size={12} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            void handleDeleteNodeMedia(media);
+                                          }}
+                                          disabled={nodeMediaUpdating}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                          aria-label="Remove"
+                                          title="Remove"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
                                 </div>
                               );
                             });

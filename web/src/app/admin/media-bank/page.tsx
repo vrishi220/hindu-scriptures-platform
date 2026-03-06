@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MoreVertical } from "lucide-react";
+import { LayoutGrid, List, MoreVertical } from "lucide-react";
 import { getMe } from "@/lib/authClient";
 import InlineClearButton from "@/components/InlineClearButton";
 import ExternalMediaFormModal from "@/components/ExternalMediaFormModal";
@@ -15,6 +15,18 @@ import {
 } from "@/lib/mediaBankClient";
 import { resolveMediaUrl } from "@/lib/mediaUrl";
 import { type ExternalMediaType } from "@/lib/externalMedia";
+
+const ADMIN_MEDIA_BANK_VIEW_KEY = "admin_media_bank_browser_view";
+
+const readStoredBrowserView = (): "list" | "icon" => {
+  if (typeof window === "undefined") {
+    return "list";
+  }
+  return window.localStorage.getItem(ADMIN_MEDIA_BANK_VIEW_KEY) === "icon" ? "icon" : "list";
+};
+
+const normalizeBrowserView = (value: unknown): "list" | "icon" =>
+  value === "icon" ? "icon" : "list";
 
 type MediaAsset = {
   id: number;
@@ -59,11 +71,13 @@ export default function AdminMediaBankPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | string>("all");
+  const [browserView, setBrowserView] = useState<"list" | "icon">("list");
   const [renameId, setRenameId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
   const [externalFormOpen, setExternalFormOpen] = useState(false);
   const [externalFormSubmitting, setExternalFormSubmitting] = useState(false);
+  const [accountPrefReady, setAccountPrefReady] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -103,7 +117,24 @@ export default function AdminMediaBankPage() {
     void (async () => {
       const admin = await ensureAdmin();
       if (admin) {
+        try {
+          const response = await fetch("/api/preferences", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (response.ok) {
+            const payload = (await response.json().catch(() => null)) as {
+              admin_media_bank_browser_view?: unknown;
+            } | null;
+            setBrowserView(normalizeBrowserView(payload?.admin_media_bank_browser_view));
+          }
+        } catch {
+          // no-op: local fallback already loaded
+        }
+        setAccountPrefReady(true);
         await loadAssets();
+      } else {
+        setAccountPrefReady(false);
       }
       setAuthChecked(true);
     })();
@@ -130,6 +161,38 @@ export default function AdminMediaBankPage() {
       document.removeEventListener("mousedown", onPointerDown);
     };
   }, [openActionsId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(ADMIN_MEDIA_BANK_VIEW_KEY, browserView);
+  }, [browserView]);
+
+  useEffect(() => {
+    if (!authChecked || accessDenied || !accountPrefReady) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch("/api/preferences", {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              admin_media_bank_browser_view: browserView,
+            }),
+          });
+        } catch {
+          // no-op: local persistence already applied
+        }
+      })();
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [authChecked, accessDenied, accountPrefReady, browserView]);
 
   const mediaTypes = useMemo(() => {
     const unique = new Set<string>();
@@ -296,6 +359,34 @@ export default function AdminMediaBankPage() {
                 </option>
               ))}
             </select>
+            <div className="inline-flex rounded-md border border-black/10 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setBrowserView("list")}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                  browserView === "list"
+                    ? "bg-[color:var(--accent)] text-white"
+                    : "text-zinc-600 hover:bg-zinc-50"
+                }`}
+                aria-label="List view"
+                title="List view"
+              >
+                <List size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setBrowserView("icon")}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+                  browserView === "icon"
+                    ? "bg-[color:var(--accent)] text-white"
+                    : "text-zinc-600 hover:bg-zinc-50"
+                }`}
+                aria-label="Icon view"
+                title="Icon view"
+              >
+                <LayoutGrid size={14} />
+              </button>
+            </div>
             <input
               ref={uploadInputRef}
               type="file"
@@ -330,124 +421,243 @@ export default function AdminMediaBankPage() {
         </div>
 
         <div className="rounded-xl border border-black/10">
-          <div className="grid grid-cols-[2.2fr_0.9fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-            <span>Asset</span>
-            <span>Type</span>
-            <span className="text-right">Actions</span>
-          </div>
+          {browserView === "list" && (
+            <div className="grid grid-cols-[2.2fr_0.9fr_1.5fr] items-center gap-3 border-b border-black/10 px-3 py-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+              <span>Asset</span>
+              <span>Type</span>
+              <span className="text-right">Actions</span>
+            </div>
+          )}
 
           {loading ? (
             <div className="px-3 py-6 text-sm text-zinc-600">Loading multimedia repo...</div>
           ) : filteredAssets.length === 0 ? (
             <div className="px-3 py-6 text-sm text-zinc-500">No assets found.</div>
           ) : (
-            <div className="divide-y divide-black/5">
+            <div className={browserView === "icon" ? "grid grid-cols-1 gap-2 p-2 sm:grid-cols-2" : "divide-y divide-black/5"}>
               {filteredAssets.map((asset) => {
                 const label = getDisplayName(asset);
                 const isRenaming = renameId === asset.id;
                 const isImage = (asset.media_type || "").toLowerCase() === "image";
                 const showUrl = isExternalUrl(asset.url);
                 return (
-                  <div key={asset.id} className="grid grid-cols-[2.2fr_0.9fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700">
-                    <div className="min-w-0">
-                      {isRenaming ? (
-                        <input
-                          value={renameValue}
-                          onChange={(event) => setRenameValue(event.target.value)}
-                          className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
-                        />
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          {isImage ? (
-                            <img
-                              src={resolveMediaUrl(asset.url)}
-                              alt={label}
-                              className="h-10 w-10 shrink-0 rounded-md border border-black/10 object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-black/10 bg-zinc-50 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
-                              {asset.media_type || "media"}
+                  <div
+                    key={asset.id}
+                    className={
+                      browserView === "icon"
+                        ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                        : "grid grid-cols-[2.2fr_0.9fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
+                    }
+                  >
+                    {browserView === "icon" ? (
+                      <>
+                        {isImage ? (
+                          <img
+                            src={resolveMediaUrl(asset.url)}
+                            alt={label}
+                            className="h-32 w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-32 w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                            {asset.media_type || "media"}
+                          </div>
+                        )}
+                        <div className="space-y-2 p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              {isRenaming ? (
+                                <input
+                                  value={renameValue}
+                                  onChange={(event) => setRenameValue(event.target.value)}
+                                  className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                                />
+                              ) : (
+                                <>
+                                  <div className="truncate font-medium">{label}</div>
+                                  {showUrl && <div className="truncate text-xs text-zinc-500">{asset.url}</div>}
+                                </>
+                              )}
                             </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">{label}</div>
-                            {showUrl && <div className="truncate text-xs text-zinc-500">{asset.url}</div>}
+                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+                              {asset.media_type || "other"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-end gap-1.5">
+                            {isRenaming ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleRename(asset.id);
+                                  }}
+                                  disabled={updatingId === asset.id}
+                                  className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRenameId(null);
+                                    setRenameValue("");
+                                  }}
+                                  className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <div
+                                className="relative"
+                                ref={(element) => {
+                                  actionMenuRefs.current[asset.id] = element;
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
+                                  }}
+                                  disabled={deletingId === asset.id || updatingId === asset.id}
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
+                                  aria-label="Open asset actions"
+                                >
+                                  <MoreVertical size={16} />
+                                </button>
+                                {openActionsId === asset.id && (
+                                  <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionsId(null);
+                                        setRenameId(asset.id);
+                                        setRenameValue(label);
+                                      }}
+                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                                    >
+                                      Rename
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionsId(null);
+                                        void handleDelete(asset);
+                                      }}
+                                      disabled={deletingId === asset.id}
+                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
-                      )}
-                    </div>
-                    <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type || "other"}</span>
-                    <div className="flex items-center justify-end gap-1.5">
-                      {isRenaming ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void handleRename(asset.id);
-                            }}
-                            disabled={updatingId === asset.id}
-                            className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                          >
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRenameId(null);
-                              setRenameValue("");
-                            }}
-                            className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <div
-                          className="relative"
-                          ref={(element) => {
-                            actionMenuRefs.current[asset.id] = element;
-                          }}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
-                            }}
-                            disabled={deletingId === asset.id || updatingId === asset.id}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
-                            aria-label="Open asset actions"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-                          {openActionsId === asset.id && (
-                            <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenActionsId(null);
-                                  setRenameId(asset.id);
-                                  setRenameValue(label);
-                                }}
-                                className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
-                              >
-                                Rename
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOpenActionsId(null);
-                                  void handleDelete(asset);
-                                }}
-                                disabled={deletingId === asset.id}
-                                className="w-full rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
-                              >
-                                Remove
-                              </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="min-w-0">
+                          {isRenaming ? (
+                            <input
+                              value={renameValue}
+                              onChange={(event) => setRenameValue(event.target.value)}
+                              className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {isImage ? (
+                                <img
+                                  src={resolveMediaUrl(asset.url)}
+                                  alt={label}
+                                  className="h-10 w-10 shrink-0 rounded-md border border-black/10 object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-black/10 bg-zinc-50 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                  {asset.media_type || "media"}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{label}</div>
+                                {showUrl && <div className="truncate text-xs text-zinc-500">{asset.url}</div>}
+                              </div>
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                        <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type || "other"}</span>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isRenaming ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleRename(asset.id);
+                                }}
+                                disabled={updatingId === asset.id}
+                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRenameId(null);
+                                  setRenameValue("");
+                                }}
+                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <div
+                              className="relative"
+                              ref={(element) => {
+                                actionMenuRefs.current[asset.id] = element;
+                              }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
+                                }}
+                                disabled={deletingId === asset.id || updatingId === asset.id}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
+                                aria-label="Open asset actions"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
+                              {openActionsId === asset.id && (
+                                <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      setRenameId(asset.id);
+                                      setRenameValue(label);
+                                    }}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                                  >
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      void handleDelete(asset);
+                                    }}
+                                    disabled={deletingId === asset.id}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })}

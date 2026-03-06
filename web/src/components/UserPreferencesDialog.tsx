@@ -28,6 +28,9 @@ export type UserPreferences = {
   preview_transliteration_script: string;
   ui_theme: UiThemePreference;
   ui_density: UiDensityPreference;
+  scriptures_book_browser_view?: "list" | "icon";
+  scriptures_media_manager_view?: "list" | "icon";
+  admin_media_bank_browser_view?: "list" | "icon";
 };
 
 type UserPreferencesDialogProps = {

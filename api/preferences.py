@@ -41,6 +41,9 @@ def get_user_preferences(
                 preview_show_transliteration=True,
                 preview_show_english=True,
                 preview_transliteration_script="iast",
+                scriptures_book_browser_view="list",
+                scriptures_media_manager_view="list",
+                admin_media_bank_browser_view="list",
             )
             db.add(pref)
             db.commit()

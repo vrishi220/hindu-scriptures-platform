@@ -31,6 +31,9 @@ class UserPreference(Base):
     preview_show_transliteration = Column(Boolean, default=True, nullable=False)
     preview_show_english = Column(Boolean, default=True, nullable=False)
     preview_transliteration_script = Column(String(20), default="iast", nullable=False)
+    scriptures_book_browser_view = Column(String(10), default="list", nullable=False)
+    scriptures_media_manager_view = Column(String(10), default="list", nullable=False)
+    admin_media_bank_browser_view = Column(String(10), default="list", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

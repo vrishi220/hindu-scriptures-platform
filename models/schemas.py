@@ -597,6 +597,9 @@ class UserPreferenceBase(BaseModel):
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
     preview_transliteration_script: str = "iast"
+    scriptures_book_browser_view: Literal["list", "icon"] = "list"
+    scriptures_media_manager_view: Literal["list", "icon"] = "list"
+    admin_media_bank_browser_view: Literal["list", "icon"] = "list"
 
 
 class UserPreferenceUpdate(BaseModel):
@@ -614,6 +617,9 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
     preview_transliteration_script: str | None = None
+    scriptures_book_browser_view: Literal["list", "icon"] | None = None
+    scriptures_media_manager_view: Literal["list", "icon"] | None = None
+    admin_media_bank_browser_view: Literal["list", "icon"] | None = None
 
 
 class UserPreferencePublic(UserPreferenceBase):
