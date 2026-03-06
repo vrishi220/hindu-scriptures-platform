@@ -6566,6 +6566,14 @@ function ScripturesContent() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {canBrowseCurrentNode && (
+                    <a
+                      href={buildScripturesPreviewPath("book", bookId)}
+                      className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                    >
+                      Preview
+                    </a>
+                  )}
                   <div className="inline-flex rounded-full border border-black/10 bg-white/90 p-0.5 lg:hidden">
                     <button
                       type="button"
