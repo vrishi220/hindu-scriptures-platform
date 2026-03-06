@@ -4,7 +4,12 @@ from models.book_share import BookShare
 from models.collection_cart import CollectionCart, CollectionCartItem
 from models.draft_book import DraftBook, EditionSnapshot
 from models.content_node import ContentNode
+from models.commentary_author import CommentaryAuthor
+from models.commentary_work import CommentaryWork
+from models.commentary_entry import CommentaryEntry
+from models.node_comment import NodeComment
 from models.media_file import MediaFile
+from models.media_asset import MediaAsset
 from models.provenance_record import ProvenanceRecord
 from models.search_query import SearchQuery
 from models.session import UserSession
@@ -28,6 +33,10 @@ __all__ = [
 	"CollectionCart",
 	"CollectionCartItem",
 	"Compilation",
+	"CommentaryAuthor",
+	"CommentaryWork",
+	"CommentaryEntry",
+	"NodeComment",
 	"Category",
 	"CategoryParent",
 	"CategoryProperty",
@@ -39,6 +48,7 @@ __all__ = [
 	"RenderTemplateAssignment",
 	"MetadataBinding",
 	"MediaFile",
+	"MediaAsset",
 	"PropertyDefinition",
 	"ProvenanceRecord",
 	"SearchQuery",

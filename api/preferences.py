@@ -32,6 +32,8 @@ def get_user_preferences(
                 transliteration_script="devanagari",
                 show_roman_transliteration=True,
                 show_only_preferred_script=False,
+                show_media=True,
+                show_commentary=True,
                 preview_show_titles=False,
                 preview_show_labels=False,
                 preview_show_details=False,

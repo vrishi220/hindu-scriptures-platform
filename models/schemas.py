@@ -456,6 +456,131 @@ class MediaFilePublic(BaseModel):
     created_at: datetime | None = None
 
 
+class MediaAssetPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    media_type: str
+    url: str
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+    created_by: int | None = None
+    created_at: datetime | None = None
+
+
+class CommentaryAuthorBase(BaseModel):
+    name: str
+    bio: str | None = None
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class CommentaryAuthorCreate(CommentaryAuthorBase):
+    pass
+
+
+class CommentaryAuthorUpdate(BaseModel):
+    name: str | None = None
+    bio: str | None = None
+    metadata: dict | None = None
+
+
+class CommentaryAuthorPublic(CommentaryAuthorBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CommentaryWorkBase(BaseModel):
+    title: str
+    author_id: int | None = None
+    description: str | None = None
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class CommentaryWorkCreate(CommentaryWorkBase):
+    pass
+
+
+class CommentaryWorkUpdate(BaseModel):
+    title: str | None = None
+    author_id: int | None = None
+    description: str | None = None
+    metadata: dict | None = None
+
+
+class CommentaryWorkPublic(CommentaryWorkBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CommentaryEntryBase(BaseModel):
+    node_id: int
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str
+    language_code: str = "en"
+    display_order: int = 0
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class CommentaryEntryCreate(CommentaryEntryBase):
+    pass
+
+
+class CommentaryEntryUpdate(BaseModel):
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str | None = None
+    language_code: str | None = None
+    display_order: int | None = None
+    metadata: dict | None = None
+
+
+class CommentaryEntryPublic(CommentaryEntryBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    last_modified_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class NodeCommentBase(BaseModel):
+    node_id: int
+    parent_comment_id: int | None = None
+    content_text: str
+    language_code: str = "en"
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class NodeCommentCreate(NodeCommentBase):
+    pass
+
+
+class NodeCommentUpdate(BaseModel):
+    parent_comment_id: int | None = None
+    content_text: str | None = None
+    language_code: str | None = None
+    metadata: dict | None = None
+
+
+class NodeCommentPublic(NodeCommentBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    last_modified_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 # === Phase 1: User Preferences ===
 class UserPreferenceBase(BaseModel):
     source_language: str = "en"
@@ -463,6 +588,8 @@ class UserPreferenceBase(BaseModel):
     transliteration_script: str = "devanagari"
     show_roman_transliteration: bool = True
     show_only_preferred_script: bool = False
+    show_media: bool = True
+    show_commentary: bool = True
     preview_show_titles: bool = False
     preview_show_labels: bool = False
     preview_show_details: bool = False
@@ -478,6 +605,8 @@ class UserPreferenceUpdate(BaseModel):
     transliteration_script: str | None = None
     show_roman_transliteration: bool | None = None
     show_only_preferred_script: bool | None = None
+    show_media: bool | None = None
+    show_commentary: bool | None = None
     preview_show_titles: bool | None = None
     preview_show_labels: bool | None = None
     preview_show_details: bool | None = None

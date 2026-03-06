@@ -22,6 +22,8 @@ class UserPreference(Base):
     transliteration_script = Column(String(20), default="devanagari", nullable=False)
     show_roman_transliteration = Column(Boolean, default=True, nullable=False)
     show_only_preferred_script = Column(Boolean, default=False, nullable=False)
+    show_media = Column(Boolean, default=True, nullable=False)
+    show_commentary = Column(Boolean, default=True, nullable=False)
     preview_show_titles = Column(Boolean, default=False, nullable=False)
     preview_show_labels = Column(Boolean, default=False, nullable=False)
     preview_show_details = Column(Boolean, default=False, nullable=False)
