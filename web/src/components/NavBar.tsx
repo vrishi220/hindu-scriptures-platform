@@ -22,6 +22,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   transliteration_enabled: true,
   transliteration_script: "iast",
   show_roman_transliteration: true,
+  show_media: true,
+  show_commentary: true,
   show_only_preferred_script: false,
   preview_show_titles: false,
   preview_show_labels: false,

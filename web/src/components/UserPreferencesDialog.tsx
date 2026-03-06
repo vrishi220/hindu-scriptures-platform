@@ -17,6 +17,8 @@ export type UserPreferences = {
   transliteration_script: string;
   show_roman_transliteration: boolean;
   show_only_preferred_script: boolean;
+  show_media: boolean;
+  show_commentary: boolean;
   preview_show_titles: boolean;
   preview_show_labels: boolean;
   preview_show_details: boolean;
@@ -258,6 +260,32 @@ export function UserPreferencesForm({
           }
         />
         Show only preferred script
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.show_media}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              show_media: event.target.checked,
+            })
+          }
+        />
+        Show multimedia
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.show_commentary}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              show_commentary: event.target.checked,
+            })
+          }
+        />
+        Show commentary
       </label>
 
       <div className="mt-1 border-t border-black/10 pt-3">
