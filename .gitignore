@@ -106,3 +106,6 @@ migrate_db.py
 # Local DB backup artifacts
 backups/*.sql
 backups/*.dump
+
+# Runtime media uploads
+media/bank/
