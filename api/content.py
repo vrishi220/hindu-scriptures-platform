@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -16,7 +17,12 @@ from api.users import get_current_user, get_current_user_optional, require_permi
 from models.book import Book
 from models.book_share import BookShare
 from models.content_node import ContentNode
+from models.commentary_author import CommentaryAuthor
+from models.commentary_work import CommentaryWork
+from models.commentary_entry import CommentaryEntry
+from models.node_comment import NodeComment
 from models.media_file import MediaFile
+from models.media_asset import MediaAsset
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
     BookCreate,
@@ -29,9 +35,22 @@ from models.schemas import (
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeUpdate,
+    CommentaryAuthorCreate,
+    CommentaryAuthorPublic,
+    CommentaryAuthorUpdate,
+    CommentaryEntryCreate,
+    CommentaryEntryPublic,
+    CommentaryEntryUpdate,
+    CommentaryWorkCreate,
+    CommentaryWorkPublic,
+    CommentaryWorkUpdate,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
+    MediaAssetPublic,
     MediaFilePublic,
+    NodeCommentCreate,
+    NodeCommentPublic,
+    NodeCommentUpdate,
     ProvenanceRecordPublic,
     ScriptureSchemaCreate,
     ScriptureSchemaPublic,
@@ -68,7 +87,79 @@ PUBLIC_READS_ENABLED = os.getenv("PUBLIC_READS_ENABLED", "false").lower() == "tr
 MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-ALLOWED_MEDIA_TYPES = {"audio", "video", "image"}
+ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
+
+
+def _media_metadata(media: MediaFile) -> dict:
+    metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+    return dict(metadata)
+
+
+def _media_display_order(media: MediaFile) -> int:
+    metadata = _media_metadata(media)
+    value = metadata.get("display_order")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _media_is_default(media: MediaFile) -> bool:
+    return bool(_media_metadata(media).get("is_default"))
+
+
+def _set_media_metadata(media: MediaFile, metadata: dict) -> None:
+    media.metadata_json = metadata
+    flag_modified(media, "metadata_json")
+
+
+def _asset_metadata(asset: MediaAsset) -> dict:
+    metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
+    return dict(metadata)
+
+
+def _set_asset_metadata(asset: MediaAsset, metadata: dict) -> None:
+    asset.metadata_json = metadata
+    flag_modified(asset, "metadata_json")
+
+
+def _media_sort_key(media: MediaFile) -> tuple:
+    created_ts = media.created_at.timestamp() if media.created_at else 0.0
+    return (
+        media.media_type or "",
+        0 if _media_is_default(media) else 1,
+        _media_display_order(media),
+        created_ts,
+        media.id,
+    )
+
+
+def _ensure_default_for_media_type(db: Session, node_id: int, media_type: str) -> None:
+    items = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == media_type)
+        .all()
+    )
+    if not items:
+        return
+    if any(_media_is_default(item) for item in items):
+        return
+
+    first_item = min(
+        items,
+        key=lambda item: (
+            _media_display_order(item),
+            item.created_at.timestamp() if item.created_at else 0.0,
+            item.id,
+        ),
+    )
+    metadata = _media_metadata(first_item)
+    metadata["is_default"] = True
+    _set_media_metadata(first_item, metadata)
 
 
 # Import request/response schemas
@@ -89,6 +180,29 @@ class InsertReferencesPayload(BaseModel):
 
 class LicensePolicyCheckPayload(BaseModel):
     node_ids: list[int]
+
+
+class NodeMediaReorderPayload(BaseModel):
+    media_type: str
+    media_ids: list[int]
+
+
+class NodeMediaSetDefaultPayload(BaseModel):
+    is_default: bool = True
+
+
+class MediaAssetUpdatePayload(BaseModel):
+    display_name: str
+
+
+class MediaAssetCreateLinkPayload(BaseModel):
+    url: str
+    media_type: str | None = None
+    display_name: str | None = None
+
+
+class MediaBankAttachNodePayload(BaseModel):
+    is_default: bool = False
 
 
 def _build_license_policy_report_for_node_ids(
@@ -1878,15 +1992,451 @@ def list_node_media(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _ensure_book_view_access(db, node_book, current_user)
 
-    media = (
-        db.query(MediaFile)
-        .filter(MediaFile.node_id == node_id)
-        .order_by(MediaFile.created_at.desc())
-        .limit(limit)
+    media = db.query(MediaFile).filter(MediaFile.node_id == node_id).all()
+    ordered_media = sorted(media, key=_media_sort_key)
+    paginated_media = ordered_media[offset : offset + limit]
+    return [MediaFilePublic.model_validate(item) for item in paginated_media]
+
+
+@router.get("/media-bank/assets", response_model=list[MediaAssetPublic])
+def list_media_bank_assets(
+    q: str | None = Query(default=None),
+    media_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[MediaAssetPublic]:
+    _ = current_user
+    query = db.query(MediaAsset)
+
+    if media_type and media_type.strip():
+        normalized_type = media_type.strip().lower()
+        query = query.filter(MediaAsset.media_type == normalized_type)
+
+    rows = (
+        query
+        .order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc())
         .offset(offset)
+        .limit(limit)
         .all()
     )
-    return [MediaFilePublic.model_validate(item) for item in media]
+
+    if q and q.strip():
+        normalized_q = q.strip().lower()
+        filtered: list[MediaAsset] = []
+        for item in rows:
+            metadata = _asset_metadata(item)
+            original_filename = metadata.get("original_filename")
+            display_name = metadata.get("display_name")
+            haystack = " ".join(
+                [
+                    str(item.media_type or ""),
+                    str(item.url or ""),
+                    str(original_filename or ""),
+                    str(display_name or ""),
+                ]
+            ).lower()
+            if normalized_q in haystack:
+                filtered.append(item)
+        rows = filtered
+
+    return [MediaAssetPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/media-bank/assets",
+    response_model=MediaAssetPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def upload_media_bank_asset(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaAssetPublic:
+    _ensure_can_contribute(current_user)
+
+    content_type = file.content_type or ""
+    media_category = content_type.split("/")[0] if "/" in content_type else ""
+    if media_category not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported media type",
+        )
+
+    suffix = Path(file.filename).suffix if file.filename else ""
+    if not suffix and content_type:
+        suffix = f".{content_type.split('/')[-1]}"
+
+    target_dir = Path(MEDIA_DIR) / "bank"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}{suffix}"
+    target_path = target_dir / filename
+
+    total_bytes = 0
+    try:
+        with open(target_path, "wb") as out_file:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if MAX_UPLOAD_BYTES and total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File too large",
+                    )
+                out_file.write(chunk)
+    finally:
+        file.file.close()
+
+    original_filename = file.filename or filename
+    metadata = {
+        "original_filename": original_filename,
+        "display_name": original_filename,
+        "content_type": content_type,
+        "size_bytes": total_bytes,
+    }
+    asset = MediaAsset(
+        media_type=media_category,
+        url=f"/media/bank/{filename}",
+        metadata_json=metadata,
+        created_by=current_user.id,
+    )
+
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return MediaAssetPublic.model_validate(asset)
+
+
+@router.post(
+    "/media-bank/assets/link",
+    response_model=MediaAssetPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_media_bank_link_asset(
+    payload: MediaAssetCreateLinkPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaAssetPublic:
+    _ensure_can_contribute(current_user)
+
+    raw_url = payload.url.strip()
+    if not raw_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="url is required",
+        )
+
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="url must be a valid http(s) URL",
+        )
+
+    normalized_type = (payload.media_type or "").strip().lower()
+    if not normalized_type:
+        inferred = ""
+        host_lower = (parsed.netloc or "").lower()
+        if host_lower.startswith("www."):
+            host_lower = host_lower[4:]
+        path_lower = (parsed.path or "").lower()
+        if any(path_lower.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif")):
+            inferred = "image"
+        elif any(path_lower.endswith(ext) for ext in (".mp3", ".wav", ".ogg", ".aac", ".m4a", ".flac")):
+            inferred = "audio"
+        elif any(path_lower.endswith(ext) for ext in (".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi")):
+            inferred = "video"
+        elif host_lower in {
+            "youtube.com",
+            "youtu.be",
+            "m.youtube.com",
+            "music.youtube.com",
+            "vimeo.com",
+            "dailymotion.com",
+        }:
+            inferred = "video"
+        else:
+            inferred = "link"
+        normalized_type = inferred
+
+    if normalized_type not in ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="media_type is required and must be image, audio, video, or link",
+        )
+
+    original_filename = Path(parsed.path).name or raw_url
+    display_name = (payload.display_name or "").strip() or original_filename
+    metadata = {
+        "original_filename": original_filename,
+        "display_name": display_name,
+        "source": "external",
+        "external_host": parsed.netloc,
+    }
+
+    asset = MediaAsset(
+        media_type=normalized_type,
+        url=raw_url,
+        metadata_json=metadata,
+        created_by=current_user.id,
+    )
+
+    db.add(asset)
+    db.commit()
+    db.refresh(asset)
+    return MediaAssetPublic.model_validate(asset)
+
+
+@router.patch("/media-bank/assets/{asset_id}", response_model=MediaAssetPublic)
+def update_media_bank_asset(
+    asset_id: int,
+    payload: MediaAssetUpdatePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaAssetPublic:
+    _ensure_can_contribute(current_user)
+
+    asset = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="display_name is required",
+        )
+
+    metadata = _asset_metadata(asset)
+    metadata["display_name"] = display_name
+    _set_asset_metadata(asset, metadata)
+
+    db.commit()
+    db.refresh(asset)
+    return MediaAssetPublic.model_validate(asset)
+
+
+@router.delete("/media-bank/assets/{asset_id}", response_model=dict)
+def delete_media_bank_asset(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    _ensure_can_contribute(current_user)
+
+    asset = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    media_rows = db.query(MediaFile).filter(MediaFile.url == asset.url).all()
+    attached_rows = []
+    for row in media_rows:
+        metadata = _media_metadata(row)
+        metadata_asset_id = metadata.get("asset_id")
+        parsed_asset_id: int | None = None
+        if isinstance(metadata_asset_id, int):
+            parsed_asset_id = metadata_asset_id
+        elif isinstance(metadata_asset_id, str):
+            try:
+                parsed_asset_id = int(metadata_asset_id)
+            except ValueError:
+                parsed_asset_id = None
+
+        if parsed_asset_id == asset.id:
+            attached_rows.append(row)
+
+    if attached_rows:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Asset is still attached to one or more nodes. "
+                "Detach it from all nodes before deleting from the media bank."
+            ),
+        )
+
+    if isinstance(asset.url, str) and asset.url.startswith("/media/bank/"):
+        filename = Path(asset.url).name
+        target_path = Path(MEDIA_DIR) / "bank" / filename
+        if target_path.exists() and target_path.is_file():
+            target_path.unlink()
+
+    db.delete(asset)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.post(
+    "/media-bank/assets/{asset_id}/attach/nodes/{node_id}",
+    response_model=MediaFilePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def attach_media_bank_asset_to_node(
+    asset_id: int,
+    node_id: int,
+    payload: MediaBankAttachNodePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaFilePublic:
+    _ensure_can_contribute(current_user)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    asset = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    existing_same_type = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == asset.media_type)
+        .all()
+    )
+    next_order = max((_media_display_order(item) for item in existing_same_type), default=-1) + 1
+    has_default = any(_media_is_default(item) for item in existing_same_type)
+
+    asset_metadata = _asset_metadata(asset)
+    is_default = payload.is_default or not has_default
+    metadata = {
+        "original_filename": asset_metadata.get("original_filename") or Path(asset.url).name,
+        "content_type": asset_metadata.get("content_type"),
+        "size_bytes": asset_metadata.get("size_bytes"),
+        "display_order": next_order,
+        "is_default": is_default,
+        "asset_id": asset.id,
+        "asset_display_name": asset_metadata.get("display_name"),
+    }
+
+    media = MediaFile(
+        node_id=node_id,
+        media_type=asset.media_type,
+        url=asset.url,
+        metadata_json=metadata,
+    )
+    db.add(media)
+
+    if is_default:
+        for item in existing_same_type:
+            existing_metadata = _media_metadata(item)
+            existing_metadata["is_default"] = False
+            _set_media_metadata(item, existing_metadata)
+
+    db.commit()
+    db.refresh(media)
+    return MediaFilePublic.model_validate(media)
+
+
+@router.post("/books/{book_id}/thumbnail", response_model=BookPublic)
+def upload_book_thumbnail(
+    book_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookPublic:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_edit_access(db, current_user, book)
+
+    content_type = file.content_type or ""
+    media_category = content_type.split("/")[0] if "/" in content_type else ""
+    if media_category != "image":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Book thumbnail must be an image",
+        )
+
+    suffix = Path(file.filename).suffix if file.filename else ""
+    if not suffix and content_type:
+        suffix = f".{content_type.split('/')[-1]}"
+
+    target_dir = Path(MEDIA_DIR) / "books" / str(book_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"thumbnail_{uuid4().hex}{suffix}"
+    target_path = target_dir / filename
+
+    total_bytes = 0
+    try:
+        with open(target_path, "wb") as out_file:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if MAX_UPLOAD_BYTES and total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="File too large",
+                    )
+                out_file.write(chunk)
+    finally:
+        file.file.close()
+
+    metadata = book.metadata_json or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    existing_thumbnail_url = metadata.get("thumbnail_url")
+    if isinstance(existing_thumbnail_url, str) and existing_thumbnail_url.startswith(
+        f"/media/books/{book_id}/"
+    ):
+        previous_name = Path(existing_thumbnail_url).name
+        previous_path = target_dir / previous_name
+        if previous_path.exists() and previous_path.is_file():
+            previous_path.unlink()
+
+    metadata["thumbnail_url"] = f"/media/books/{book_id}/{filename}"
+    metadata["thumbnail_content_type"] = content_type
+    metadata["thumbnail_original_filename"] = file.filename
+    metadata["thumbnail_size_bytes"] = total_bytes
+
+    setattr(book, "metadata_json", metadata)
+    flag_modified(book, "metadata_json")
+
+    db.commit()
+    db.refresh(book)
+    return _book_public_model(book)
+
+
+@router.delete("/books/{book_id}/thumbnail", response_model=BookPublic)
+def delete_book_thumbnail(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookPublic:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_edit_access(db, current_user, book)
+
+    metadata = book.metadata_json or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    thumbnail_url = metadata.get("thumbnail_url")
+    if isinstance(thumbnail_url, str) and thumbnail_url.startswith(f"/media/books/{book_id}/"):
+        filename = Path(thumbnail_url).name
+        target_path = Path(MEDIA_DIR) / "books" / str(book_id) / filename
+        if target_path.exists() and target_path.is_file():
+            target_path.unlink()
+
+    metadata.pop("thumbnail_url", None)
+    metadata.pop("thumbnail_content_type", None)
+    metadata.pop("thumbnail_original_filename", None)
+    metadata.pop("thumbnail_size_bytes", None)
+
+    setattr(book, "metadata_json", metadata)
+    flag_modified(book, "metadata_json")
+
+    db.commit()
+    db.refresh(book)
+    return _book_public_model(book)
 
 
 @router.post(
@@ -1940,11 +2490,23 @@ def upload_node_media(
     finally:
         file.file.close()
 
+    existing_same_type = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == media_category)
+        .all()
+    )
+    next_order = (
+        max((_media_display_order(item) for item in existing_same_type), default=-1) + 1
+    )
+    has_default = any(_media_is_default(item) for item in existing_same_type)
+
     url = f"/media/{node_id}/{filename}"
     metadata = {
         "original_filename": file.filename,
         "content_type": content_type,
         "size_bytes": total_bytes,
+        "display_order": next_order,
+        "is_default": not has_default,
     }
 
     media = MediaFile(
@@ -1954,6 +2516,97 @@ def upload_node_media(
         metadata_json=metadata,
     )
     db.add(media)
+    db.commit()
+    db.refresh(media)
+    return MediaFilePublic.model_validate(media)
+
+
+@router.patch("/nodes/{node_id}/media/reorder", response_model=list[MediaFilePublic])
+def reorder_node_media(
+    node_id: int,
+    payload: NodeMediaReorderPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[MediaFilePublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    media_type = payload.media_type.strip().lower()
+    if not media_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="media_type is required")
+
+    rows = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == media_type)
+        .all()
+    )
+    row_by_id = {item.id: item for item in rows}
+    existing_ids = set(row_by_id.keys())
+    requested_ids = set(payload.media_ids)
+
+    if existing_ids != requested_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="media_ids must include exactly all media ids for the selected type",
+        )
+
+    for order, media_id in enumerate(payload.media_ids):
+        item = row_by_id[media_id]
+        metadata = _media_metadata(item)
+        metadata["display_order"] = order
+        metadata["is_default"] = order == 0
+        _set_media_metadata(item, metadata)
+
+    db.commit()
+    updated_rows = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == media_type)
+        .all()
+    )
+    return [MediaFilePublic.model_validate(item) for item in sorted(updated_rows, key=_media_sort_key)]
+
+
+@router.patch("/nodes/{node_id}/media/{media_id}", response_model=MediaFilePublic)
+def set_default_node_media(
+    node_id: int,
+    media_id: int,
+    payload: NodeMediaSetDefaultPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaFilePublic:
+    if not payload.is_default:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only setting is_default=true is supported",
+        )
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    media = (
+        db.query(MediaFile)
+        .filter(MediaFile.id == media_id, MediaFile.node_id == node_id)
+        .first()
+    )
+    if not media:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    same_type_media = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id == node_id, MediaFile.media_type == media.media_type)
+        .all()
+    )
+    for item in same_type_media:
+        metadata = _media_metadata(item)
+        metadata["is_default"] = item.id == media.id
+        _set_media_metadata(item, metadata)
+
     db.commit()
     db.refresh(media)
     return MediaFilePublic.model_validate(media)
@@ -1980,12 +2633,563 @@ def delete_node_media(
     if not media:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    filename = Path(media.url).name
-    target_path = Path(MEDIA_DIR) / str(node_id) / filename
-    if target_path.exists():
-        target_path.unlink()
+    if not (isinstance(media.url, str) and media.url.startswith("/media/bank/")):
+        filename = Path(media.url).name
+        target_path = Path(MEDIA_DIR) / str(node_id) / filename
+        if target_path.exists():
+            target_path.unlink()
 
+    deleted_media_type = media.media_type
     db.delete(media)
+    db.commit()
+
+    _ensure_default_for_media_type(db, node_id, deleted_media_type)
+    db.commit()
+
+    return {"message": "Deleted"}
+
+
+@router.get("/commentary/authors", response_model=list[CommentaryAuthorPublic])
+def list_commentary_authors(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryAuthorPublic]:
+    _ = current_user
+    query = db.query(CommentaryAuthor)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        query = query.filter(CommentaryAuthor.name.ilike(like))
+
+    rows = (
+        query
+        .order_by(CommentaryAuthor.name.asc(), CommentaryAuthor.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [CommentaryAuthorPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/commentary/authors",
+    response_model=CommentaryAuthorPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_commentary_author(
+    payload: CommentaryAuthorCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryAuthorPublic:
+    _ensure_can_contribute(current_user)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Author name is required")
+
+    existing = (
+        db.query(CommentaryAuthor)
+        .filter(func.lower(CommentaryAuthor.name) == name.lower())
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Commentary author already exists")
+
+    author = CommentaryAuthor(
+        name=name,
+        bio=payload.bio,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+    )
+    db.add(author)
+    db.commit()
+    db.refresh(author)
+    return CommentaryAuthorPublic.model_validate(author)
+
+
+@router.patch("/commentary/authors/{author_id}", response_model=CommentaryAuthorPublic)
+def update_commentary_author(
+    author_id: int,
+    payload: CommentaryAuthorUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryAuthorPublic:
+    _ensure_can_contribute(current_user)
+    author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == author_id).first()
+    if not author:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "name" in updates:
+        name = (updates.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Author name is required")
+        existing = (
+            db.query(CommentaryAuthor)
+            .filter(func.lower(CommentaryAuthor.name) == name.lower(), CommentaryAuthor.id != author_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Commentary author already exists")
+        author.name = name
+
+    if "bio" in updates:
+        author.bio = updates["bio"]
+    if "metadata" in updates:
+        author.metadata_json = updates["metadata"] or {}
+
+    db.commit()
+    db.refresh(author)
+    return CommentaryAuthorPublic.model_validate(author)
+
+
+@router.get("/commentary/works", response_model=list[CommentaryWorkPublic])
+def list_commentary_works(
+    q: str | None = Query(default=None),
+    author_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryWorkPublic]:
+    _ = current_user
+    query = db.query(CommentaryWork)
+    if author_id is not None:
+        query = query.filter(CommentaryWork.author_id == author_id)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        query = query.filter(CommentaryWork.title.ilike(like))
+
+    rows = (
+        query
+        .order_by(CommentaryWork.title.asc(), CommentaryWork.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [CommentaryWorkPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/commentary/works",
+    response_model=CommentaryWorkPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_commentary_work(
+    payload: CommentaryWorkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryWorkPublic:
+    _ensure_can_contribute(current_user)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Work title is required")
+
+    if payload.author_id is not None:
+        author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == payload.author_id).first()
+        if not author:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+
+    work = CommentaryWork(
+        title=title,
+        author_id=payload.author_id,
+        description=payload.description,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+    )
+    db.add(work)
+    db.commit()
+    db.refresh(work)
+    return CommentaryWorkPublic.model_validate(work)
+
+
+@router.patch("/commentary/works/{work_id}", response_model=CommentaryWorkPublic)
+def update_commentary_work(
+    work_id: int,
+    payload: CommentaryWorkUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryWorkPublic:
+    _ensure_can_contribute(current_user)
+    work = db.query(CommentaryWork).filter(CommentaryWork.id == work_id).first()
+    if not work:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "title" in updates:
+        title = (updates.get("title") or "").strip()
+        if not title:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Work title is required")
+        work.title = title
+
+    if "author_id" in updates:
+        next_author_id = updates.get("author_id")
+        if next_author_id is not None:
+            author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == next_author_id).first()
+            if not author:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+        work.author_id = next_author_id
+
+    if "description" in updates:
+        work.description = updates["description"]
+    if "metadata" in updates:
+        work.metadata_json = updates["metadata"] or {}
+
+    db.commit()
+    db.refresh(work)
+    return CommentaryWorkPublic.model_validate(work)
+
+
+@router.get("/nodes/{node_id}/commentary", response_model=list[CommentaryEntryPublic])
+def list_node_commentary(
+    node_id: int,
+    language_code: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryEntryPublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
+    query = db.query(CommentaryEntry).filter(CommentaryEntry.node_id == node_id)
+    if language_code and language_code.strip():
+        query = query.filter(CommentaryEntry.language_code == language_code.strip().lower())
+
+    rows = (
+        query
+        .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [CommentaryEntryPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/nodes/{node_id}/commentary",
+    response_model=CommentaryEntryPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_node_commentary(
+    node_id: int,
+    payload: CommentaryEntryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryEntryPublic:
+    _ensure_can_contribute(current_user)
+    if payload.node_id != node_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id mismatch")
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    text_value = payload.content_text.strip()
+    if not text_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+
+    if payload.author_id is not None:
+        author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == payload.author_id).first()
+        if not author:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+
+    if payload.work_id is not None:
+        work = db.query(CommentaryWork).filter(CommentaryWork.id == payload.work_id).first()
+        if not work:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+
+    language = payload.language_code.strip().lower() if payload.language_code else "en"
+    if not language:
+        language = "en"
+
+    entry = CommentaryEntry(
+        node_id=node_id,
+        author_id=payload.author_id,
+        work_id=payload.work_id,
+        content_text=text_value,
+        language_code=language,
+        display_order=payload.display_order,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+        last_modified_by=current_user.id,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return CommentaryEntryPublic.model_validate(entry)
+
+
+@router.patch("/nodes/{node_id}/commentary/{entry_id}", response_model=CommentaryEntryPublic)
+def update_node_commentary(
+    node_id: int,
+    entry_id: int,
+    payload: CommentaryEntryUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CommentaryEntryPublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    entry = (
+        db.query(CommentaryEntry)
+        .filter(CommentaryEntry.id == entry_id, CommentaryEntry.node_id == node_id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "author_id" in updates:
+        next_author_id = updates.get("author_id")
+        if next_author_id is not None:
+            author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == next_author_id).first()
+            if not author:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+        entry.author_id = next_author_id
+
+    if "work_id" in updates:
+        next_work_id = updates.get("work_id")
+        if next_work_id is not None:
+            work = db.query(CommentaryWork).filter(CommentaryWork.id == next_work_id).first()
+            if not work:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+        entry.work_id = next_work_id
+
+    if "content_text" in updates:
+        text_value = (updates.get("content_text") or "").strip()
+        if not text_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+        entry.content_text = text_value
+
+    if "language_code" in updates:
+        language = (updates.get("language_code") or "").strip().lower()
+        if not language:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="language_code is required")
+        entry.language_code = language
+
+    if "display_order" in updates:
+        entry.display_order = int(updates["display_order"])
+
+    if "metadata" in updates:
+        entry.metadata_json = updates["metadata"] or {}
+
+    entry.last_modified_by = current_user.id
+    db.commit()
+    db.refresh(entry)
+    return CommentaryEntryPublic.model_validate(entry)
+
+
+@router.delete("/nodes/{node_id}/commentary/{entry_id}", response_model=dict)
+def delete_node_commentary(
+    node_id: int,
+    entry_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    entry = (
+        db.query(CommentaryEntry)
+        .filter(CommentaryEntry.id == entry_id, CommentaryEntry.node_id == node_id)
+        .first()
+    )
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    db.delete(entry)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.get("/nodes/{node_id}/comments", response_model=list[NodeCommentPublic])
+def list_node_comments(
+    node_id: int,
+    parent_comment_id: int | None = Query(default=None),
+    language_code: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[NodeCommentPublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
+    query = db.query(NodeComment).filter(NodeComment.node_id == node_id)
+    if parent_comment_id is not None:
+        query = query.filter(NodeComment.parent_comment_id == parent_comment_id)
+    if language_code and language_code.strip():
+        query = query.filter(NodeComment.language_code == language_code.strip().lower())
+
+    rows = (
+        query
+        .order_by(NodeComment.created_at.asc(), NodeComment.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [NodeCommentPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/nodes/{node_id}/comments",
+    response_model=NodeCommentPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_node_comment(
+    node_id: int,
+    payload: NodeCommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NodeCommentPublic:
+    _ensure_can_contribute(current_user)
+    if payload.node_id != node_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id mismatch")
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
+    text_value = payload.content_text.strip()
+    if not text_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+
+    parent_comment_id = payload.parent_comment_id
+    if parent_comment_id is not None:
+        parent_comment = (
+            db.query(NodeComment)
+            .filter(NodeComment.id == parent_comment_id, NodeComment.node_id == node_id)
+            .first()
+        )
+        if not parent_comment:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent_comment_id")
+
+    language = payload.language_code.strip().lower() if payload.language_code else "en"
+    if not language:
+        language = "en"
+
+    comment = NodeComment(
+        node_id=node_id,
+        parent_comment_id=parent_comment_id,
+        content_text=text_value,
+        language_code=language,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+        last_modified_by=current_user.id,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return NodeCommentPublic.model_validate(comment)
+
+
+@router.patch("/nodes/{node_id}/comments/{comment_id}", response_model=NodeCommentPublic)
+def update_node_comment(
+    node_id: int,
+    comment_id: int,
+    payload: NodeCommentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> NodeCommentPublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    comment = (
+        db.query(NodeComment)
+        .filter(NodeComment.id == comment_id, NodeComment.node_id == node_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    is_author = current_user.id is not None and comment.created_by == current_user.id
+    if not is_author:
+        _ensure_node_edit_access(db, current_user, node)
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "parent_comment_id" in updates:
+        next_parent_comment_id = updates.get("parent_comment_id")
+        if next_parent_comment_id is not None:
+            if int(next_parent_comment_id) == comment_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Comment cannot parent itself")
+            parent_comment = (
+                db.query(NodeComment)
+                .filter(NodeComment.id == next_parent_comment_id, NodeComment.node_id == node_id)
+                .first()
+            )
+            if not parent_comment:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent_comment_id")
+        comment.parent_comment_id = next_parent_comment_id
+
+    if "content_text" in updates:
+        text_value = (updates.get("content_text") or "").strip()
+        if not text_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+        comment.content_text = text_value
+
+    if "language_code" in updates:
+        language = (updates.get("language_code") or "").strip().lower()
+        if not language:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="language_code is required")
+        comment.language_code = language
+
+    if "metadata" in updates:
+        comment.metadata_json = updates["metadata"] or {}
+
+    comment.last_modified_by = current_user.id
+    db.commit()
+    db.refresh(comment)
+    return NodeCommentPublic.model_validate(comment)
+
+
+@router.delete("/nodes/{node_id}/comments/{comment_id}", response_model=dict)
+def delete_node_comment(
+    node_id: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    comment = (
+        db.query(NodeComment)
+        .filter(NodeComment.id == comment_id, NodeComment.node_id == node_id)
+        .first()
+    )
+    if not comment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    is_author = current_user.id is not None and comment.created_by == current_user.id
+    if not is_author:
+        _ensure_node_edit_access(db, current_user, node)
+
+    db.delete(comment)
     db.commit()
     return {"message": "Deleted"}
 

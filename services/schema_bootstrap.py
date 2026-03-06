@@ -64,7 +64,9 @@ def ensure_phase1_schema(database_url: str) -> None:
         """,
         """
         ALTER TABLE IF EXISTS user_preferences
-            ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false;
+            ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS show_media BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS show_commentary BOOLEAN NOT NULL DEFAULT true;
         """,
         """
         ALTER TABLE IF EXISTS scripture_schemas
@@ -89,6 +91,8 @@ def ensure_phase1_schema(database_url: str) -> None:
             transliteration_script VARCHAR(20) NOT NULL DEFAULT 'devanagari',
             show_roman_transliteration BOOLEAN NOT NULL DEFAULT true,
             show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
+            show_media BOOLEAN NOT NULL DEFAULT true,
+            show_commentary BOOLEAN NOT NULL DEFAULT true,
             preview_show_titles BOOLEAN NOT NULL DEFAULT false,
             preview_show_labels BOOLEAN NOT NULL DEFAULT false,
             preview_show_details BOOLEAN NOT NULL DEFAULT false,
@@ -190,6 +194,96 @@ def ensure_phase1_schema(database_url: str) -> None:
             draft_section VARCHAR(20) NOT NULL DEFAULT 'body',
             created_at TIMESTAMP DEFAULT NOW()
         );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS commentary_authors (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            bio TEXT,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS commentary_works (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            author_id INTEGER REFERENCES commentary_authors(id) ON DELETE SET NULL,
+            description TEXT,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS commentary_entries (
+            id SERIAL PRIMARY KEY,
+            node_id INTEGER NOT NULL REFERENCES content_nodes(id) ON DELETE CASCADE,
+            author_id INTEGER REFERENCES commentary_authors(id) ON DELETE SET NULL,
+            work_id INTEGER REFERENCES commentary_works(id) ON DELETE SET NULL,
+            content_text TEXT NOT NULL,
+            language_code TEXT NOT NULL DEFAULT 'en',
+            display_order INTEGER NOT NULL DEFAULT 0,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            last_modified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_commentary_works_author_id ON commentary_works(author_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_commentary_entries_node_id ON commentary_entries(node_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_commentary_entries_author_id ON commentary_entries(author_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_commentary_entries_work_id ON commentary_entries(work_id);
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS node_comments (
+            id SERIAL PRIMARY KEY,
+            node_id INTEGER NOT NULL REFERENCES content_nodes(id) ON DELETE CASCADE,
+            parent_comment_id INTEGER REFERENCES node_comments(id) ON DELETE SET NULL,
+            content_text TEXT NOT NULL,
+            language_code TEXT NOT NULL DEFAULT 'en',
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            last_modified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS media_assets (
+            id SERIAL PRIMARY KEY,
+            media_type VARCHAR(50) NOT NULL,
+            url TEXT NOT NULL,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_media_assets_media_type ON media_assets(media_type);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_media_assets_created_at ON media_assets(created_at DESC);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_node_comments_node_id ON node_comments(node_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_node_comments_parent_comment_id ON node_comments(parent_comment_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_node_comments_created_by ON node_comments(created_by);
         """,
         """
         CREATE TABLE IF NOT EXISTS property_definitions (
