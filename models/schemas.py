@@ -379,7 +379,7 @@ class ContentNodeBase(BaseModel):
 
 
 class ContentNodeCreate(ContentNodeBase):
-    pass
+    insert_after_node_id: int | None = None
 
 
 class ContentNodeUpdate(BaseModel):

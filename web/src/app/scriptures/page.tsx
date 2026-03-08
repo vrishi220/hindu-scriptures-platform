@@ -19,8 +19,11 @@ import {
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
+import BookThumbnailSection from "./components/BookThumbnailSection";
 import ExternalMediaFormModal from "../../components/ExternalMediaFormModal";
 import InlineClearButton from "../../components/InlineClearButton";
+import NodeLevelTemplateSection from "./components/NodeLevelTemplateSection";
+import PropertiesPanel from "./components/PropertiesPanel";
 import WordMeaningsEditor from "../../components/WordMeaningsEditor";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
@@ -583,18 +586,10 @@ const WORD_MEANINGS_VERSION = "1.0";
 const WORD_MEANINGS_REQUIRED_LANGUAGE = "en";
 const WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = ["sa", "pi", "hi", "ta"] as const;
 const WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES = ["en", "hi", "ta", "te", "kn", "ml"] as const;
-const WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES = ["iast", "hk", "itrans"] as const;
-const WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES = ["user_preference", "en", "first_available"] as const;
 const WORD_MEANINGS_MAX_ROWS = 400;
 const WORD_MEANINGS_MAX_SOURCE_CHARS = 120;
 const WORD_MEANINGS_MAX_MEANING_CHARS = 400;
 const WORD_MEANINGS_HTML_TAG_PATTERN = /<[^>]+>/;
-const WORD_MEANINGS_FALLBACK_ORDER_DEFAULT = [...WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES];
-
-type WordMeaningsSourceDisplayMode = "script" | "transliteration";
-type WordMeaningsTransliterationScheme =
-  (typeof WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES)[number];
-type WordMeaningsMeaningLanguage = (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number];
 
 type WordMeaningPayloadRow = {
   id: string;
@@ -872,83 +867,6 @@ const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<str
       .filter((level): level is string => typeof level === "string" && level.trim().length > 0)
       .map((level) => level.trim().toLowerCase())
   );
-};
-
-const getWordMeaningsRenderingSettingsFromBook = (
-  book: BookDetails | null
-): {
-  sourceDisplayMode: WordMeaningsSourceDisplayMode;
-  preferredScheme: WordMeaningsTransliterationScheme;
-  allowRuntimeGeneration: boolean;
-  meaningLanguage: WordMeaningsMeaningLanguage;
-  fallbackOrder: string[];
-} => {
-  const metadata =
-    book?.metadata_json && typeof book.metadata_json === "object"
-      ? book.metadata_json
-      : book?.metadata && typeof book.metadata === "object"
-        ? book.metadata
-        : null;
-
-  const wordMeaningsConfig =
-    metadata &&
-    typeof metadata.word_meanings === "object" &&
-    metadata.word_meanings !== null
-      ? (metadata.word_meanings as Record<string, unknown>)
-      : null;
-
-  const sourceConfig =
-    wordMeaningsConfig &&
-    typeof wordMeaningsConfig.source === "object" &&
-    wordMeaningsConfig.source !== null
-      ? (wordMeaningsConfig.source as Record<string, unknown>)
-      : {};
-
-  const meaningsConfig =
-    wordMeaningsConfig &&
-    typeof wordMeaningsConfig.meanings === "object" &&
-    wordMeaningsConfig.meanings !== null
-      ? (wordMeaningsConfig.meanings as Record<string, unknown>)
-      : {};
-
-  const rawMode =
-    typeof sourceConfig.source_display_mode === "string"
-      ? sourceConfig.source_display_mode.trim().toLowerCase()
-      : "";
-  const sourceDisplayMode = rawMode === "transliteration" ? "transliteration" : "script";
-
-  const rawScheme =
-    typeof sourceConfig.preferred_transliteration_scheme === "string"
-      ? sourceConfig.preferred_transliteration_scheme.trim().toLowerCase()
-      : "";
-  const preferredScheme =
-    WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.find((option) => option === rawScheme) || "iast";
-
-  const allowRuntimeGeneration =
-    typeof sourceConfig.allow_runtime_transliteration_generation === "boolean"
-      ? sourceConfig.allow_runtime_transliteration_generation
-      : true;
-
-  const rawMeaningLanguage =
-    typeof meaningsConfig.meaning_language === "string"
-      ? meaningsConfig.meaning_language.trim().toLowerCase()
-      : "";
-  const meaningLanguage =
-    WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.find((option) => option === rawMeaningLanguage) || "en";
-
-  const fallbackOrder = Array.isArray(meaningsConfig.fallback_order)
-    ? meaningsConfig.fallback_order
-        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-        .map((item) => item.trim().toLowerCase())
-    : [...WORD_MEANINGS_FALLBACK_ORDER_DEFAULT];
-
-  return {
-    sourceDisplayMode,
-    preferredScheme,
-    allowRuntimeGeneration,
-    meaningLanguage,
-    fallbackOrder,
-  };
 };
 
 const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | null => {
@@ -1440,6 +1358,9 @@ function ScripturesContent() {
   const [commentaryMessage, setCommentaryMessage] = useState<string | null>(null);
   const [actionNode, setActionNode] = useState<TreeNode | null>(null);
   const [action, setAction] = useState<"add" | "edit" | null>(null);
+  const [createParentNodeIdOverride, setCreateParentNodeIdOverride] = useState<number | null>(null);
+  const [createInsertAfterNodeId, setCreateInsertAfterNodeId] = useState<number | null>(null);
+  const [createNextOnSubmit, setCreateNextOnSubmit] = useState(false);
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
@@ -1538,6 +1459,9 @@ function ScripturesContent() {
   const [createBookStep, setCreateBookStep] = useState<"schema" | "details">("schema");
   const [bookFormData, setBookFormData] = useState({
     bookName: "",
+    titleTransliteration: "",
+    titleEnglish: "",
+    author: "",
     bookCode: "",
     languagePrimary: "sanskrit",
   });
@@ -1568,18 +1492,6 @@ function ScripturesContent() {
   const [propertiesSaving, setPropertiesSaving] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
   const [propertiesMessage, setPropertiesMessage] = useState<string | null>(null);
-  const [wordMeaningsEnabledLevelSelection, setWordMeaningsEnabledLevelSelection] = useState<Set<string>>(new Set());
-  const [wordMeaningsSourceDisplayModeSelection, setWordMeaningsSourceDisplayModeSelection] =
-    useState<WordMeaningsSourceDisplayMode>("script");
-  const [wordMeaningsPreferredSchemeSelection, setWordMeaningsPreferredSchemeSelection] =
-    useState<WordMeaningsTransliterationScheme>("iast");
-  const [wordMeaningsAllowRuntimeGenerationSelection, setWordMeaningsAllowRuntimeGenerationSelection] =
-    useState(true);
-  const [wordMeaningsMeaningLanguageSelection, setWordMeaningsMeaningLanguageSelection] =
-    useState<WordMeaningsMeaningLanguage>("en");
-  const [wordMeaningsFallbackOrderInput, setWordMeaningsFallbackOrderInput] = useState(
-    WORD_MEANINGS_FALLBACK_ORDER_DEFAULT.join(", ")
-  );
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -2790,44 +2702,9 @@ function ScripturesContent() {
     }
   };
 
-  const handleToggleWordMeaningsRolloutLevel = (levelName: string) => {
-    const normalized = levelName.trim().toLowerCase();
-    if (!normalized) return;
-
-    setWordMeaningsEnabledLevelSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(normalized)) {
-        next.delete(normalized);
-      } else {
-        next.add(normalized);
-      }
-      return next;
-    });
-  };
-
   const handleSaveProperties = async () => {
     if (!propertiesCategoryId) {
       setPropertiesError("Select a category before saving");
-      return;
-    }
-
-    const fallbackOrderFromInput = wordMeaningsFallbackOrderInput
-      .split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean);
-
-    const invalidFallbackStrategies = fallbackOrderFromInput.filter(
-      (item) =>
-        !WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.includes(
-          item as (typeof WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES)[number]
-        )
-    );
-
-    if (propertiesScope === "book" && invalidFallbackStrategies.length > 0) {
-      setPropertiesError(
-        `Fallback order contains invalid values: ${Array.from(new Set(invalidFallbackStrategies)).join(", "
-        )}. Allowed values: ${WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.join(", ")}`
-      );
       return;
     }
 
@@ -2845,83 +2722,6 @@ function ScripturesContent() {
     setPropertiesMessage(null);
 
     try {
-      if (propertiesScope === "book" && bookId && currentBook) {
-        const existingMetadata =
-          currentBook.metadata_json && typeof currentBook.metadata_json === "object"
-            ? { ...currentBook.metadata_json }
-            : currentBook.metadata && typeof currentBook.metadata === "object"
-              ? { ...currentBook.metadata }
-              : {};
-
-        const existingWordMeanings =
-          existingMetadata.word_meanings && typeof existingMetadata.word_meanings === "object"
-            ? { ...(existingMetadata.word_meanings as Record<string, unknown>) }
-            : {};
-
-        const schemaLevels = Array.isArray(currentBook.schema?.levels)
-          ? currentBook.schema.levels
-          : [];
-
-        const selectedLevels =
-          schemaLevels.length > 0
-            ? schemaLevels.filter((level) =>
-                wordMeaningsEnabledLevelSelection.has(level.trim().toLowerCase())
-              )
-            : Array.from(wordMeaningsEnabledLevelSelection);
-
-        const selectedFallbackOrder =
-          fallbackOrderFromInput.length > 0
-            ? Array.from(new Set(fallbackOrderFromInput))
-            : [...WORD_MEANINGS_FALLBACK_ORDER_DEFAULT];
-
-        const existingSourceConfig =
-          existingWordMeanings.source && typeof existingWordMeanings.source === "object"
-            ? { ...(existingWordMeanings.source as Record<string, unknown>) }
-            : {};
-
-        const existingMeaningsConfig =
-          existingWordMeanings.meanings && typeof existingWordMeanings.meanings === "object"
-            ? { ...(existingWordMeanings.meanings as Record<string, unknown>) }
-            : {};
-
-        existingWordMeanings.enabled_levels = selectedLevels;
-        existingWordMeanings.source = {
-          ...existingSourceConfig,
-          source_display_mode: wordMeaningsSourceDisplayModeSelection,
-          preferred_transliteration_scheme: wordMeaningsPreferredSchemeSelection,
-          allow_runtime_transliteration_generation: wordMeaningsAllowRuntimeGenerationSelection,
-        };
-        existingWordMeanings.meanings = {
-          ...existingMeaningsConfig,
-          meaning_language: wordMeaningsMeaningLanguageSelection,
-          fallback_order: selectedFallbackOrder,
-        };
-        existingMetadata.word_meanings = existingWordMeanings;
-
-        const bookResponse = await fetch(`/api/books/${bookId}`, {
-          method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ metadata: existingMetadata }),
-        });
-
-        const bookPayload = (await bookResponse.json().catch(() => null)) as
-          | BookDetails
-          | { detail?: string }
-          | null;
-
-        if (!bookResponse.ok) {
-          throw new Error(
-            (bookPayload as { detail?: string } | null)?.detail ||
-              "Failed to save word meanings rollout"
-          );
-        }
-
-        const updatedBook = bookPayload as BookDetails;
-        setCurrentBook(updatedBook);
-        setWordMeaningsEnabledLevelSelection(getWordMeaningsEnabledLevelsFromBook(updatedBook));
-      }
-
       const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
       const response = await fetch(endpoint, {
         method: "POST",
@@ -3046,28 +2846,12 @@ function ScripturesContent() {
   const activeNodePreviewLabel = `Preview ${activeNodeLevelLabel}`;
   const activeNodeEditLabel = `Edit ${activeNodeLevelLabel}`;
   const activeNodeDeleteLabel = `Delete ${activeNodeLevelLabel}`;
-  const currentBookSchemaLevels = Array.isArray(currentBook?.schema?.levels)
-    ? currentBook.schema.levels
-    : [];
-
   useEffect(() => {
     if (!canExploreStructure && showExploreStructure) {
       setShowExploreStructure(false);
       setMobilePanel("content");
     }
   }, [canExploreStructure, showExploreStructure]);
-
-  useEffect(() => {
-    if (!showPropertiesModal || propertiesScope !== "book" || !currentBook) return;
-
-    setWordMeaningsEnabledLevelSelection(getWordMeaningsEnabledLevelsFromBook(currentBook));
-    const renderingSettings = getWordMeaningsRenderingSettingsFromBook(currentBook);
-    setWordMeaningsSourceDisplayModeSelection(renderingSettings.sourceDisplayMode);
-    setWordMeaningsPreferredSchemeSelection(renderingSettings.preferredScheme);
-    setWordMeaningsAllowRuntimeGenerationSelection(renderingSettings.allowRuntimeGeneration);
-    setWordMeaningsMeaningLanguageSelection(renderingSettings.meaningLanguage);
-    setWordMeaningsFallbackOrderInput(renderingSettings.fallbackOrder.join(", "));
-  }, [showPropertiesModal, propertiesScope, currentBook]);
 
   useEffect(() => {
     if (!authResolved) return;
@@ -5561,12 +5345,19 @@ function ScripturesContent() {
 
     setBookSubmitting(true);
     try {
+      const titleTransliteration = bookFormData.titleTransliteration.trim();
+      const titleEnglish = bookFormData.titleEnglish.trim();
+      const author = bookFormData.author.trim();
       const payload = {
         schema_id: selectedSchema,
         book_name: bookFormData.bookName,
         book_code: bookFormData.bookCode || null,
         language_primary: bookFormData.languagePrimary,
-        metadata: {},
+        metadata: {
+          ...(titleTransliteration ? { title_transliteration: titleTransliteration } : {}),
+          ...(titleEnglish ? { title_english: titleEnglish } : {}),
+          ...(author ? { author } : {}),
+        },
       };
 
       const response = await fetch("/api/books", {
@@ -5584,6 +5375,9 @@ function ScripturesContent() {
         setCreateBookStep("schema");
         setBookFormData({
           bookName: "",
+          titleTransliteration: "",
+          titleEnglish: "",
+          author: "",
           bookCode: "",
           languagePrimary: "sanskrit",
         });
@@ -5926,22 +5720,35 @@ function ScripturesContent() {
         }
       }
 
-      // Calculate level_order based on parent node
+      const isAddAction = action === "add";
+      const resolvedParentNodeId = isAddAction
+        ? createParentNodeIdOverride !== null
+          ? createParentNodeIdOverride
+          : actionNode.level_name === "BOOK"
+            ? null
+            : actionNode.id
+        : null;
+
+      // Calculate level_order based on parent or sibling-insert context
       let levelOrder = 1;
-      if (action === "add" && actionNode) {
-        // When adding a child node
-        if (actionNode.level_name?.toUpperCase() === "BOOK") {
-          // Adding to book root, this is level 1
-          levelOrder = 1;
-        } else if (actionNode.level_order !== undefined) {
-          // Use parent's level_order + 1
-          levelOrder = actionNode.level_order + 1;
+      if (isAddAction && actionNode) {
+        if (createInsertAfterNodeId !== null) {
+          levelOrder = actionNode.level_order || 1;
         } else {
-          // Fallback based on level name
-          if (actionNode.level_name?.toUpperCase() === "CHAPTER") {
-            levelOrder = 2;
+          // When adding a child node
+          if (actionNode.level_name?.toUpperCase() === "BOOK") {
+            // Adding to book root, this is level 1
+            levelOrder = 1;
+          } else if (actionNode.level_order !== undefined) {
+            // Use parent's level_order + 1
+            levelOrder = actionNode.level_order + 1;
           } else {
-            levelOrder = 3;
+            // Fallback based on level name
+            if (actionNode.level_name?.toUpperCase() === "CHAPTER") {
+              levelOrder = 2;
+            } else {
+              levelOrder = 3;
+            }
           }
         }
       }
@@ -5958,12 +5765,13 @@ function ScripturesContent() {
       };
 
       const payload =
-        action === "add"
+        isAddAction
           ? {
               ...basePayload,
               book_id: parseInt(bookId, 10),
-              parent_node_id: actionNode.level_name === "BOOK" ? null : actionNode.id,
+              parent_node_id: resolvedParentNodeId,
               level_order: levelOrder,
+              insert_after_node_id: createInsertAfterNodeId,
             }
           : basePayload;
 
@@ -5978,8 +5786,11 @@ function ScripturesContent() {
       );
 
       if (response.ok) {
+        const savedNode = (await response.json().catch(() => null)) as { id?: number } | null;
+        const savedNodeId = typeof savedNode?.id === "number" ? savedNode.id : null;
+        const shouldCreateNext = action === "add" && createNextOnSubmit;
         const preservedNodeId =
-          action === "edit" ? actionNode.id : selectedId ?? actionNode.id;
+          action === "edit" ? actionNode.id : savedNodeId ?? selectedId ?? actionNode.id;
 
         pendingSavedNodeId.current = preservedNodeId;
 
@@ -5990,23 +5801,45 @@ function ScripturesContent() {
           window.history.replaceState(window.history.state, "", url.toString());
         }
 
-        // Reset form and close modal
-        setAction(null);
-        setActionNode(null);
-        setActionMessage(null);
-        setFormData({
-          levelName: "",
-          titleSanskrit: "",
-          titleTransliteration: "",
-          titleEnglish: "",
-          sequenceNumber: "",
-          hasContent: false,
-          contentSanskrit: "",
-          contentTransliteration: "",
-          contentEnglish: "",
-          tags: "",
-          wordMeanings: [],
-        });
+        if (shouldCreateNext) {
+          setCreateParentNodeIdOverride(resolvedParentNodeId);
+          if (savedNodeId) {
+            setCreateInsertAfterNodeId(savedNodeId);
+          }
+          setActionMessage("Created. Ready for next.");
+          setFormData((prev) => ({
+            ...prev,
+            titleSanskrit: "",
+            titleTransliteration: "",
+            titleEnglish: "",
+            sequenceNumber: "",
+            contentSanskrit: "",
+            contentTransliteration: "",
+            contentEnglish: "",
+            tags: "",
+            wordMeanings: [],
+          }));
+        } else {
+          // Reset form and close modal
+          setAction(null);
+          setActionNode(null);
+          setCreateParentNodeIdOverride(null);
+          setCreateInsertAfterNodeId(null);
+          setActionMessage(null);
+          setFormData({
+            levelName: "",
+            titleSanskrit: "",
+            titleTransliteration: "",
+            titleEnglish: "",
+            sequenceNumber: "",
+            hasContent: false,
+            contentSanskrit: "",
+            contentTransliteration: "",
+            contentEnglish: "",
+            tags: "",
+            wordMeanings: [],
+          });
+        }
         // Refresh tree without losing context
         if (bookId) {
           try {
@@ -6439,6 +6272,8 @@ function ScripturesContent() {
                 const nextLevel = getNextLevelName(node);
                 const defaultHasContent = isLeafLevelName(nextLevel);
                 setActionNode(node);
+                setCreateParentNodeIdOverride(null);
+                setCreateInsertAfterNodeId(null);
                 setFormData({
                   levelName: nextLevel,
                   titleSanskrit: "",
@@ -7205,7 +7040,7 @@ function ScripturesContent() {
 
           {showBrowseBookModal && bookId && isExploreVisible && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
-            <div className="flex h-full w-full flex-col bg-[color:var(--paper)]">
+            <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
               <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div>
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
@@ -7268,9 +7103,9 @@ function ScripturesContent() {
             {/* Tree Section */}
             {isExploreVisible && (
             <div
-              className={`lg:col-span-1 min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 lg:flex lg:flex-col ${
-                mobilePanel === "tree" ? "block" : "hidden"
-              } lg:block`}
+              className={`lg:col-span-1 min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 flex flex-col ${
+                mobilePanel === "tree" ? "flex" : "hidden"
+              } lg:flex`}
             >
               <div className="sticky top-0 z-10 bg-white/90 pb-3">
                 <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -7323,6 +7158,8 @@ function ScripturesContent() {
                                 const firstLevel = currentBook.schema?.levels[0] || "";
                                 const defaultHasContent = isLeafLevelName(firstLevel);
                                 setActionNode(virtualBook);
+                                setCreateParentNodeIdOverride(null);
+                                setCreateInsertAfterNodeId(null);
                                 setFormData({
                                   levelName: firstLevel,
                                   titleSanskrit: "",
@@ -7686,6 +7523,49 @@ function ScripturesContent() {
                                   type="button"
                                   onClick={() => {
                                     setShowNodeActionsMenu(false);
+                                    if (!nodeContent) return;
+                                    const foundNode = findNodeById(treeData, selectedId);
+                                    const fallbackNode: TreeNode = foundNode || {
+                                      id: nodeContent.id,
+                                      level_name: nodeContent.level_name,
+                                      level_order: nodeContent.level_order,
+                                      sequence_number: nodeContent.sequence_number ?? null,
+                                      title_english: nodeContent.title_english ?? null,
+                                      title_sanskrit: nodeContent.title_sanskrit ?? null,
+                                      title_transliteration: nodeContent.title_transliteration ?? null,
+                                      children: [],
+                                    };
+                                    const parentNode = breadcrumb.length > 1 ? breadcrumb[breadcrumb.length - 2] : null;
+                                    const defaultHasContent = isLeafLevelName(nodeContent.level_name || "");
+                                    setActionNode(fallbackNode);
+                                    setCreateParentNodeIdOverride(parentNode ? parentNode.id : null);
+                                    setCreateInsertAfterNodeId(nodeContent.id);
+                                    setFormData({
+                                      levelName: nodeContent.level_name || "",
+                                      titleSanskrit: "",
+                                      titleTransliteration: "",
+                                      titleEnglish: "",
+                                      sequenceNumber: "",
+                                      hasContent: defaultHasContent,
+                                      contentSanskrit: "",
+                                      contentTransliteration: "",
+                                      contentEnglish: "",
+                                      tags: "",
+                                      wordMeanings: [],
+                                    });
+                                    setAction("add");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Plus size={14} />
+                                  Create next sibling
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowNodeActionsMenu(false);
                                     openNodeMediaManager(selectedId);
                                   }}
                                     disabled={nodeMediaUploading || nodeMediaUpdating}
@@ -7752,6 +7632,8 @@ function ScripturesContent() {
                                       children: [],
                                     };
                                     setActionNode(fallbackNode);
+                                    setCreateParentNodeIdOverride(null);
+                                    setCreateInsertAfterNodeId(null);
                                     setFormData(buildFormDataFromNode(nodeContent));
                                     setAction("edit");
                                   }}
@@ -8779,487 +8661,91 @@ function ScripturesContent() {
           )}
         </section>
 
-        {showPropertiesModal && (
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 md:items-center">
-            <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                    {propertiesScope === "book" ? "Book Properties" : activeNodePropertiesTitle}
-                  </h2>
-                  <p className="text-sm text-zinc-600">
-                    Base properties: Name, Description, Category. Other fields are category metadata properties.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPropertiesModal(false);
-                    setPropertiesMessage(null);
-                    setPropertiesError(null);
+        <PropertiesPanel
+          open={showPropertiesModal}
+          title={propertiesScope === "book" ? "Book Properties" : activeNodePropertiesTitle}
+          subtitle="Base properties: Name, Description, Category. Other fields are category metadata properties."
+          nameValue={
+            propertiesScope === "book"
+              ? currentBook?.book_name || ""
+              : nodeContent?.title_english ||
+                nodeContent?.title_sanskrit ||
+                nodeContent?.title_transliteration ||
+                `Node ${propertiesNodeId || ""}`
+          }
+          descriptionValue={
+            propertiesScope === "book"
+              ? typeof (currentBook?.metadata_json || currentBook?.metadata || {})?.description === "string"
+                ? String((currentBook?.metadata_json || currentBook?.metadata || {}).description)
+                : ""
+              : `${nodeContent?.level_name || "Node"} ${formatSequenceDisplay(
+                  nodeContent?.sequence_number,
+                  Boolean(nodeContent?.has_content)
+                ) || propertiesNodeId || ""}`
+          }
+          categoryId={propertiesCategoryId}
+          categories={metadataCategories}
+          loading={propertiesLoading}
+          categoriesLoading={metadataCategoriesLoading}
+          error={propertiesError}
+          message={propertiesMessage}
+          saving={propertiesSaving}
+          saveDisabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
+          effectiveFields={propertiesEffectiveFields}
+          values={propertiesValues}
+          onClose={() => {
+            setShowPropertiesModal(false);
+            setPropertiesMessage(null);
+            setPropertiesError(null);
+          }}
+          onCategoryChange={(value) => {
+            void handlePropertiesCategoryChange(value);
+          }}
+          onValueChange={handlePropertiesValueChange}
+          onSave={() => {
+            void handleSaveProperties();
+          }}
+          toDisplayText={metadataObjectToDisplayText}
+          toDatetimeLocalValue={toDatetimeLocalValue}
+          isSingleLineTextField={isSingleLineTextMetadataField}
+          isTemplateField={isTemplateMetadataField}
+          extraSections={
+            <>
+              {propertiesScope === "node" && (
+                <NodeLevelTemplateSection
+                  levelDefaultTemplateKey={levelDefaultTemplateKey}
+                  propertiesLevelKey={propertiesLevelKey}
+                  selectedLevelTemplateId={selectedLevelTemplateId}
+                  levelTemplates={levelTemplates}
+                  levelTemplatesLoading={levelTemplatesLoading}
+                  levelTemplateSaving={levelTemplateSaving}
+                  levelTemplateAssignmentId={levelTemplateAssignmentId}
+                  levelTemplateError={levelTemplateError}
+                  levelTemplateMessage={levelTemplateMessage}
+                  onTemplateChange={(templateId) => {
+                    setSelectedLevelTemplateId(templateId);
+                    setLevelTemplateError(null);
+                    setLevelTemplateMessage(null);
                   }}
-                  className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
-                >
-                  X
-                </button>
-              </div>
+                  onAssignTemplate={() => {
+                    void assignLevelTemplate();
+                  }}
+                />
+              )}
 
-              <div className="space-y-3 overflow-y-auto pr-1">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Name</span>
-                  <input
-                    type="text"
-                    readOnly
-                    value={
-                      propertiesScope === "book"
-                        ? currentBook?.book_name || ""
-                        : nodeContent?.title_english || nodeContent?.title_sanskrit || nodeContent?.title_transliteration || `Node ${propertiesNodeId || ""}`
-                    }
-                    className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Description</span>
-                  <textarea
-                    readOnly
-                    value={
-                      propertiesScope === "book"
-                        ? (typeof (currentBook?.metadata_json || currentBook?.metadata || {})?.description === "string"
-                            ? String((currentBook?.metadata_json || currentBook?.metadata || {}).description)
-                            : "")
-                        : `${nodeContent?.level_name || "Node"} ${formatSequenceDisplay(nodeContent?.sequence_number, Boolean(nodeContent?.has_content)) || propertiesNodeId || ""}`
-                    }
-                    rows={2}
-                    className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
-                  />
-                </label>
-
-                {propertiesScope === "node" && (
-                  <div className="rounded-lg border border-black/10 bg-white p-3">
-                    <div>
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Level Template</div>
-                        <p className="mt-1 text-xs text-zinc-600">
-                          Schema default: <span className="font-medium">{levelDefaultTemplateKey || "Not configured"}</span>
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-600">
-                          Instance override for level: <span className="font-medium">{propertiesLevelKey || "unknown"}</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    <label className="mt-3 flex flex-col gap-1">
-                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Template</span>
-                      <select
-                        value={selectedLevelTemplateId}
-                        onChange={(event) => {
-                          setSelectedLevelTemplateId(event.target.value);
-                          setLevelTemplateError(null);
-                          setLevelTemplateMessage(null);
-                        }}
-                        disabled={levelTemplatesLoading || levelTemplateSaving || !propertiesLevelKey}
-                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-60"
-                      >
-                        <option value="">Select template</option>
-                        {levelTemplates.map((template) => (
-                          <option key={template.id} value={template.id.toString()}>
-                            {template.name} (v{template.current_version}, {template.visibility})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void assignLevelTemplate();
-                        }}
-                        disabled={!selectedLevelTemplateId || levelTemplateSaving || !propertiesLevelKey}
-                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-                      >
-                        {levelTemplateSaving
-                          ? "Saving..."
-                          : levelTemplateAssignmentId
-                            ? "Update Assignment"
-                            : "Assign Template"}
-                      </button>
-                      <span className="text-xs text-zinc-500">
-                        {levelTemplateAssignmentId ? "Override active" : "Using schema default"}
-                      </span>
-                      <a
-                        href="/templates"
-                        className="text-xs text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
-                      >
-                        Manage templates
-                      </a>
-                    </div>
-
-                    {levelTemplateError && (
-                      <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                        {levelTemplateError}
-                      </div>
-                    )}
-                    {levelTemplateMessage && (
-                      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                        {levelTemplateMessage}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Category</span>
-                  <select
-                    value={propertiesCategoryId?.toString() || ""}
-                    onChange={(event) => {
-                      void handlePropertiesCategoryChange(event.target.value);
-                    }}
-                    disabled={propertiesLoading || metadataCategoriesLoading}
-                    className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)] disabled:opacity-60"
-                  >
-                    <option value="">Select category</option>
-                    {metadataCategories.map((category) => (
-                      <option key={category.id} value={category.id.toString()}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                {propertiesLoading && (
-                  <p className="text-xs text-zinc-500">Loading metadata properties...</p>
-                )}
-
-                {propertiesError && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {propertiesError}
-                  </div>
-                )}
-
-                {!propertiesLoading && propertiesCategoryId && propertiesEffectiveFields.length === 0 && (
-                  <p className="text-xs text-zinc-500">Selected category has no metadata properties.</p>
-                )}
-
-                {propertiesScope === "book" && (
-                  <div className="rounded-lg border border-black/10 bg-white p-3">
-                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Book Thumbnail
-                    </div>
-                    <div className="mt-2 flex items-start gap-3">
-                      {getBookThumbnailUrl(currentBook) ? (
-                        <img
-                          src={getBookThumbnailUrl(currentBook) || ""}
-                          alt="Book thumbnail"
-                          className="h-20 w-20 rounded-lg border border-black/10 object-cover"
-                        />
-                      ) : (
-                        <div className="h-20 w-20 rounded-lg border border-black/10 bg-zinc-100" />
-                      )}
-                      <div className="flex flex-col items-start gap-2">
-                        <p className="text-xs text-zinc-600">
-                          {getBookThumbnailUrl(currentBook)
-                            ? "Thumbnail is managed in Multimedia Manager."
-                            : "No thumbnail set for this book."}
-                        </p>
-                        {canEditCurrentBook && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMediaManagerScope("book");
-                              setShowMediaManagerModal(true);
-                            }}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700"
-                          >
-                            Manage multimedia
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 border-t border-black/10 pt-3">
-                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Word Meanings Rollout
-                    </div>
-                    <p className="mt-1 text-xs text-zinc-600">
-                      Enable word-to-word meanings for selected levels in this book.
-                    </p>
-                    {currentBookSchemaLevels.length === 0 ? (
-                      <p className="mt-2 text-xs text-zinc-500">
-                        No schema levels available for this book.
-                      </p>
-                    ) : (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {currentBookSchemaLevels.map((level) => {
-                          const normalized = level.trim().toLowerCase();
-                          const checked = wordMeaningsEnabledLevelSelection.has(normalized);
-                          return (
-                            <label
-                              key={level}
-                              className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-zinc-700"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => handleToggleWordMeaningsRolloutLevel(level)}
-                                disabled={propertiesSaving || propertiesLoading}
-                              />
-                              <span>{level}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <p className="mt-2 text-xs text-zinc-500">
-                      Changes are saved with Save.
-                    </p>
-
-                    <div className="mt-4 border-t border-black/10 pt-3">
-                      <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Word Meanings Rendering
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-600">
-                        Controls how W2W source and meaning are rendered in preview/export.
-                      </p>
-
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Source Display Mode</span>
-                          <select
-                            value={wordMeaningsSourceDisplayModeSelection}
-                            onChange={(event) => {
-                              setWordMeaningsSourceDisplayModeSelection(
-                                event.target.value === "transliteration" ? "transliteration" : "script"
-                              );
-                              setPropertiesMessage(null);
-                              setPropertiesError(null);
-                            }}
-                            disabled={propertiesSaving || propertiesLoading}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                          >
-                            <option value="script">Script</option>
-                            <option value="transliteration">Transliteration</option>
-                          </select>
-                        </label>
-
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preferred Transliteration Scheme</span>
-                          <select
-                            value={wordMeaningsPreferredSchemeSelection}
-                            onChange={(event) => {
-                              const nextValue = event.target.value as (typeof WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES)[number];
-                              setWordMeaningsPreferredSchemeSelection(
-                                WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.includes(nextValue)
-                                  ? nextValue
-                                  : "iast"
-                              );
-                              setPropertiesMessage(null);
-                              setPropertiesError(null);
-                            }}
-                            disabled={propertiesSaving || propertiesLoading}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                          >
-                            {WORD_MEANINGS_ALLOWED_TRANSLITERATION_SCHEMES.map((scheme) => (
-                              <option key={scheme} value={scheme}>{scheme}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Meaning Language</span>
-                          <select
-                            value={wordMeaningsMeaningLanguageSelection}
-                            onChange={(event) => {
-                              const nextValue = event.target.value as (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number];
-                              setWordMeaningsMeaningLanguageSelection(
-                                WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.includes(nextValue)
-                                  ? nextValue
-                                  : "en"
-                              );
-                              setPropertiesMessage(null);
-                              setPropertiesError(null);
-                            }}
-                            disabled={propertiesSaving || propertiesLoading}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                          >
-                            {WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.map((language) => (
-                              <option key={language} value={language}>{language}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Fallback Order</span>
-                          <input
-                            type="text"
-                            value={wordMeaningsFallbackOrderInput}
-                            onChange={(event) => {
-                              setWordMeaningsFallbackOrderInput(event.target.value);
-                              setPropertiesMessage(null);
-                              setPropertiesError(null);
-                            }}
-                            disabled={propertiesSaving || propertiesLoading}
-                            placeholder="user_preference, en, first_available"
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                          />
-                          <span className="text-[11px] text-zinc-500">
-                            Allowed: {WORD_MEANINGS_ALLOWED_FALLBACK_STRATEGIES.join(", ")}
-                          </span>
-                        </label>
-                      </div>
-
-                      <label className="mt-3 inline-flex items-center gap-2 text-xs text-zinc-700">
-                        <input
-                          type="checkbox"
-                          checked={wordMeaningsAllowRuntimeGenerationSelection}
-                          onChange={(event) => {
-                            setWordMeaningsAllowRuntimeGenerationSelection(event.target.checked);
-                            setPropertiesMessage(null);
-                            setPropertiesError(null);
-                          }}
-                          disabled={propertiesSaving || propertiesLoading}
-                        />
-                        <span>Allow runtime transliteration generation</span>
-                      </label>
-                    </div>
-                    </div>
-                  </div>
-                )}
-
-                {propertiesEffectiveFields.map((field) => {
-                  const key = field.property_internal_name;
-                  const value = propertiesValues[key];
-                  const required = Boolean(field.is_required);
-
-                  if (field.property_data_type === "boolean") {
-                    return (
-                      <label key={key} className="flex items-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(value)}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.checked)}
-                          className="rounded border-black/20"
-                        />
-                        <span>{field.property_display_name}{required ? " *" : ""}</span>
-                      </label>
-                    );
-                  }
-
-                  if (field.property_data_type === "dropdown") {
-                    const dropdownValue = metadataObjectToDisplayText(value);
-                    return (
-                      <label key={key} className="flex flex-col gap-1">
-                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                        <select
-                          value={dropdownValue}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        >
-                          <option value="">Select value</option>
-                          {(field.dropdown_options || []).map((option) => (
-                            <option key={option} value={option}>{option}</option>
-                          ))}
-                        </select>
-                      </label>
-                    );
-                  }
-
-                  if (field.property_data_type === "number") {
-                    return (
-                      <label key={key} className="flex flex-col gap-1">
-                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                        <input
-                          type="number"
-                          value={value === null || value === undefined ? "" : String(value)}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
-                    );
-                  }
-
-                  if (field.property_data_type === "date") {
-                    return (
-                      <label key={key} className="flex flex-col gap-1">
-                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                        <input
-                          type="date"
-                          value={typeof value === "string" ? value : ""}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
-                    );
-                  }
-
-                  if (field.property_data_type === "datetime") {
-                    return (
-                      <label key={key} className="flex flex-col gap-1">
-                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                        <input
-                          type="datetime-local"
-                          value={toDatetimeLocalValue(value)}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
-                    );
-                  }
-
-                  const singleLine = isSingleLineTextMetadataField(field);
-                  const isTemplateField = isTemplateMetadataField(field);
-                  const textValue = metadataObjectToDisplayText(value);
-
-                  return (
-                    <label key={key} className="flex flex-col gap-1">
-                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{field.property_display_name}{required ? " *" : ""}</span>
-                      {isTemplateField ? (
-                        <select
-                          value={textValue}
-                          disabled
-                          className="rounded-lg border border-black/10 bg-zinc-100 px-3 py-2 text-sm text-zinc-700"
-                        >
-                          <option value={textValue}>{textValue || "Not configured"}</option>
-                        </select>
-                      ) : singleLine ? (
-                        <input
-                          type="text"
-                          value={textValue}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        />
-                      ) : (
-                        <textarea
-                          value={textValue}
-                          onChange={(event) => handlePropertiesValueChange(key, event.target.value)}
-                          rows={4}
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
-                        />
-                      )}
-                    </label>
-                  );
-                })}
-
-                <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-black/5 bg-[color:var(--paper)] pt-2">
-                  <div>{propertiesMessage && <span className="text-xs text-emerald-700">{propertiesMessage}</span>}</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSaveProperties();
-                      }}
-                      disabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
-                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                    >
-                      {propertiesSaving ? "Saving..." : "Save"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+              {propertiesScope === "book" && (
+                <BookThumbnailSection
+                  thumbnailUrl={getBookThumbnailUrl(currentBook)}
+                  canEditCurrentBook={canEditCurrentBook}
+                  onManageMultimedia={() => {
+                    setMediaManagerScope("book");
+                    setShowMediaManagerModal(true);
+                  }}
+                />
+              )}
+            </>
+          }
+        />
 
         {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(bookId) : Boolean(selectedId)))) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
@@ -10156,7 +9642,7 @@ function ScripturesContent() {
 
         {showBookPreview && bookPreviewArtifact && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
-            <div className="flex h-full w-full flex-col bg-[color:var(--paper)]">
+            <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
               <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div>
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
@@ -10594,7 +10080,7 @@ function ScripturesContent() {
         {/* Create Book Modal */}
         {showCreateBook && (
           <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 sm:items-center">
-            <div className="my-3 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:my-6 sm:max-h-[calc(100dvh-3rem)] sm:p-5">
+            <div className="my-3 flex max-h-[calc(100svh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:my-6 sm:max-h-[calc(100svh-3rem)] sm:p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                   Create New Book
@@ -10607,6 +10093,9 @@ function ScripturesContent() {
                     setCreateBookStep("schema");
                     setBookFormData({
                       bookName: "",
+                      titleTransliteration: "",
+                      titleEnglish: "",
+                      author: "",
                       bookCode: "",
                       languagePrimary: "sanskrit",
                     });
@@ -10688,7 +10177,7 @@ function ScripturesContent() {
 
                   <div>
                     <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Book Name *
+                      Title (Primary) *
                     </label>
                     <input
                       type="text"
@@ -10699,6 +10188,51 @@ function ScripturesContent() {
                       className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
                       placeholder="e.g., Bhagavad Gita"
                       required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Title (Transliteration)
+                    </label>
+                    <input
+                      type="text"
+                      value={bookFormData.titleTransliteration}
+                      onChange={(e) =>
+                        setBookFormData({ ...bookFormData, titleTransliteration: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
+                      placeholder="e.g., Bhagavad Gītā"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Title (English)
+                    </label>
+                    <input
+                      type="text"
+                      value={bookFormData.titleEnglish}
+                      onChange={(e) =>
+                        setBookFormData({ ...bookFormData, titleEnglish: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
+                      placeholder="e.g., Song of the Lord"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Author
+                    </label>
+                    <input
+                      type="text"
+                      value={bookFormData.author}
+                      onChange={(e) =>
+                        setBookFormData({ ...bookFormData, author: e.target.value })
+                      }
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-base outline-none focus:border-[color:var(--accent)] sm:text-sm"
+                      placeholder="e.g., Vedavyasa"
                     />
                   </div>
 
@@ -10759,7 +10293,7 @@ function ScripturesContent() {
         {/* Action Modal */}
         {action && actionNode && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3 overflow-y-auto">
-            <div className="my-6 flex max-h-[calc(100dvh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
+            <div className="my-6 flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
               <div className="flex-shrink-0 border-b border-black/10 p-4 pb-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
@@ -10772,6 +10306,8 @@ function ScripturesContent() {
                     onClick={() => {
                       setAction(null);
                       setActionNode(null);
+                      setCreateParentNodeIdOverride(null);
+                      setCreateInsertAfterNodeId(null);
                       setActionMessage(null);
                     }}
                     className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
@@ -11035,12 +10571,28 @@ function ScripturesContent() {
                       {actionMessage}
                     </div>
                   )}
-                  <div className="flex justify-end gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    {action === "add" ? (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={createNextOnSubmit}
+                          onChange={(e) => setCreateNextOnSubmit(e.target.checked)}
+                          className="rounded border-black/10"
+                        />
+                        <span className="text-sm text-zinc-600">Create next after save</span>
+                      </label>
+                    ) : (
+                      <div />
+                    )}
+                    <div className="flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setAction(null);
                         setActionNode(null);
+                        setCreateParentNodeIdOverride(null);
+                        setCreateInsertAfterNodeId(null);
                         setActionMessage(null);
                       }}
                       className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
@@ -11054,6 +10606,7 @@ function ScripturesContent() {
                     >
                       {submitting ? "Submitting..." : action === "add" ? "Create" : "Save"}
                     </button>
+                    </div>
                   </div>
                 </div>
               </form>

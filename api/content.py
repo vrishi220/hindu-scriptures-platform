@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy import Integer, cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -1744,19 +1745,107 @@ def create_node(
                     status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
                 )
 
-    # Auto-calculate sequence number if not provided
-    sequence_number = payload.sequence_number
-    if sequence_number is None:
-        # Find the maximum sequence number among siblings
-        siblings_query = db.query(ContentNode).filter(
-            ContentNode.book_id == payload.book_id,
-            ContentNode.parent_node_id == payload.parent_node_id,
+    insert_after_node: ContentNode | None = None
+    if payload.insert_after_node_id is not None:
+        if payload.insert_after_node_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid insert-after context",
+            )
+
+        insert_after_node = (
+            db.query(ContentNode)
+            .filter(
+                ContentNode.id == payload.insert_after_node_id,
+                ContentNode.book_id == payload.book_id,
+            )
+            .first()
         )
-        max_seq = db.query(func.max(ContentNode.sequence_number)).filter(
+        if not insert_after_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node not found",
+            )
+
+        if insert_after_node.parent_node_id != payload.parent_node_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same parent",
+            )
+
+        if insert_after_node.level_name != payload.level_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same level",
+            )
+
+        if (
+            payload.level_order is not None
+            and insert_after_node.level_order is not None
+            and insert_after_node.level_order != payload.level_order
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same level order",
+            )
+
+    # Normalize sequence number and auto-calculate when omitted/blank
+    sequence_number: int | None = None
+    if payload.sequence_number is not None:
+        normalized_sequence = str(payload.sequence_number).strip()
+        if normalized_sequence:
+            if not normalized_sequence.isdigit():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sequence number must be a positive integer",
+                )
+            sequence_number = int(normalized_sequence)
+            if sequence_number <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Sequence number must be a positive integer",
+                )
+
+    if insert_after_node is not None:
+        if insert_after_node.sequence_number is None:
+            max_seq = db.query(func.max(cast(ContentNode.sequence_number, Integer))).filter(
+                ContentNode.book_id == payload.book_id,
+                ContentNode.parent_node_id == payload.parent_node_id,
+                ContentNode.sequence_number.isnot(None),
+            ).scalar()
+            sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
+        else:
+            insert_after_sequence = str(insert_after_node.sequence_number).strip()
+            if not insert_after_sequence.isdigit():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Insert-after node has invalid sequence number",
+                )
+            sequence_number = int(insert_after_sequence) + 1
+
+    if sequence_number is not None:
+        numeric_sequence = cast(ContentNode.sequence_number, Integer)
+        nodes_to_shift = (
+            db.query(ContentNode)
+            .filter(
+                ContentNode.book_id == payload.book_id,
+                ContentNode.parent_node_id == payload.parent_node_id,
+                ContentNode.sequence_number.isnot(None),
+                numeric_sequence >= sequence_number,
+            )
+            .order_by(numeric_sequence.desc(), ContentNode.id.desc())
+            .all()
+        )
+        for sibling_node in nodes_to_shift:
+            sibling_node.sequence_number = int(sibling_node.sequence_number) + 1
+
+    if sequence_number is None:
+        max_seq = db.query(func.max(cast(ContentNode.sequence_number, Integer))).filter(
             ContentNode.book_id == payload.book_id,
             ContentNode.parent_node_id == payload.parent_node_id,
+            ContentNode.sequence_number.isnot(None),
         ).scalar()
-        sequence_number = (int(max_seq) if max_seq else 0) + 1
+        sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
 
     title_sanskrit, title_transliteration = _autofill_sanskrit_transliteration_pair(
         payload.title_sanskrit,

@@ -46,11 +46,11 @@ const normalizeBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 => {
 
 const readStoredBrowserDensity = (): { value: 0 | 1 | 2 | 3 | 4; hasStored: boolean } => {
   if (typeof window === "undefined") {
-    return { value: 0, hasStored: false };
+    return { value: 4, hasStored: false };
   }
   const raw = window.localStorage.getItem(ADMIN_MEDIA_BANK_DENSITY_KEY);
   if (raw === null) {
-    return { value: 0, hasStored: false };
+    return { value: 4, hasStored: false };
   }
   return { value: normalizeBrowserDensity(raw), hasStored: true };
 };
@@ -167,9 +167,6 @@ export default function AdminMediaBankPage() {
             } | null;
             const nextView = normalizeBrowserView(payload?.admin_media_bank_browser_view);
             setBrowserView(nextView);
-            if (!hasStoredDensity) {
-              setBrowserDensity(nextView === "icon" ? 3 : 0);
-            }
           }
         } catch {
           // no-op: local fallback already loaded
