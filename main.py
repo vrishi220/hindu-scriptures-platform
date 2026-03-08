@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import FastAPI
@@ -7,7 +8,10 @@ from api import auth, content, search, users, preferences, compilations, collect
 from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
+logger = logging.getLogger(__name__)
+
 MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
+MEDIA_DIR_RESOLVED = os.path.abspath(MEDIA_DIR)
 MEDIA_STORAGE_BACKEND = os.getenv("MEDIA_STORAGE_BACKEND", "local").strip().lower()
 LOCAL_MEDIA_BACKENDS = {"local", "filesystem", "railway-volume"}
 if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
@@ -19,6 +23,12 @@ app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
 @app.on_event("startup")
 def bootstrap_schema() -> None:
     ensure_phase1_schema(DATABASE_URL)
+    logger.info(
+        "Media storage backend=%s media_dir=%s static_mount=%s",
+        MEDIA_STORAGE_BACKEND,
+        MEDIA_DIR_RESOLVED,
+        MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS,
+    )
 
 
 @app.get("/health")
