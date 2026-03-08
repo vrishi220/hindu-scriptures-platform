@@ -33,7 +33,12 @@ def bootstrap_schema() -> None:
 
 @app.get("/health")
 def health_check() -> dict:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "media_storage_backend": MEDIA_STORAGE_BACKEND,
+        "media_dir": MEDIA_DIR_RESOLVED,
+        "media_static_mount_enabled": MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS,
+    }
 
 
 app.include_router(auth.router, prefix="/api")
