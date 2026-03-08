@@ -134,6 +134,21 @@ See `.env.example` for required configuration. Key variables include:
 
 - `DATABASE_URL`: PostgreSQL connection string
 - `SECRET_KEY`: Session management secret (for backend)
+- `MEDIA_STORAGE_BACKEND`: Media storage backend (`local`, `filesystem`, `railway-volume`)
+- `MEDIA_DIR`: Filesystem directory for uploaded media (set this to a persistent mount path on Railway, e.g. `/data/media`)
+- `MEDIA_URL_PREFIX`: Public URL prefix for local media serving (default `/media`)
+- `MAX_UPLOAD_MB`: Upload size limit in MB
+
+### Railway Persistent Media Setup
+
+For durable media uploads on Railway, mount a persistent volume and set:
+
+```bash
+MEDIA_STORAGE_BACKEND=railway-volume
+MEDIA_DIR=/data/media
+```
+
+Without a persistent volume, files written to local service disk can be lost on deploy/restart.
 
 ## Development Tips
 

@@ -80,15 +80,42 @@ from services.book_permissions import (
     user_can_edit_any,
 )
 from services.license_policy import classify_license_action, normalize_license
+from services.media_storage import FileTooLargeError, get_media_storage_from_env
 from services.transliteration import contains_devanagari, devanagari_to_iast, latin_to_devanagari
 
 router = APIRouter(prefix="/content", tags=["content"])
 
 PUBLIC_READS_ENABLED = os.getenv("PUBLIC_READS_ENABLED", "false").lower() == "true"
-MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
+MEDIA_STORAGE = get_media_storage_from_env()
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
+
+
+def _save_upload_to_media_storage(file: UploadFile, relative_path: Path) -> int:
+    try:
+        return MEDIA_STORAGE.save_upload(
+            file=file,
+            relative_path=relative_path,
+            max_upload_bytes=MAX_UPLOAD_BYTES,
+        )
+    except FileTooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File too large",
+        ) from exc
+
+
+def _relative_media_path_from_url(url: str | None) -> Path | None:
+    if not isinstance(url, str):
+        return None
+    return MEDIA_STORAGE.resolve_relative_path_from_url(url)
+
+
+def _is_bank_media_path(relative_path: Path | None) -> bool:
+    if relative_path is None:
+        return False
+    return len(relative_path.parts) > 0 and relative_path.parts[0] == "bank"
 
 
 def _media_metadata(media: MediaFile) -> dict:
@@ -2182,27 +2209,9 @@ def upload_media_bank_asset(
     if not suffix and content_type:
         suffix = f".{content_type.split('/')[-1]}"
 
-    target_dir = Path(MEDIA_DIR) / "bank"
-    target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{suffix}"
-    target_path = target_dir / filename
-
-    total_bytes = 0
-    try:
-        with open(target_path, "wb") as out_file:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total_bytes += len(chunk)
-                if MAX_UPLOAD_BYTES and total_bytes > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="File too large",
-                    )
-                out_file.write(chunk)
-    finally:
-        file.file.close()
+    relative_path = Path("bank") / filename
+    total_bytes = _save_upload_to_media_storage(file, relative_path)
 
     original_filename = file.filename or filename
     metadata = {
@@ -2213,7 +2222,7 @@ def upload_media_bank_asset(
     }
     asset = MediaAsset(
         media_type=media_category,
-        url=f"/media/bank/{filename}",
+        url=MEDIA_STORAGE.public_url(relative_path),
         metadata_json=metadata,
         created_by=current_user.id,
     )
@@ -2374,11 +2383,9 @@ def delete_media_bank_asset(
             ),
         )
 
-    if isinstance(asset.url, str) and asset.url.startswith("/media/bank/"):
-        filename = Path(asset.url).name
-        target_path = Path(MEDIA_DIR) / "bank" / filename
-        if target_path.exists() and target_path.is_file():
-            target_path.unlink()
+    asset_relative_path = _relative_media_path_from_url(asset.url)
+    if _is_bank_media_path(asset_relative_path):
+        MEDIA_STORAGE.delete_relative_path(asset_relative_path)
 
     db.delete(asset)
     db.commit()
@@ -2472,42 +2479,21 @@ def upload_book_thumbnail(
     if not suffix and content_type:
         suffix = f".{content_type.split('/')[-1]}"
 
-    target_dir = Path(MEDIA_DIR) / "books" / str(book_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"thumbnail_{uuid4().hex}{suffix}"
-    target_path = target_dir / filename
-
-    total_bytes = 0
-    try:
-        with open(target_path, "wb") as out_file:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total_bytes += len(chunk)
-                if MAX_UPLOAD_BYTES and total_bytes > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="File too large",
-                    )
-                out_file.write(chunk)
-    finally:
-        file.file.close()
+    relative_path = Path("books") / str(book_id) / filename
+    total_bytes = _save_upload_to_media_storage(file, relative_path)
 
     metadata = book.metadata_json or {}
     if not isinstance(metadata, dict):
         metadata = {}
 
     existing_thumbnail_url = metadata.get("thumbnail_url")
-    if isinstance(existing_thumbnail_url, str) and existing_thumbnail_url.startswith(
-        f"/media/books/{book_id}/"
-    ):
-        previous_name = Path(existing_thumbnail_url).name
-        previous_path = target_dir / previous_name
-        if previous_path.exists() and previous_path.is_file():
-            previous_path.unlink()
+    previous_relative_path = _relative_media_path_from_url(existing_thumbnail_url)
+    expected_prefix = ("books", str(book_id))
+    if previous_relative_path and previous_relative_path.parts[:2] == expected_prefix:
+        MEDIA_STORAGE.delete_relative_path(previous_relative_path)
 
-    metadata["thumbnail_url"] = f"/media/books/{book_id}/{filename}"
+    metadata["thumbnail_url"] = MEDIA_STORAGE.public_url(relative_path)
     metadata["thumbnail_content_type"] = content_type
     metadata["thumbnail_original_filename"] = file.filename
     metadata["thumbnail_size_bytes"] = total_bytes
@@ -2536,12 +2522,10 @@ def delete_book_thumbnail(
     if not isinstance(metadata, dict):
         metadata = {}
 
-    thumbnail_url = metadata.get("thumbnail_url")
-    if isinstance(thumbnail_url, str) and thumbnail_url.startswith(f"/media/books/{book_id}/"):
-        filename = Path(thumbnail_url).name
-        target_path = Path(MEDIA_DIR) / "books" / str(book_id) / filename
-        if target_path.exists() and target_path.is_file():
-            target_path.unlink()
+    thumbnail_relative_path = _relative_media_path_from_url(metadata.get("thumbnail_url"))
+    expected_prefix = ("books", str(book_id))
+    if thumbnail_relative_path and thumbnail_relative_path.parts[:2] == expected_prefix:
+        MEDIA_STORAGE.delete_relative_path(thumbnail_relative_path)
 
     metadata.pop("thumbnail_url", None)
     metadata.pop("thumbnailUrl", None)
@@ -2588,27 +2572,9 @@ def upload_node_media(
     if not suffix and content_type:
         suffix = f".{content_type.split('/')[-1]}"
 
-    target_dir = Path(MEDIA_DIR) / str(node_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{suffix}"
-    target_path = target_dir / filename
-
-    total_bytes = 0
-    try:
-        with open(target_path, "wb") as out_file:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                total_bytes += len(chunk)
-                if MAX_UPLOAD_BYTES and total_bytes > MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="File too large",
-                    )
-                out_file.write(chunk)
-    finally:
-        file.file.close()
+    relative_path = Path(str(node_id)) / filename
+    total_bytes = _save_upload_to_media_storage(file, relative_path)
 
     existing_same_type = (
         db.query(MediaFile)
@@ -2620,7 +2586,7 @@ def upload_node_media(
     )
     has_default = any(_media_is_default(item) for item in existing_same_type)
 
-    url = f"/media/{node_id}/{filename}"
+    url = MEDIA_STORAGE.public_url(relative_path)
     metadata = {
         "original_filename": file.filename,
         "content_type": content_type,
@@ -2753,11 +2719,9 @@ def delete_node_media(
     if not media:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not (isinstance(media.url, str) and media.url.startswith("/media/bank/")):
-        filename = Path(media.url).name
-        target_path = Path(MEDIA_DIR) / str(node_id) / filename
-        if target_path.exists():
-            target_path.unlink()
+    media_relative_path = _relative_media_path_from_url(media.url)
+    if media_relative_path is not None and not _is_bank_media_path(media_relative_path):
+        MEDIA_STORAGE.delete_relative_path(media_relative_path)
 
     deleted_media_type = media.media_type
     db.delete(media)

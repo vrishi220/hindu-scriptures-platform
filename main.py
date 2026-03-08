@@ -8,7 +8,10 @@ from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
 MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
-os.makedirs(MEDIA_DIR, exist_ok=True)
+MEDIA_STORAGE_BACKEND = os.getenv("MEDIA_STORAGE_BACKEND", "local").strip().lower()
+LOCAL_MEDIA_BACKENDS = {"local", "filesystem", "railway-volume"}
+if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
+    os.makedirs(MEDIA_DIR, exist_ok=True)
 
 app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
 
@@ -34,4 +37,5 @@ app.include_router(draft_books.router, prefix="/api")
 app.include_router(metadata.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
 
-app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
+    app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
