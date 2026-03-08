@@ -897,10 +897,10 @@ function HomeContent() {
   };
 
   return (
-    <div className="grainy-bg min-h-screen">
-      <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-14 px-4 pb-14 pt-8 sm:px-6">
+    <div className="grainy-bg">
+      <main className="relative mx-auto flex w-full max-w-6xl flex-col gap-14 px-4 pb-14 pt-8 sm:px-6">
         <section className="grid gap-7 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="order-2 flex flex-col gap-4 lg:order-1">
+          <div className="order-1 flex flex-col gap-4 lg:order-1">
             {authEmail && preferences && (
               <div className="flex justify-start">
                 <button
@@ -962,7 +962,7 @@ function HomeContent() {
             </div>
           </div>
 
-          <div className="order-1 flex flex-col gap-4 lg:order-2">
+          <div className="order-2 flex flex-col gap-4 lg:order-2">
             <div className="rounded-[28px] border border-black/10 bg-white/80 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-[0.18em] text-zinc-500">
                 Library at a glance

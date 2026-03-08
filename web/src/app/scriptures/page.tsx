@@ -10565,13 +10565,13 @@ function ScripturesContent() {
                 )}
                 </div>
 
-                <div className="flex-shrink-0 p-6 pt-4 border-t border-black/10">
+                <div className="sticky bottom-0 z-10 flex-shrink-0 border-t border-black/10 bg-[color:var(--paper)] p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
                   {actionMessage && (
                     <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                       {actionMessage}
                     </div>
                   )}
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     {action === "add" ? (
                       <label className="flex items-center gap-2">
                         <input
@@ -10582,9 +10582,7 @@ function ScripturesContent() {
                         />
                         <span className="text-sm text-zinc-600">Create next after save</span>
                       </label>
-                    ) : (
-                      <div />
-                    )}
+                    ) : null}
                     <div className="flex justify-end gap-2">
                     <button
                       type="button"
