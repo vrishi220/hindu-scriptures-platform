@@ -2058,6 +2058,33 @@ def delete_node(
 
     _ensure_node_edit_access(db, current_user, node)
 
+    deleted_sequence: int | None = None
+    if node.sequence_number is not None:
+        normalized_sequence = str(node.sequence_number).strip()
+        if normalized_sequence.isdigit():
+            deleted_sequence = int(normalized_sequence)
+
+    if deleted_sequence is not None:
+        numeric_sequence = cast(ContentNode.sequence_number, Integer)
+        siblings_to_shift = (
+            db.query(ContentNode)
+            .filter(
+                ContentNode.book_id == node.book_id,
+                ContentNode.parent_node_id == node.parent_node_id,
+                ContentNode.id != node.id,
+                ContentNode.sequence_number.isnot(None),
+                numeric_sequence > deleted_sequence,
+            )
+            .order_by(numeric_sequence.asc(), ContentNode.id.asc())
+            .all()
+        )
+
+        for sibling_node in siblings_to_shift:
+            sibling_sequence = str(sibling_node.sequence_number).strip()
+            if not sibling_sequence.isdigit():
+                continue
+            sibling_node.sequence_number = int(sibling_sequence) - 1
+
     db.delete(node)
     db.commit()
     return {"message": "Deleted"}

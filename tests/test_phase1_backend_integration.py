@@ -531,6 +531,85 @@ class TestNodeInsertAfterParentResolution:
         assert sibling_payload["parent_node_id"] == chapter_one_id
         assert sibling_payload["level_name"] == "Verse"
 
+
+class TestNodeDeleteSequenceRenumbering:
+    def test_delete_node_renumbers_remaining_siblings(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Delete Renumber Schema {uuid4().hex[:8]}",
+                "description": "Schema for delete renumber regression",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Delete Renumber Book {uuid4().hex[:6]}",
+                "book_code": f"delete-renumber-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        created_verse_ids: list[int] = []
+        for index in range(1, 4):
+            verse_response = client.post(
+                "/api/content/nodes",
+                json={
+                    "book_id": book_id,
+                    "parent_node_id": chapter_id,
+                    "level_name": "Verse",
+                    "level_order": 2,
+                    "sequence_number": str(index),
+                    "title_english": f"Verse {index}",
+                    "has_content": True,
+                    "content_data": {"translations": {"english": f"Verse {index} content"}},
+                },
+                headers=headers,
+            )
+            assert verse_response.status_code == status.HTTP_201_CREATED
+            created_verse_ids.append(verse_response.json()["id"])
+
+        delete_response = client.delete(f"/api/content/nodes/{created_verse_ids[1]}", headers=headers)
+        assert delete_response.status_code == status.HTTP_200_OK
+
+        tree_response = client.get(f"/api/content/books/{book_id}/tree", headers=headers)
+        assert tree_response.status_code == status.HTTP_200_OK
+        tree_payload = tree_response.json()
+        verses = [
+            item
+            for item in tree_payload
+            if item.get("parent_node_id") == chapter_id and item.get("level_name") == "Verse"
+        ]
+        assert len(verses) == 2
+        assert [str(item["sequence_number"]) for item in verses] == ["1", "2"]
+
     def test_viewer_cannot_copy_existing_content_as_independent_node(self, client):
         headers_a = _register_and_login(client)
         headers_b = _register_and_login(client)
