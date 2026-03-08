@@ -7535,7 +7535,13 @@ function ScripturesContent() {
                                       title_transliteration: nodeContent.title_transliteration ?? null,
                                       children: [],
                                     };
-                                    const parentNode = breadcrumb.length > 1 ? breadcrumb[breadcrumb.length - 2] : null;
+                                    const siblingPath = findPath(treeData, nodeContent.id);
+                                    const parentNode =
+                                      siblingPath && siblingPath.length > 1
+                                        ? siblingPath[siblingPath.length - 2]
+                                        : breadcrumb.length > 1
+                                          ? breadcrumb[breadcrumb.length - 2]
+                                          : null;
                                     const defaultHasContent = isLeafLevelName(nodeContent.level_name || "");
                                     setActionNode(fallbackNode);
                                     setCreateParentNodeIdOverride(parentNode ? parentNode.id : null);
