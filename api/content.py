@@ -1693,13 +1693,7 @@ def create_node(
                 detail="Insert-after node not found",
             )
 
-        if resolved_parent_node_id is None:
-            resolved_parent_node_id = insert_after_node.parent_node_id
-        elif insert_after_node.parent_node_id != resolved_parent_node_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same parent",
-            )
+        resolved_parent_node_id = insert_after_node.parent_node_id
 
         if insert_after_node.level_name != payload.level_name:
             raise HTTPException(
