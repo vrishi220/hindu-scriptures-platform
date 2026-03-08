@@ -352,6 +352,88 @@ class TestViewerOwnershipAndReferences:
         finally:
             db.close()
 
+
+class TestNodeInsertAfterParentResolution:
+    def test_create_sibling_with_insert_after_works_without_parent_id(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Insert After Schema {uuid4().hex[:8]}",
+                "description": "Schema for insert-after sibling regression",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Insert After Book {uuid4().hex[:6]}",
+                "book_code": f"insert-after-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        first_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {"translations": {"english": "First verse"}},
+            },
+            headers=headers,
+        )
+        assert first_verse_response.status_code == status.HTTP_201_CREATED
+        first_verse_id = first_verse_response.json()["id"]
+
+        sibling_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "insert_after_node_id": first_verse_id,
+                "title_english": "Verse 2",
+                "has_content": True,
+                "content_data": {"translations": {"english": "Second verse"}},
+            },
+            headers=headers,
+        )
+
+        assert sibling_response.status_code == status.HTTP_201_CREATED
+        sibling_payload = sibling_response.json()
+        assert sibling_payload["parent_node_id"] == chapter_id
+        assert sibling_payload["level_name"] == "Verse"
+
     def test_viewer_cannot_copy_existing_content_as_independent_node(self, client):
         headers_a = _register_and_login(client)
         headers_b = _register_and_login(client)

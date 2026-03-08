@@ -1669,6 +1669,54 @@ def create_node(
             detail="You can only add existing content as references",
         )
 
+    insert_after_node: ContentNode | None = None
+    resolved_parent_node_id = payload.parent_node_id
+
+    if payload.insert_after_node_id is not None:
+        if payload.insert_after_node_id <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid insert-after context",
+            )
+
+        insert_after_node = (
+            db.query(ContentNode)
+            .filter(
+                ContentNode.id == payload.insert_after_node_id,
+                ContentNode.book_id == payload.book_id,
+            )
+            .first()
+        )
+        if not insert_after_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node not found",
+            )
+
+        if resolved_parent_node_id is None:
+            resolved_parent_node_id = insert_after_node.parent_node_id
+        elif insert_after_node.parent_node_id != resolved_parent_node_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same parent",
+            )
+
+        if insert_after_node.level_name != payload.level_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same level",
+            )
+
+        if (
+            payload.level_order is not None
+            and insert_after_node.level_order is not None
+            and insert_after_node.level_order != payload.level_order
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insert-after node must share the same level order",
+            )
+
     # Validate hierarchy against schema if book has one
     if book.schema and book.schema.levels:
         schema_levels = book.schema.levels if isinstance(book.schema.levels, list) else []
@@ -1693,10 +1741,10 @@ def create_node(
                 )
 
             # Check parent-child relationship in schema
-            if payload.parent_node_id:
+            if resolved_parent_node_id:
                 parent = (
                     db.query(ContentNode)
-                    .filter(ContentNode.id == payload.parent_node_id)
+                    .filter(ContentNode.id == resolved_parent_node_id)
                     .first()
                 )
                 if not parent:
@@ -1734,60 +1782,16 @@ def create_node(
                     )
     else:
         # No schema - basic parent validation only
-        if payload.parent_node_id:
+        if resolved_parent_node_id:
             parent = (
                 db.query(ContentNode)
-                .filter(ContentNode.id == payload.parent_node_id)
+                .filter(ContentNode.id == resolved_parent_node_id)
                 .first()
             )
             if not parent:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid parent"
                 )
-
-    insert_after_node: ContentNode | None = None
-    if payload.insert_after_node_id is not None:
-        if payload.insert_after_node_id <= 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid insert-after context",
-            )
-
-        insert_after_node = (
-            db.query(ContentNode)
-            .filter(
-                ContentNode.id == payload.insert_after_node_id,
-                ContentNode.book_id == payload.book_id,
-            )
-            .first()
-        )
-        if not insert_after_node:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node not found",
-            )
-
-        if insert_after_node.parent_node_id != payload.parent_node_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same parent",
-            )
-
-        if insert_after_node.level_name != payload.level_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same level",
-            )
-
-        if (
-            payload.level_order is not None
-            and insert_after_node.level_order is not None
-            and insert_after_node.level_order != payload.level_order
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same level order",
-            )
 
     # Normalize sequence number and auto-calculate when omitted/blank
     sequence_number: int | None = None
@@ -1810,7 +1814,7 @@ def create_node(
         if insert_after_node.sequence_number is None:
             max_seq = db.query(func.max(cast(ContentNode.sequence_number, Integer))).filter(
                 ContentNode.book_id == payload.book_id,
-                ContentNode.parent_node_id == payload.parent_node_id,
+                ContentNode.parent_node_id == resolved_parent_node_id,
                 ContentNode.sequence_number.isnot(None),
             ).scalar()
             sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
@@ -1829,7 +1833,7 @@ def create_node(
             db.query(ContentNode)
             .filter(
                 ContentNode.book_id == payload.book_id,
-                ContentNode.parent_node_id == payload.parent_node_id,
+                ContentNode.parent_node_id == resolved_parent_node_id,
                 ContentNode.sequence_number.isnot(None),
                 numeric_sequence >= sequence_number,
             )
@@ -1842,7 +1846,7 @@ def create_node(
     if sequence_number is None:
         max_seq = db.query(func.max(cast(ContentNode.sequence_number, Integer))).filter(
             ContentNode.book_id == payload.book_id,
-            ContentNode.parent_node_id == payload.parent_node_id,
+            ContentNode.parent_node_id == resolved_parent_node_id,
             ContentNode.sequence_number.isnot(None),
         ).scalar()
         sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
@@ -1856,7 +1860,7 @@ def create_node(
 
     node = ContentNode(
         book_id=payload.book_id,
-        parent_node_id=payload.parent_node_id,
+        parent_node_id=resolved_parent_node_id,
         referenced_node_id=payload.referenced_node_id,
         level_name=payload.level_name,
         level_order=payload.level_order,
