@@ -6599,8 +6599,8 @@ function ScripturesContent() {
   );
 
   return (
-    <div className="grainy-bg flex h-full min-h-0 flex-col overflow-hidden overscroll-none">
-      <main className="mx-auto flex h-full min-h-0 w-full max-w-none flex-col gap-2 overflow-hidden overscroll-none px-3 pb-2 pt-2 sm:gap-3 sm:px-4 sm:pb-3 sm:pt-3">
+    <div className="grainy-bg flex min-h-0 flex-col">
+      <main className="mx-auto flex h-[calc(100svh-7.5rem)] min-h-0 w-full max-w-none flex-col gap-2 overflow-hidden px-3 pb-2 pt-2 sm:gap-3 sm:px-4 sm:pb-3 sm:pt-3">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">
             <a
@@ -6611,7 +6611,7 @@ function ScripturesContent() {
             </a>
           </div>
         )}
-        <section className="flex h-0 min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white px-3 py-2 sm:px-4 sm:py-3">
+        <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white px-3 py-2 sm:px-4 sm:py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-zinc-900">Books</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -6692,10 +6692,10 @@ function ScripturesContent() {
             )}
           </div>
 
-          <div className="mt-2 flex h-0 min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white">
+          <div className="mt-2 flex min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white">
             <div
               ref={booksScrollContainerRef}
-              className="books-scroll-pane h-0 min-h-0 flex-1 overflow-y-scroll overflow-x-hidden overscroll-contain"
+              className="books-scroll-pane min-h-0 flex-1 overflow-y-scroll overflow-x-hidden overscroll-contain"
               onScroll={handleBooksScroll}
             >
               {isInitialBooksLoad ? (
