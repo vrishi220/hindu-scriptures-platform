@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,42 @@ MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 MEDIA_DIR_RESOLVED = os.path.abspath(MEDIA_DIR)
 MEDIA_STORAGE_BACKEND = os.getenv("MEDIA_STORAGE_BACKEND", "local").strip().lower()
 LOCAL_MEDIA_BACKENDS = {"local", "filesystem", "railway-volume"}
+
+
+def _validate_media_storage_config() -> None:
+    if MEDIA_STORAGE_BACKEND == "railway-volume":
+        media_path = Path(MEDIA_DIR)
+        if not media_path.is_absolute():
+            raise RuntimeError(
+                "Invalid media storage config: MEDIA_STORAGE_BACKEND=railway-volume requires "
+                f"an absolute MEDIA_DIR path (current value: {MEDIA_DIR!r})"
+            )
+        if not str(media_path).startswith("/data"):
+            logger.warning(
+                "Railway volume backend is enabled but MEDIA_DIR does not start with /data: %s",
+                MEDIA_DIR,
+            )
+
+
+def _media_storage_runtime_state() -> dict:
+    media_path = Path(MEDIA_DIR_RESOLVED)
+    exists = media_path.exists()
+    is_dir = media_path.is_dir()
+    is_absolute = media_path.is_absolute()
+    writable = os.access(media_path, os.W_OK) if exists else False
+
+    return {
+        "media_storage_backend": MEDIA_STORAGE_BACKEND,
+        "media_dir": MEDIA_DIR_RESOLVED,
+        "media_dir_exists": exists,
+        "media_dir_is_directory": is_dir,
+        "media_dir_is_absolute": is_absolute,
+        "media_dir_writable": writable,
+        "media_static_mount_enabled": MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS,
+    }
+
+
+_validate_media_storage_config()
 if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
     os.makedirs(MEDIA_DIR, exist_ok=True)
 
@@ -23,22 +60,21 @@ app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
 @app.on_event("startup")
 def bootstrap_schema() -> None:
     ensure_phase1_schema(DATABASE_URL)
+    media_state = _media_storage_runtime_state()
     logger.info(
-        "Media storage backend=%s media_dir=%s static_mount=%s",
-        MEDIA_STORAGE_BACKEND,
-        MEDIA_DIR_RESOLVED,
-        MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS,
+        "Media storage config backend=%s media_dir=%s exists=%s is_dir=%s writable=%s static_mount=%s",
+        media_state["media_storage_backend"],
+        media_state["media_dir"],
+        media_state["media_dir_exists"],
+        media_state["media_dir_is_directory"],
+        media_state["media_dir_writable"],
+        media_state["media_static_mount_enabled"],
     )
 
 
 @app.get("/health")
 def health_check() -> dict:
-    return {
-        "status": "ok",
-        "media_storage_backend": MEDIA_STORAGE_BACKEND,
-        "media_dir": MEDIA_DIR_RESOLVED,
-        "media_static_mount_enabled": MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS,
-    }
+    return {"status": "ok", **_media_storage_runtime_state()}
 
 
 app.include_router(auth.router, prefix="/api")
