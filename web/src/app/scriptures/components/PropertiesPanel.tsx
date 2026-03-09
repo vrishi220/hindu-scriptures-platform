@@ -18,6 +18,7 @@ type PropertiesPanelProps = {
   title: string;
   subtitle: string;
   nameValue: string;
+  onNameChange: (value: string) => void;
   descriptionValue: string;
   categoryId: number | null;
   categories: MetadataCategoryOption[];
@@ -45,6 +46,7 @@ export default function PropertiesPanel({
   title,
   subtitle,
   nameValue,
+  onNameChange,
   descriptionValue,
   categoryId,
   categories,
@@ -90,9 +92,9 @@ export default function PropertiesPanel({
             <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Name</span>
             <input
               type="text"
-              readOnly
               value={nameValue}
-              className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+              onChange={(event) => onNameChange(event.target.value)}
+              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
             />
           </label>
 

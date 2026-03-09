@@ -1493,6 +1493,7 @@ function ScripturesContent() {
   const [propertiesSaving, setPropertiesSaving] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
   const [propertiesMessage, setPropertiesMessage] = useState<string | null>(null);
+  const [propertiesName, setPropertiesName] = useState("");
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -2274,6 +2275,14 @@ function ScripturesContent() {
     setShowPropertiesModal(true);
     setPropertiesScope(scope);
     setPropertiesNodeId(nodeId);
+    setPropertiesName(
+      scope === "book"
+        ? currentBook?.book_name || ""
+        : nodeContent?.title_english ||
+            nodeContent?.title_sanskrit ||
+            nodeContent?.title_transliteration ||
+            `Node ${nodeId || ""}`
+    );
     setPropertiesLoading(true);
     setPropertiesSaving(false);
     setPropertiesError(null);
@@ -2712,8 +2721,26 @@ function ScripturesContent() {
   };
 
   const handleSaveProperties = async () => {
-    if (!propertiesCategoryId) {
-      setPropertiesError("Select a category before saving");
+    const nextName = propertiesName.trim();
+    if (!nextName) {
+      setPropertiesError("Name is required");
+      return;
+    }
+
+    const currentName =
+      propertiesScope === "book"
+        ? (currentBook?.book_name || "").trim()
+        : (
+            nodeContent?.title_english ||
+            nodeContent?.title_sanskrit ||
+            nodeContent?.title_transliteration ||
+            `Node ${propertiesNodeId || ""}`
+          ).trim();
+    const shouldUpdateName = nextName !== currentName;
+    const shouldSaveMetadata = Boolean(propertiesCategoryId);
+
+    if (!shouldUpdateName && !shouldSaveMetadata) {
+      setPropertiesError("No changes to save");
       return;
     }
 
@@ -2731,23 +2758,107 @@ function ScripturesContent() {
     setPropertiesMessage(null);
 
     try {
-      const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          category_id: propertiesCategoryId,
-          property_overrides: propertyOverrides,
-          unset_overrides: [],
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to save properties");
+      let didUpdateName = false;
+      let didSaveMetadata = false;
+
+      if (shouldUpdateName) {
+        if (propertiesScope === "book") {
+          if (!bookId) {
+            throw new Error("Select a book first");
+          }
+          const renameResponse = await fetch(`/api/books/${bookId}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ book_name: nextName }),
+          });
+          const renamePayload = (await renameResponse.json().catch(() => null)) as
+            | BookDetails
+            | { detail?: string }
+            | null;
+          if (!renameResponse.ok) {
+            throw new Error((renamePayload as { detail?: string } | null)?.detail || "Failed to update name");
+          }
+          const updatedBook = renamePayload as BookDetails;
+          setCurrentBook(updatedBook);
+          setBooks((prev) =>
+            prev.map((book) =>
+              book.id === updatedBook.id
+                ? {
+                    ...book,
+                    book_name: updatedBook.book_name,
+                    metadata_json: updatedBook.metadata_json,
+                    metadata: updatedBook.metadata,
+                  }
+                : book
+            )
+          );
+          didUpdateName = true;
+        } else {
+          if (!propertiesNodeId) {
+            throw new Error("Select a node first");
+          }
+          const renameResponse = await fetch(contentPath(`/nodes/${propertiesNodeId}`), {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title_english: nextName }),
+          });
+          const renamePayload = (await renameResponse.json().catch(() => null)) as
+            | { detail?: string }
+            | null;
+          if (!renameResponse.ok) {
+            throw new Error(renamePayload?.detail || "Failed to update name");
+          }
+          if (bookId) {
+            const treeResponse = await fetch(`/api/books/${bookId}/tree`, {
+              credentials: "include",
+            });
+            if (treeResponse.ok) {
+              const data = (await treeResponse.json()) as TreeNode[];
+              setTreeData(data);
+              const path = findPath(data, propertiesNodeId);
+              if (path) {
+                setBreadcrumb(path);
+                setExpandedIds((prev) => {
+                  const next = new Set(prev);
+                  path.forEach((node) => next.add(node.id));
+                  return next;
+                });
+              }
+            }
+          }
+          await loadNodeContent(propertiesNodeId, true);
+          didUpdateName = true;
+        }
       }
 
-      setPropertiesMessage("Properties saved");
+      if (shouldSaveMetadata) {
+        const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
+        const response = await fetch(endpoint, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            category_id: propertiesCategoryId,
+            property_overrides: propertyOverrides,
+            unset_overrides: [],
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (!response.ok) {
+          throw new Error(payload?.detail || "Failed to save properties");
+        }
+        didSaveMetadata = true;
+      }
+
+      setPropertiesMessage(
+        didUpdateName && didSaveMetadata
+          ? "Properties and name saved"
+          : didUpdateName
+            ? "Name saved"
+            : "Properties saved"
+      );
       await openPropertiesModal(propertiesScope, propertiesNodeId);
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to save properties");
@@ -3468,9 +3579,9 @@ function ScripturesContent() {
 
   useEffect(() => {
     if (selectedId) {
-      setMobilePanel("content");
+      setMobilePanel(showExploreStructure ? "tree" : "content");
     }
-  }, [selectedId]);
+  }, [selectedId, showExploreStructure]);
 
   // Sync state from URL parameters (supports back/forward navigation)
   useEffect(() => {
@@ -6280,9 +6391,26 @@ function ScripturesContent() {
               onClick={() => {
                 const nextLevel = getNextLevelName(node);
                 const defaultHasContent = isLeafLevelName(nextLevel);
+                let insertAfterNodeId: number | null = null;
+
+                if (selectedId) {
+                  const selectedPath = findPath(treeData, selectedId);
+                  const selectedNode = findNodeById(treeData, selectedId);
+                  const selectedParentId =
+                    selectedPath && selectedPath.length > 1
+                      ? selectedPath[selectedPath.length - 2].id
+                      : null;
+                  const selectedLevelName = (selectedNode?.level_name || "").trim().toLowerCase();
+                  const nextLevelName = nextLevel.trim().toLowerCase();
+
+                  if (selectedParentId === node.id && selectedLevelName === nextLevelName) {
+                    insertAfterNodeId = selectedId;
+                  }
+                }
+
                 setActionNode(node);
-                setCreateParentNodeIdOverride(null);
-                setCreateInsertAfterNodeId(null);
+                setCreateParentNodeIdOverride(node.id);
+                setCreateInsertAfterNodeId(insertAfterNodeId);
                 setFormData({
                   levelName: nextLevel,
                   titleSanskrit: "",
@@ -8685,14 +8813,12 @@ function ScripturesContent() {
           open={showPropertiesModal}
           title={propertiesScope === "book" ? "Book Properties" : activeNodePropertiesTitle}
           subtitle="Base properties: Name, Description, Category. Other fields are category metadata properties."
-          nameValue={
-            propertiesScope === "book"
-              ? currentBook?.book_name || ""
-              : nodeContent?.title_english ||
-                nodeContent?.title_sanskrit ||
-                nodeContent?.title_transliteration ||
-                `Node ${propertiesNodeId || ""}`
-          }
+          nameValue={propertiesName}
+          onNameChange={(value) => {
+            setPropertiesName(value);
+            setPropertiesMessage(null);
+            setPropertiesError(null);
+          }}
           descriptionValue={
             propertiesScope === "book"
               ? typeof (currentBook?.metadata_json || currentBook?.metadata || {})?.description === "string"
@@ -8710,7 +8836,20 @@ function ScripturesContent() {
           error={propertiesError}
           message={propertiesMessage}
           saving={propertiesSaving}
-          saveDisabled={propertiesSaving || propertiesLoading || !propertiesCategoryId}
+          saveDisabled={
+            propertiesSaving ||
+            propertiesLoading ||
+            (!propertiesCategoryId &&
+              propertiesName.trim() ===
+                (
+                  propertiesScope === "book"
+                    ? currentBook?.book_name || ""
+                    : nodeContent?.title_english ||
+                      nodeContent?.title_sanskrit ||
+                      nodeContent?.title_transliteration ||
+                      `Node ${propertiesNodeId || ""}`
+                ).trim())
+          }
           effectiveFields={propertiesEffectiveFields}
           values={propertiesValues}
           onClose={() => {

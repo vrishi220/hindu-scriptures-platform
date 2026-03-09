@@ -10,6 +10,7 @@ import UserPreferencesDialog, {
   type UserPreferences,
 } from "../components/UserPreferencesDialog";
 import { normalizeTransliterationScript } from "../lib/indicScript";
+import { resolveMediaUrl } from "../lib/mediaUrl";
 import {
   applyUiPreferencesToDocument,
   normalizeUiDensity,
@@ -51,6 +52,20 @@ type SearchResponse = {
 type BookOption = {
   id: number;
   book_name: string;
+  metadata_json?: {
+    thumbnail_url?: string;
+    thumbnailUrl?: string;
+    cover_image_url?: string;
+    coverImageUrl?: string;
+    [key: string]: unknown;
+  } | null;
+  metadata?: {
+    thumbnail_url?: string;
+    thumbnailUrl?: string;
+    cover_image_url?: string;
+    coverImageUrl?: string;
+    [key: string]: unknown;
+  } | null;
   schema?: {
     id: number;
     name: string;
@@ -877,6 +892,90 @@ function HomeContent() {
     })
     .slice(0, 6);
 
+  const getBookThumbnailUrl = (book: BookOption): string | null => {
+    const metadata =
+      book.metadata_json && typeof book.metadata_json === "object"
+        ? book.metadata_json
+        : book.metadata && typeof book.metadata === "object"
+          ? book.metadata
+          : null;
+
+    if (!metadata) {
+      return null;
+    }
+
+    const thumbnailCandidates = [
+      metadata.thumbnail_url,
+      metadata.thumbnailUrl,
+      metadata.cover_image_url,
+      metadata.coverImageUrl,
+    ];
+
+    for (const candidate of thumbnailCandidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return resolveMediaUrl(candidate);
+      }
+    }
+
+    return null;
+  };
+
+  const renderFeaturedBooksCard = (className: string, includeId = false) => (
+    <div
+      id={includeId ? "featured-books" : undefined}
+      className={className}
+    >
+      <div className="flex items-center justify-between border-b border-black/10 px-2 pb-3">
+        <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Featured Books</p>
+        <a
+          href="/scriptures"
+          className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+        >
+          Browse All Books
+        </a>
+      </div>
+      {featuredBooks.length === 0 ? (
+        <div className="px-2 py-6 text-sm text-zinc-600">No books available yet.</div>
+      ) : (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {featuredBooks.map((book) => {
+            const thumbnailUrl = getBookThumbnailUrl(book);
+            return (
+              <a
+                key={book.id}
+                href={`/scriptures?book=${book.id}&preview=book`}
+                aria-label={`Open preview for ${book.book_name}`}
+                className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
+              >
+                {thumbnailUrl ? (
+                  <div className="mb-3 overflow-hidden rounded-xl border border-black/10 bg-zinc-100">
+                    <img
+                      src={thumbnailUrl}
+                      alt={`${book.book_name} thumbnail`}
+                      className="h-28 w-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+                ) : null}
+                <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
+                  {book.book_name}
+                </p>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  {(book as BookOption & { visibility?: string }).visibility === "public"
+                    ? "Public"
+                    : "Private draft"}
+                </p>
+                <p className="mt-3 text-xs text-zinc-600">
+                  {book.schema?.name || "Scripture"}
+                </p>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleLogout = async () => {
     setAuthMessage(null);
@@ -920,46 +1019,7 @@ function HomeContent() {
               A new editorial platform for scripture library.
             </p>
 
-            <div
-              id="featured-books"
-              className="rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg"
-            >
-              <div className="flex items-center justify-between border-b border-black/10 px-2 pb-3">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Featured Books</p>
-                <a
-                  href="/scriptures"
-                  className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                >
-                  Browse All Books
-                </a>
-              </div>
-              {featuredBooks.length === 0 ? (
-                <div className="px-2 py-6 text-sm text-zinc-600">No books available yet.</div>
-              ) : (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {featuredBooks.map((book) => (
-                    <a
-                      key={book.id}
-                      href={`/scriptures?book=${book.id}&preview=book`}
-                      aria-label={`Open preview for ${book.book_name}`}
-                      className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
-                    >
-                      <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
-                        {book.book_name}
-                      </p>
-                      <p className="mt-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        {(book as BookOption & { visibility?: string }).visibility === "public"
-                          ? "Public"
-                          : "Private draft"}
-                      </p>
-                      <p className="mt-3 text-xs text-zinc-600">
-                        {book.schema?.name || "Scripture"}
-                      </p>
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
+            {renderFeaturedBooksCard("hidden rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:block", true)}
           </div>
 
           <div className="order-2 flex flex-col gap-4 lg:order-2">
@@ -1100,6 +1160,8 @@ function HomeContent() {
               )}
             </div>
           </div>
+
+          {renderFeaturedBooksCard("order-3 rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:hidden")}
         </section>
       </main>
 
