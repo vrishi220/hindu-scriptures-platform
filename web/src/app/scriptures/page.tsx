@@ -1320,6 +1320,8 @@ function ScripturesContent() {
   const [mediaBankMessage, setMediaBankMessage] = useState<string | null>(null);
   const [mediaBankUploading, setMediaBankUploading] = useState(false);
   const [mediaBankUpdating, setMediaBankUpdating] = useState(false);
+  const [mediaBankRenameId, setMediaBankRenameId] = useState<number | null>(null);
+  const [mediaBankRenameValue, setMediaBankRenameValue] = useState("");
   const [externalMediaFormOpen, setExternalMediaFormOpen] = useState(false);
   const [externalMediaFormContext, setExternalMediaFormContext] = useState<MediaLinkContext>("bank");
   const [externalMediaFormSubmitting, setExternalMediaFormSubmitting] = useState(false);
@@ -1378,6 +1380,7 @@ function ScripturesContent() {
   const mediaBankUploadInputRef = useRef<HTMLInputElement | null>(null);
   const mediaBankReplaceInputRef = useRef<HTMLInputElement | null>(null);
   const mediaBankReplaceTargetIdRef = useRef<number | null>(null);
+  const mediaBankSuppressRenameBlurRef = useRef(false);
   const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookThumbnailInputRef = useRef<HTMLInputElement | null>(null);
@@ -1389,7 +1392,7 @@ function ScripturesContent() {
   const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
-  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("content");
+  const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
     levelName: "",
@@ -3580,12 +3583,6 @@ function ScripturesContent() {
     );
   };
 
-  useEffect(() => {
-    if (selectedId) {
-      setMobilePanel(showExploreStructure ? "tree" : "content");
-    }
-  }, [selectedId, showExploreStructure]);
-
   // Sync state from URL parameters (supports back/forward navigation)
   useEffect(() => {
     const bookParam = searchParams.get("book") || "";
@@ -4224,20 +4221,44 @@ function ScripturesContent() {
     }
   };
 
-  const handleRenameMediaBankAsset = async (asset: MediaAsset) => {
-    const currentName =
-      typeof asset.metadata?.display_name === "string" && asset.metadata.display_name.trim()
-        ? asset.metadata.display_name
-        : typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename.trim()
-          ? asset.metadata.original_filename
-          : `${asset.media_type} #${asset.id}`;
-    const nextName = window.prompt("Rename media asset", currentName);
-    if (nextName === null) {
+  const getMediaBankAssetDisplayName = (asset: MediaAsset): string => {
+    if (typeof asset.metadata?.display_name === "string" && asset.metadata.display_name.trim()) {
+      return asset.metadata.display_name.trim();
+    }
+    if (typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename.trim()) {
+      return asset.metadata.original_filename.trim();
+    }
+    return `${asset.media_type} #${asset.id}`;
+  };
+
+  const beginRenameMediaBankAsset = (asset: MediaAsset) => {
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    setMediaBankRenameId(asset.id);
+    setMediaBankRenameValue(getMediaBankAssetDisplayName(asset));
+  };
+
+  const cancelRenameMediaBankAsset = () => {
+    setMediaBankRenameId(null);
+    setMediaBankRenameValue("");
+  };
+
+  const handleRenameMediaBankAsset = async (assetId: number) => {
+    const asset = mediaBankAssets.find((entry) => entry.id === assetId);
+    if (!asset) {
+      cancelRenameMediaBankAsset();
       return;
     }
-    const trimmed = nextName.trim();
+
+    const currentName = getMediaBankAssetDisplayName(asset);
+    const trimmed = mediaBankRenameValue.trim();
     if (!trimmed) {
       setMediaBankError("Name cannot be empty.");
+      return;
+    }
+
+    if (trimmed === currentName) {
+      cancelRenameMediaBankAsset();
       return;
     }
 
@@ -4245,9 +4266,19 @@ function ScripturesContent() {
     setMediaBankError(null);
     setMediaBankMessage(null);
     try {
-      await renameMediaBankAsset(asset.id, trimmed);
+      const updatedAsset = await renameMediaBankAsset(assetId, trimmed);
+      setMediaBankAssets((prev) =>
+        prev.map((entry) =>
+          entry.id === assetId
+            ? {
+                ...entry,
+                ...updatedAsset,
+              }
+            : entry
+        )
+      );
+      cancelRenameMediaBankAsset();
       setMediaBankMessage("Media asset renamed.");
-      await loadMediaBankAssets();
     } catch (err) {
       setMediaBankError(err instanceof Error ? err.message : "Failed to rename media asset");
     } finally {
@@ -9316,12 +9347,8 @@ function ScripturesContent() {
                             }
 
                             return filteredAssets.map((asset) => {
-                              const label =
-                                typeof asset.metadata?.display_name === "string" && asset.metadata.display_name
-                                  ? asset.metadata.display_name
-                                  : typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename
-                                    ? asset.metadata.original_filename
-                                    : `${asset.media_type} #${asset.id}`;
+                              const label = getMediaBankAssetDisplayName(asset);
+                              const isRenaming = mediaBankRenameId === asset.id;
                               return (
                                 <div
                                   key={asset.id}
@@ -9347,7 +9374,34 @@ function ScripturesContent() {
                                       <div className="space-y-2 p-3">
                                         <div className="flex items-start justify-between gap-2">
                                           <div className="min-w-0">
-                                            <div className="truncate font-medium">{label}</div>
+                                            {isRenaming ? (
+                                              <input
+                                                autoFocus
+                                                value={mediaBankRenameValue}
+                                                onChange={(event) => setMediaBankRenameValue(event.target.value)}
+                                                onBlur={() => {
+                                                  if (mediaBankSuppressRenameBlurRef.current) {
+                                                    mediaBankSuppressRenameBlurRef.current = false;
+                                                    return;
+                                                  }
+                                                  void handleRenameMediaBankAsset(asset.id);
+                                                }}
+                                                onKeyDown={(event) => {
+                                                  if (event.key === "Enter") {
+                                                    event.preventDefault();
+                                                    event.currentTarget.blur();
+                                                    return;
+                                                  }
+                                                  if (event.key === "Escape") {
+                                                    event.preventDefault();
+                                                    cancelRenameMediaBankAsset();
+                                                  }
+                                                }}
+                                                className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                                              />
+                                            ) : (
+                                              <div className="truncate font-medium">{label}</div>
+                                            )}
                                             <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">{asset.media_type}</div>
                                           </div>
                                         </div>
@@ -9382,6 +9436,34 @@ function ScripturesContent() {
                                             >
                                               Pick
                                             </button>
+                                          ) : isRenaming ? (
+                                            <>
+                                              <button
+                                                type="button"
+                                                onMouseDown={() => {
+                                                  mediaBankSuppressRenameBlurRef.current = true;
+                                                }}
+                                                onClick={() => {
+                                                  void handleRenameMediaBankAsset(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Save
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onMouseDown={() => {
+                                                  mediaBankSuppressRenameBlurRef.current = true;
+                                                }}
+                                                onClick={() => {
+                                                  cancelRenameMediaBankAsset();
+                                                }}
+                                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
+                                              >
+                                                Cancel
+                                              </button>
+                                            </>
                                           ) : (
                                             <>
                                               <button
@@ -9398,7 +9480,7 @@ function ScripturesContent() {
                                               <button
                                                 type="button"
                                                 onClick={() => {
-                                                  void handleRenameMediaBankAsset(asset);
+                                                  beginRenameMediaBankAsset(asset);
                                                 }}
                                                 disabled={mediaBankUpdating || mediaBankUploading}
                                                 className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
@@ -9433,7 +9515,34 @@ function ScripturesContent() {
                                   ) : (
                                     <>
                                       <div className="min-w-0">
-                                        <div className="truncate font-medium">{label}</div>
+                                        {isRenaming ? (
+                                          <input
+                                            autoFocus
+                                            value={mediaBankRenameValue}
+                                            onChange={(event) => setMediaBankRenameValue(event.target.value)}
+                                            onBlur={() => {
+                                              if (mediaBankSuppressRenameBlurRef.current) {
+                                                mediaBankSuppressRenameBlurRef.current = false;
+                                                return;
+                                              }
+                                              void handleRenameMediaBankAsset(asset.id);
+                                            }}
+                                            onKeyDown={(event) => {
+                                              if (event.key === "Enter") {
+                                                event.preventDefault();
+                                                event.currentTarget.blur();
+                                                return;
+                                              }
+                                              if (event.key === "Escape") {
+                                                event.preventDefault();
+                                                cancelRenameMediaBankAsset();
+                                              }
+                                            }}
+                                            className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                                          />
+                                        ) : (
+                                          <div className="truncate font-medium">{label}</div>
+                                        )}
                                         {asset.media_type === "image" ? (
                                           <img
                                             src={resolveMediaUrl(asset.url)}
@@ -9477,49 +9586,79 @@ function ScripturesContent() {
                                             Pick
                                           </button>
                                         ) : (
-                                          <>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                mediaBankReplaceTargetIdRef.current = asset.id;
-                                                mediaBankReplaceInputRef.current?.click();
-                                              }}
-                                              disabled={mediaBankUpdating || mediaBankUploading || asset.url.startsWith("http")}
-                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                            >
-                                              Replace
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                void handleRenameMediaBankAsset(asset);
-                                              }}
-                                              disabled={mediaBankUpdating || mediaBankUploading}
-                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                            >
-                                              Rename
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                void handleAttachMediaBankAssetToSelectedNode(asset.id);
-                                              }}
-                                              disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
-                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
-                                            >
-                                              Attach
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                void handleDeleteMediaBankAsset(asset.id);
-                                              }}
-                                              disabled={mediaBankUpdating || mediaBankUploading}
-                                              className="rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 disabled:opacity-50"
-                                            >
-                                              Remove
-                                            </button>
-                                          </>
+                                          isRenaming ? (
+                                            <>
+                                              <button
+                                                type="button"
+                                                onMouseDown={() => {
+                                                  mediaBankSuppressRenameBlurRef.current = true;
+                                                }}
+                                                onClick={() => {
+                                                  void handleRenameMediaBankAsset(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Save
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onMouseDown={() => {
+                                                  mediaBankSuppressRenameBlurRef.current = true;
+                                                }}
+                                                onClick={() => {
+                                                  cancelRenameMediaBankAsset();
+                                                }}
+                                                className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700"
+                                              >
+                                                Cancel
+                                              </button>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  mediaBankReplaceTargetIdRef.current = asset.id;
+                                                  mediaBankReplaceInputRef.current?.click();
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading || asset.url.startsWith("http")}
+                                                className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Replace
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  beginRenameMediaBankAsset(asset);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Rename
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void handleAttachMediaBankAssetToSelectedNode(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading || !selectedId}
+                                                className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Attach
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void handleDeleteMediaBankAsset(asset.id);
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading}
+                                                className="rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 disabled:opacity-50"
+                                              >
+                                                Remove
+                                              </button>
+                                            </>
+                                          )
                                         )}
                                       </div>
                                     </>

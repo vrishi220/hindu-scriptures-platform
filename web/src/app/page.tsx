@@ -969,9 +969,6 @@ function HomeContent() {
                     ? "Public"
                     : "Private draft"}
                 </p>
-                <p className="mt-3 text-xs text-zinc-600">
-                  {book.schema?.name || "Scripture"}
-                </p>
               </a>
             );
           })}

@@ -114,6 +114,7 @@ export default function AdminMediaBankPage() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const replaceTargetIdRef = useRef<number | null>(null);
+  const suppressRenameBlurRef = useRef(false);
   const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const densityMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -343,21 +344,46 @@ export default function AdminMediaBankPage() {
     }
   };
 
+  const cancelRename = () => {
+    setRenameId(null);
+    setRenameValue("");
+  };
+
   const handleRename = async (assetId: number) => {
+    const target = assets.find((asset) => asset.id === assetId);
+    if (!target) {
+      cancelRename();
+      return;
+    }
+
+    const currentName = getDisplayName(target).trim();
     const nextName = renameValue.trim();
     if (!nextName) {
       setToast({ type: "error", message: "Display name is required." });
       return;
     }
 
+    if (nextName === currentName) {
+      cancelRename();
+      return;
+    }
+
     setUpdatingId(assetId);
     setToast(null);
     try {
-      await renameMediaBankAsset(assetId, nextName);
-      setRenameId(null);
-      setRenameValue("");
+      const updatedAsset = await renameMediaBankAsset(assetId, nextName);
+      setAssets((prev) =>
+        prev.map((asset) =>
+          asset.id === assetId
+            ? {
+                ...asset,
+                ...updatedAsset,
+              }
+            : asset
+        )
+      );
+      cancelRename();
       setToast({ type: "success", message: "Asset renamed." });
-      await loadAssets();
     } catch (error) {
       setToast({
         type: "error",
@@ -615,8 +641,27 @@ export default function AdminMediaBankPage() {
                             <div className="min-w-0">
                               {isRenaming ? (
                                 <input
+                                  autoFocus
                                   value={renameValue}
                                   onChange={(event) => setRenameValue(event.target.value)}
+                                  onBlur={() => {
+                                    if (suppressRenameBlurRef.current) {
+                                      suppressRenameBlurRef.current = false;
+                                      return;
+                                    }
+                                    void handleRename(asset.id);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      event.currentTarget.blur();
+                                      return;
+                                    }
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      cancelRename();
+                                    }
+                                  }}
                                   className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
                                 />
                               ) : (
@@ -635,6 +680,9 @@ export default function AdminMediaBankPage() {
                               <>
                                 <button
                                   type="button"
+                                  onMouseDown={() => {
+                                    suppressRenameBlurRef.current = true;
+                                  }}
                                   onClick={() => {
                                     void handleRename(asset.id);
                                   }}
@@ -645,9 +693,11 @@ export default function AdminMediaBankPage() {
                                 </button>
                                 <button
                                   type="button"
+                                  onMouseDown={() => {
+                                    suppressRenameBlurRef.current = true;
+                                  }}
                                   onClick={() => {
-                                    setRenameId(null);
-                                    setRenameValue("");
+                                    cancelRename();
                                   }}
                                   className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
                                 >
@@ -720,8 +770,27 @@ export default function AdminMediaBankPage() {
                         <div className="min-w-0">
                           {isRenaming ? (
                             <input
+                              autoFocus
                               value={renameValue}
                               onChange={(event) => setRenameValue(event.target.value)}
+                              onBlur={() => {
+                                if (suppressRenameBlurRef.current) {
+                                  suppressRenameBlurRef.current = false;
+                                  return;
+                                }
+                                void handleRename(asset.id);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  event.currentTarget.blur();
+                                  return;
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelRename();
+                                }
+                              }}
                               className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
                             />
                           ) : (
@@ -750,6 +819,9 @@ export default function AdminMediaBankPage() {
                             <>
                               <button
                                 type="button"
+                                onMouseDown={() => {
+                                  suppressRenameBlurRef.current = true;
+                                }}
                                 onClick={() => {
                                   void handleRename(asset.id);
                                 }}
@@ -760,9 +832,11 @@ export default function AdminMediaBankPage() {
                               </button>
                               <button
                                 type="button"
+                                onMouseDown={() => {
+                                  suppressRenameBlurRef.current = true;
+                                }}
                                 onClick={() => {
-                                  setRenameId(null);
-                                  setRenameValue("");
+                                  cancelRename();
                                 }}
                                 className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700"
                               >
