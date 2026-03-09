@@ -55,6 +55,7 @@ import {
   deleteMediaBankAsset,
   listMediaBankAssets,
   MediaBankClientError,
+  replaceMediaBankAssetFile,
   renameMediaBankAsset,
   uploadMediaBankAsset,
 } from "../../lib/mediaBankClient";
@@ -1375,6 +1376,8 @@ function ScripturesContent() {
   const activeNodeMediaAbortController = useRef<AbortController | null>(null);
   const activeNodeMediaNodeId = useRef<number | null>(null);
   const mediaBankUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaBankReplaceInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaBankReplaceTargetIdRef = useRef<number | null>(null);
   const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookThumbnailInputRef = useRef<HTMLInputElement | null>(null);
@@ -4268,6 +4271,24 @@ function ScripturesContent() {
       } else {
         setMediaBankError(err instanceof Error ? err.message : "Failed to delete media asset");
       }
+    } finally {
+      setMediaBankUpdating(false);
+    }
+  };
+
+  const handleReplaceMediaBankAsset = async (asset: MediaAsset, file: File) => {
+    setMediaBankUpdating(true);
+    setMediaBankError(null);
+    setMediaBankMessage(null);
+    try {
+      await replaceMediaBankAssetFile(asset.id, file);
+      setMediaBankMessage("Media asset file replaced. Existing links remain intact.");
+      await Promise.all([
+        loadMediaBankAssets(),
+        mediaManagerScope === "node" && selectedId ? loadNodeMedia(selectedId, true) : Promise.resolve(),
+      ]);
+    } catch (err) {
+      setMediaBankError(err instanceof Error ? err.message : "Failed to replace media asset");
     } finally {
       setMediaBankUpdating(false);
     }
@@ -9195,6 +9216,25 @@ function ScripturesContent() {
                             void handleUploadMediaBankAsset(file);
                           }}
                         />
+                        <input
+                          ref={mediaBankReplaceInputRef}
+                          type="file"
+                          accept="image/*,audio/*,video/*"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.currentTarget.value = "";
+                            const targetId = mediaBankReplaceTargetIdRef.current;
+                            mediaBankReplaceTargetIdRef.current = null;
+                            if (!file || !targetId) return;
+                            const target = mediaBankAssets.find((item) => item.id === targetId);
+                            if (!target) {
+                              setMediaBankError("Asset not found for replacement.");
+                              return;
+                            }
+                            void handleReplaceMediaBankAsset(target, file);
+                          }}
+                        />
                         <button
                           type="button"
                           onClick={() => mediaBankUploadInputRef.current?.click()}
@@ -9347,6 +9387,17 @@ function ScripturesContent() {
                                               <button
                                                 type="button"
                                                 onClick={() => {
+                                                  mediaBankReplaceTargetIdRef.current = asset.id;
+                                                  mediaBankReplaceInputRef.current?.click();
+                                                }}
+                                                disabled={mediaBankUpdating || mediaBankUploading || asset.url.startsWith("http")}
+                                                className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                              >
+                                                Replace
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
                                                   void handleRenameMediaBankAsset(asset);
                                                 }}
                                                 disabled={mediaBankUpdating || mediaBankUploading}
@@ -9427,6 +9478,17 @@ function ScripturesContent() {
                                           </button>
                                         ) : (
                                           <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                mediaBankReplaceTargetIdRef.current = asset.id;
+                                                mediaBankReplaceInputRef.current?.click();
+                                              }}
+                                              disabled={mediaBankUpdating || mediaBankUploading || asset.url.startsWith("http")}
+                                              className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
+                                            >
+                                              Replace
+                                            </button>
                                             <button
                                               type="button"
                                               onClick={() => {

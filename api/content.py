@@ -2342,6 +2342,75 @@ def update_media_bank_asset(
     return MediaAssetPublic.model_validate(asset)
 
 
+@router.post("/media-bank/assets/{asset_id}/file", response_model=MediaAssetPublic)
+def replace_media_bank_asset_file(
+    asset_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MediaAssetPublic:
+    _ensure_can_contribute(current_user)
+
+    asset = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    relative_path = _relative_media_path_from_url(asset.url)
+    if not _is_bank_media_path(relative_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only uploaded media-bank assets can be replaced in place",
+        )
+
+    content_type = file.content_type or ""
+    media_category = content_type.split("/")[0] if "/" in content_type else ""
+    if media_category not in {"image", "audio", "video"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Replacement file must be image, audio, or video",
+        )
+
+    if media_category != asset.media_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Replacement file type '{media_category}' does not match existing asset type "
+                f"'{asset.media_type}'"
+            ),
+        )
+
+    if relative_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Asset URL cannot be mapped to a replaceable storage path",
+        )
+
+    total_bytes = _save_upload_to_media_storage(file, relative_path)
+
+    metadata = _asset_metadata(asset)
+    if file.filename:
+        metadata["original_filename"] = file.filename
+    metadata["content_type"] = content_type
+    metadata["size_bytes"] = total_bytes
+    _set_asset_metadata(asset, metadata)
+
+    # Keep linked media metadata in sync while preserving URLs/links.
+    linked_media = (
+        db.query(MediaFile)
+        .filter(MediaFile.url == asset.url, MediaFile.media_type == asset.media_type)
+        .all()
+    )
+    for media in linked_media:
+        media_metadata = _media_metadata(media)
+        media_metadata["content_type"] = content_type
+        media_metadata["size_bytes"] = total_bytes
+        _set_media_metadata(media, media_metadata)
+
+    db.commit()
+    db.refresh(asset)
+    return MediaAssetPublic.model_validate(asset)
+
+
 @router.delete("/media-bank/assets/{asset_id}", response_model=dict)
 def delete_media_bank_asset(
     asset_id: int,

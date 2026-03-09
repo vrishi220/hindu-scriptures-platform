@@ -152,6 +152,27 @@ export const deleteMediaBankAsset = async (assetId: number): Promise<void> => {
   }
 };
 
+export const replaceMediaBankAssetFile = async (
+  assetId: number,
+  file: File
+): Promise<MediaBankAssetMinimal> => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(contentPath(`/media-bank/assets/${assetId}/file`), {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw buildClientError(responsePayload, "Failed to replace media asset file", response.status);
+  }
+
+  return normalizeAsset(responsePayload as Partial<MediaBankAssetMinimal>);
+};
+
 export const createMediaBankLinkAsset = async (
   payload: MediaBankAssetLinkPayload
 ): Promise<MediaBankAssetMinimal> => {

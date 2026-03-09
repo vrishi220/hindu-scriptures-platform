@@ -10,6 +10,7 @@ import {
   deleteMediaBankAsset,
   listMediaBankAssets,
   MediaBankClientError,
+  replaceMediaBankAssetFile,
   renameMediaBankAsset,
   uploadMediaBankAsset,
 } from "@/lib/mediaBankClient";
@@ -92,6 +93,7 @@ export default function AdminMediaBankPage() {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [replacingId, setReplacingId] = useState<number | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -110,6 +112,8 @@ export default function AdminMediaBankPage() {
   const [externalFormSubmitting, setExternalFormSubmitting] = useState(false);
   const [accountPrefReady, setAccountPrefReady] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const replaceTargetIdRef = useRef<number | null>(null);
   const actionMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const densityMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -383,6 +387,23 @@ export default function AdminMediaBankPage() {
     }
   };
 
+  const handleReplace = async (asset: MediaAsset, file: File) => {
+    setReplacingId(asset.id);
+    setToast(null);
+    try {
+      await replaceMediaBankAssetFile(asset.id, file);
+      setToast({ type: "success", message: "Asset file replaced. Existing links remain intact." });
+      await loadAssets();
+    } catch (error) {
+      setToast({
+        type: "error",
+        message: error instanceof Error ? error.message : "Replace failed",
+      });
+    } finally {
+      setReplacingId(null);
+    }
+  };
+
   if (!authChecked) {
     return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
   }
@@ -496,6 +517,25 @@ export default function AdminMediaBankPage() {
                 event.currentTarget.value = "";
                 if (!file) return;
                 void handleUpload(file);
+              }}
+            />
+            <input
+              ref={replaceInputRef}
+              type="file"
+              accept="image/*,audio/*,video/*"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                const targetId = replaceTargetIdRef.current;
+                replaceTargetIdRef.current = null;
+                if (!file || !targetId) return;
+                const target = assets.find((item) => item.id === targetId);
+                if (!target) {
+                  setToast({ type: "error", message: "Asset not found for replacement." });
+                  return;
+                }
+                void handleReplace(target, file);
               }}
             />
             <button
@@ -626,7 +666,7 @@ export default function AdminMediaBankPage() {
                                   onClick={() => {
                                     setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
                                   }}
-                                  disabled={deletingId === asset.id || updatingId === asset.id}
+                                  disabled={deletingId === asset.id || updatingId === asset.id || replacingId === asset.id}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
                                   aria-label="Open asset actions"
                                 >
@@ -634,6 +674,18 @@ export default function AdminMediaBankPage() {
                                 </button>
                                 {openActionsId === asset.id && (
                                   <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenActionsId(null);
+                                        replaceTargetIdRef.current = asset.id;
+                                        replaceInputRef.current?.click();
+                                      }}
+                                      disabled={isExternalUrl(asset.url) || replacingId === asset.id}
+                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                                    >
+                                      Replace file
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -729,7 +781,7 @@ export default function AdminMediaBankPage() {
                                 onClick={() => {
                                   setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
                                 }}
-                                disabled={deletingId === asset.id || updatingId === asset.id}
+                                disabled={deletingId === asset.id || updatingId === asset.id || replacingId === asset.id}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
                                 aria-label="Open asset actions"
                               >
@@ -737,6 +789,18 @@ export default function AdminMediaBankPage() {
                               </button>
                               {openActionsId === asset.id && (
                                 <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      replaceTargetIdRef.current = asset.id;
+                                      replaceInputRef.current?.click();
+                                    }}
+                                    disabled={isExternalUrl(asset.url) || replacingId === asset.id}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                                  >
+                                    Replace file
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
