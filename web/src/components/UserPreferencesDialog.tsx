@@ -29,7 +29,7 @@ export type UserPreferences = {
   ui_theme: UiThemePreference;
   ui_density: UiDensityPreference;
   scriptures_book_browser_view?: "list" | "icon";
-  scriptures_book_browser_density?: 0 | 1 | 2 | 3 | 4;
+  scriptures_book_browser_density?: 0 | 1 | 2 | 3 | 4 | 5;
   scriptures_media_manager_view?: "list" | "icon";
   admin_media_bank_browser_view?: "list" | "icon";
 };

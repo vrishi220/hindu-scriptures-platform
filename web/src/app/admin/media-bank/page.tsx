@@ -29,22 +29,22 @@ const readStoredBrowserView = (): "list" | "icon" => {
 const normalizeBrowserView = (value: unknown): "list" | "icon" =>
   value === "icon" ? "icon" : "list";
 
-const normalizeBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 => {
+const normalizeBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (typeof value === "number" && Number.isFinite(value)) {
-    const normalized = Math.min(4, Math.max(0, Math.round(value)));
-    return normalized as 0 | 1 | 2 | 3 | 4;
+    const normalized = Math.min(5, Math.max(0, Math.round(value)));
+    return normalized as 0 | 1 | 2 | 3 | 4 | 5;
   }
   if (typeof value === "string") {
     const parsed = Number.parseInt(value, 10);
     if (Number.isFinite(parsed)) {
-      const normalized = Math.min(4, Math.max(0, Math.round(parsed)));
-      return normalized as 0 | 1 | 2 | 3 | 4;
+      const normalized = Math.min(5, Math.max(0, Math.round(parsed)));
+      return normalized as 0 | 1 | 2 | 3 | 4 | 5;
     }
   }
   return 0;
 };
 
-const readStoredBrowserDensity = (): { value: 0 | 1 | 2 | 3 | 4; hasStored: boolean } => {
+const readStoredBrowserDensity = (): { value: 0 | 1 | 2 | 3 | 4 | 5; hasStored: boolean } => {
   if (typeof window === "undefined") {
     return { value: 4, hasStored: false };
   }
@@ -99,7 +99,7 @@ export default function AdminMediaBankPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | string>("all");
   const [browserView, setBrowserView] = useState<"list" | "icon">("list");
-  const [browserDensity, setBrowserDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [browserDensity, setBrowserDensity] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
   const [densityHydrated, setDensityHydrated] = useState(false);
   const [hasStoredDensity, setHasStoredDensity] = useState(false);
   const [showDensityMenu, setShowDensityMenu] = useState(false);
@@ -284,7 +284,9 @@ export default function AdminMediaBankPage() {
         ? 6
         : browserDensity === 3
           ? 4
-          : 2;
+          : browserDensity === 4
+            ? 2
+            : 1;
   const browserDensityLabel =
     browserDensity === 0
       ? "List"
@@ -294,7 +296,9 @@ export default function AdminMediaBankPage() {
           ? "6 col"
           : browserDensity === 3
             ? "4 col"
-            : "2 col";
+            : browserDensity === 4
+              ? "2 col"
+              : "1 col";
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -462,7 +466,7 @@ export default function AdminMediaBankPage() {
                   <input
                     type="range"
                     min={0}
-                    max={4}
+                    max={5}
                     step={1}
                     value={browserDensity}
                     onChange={(event) => {
@@ -471,12 +475,13 @@ export default function AdminMediaBankPage() {
                     className="w-full"
                     aria-label="Media bank view density"
                   />
-                  <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+                  <div className="mt-2 grid grid-cols-6 text-center text-[10px] text-zinc-500">
                     <span>List</span>
                     <span>8 col</span>
                     <span>6 col</span>
                     <span>4 col</span>
                     <span>2 col</span>
+                    <span>1 col</span>
                   </div>
                 </div>
               )}
