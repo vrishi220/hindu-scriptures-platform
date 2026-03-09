@@ -525,22 +525,22 @@ const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
   return window.localStorage.getItem(storageKey) === "icon" ? "icon" : "list";
 };
 
-const normalizeBookBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 => {
+const normalizeBookBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (typeof value === "number" && Number.isFinite(value)) {
-    const normalized = Math.min(4, Math.max(0, Math.round(value)));
-    return normalized as 0 | 1 | 2 | 3 | 4;
+    const normalized = Math.min(5, Math.max(0, Math.round(value)));
+    return normalized as 0 | 1 | 2 | 3 | 4 | 5;
   }
   if (typeof value === "string") {
     const parsed = Number.parseInt(value, 10);
     if (Number.isFinite(parsed)) {
-      const normalized = Math.min(4, Math.max(0, Math.round(parsed)));
-      return normalized as 0 | 1 | 2 | 3 | 4;
+      const normalized = Math.min(5, Math.max(0, Math.round(parsed)));
+      return normalized as 0 | 1 | 2 | 3 | 4 | 5;
     }
   }
   return 0;
 };
 
-const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 => {
+const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (typeof window === "undefined") {
     return 0;
   }
@@ -553,7 +553,7 @@ const mediaManagerDensityStorageKey = (scope: "node" | "book" | "bank"): string 
   return SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY;
 };
 
-const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 | 2 | 3 | 4 => {
+const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (typeof window === "undefined") {
     return 0;
   }
@@ -565,10 +565,10 @@ const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 |
 };
 
 const resolveBookBrowserDensity = (
-  storedDensity: 0 | 1 | 2 | 3 | 4,
+  storedDensity: 0 | 1 | 2 | 3 | 4 | 5,
   preferenceDensity: unknown,
   preferenceView: "list" | "icon"
-): 0 | 1 | 2 | 3 | 4 => {
+): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (storedDensity !== 0) {
     return storedDensity;
   }
@@ -1269,11 +1269,12 @@ const toDatetimeLocalValue = (value: unknown): string => {
 
 function ScripturesContent() {
   const BOOKS_PAGE_SIZE_LIST = 18;
-  const BOOKS_PAGE_SIZE_BY_DENSITY: Record<1 | 2 | 3 | 4, number> = {
+  const BOOKS_PAGE_SIZE_BY_DENSITY: Record<1 | 2 | 3 | 4 | 5, number> = {
     1: 25,
     2: 16,
     3: 9,
     4: 4,
+    5: 3,
   };
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1326,11 +1327,11 @@ function ScripturesContent() {
   const [mediaManagerSearchQuery, setMediaManagerSearchQuery] = useState("");
   const [mediaManagerTypeFilter, setMediaManagerTypeFilter] = useState("all");
   const [bookBrowserView, setBookBrowserView] = useState<"list" | "icon">("list");
-  const [bookBrowserDensity, setBookBrowserDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [bookBrowserDensity, setBookBrowserDensity] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
   const [bookBrowserDensityHydrated, setBookBrowserDensityHydrated] = useState(false);
   const [showBookBrowserDensityMenu, setShowBookBrowserDensityMenu] = useState(false);
   const [mediaManagerView, setMediaManagerView] = useState<"list" | "icon">("list");
-  const [mediaManagerDensity, setMediaManagerDensity] = useState<0 | 1 | 2 | 3 | 4>(0);
+  const [mediaManagerDensity, setMediaManagerDensity] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
   const [mediaManagerDensityHydrated, setMediaManagerDensityHydrated] = useState(false);
   const [showMediaManagerDensityMenu, setShowMediaManagerDensityMenu] = useState(false);
   const [showMediaManagerModal, setShowMediaManagerModal] = useState(false);
@@ -1510,6 +1511,8 @@ function ScripturesContent() {
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookMediaActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const nodeMediaActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const booksScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const booksLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const activeBooksAbortController = useRef<AbortController | null>(null);
@@ -1531,6 +1534,12 @@ function ScripturesContent() {
       }
       if (mediaManagerDensityMenuRef.current && !mediaManagerDensityMenuRef.current.contains(target)) {
         setShowMediaManagerDensityMenu(false);
+      }
+      if (bookMediaActionsMenuRef.current && !bookMediaActionsMenuRef.current.contains(target)) {
+        setBookMediaActionsOpen(false);
+      }
+      if (nodeMediaActionsMenuRef.current && !nodeMediaActionsMenuRef.current.contains(target)) {
+        setNodeMediaActionsOpen(false);
       }
       if (bookTreeActionsMenuRef.current && !bookTreeActionsMenuRef.current.contains(target)) {
         setShowBookTreeActionsMenu(false);
@@ -3550,7 +3559,7 @@ function ScripturesContent() {
       const pageSize =
         bookBrowserDensity === 0
           ? BOOKS_PAGE_SIZE_LIST
-          : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4];
+          : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4 | 5];
       const offset = reset ? 0 : bookNextOffsetRef.current;
 
       if (reset) {
@@ -6366,7 +6375,9 @@ function ScripturesContent() {
         ? 6
         : bookBrowserDensity === 3
           ? 4
-          : 2;
+          : bookBrowserDensity === 4
+            ? 2
+            : 1;
   const booksDensityLabel =
     bookBrowserDensity === 0
       ? "List"
@@ -6376,7 +6387,9 @@ function ScripturesContent() {
           ? "6 col"
           : bookBrowserDensity === 3
             ? "4 col"
-            : "2 col";
+            : bookBrowserDensity === 4
+              ? "2 col"
+              : "1 col";
   const mediaManagerGridColumns =
     mediaManagerDensity === 1
       ? 8
@@ -6540,7 +6553,7 @@ function ScripturesContent() {
       : undefined;
 
   const renderMediaManagerSearchInput = (placeholder: string, ariaLabel: string) => (
-    <div className="group relative min-w-[220px] flex-1">
+    <div className="group relative min-w-0 w-full sm:min-w-[220px] sm:flex-1">
       <input
         type="text"
         value={mediaManagerSearchQuery}
@@ -6569,7 +6582,7 @@ function ScripturesContent() {
         {mediaManagerDensityLabel}
       </button>
       {showMediaManagerDensityMenu && (
-        <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+        <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
             <span>Media density</span>
             <span className="font-semibold text-zinc-700">{mediaManagerDensityLabel}</span>
@@ -6641,7 +6654,7 @@ function ScripturesContent() {
                   {booksDensityLabel}
                 </button>
                 {showBookBrowserDensityMenu && (
-                  <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                  <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
                     <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
                       <span>View density</span>
                       <span className="font-semibold text-zinc-700">{booksDensityLabel}</span>
@@ -6649,7 +6662,7 @@ function ScripturesContent() {
                     <input
                       type="range"
                       min={0}
-                      max={4}
+                      max={5}
                       step={1}
                       value={bookBrowserDensity}
                       onChange={(event) => {
@@ -6658,12 +6671,13 @@ function ScripturesContent() {
                       className="w-full"
                       aria-label="Books view density"
                     />
-                    <div className="mt-2 grid grid-cols-5 text-center text-[10px] text-zinc-500">
+                    <div className="mt-2 grid grid-cols-6 text-center text-[10px] text-zinc-500">
                       <span>List</span>
                       <span>8 col</span>
                       <span>6 col</span>
                       <span>4 col</span>
                       <span>2 col</span>
+                      <span>1 col</span>
                     </div>
                   </div>
                 )}
@@ -8806,7 +8820,7 @@ function ScripturesContent() {
                         void handleUploadBookMediaViaBank(file);
                       }}
                     />
-                    <div className="relative">
+                    <div ref={bookMediaActionsMenuRef} className="relative">
                       <button
                         type="button"
                         onClick={() => setBookMediaActionsOpen((prev) => !prev)}
@@ -8817,7 +8831,7 @@ function ScripturesContent() {
                         <MoreVertical size={16} />
                       </button>
                       {bookMediaActionsOpen && (
-                        <div className="absolute right-0 top-10 z-20 min-w-[260px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute right-0 top-10 z-50 mt-1 w-[calc(100vw-2rem)] max-w-[260px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
                           <button
                             type="button"
                             onClick={() => {
@@ -9355,7 +9369,7 @@ function ScripturesContent() {
                         void handleUploadNodeMediaViaBank(file);
                       }}
                     />
-                    <div className="relative">
+                    <div ref={nodeMediaActionsMenuRef} className="relative">
                       <button
                         type="button"
                         onClick={() => setNodeMediaActionsOpen((prev) => !prev)}
@@ -9366,7 +9380,7 @@ function ScripturesContent() {
                         <MoreVertical size={16} />
                       </button>
                       {nodeMediaActionsOpen && (
-                        <div className="absolute right-0 top-10 z-20 min-w-[250px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute right-0 top-10 z-50 mt-1 w-[calc(100vw-2rem)] max-w-[250px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
                           <button
                             type="button"
                             onClick={() => {
