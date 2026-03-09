@@ -947,16 +947,20 @@ function HomeContent() {
                 aria-label={`Open preview for ${book.book_name}`}
                 className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
               >
-                {thumbnailUrl ? (
-                  <div className="mb-3 overflow-hidden rounded-xl border border-black/10 bg-zinc-100">
+                <div className="mb-3 aspect-square overflow-hidden rounded-xl border border-black/10 bg-zinc-100">
+                  {thumbnailUrl ? (
                     <img
                       src={thumbnailUrl}
                       alt={`${book.book_name} thumbnail`}
-                      className="h-28 w-full object-cover"
+                      className="h-full w-full object-contain"
                       loading="lazy"
                     />
-                  </div>
-                ) : null}
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.18em] text-zinc-500">
+                      No image
+                    </div>
+                  )}
+                </div>
                 <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
                   {book.book_name}
                 </p>
