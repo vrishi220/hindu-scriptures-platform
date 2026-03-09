@@ -9072,7 +9072,7 @@ function ScripturesContent() {
                           <div
                             className={
                               mediaManagerView === "icon"
-                                ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                ? "overflow-visible rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
                                 : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
                             }
                           >
@@ -9327,7 +9327,7 @@ function ScripturesContent() {
                                   key={asset.id}
                                   className={
                                     mediaManagerView === "icon"
-                                      ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                      ? "overflow-visible rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
                                       : "grid grid-cols-[2fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
                                   }
                                 >
@@ -9678,7 +9678,7 @@ function ScripturesContent() {
                                   key={media.id}
                                   className={
                                     mediaManagerView === "icon"
-                                      ? "overflow-hidden rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                      ? "overflow-visible rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
                                       : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
                                   }
                                 >
