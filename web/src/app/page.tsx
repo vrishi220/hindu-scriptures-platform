@@ -1167,16 +1167,18 @@ function HomeContent() {
       </main>
 
       {/* Floating Basket Panel */}
-      <BasketPanel
-        items={basketItems}
-        onRemoveItem={removeFromBasket}
-        onMoveItem={moveBasketItem}
-        reorderLoading={isReorderingBasket}
-        onClearBasket={clearBasket}
-        onItemsAdded={() => {
-          // Refresh or handle after items are added to book
-        }}
-      />
+      {authEmail ? (
+        <BasketPanel
+          items={basketItems}
+          onRemoveItem={removeFromBasket}
+          onMoveItem={moveBasketItem}
+          reorderLoading={isReorderingBasket}
+          onClearBasket={clearBasket}
+          onItemsAdded={() => {
+            // Refresh or handle after items are added to book
+          }}
+        />
+      ) : null}
 
       <UserPreferencesDialog
         open={showPreferencesDialog}

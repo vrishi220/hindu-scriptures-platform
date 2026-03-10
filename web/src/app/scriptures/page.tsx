@@ -8850,7 +8850,7 @@ function ScripturesContent() {
                 </p>
               ) : !selectedId ? (
                 <p className="text-sm text-zinc-400">
-                  Select a node to view details
+                  Select an item in the tree
                 </p>
               ) : null}
             </div>
