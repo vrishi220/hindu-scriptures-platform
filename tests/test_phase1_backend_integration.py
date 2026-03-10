@@ -858,6 +858,227 @@ class TestDailyVerseVisibilityRegression:
         finally:
             monkeypatch.setattr(content_api, "_book_is_visible_to_user", original_visibility)
 
+    def test_daily_verse_anonymous_only_uses_public_books(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Daily Verse Anonymous Schema {uuid4().hex[:8]}",
+                "description": "Schema for anonymous daily verse visibility",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        private_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Private Daily Book {uuid4().hex[:6]}",
+                "book_code": f"private-daily-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert private_book_response.status_code == status.HTTP_201_CREATED
+        private_book_id = private_book_response.json()["id"]
+
+        public_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Public Daily Book {uuid4().hex[:6]}",
+                "book_code": f"public-daily-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert public_book_response.status_code == status.HTTP_201_CREATED
+        public_book_id = public_book_response.json()["id"]
+
+        publish_response = client.patch(
+            f"/api/content/books/{public_book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=headers,
+        )
+        assert publish_response.status_code == status.HTTP_200_OK
+
+        private_chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": private_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Private Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert private_chapter_response.status_code == status.HTTP_201_CREATED
+        private_chapter_id = private_chapter_response.json()["id"]
+
+        public_chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": public_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Public Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert public_chapter_response.status_code == status.HTTP_201_CREATED
+        public_chapter_id = public_chapter_response.json()["id"]
+
+        private_marker = f"private-daily-{uuid4().hex}"
+        public_marker = f"public-daily-{uuid4().hex}"
+
+        private_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": private_book_id,
+                "parent_node_id": private_chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Private Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": private_marker},
+                },
+            },
+            headers=headers,
+        )
+        assert private_verse_response.status_code == status.HTTP_201_CREATED
+
+        public_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": public_book_id,
+                "parent_node_id": public_chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Public Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": public_marker},
+                },
+            },
+            headers=headers,
+        )
+        assert public_verse_response.status_code == status.HTTP_201_CREATED
+
+        original_book_visibility = content_api._book_visibility
+
+        def scoped_book_visibility(book):
+            if book.id == public_book_id:
+                return "public"
+            if book.id == private_book_id:
+                return "private"
+            return "private"
+
+        monkeypatch.setattr(content_api, "_book_visibility", scoped_book_visibility)
+
+        try:
+            client.cookies.clear()
+            anonymous_daily_response = client.get("/api/content/daily-verse?mode=daily")
+            assert anonymous_daily_response.status_code == status.HTTP_200_OK
+            anonymous_daily_payload = anonymous_daily_response.json()
+            assert anonymous_daily_payload is not None
+            assert anonymous_daily_payload["book_id"] == public_book_id
+            assert public_marker in anonymous_daily_payload["content"]
+            assert private_marker not in anonymous_daily_payload["content"]
+        finally:
+            monkeypatch.setattr(content_api, "_book_visibility", original_book_visibility)
+
+    def test_random_verse_anonymous_returns_none_when_only_private_books(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Random Verse Anonymous Schema {uuid4().hex[:8]}",
+                "description": "Schema for anonymous random verse filtering",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        private_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Private Random Book {uuid4().hex[:6]}",
+                "book_code": f"private-random-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert private_book_response.status_code == status.HTTP_201_CREATED
+        private_book_id = private_book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": private_book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Private Chapter",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        private_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": private_book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Private Verse",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": f"private-random-{uuid4().hex}"},
+                },
+            },
+            headers=headers,
+        )
+        assert private_verse_response.status_code == status.HTTP_201_CREATED
+
+        original_book_visibility = content_api._book_visibility
+
+        def private_only_visibility(book):
+            if book.id == private_book_id:
+                return "private"
+            return "private"
+
+        monkeypatch.setattr(content_api, "_book_visibility", private_only_visibility)
+
+        try:
+            client.cookies.clear()
+            anonymous_random_response = client.get("/api/content/daily-verse?mode=random")
+            assert anonymous_random_response.status_code == status.HTTP_200_OK
+            assert anonymous_random_response.json() is None
+        finally:
+            monkeypatch.setattr(content_api, "_book_visibility", original_book_visibility)
+
 
 class TestBookSharesPhase2:
     def test_owner_can_share_private_book_with_selected_users(self, client):

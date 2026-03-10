@@ -1064,7 +1064,11 @@ def get_daily_verse(
         visible_book_ids = [
             book.id
             for book in db.query(Book).all()
-            if _book_is_visible_to_user(db, book, current_user)
+            if (
+                _book_visibility(book) == BOOK_VISIBILITY_PUBLIC
+                if current_user is None
+                else _book_is_visible_to_user(db, book, current_user)
+            )
         ]
         if not visible_book_ids:
             return None
