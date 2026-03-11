@@ -1288,6 +1288,7 @@ function ScripturesContent() {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
+  const [privateBookGate, setPrivateBookGate] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [urlInitialized, setUrlInitialized] = useState(false);
@@ -3788,7 +3789,20 @@ function ScripturesContent() {
       setSelectedId(null);
       setBreadcrumb([]);
       setCurrentBook(null);
+      setPrivateBookGate(false);
       return;
+    }
+
+    // For anonymous users, gate access to private books before any API calls
+    setPrivateBookGate(false);
+    if (!authEmail) {
+      const selectedBook = books.find((b) => b.id.toString() === selectedId);
+      if (selectedBook?.visibility === "private") {
+        setPrivateBookGate(true);
+        setTreeData([]);
+        setCurrentBook(null);
+        return;
+      }
     }
 
     setTreeLoading(true);
@@ -7500,14 +7514,37 @@ function ScripturesContent() {
                 )}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                {treeError && (
-                  <p className="mt-3 text-sm text-[color:var(--accent)]">{treeError}</p>
-                )}
-                {!treeLoading && !treeError && treeData.length === 0 && bookId && (
-                  <p className="mt-3 text-sm text-zinc-600">No nodes yet.</p>
-                )}
-                {!treeLoading && !treeError && treeData.length > 0 && (
-                  <div className="mt-4">{renderTree(treeData)}</div>
+                {privateBookGate ? (
+                  <div className="mx-2 mt-6 rounded-2xl border border-black/10 bg-white/80 p-5 text-center">
+                    <p className="text-sm font-medium text-zinc-700">🔒 Private book</p>
+                    <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
+                    <div className="mt-4 flex flex-col gap-2">
+                      <a
+                        href="/signin"
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
+                      >
+                        Sign in
+                      </a>
+                      <a
+                        href="/signup"
+                        className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
+                      >
+                        Create account
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {treeError && (
+                      <p className="mt-3 text-sm text-[color:var(--accent)]">{treeError}</p>
+                    )}
+                    {!treeLoading && !treeError && treeData.length === 0 && bookId && (
+                      <p className="mt-3 text-sm text-zinc-600">No nodes yet.</p>
+                    )}
+                    {!treeLoading && !treeError && treeData.length > 0 && (
+                      <div className="mt-4">{renderTree(treeData)}</div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -8916,9 +8953,30 @@ function ScripturesContent() {
                   Unable to load content for this node.
                 </p>
               ) : !selectedId ? (
-                <p className="text-sm text-zinc-400">
-                  Select an item in the tree
-                </p>
+                privateBookGate ? (
+                  <div className="flex flex-col items-center gap-3 py-10 text-center">
+                    <p className="text-sm font-medium text-zinc-700">🔒 This book is private</p>
+                    <p className="text-xs text-zinc-500">Sign in or create an account to view private books.</p>
+                    <div className="mt-2 flex gap-2">
+                      <a
+                        href="/signin"
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
+                      >
+                        Sign in
+                      </a>
+                      <a
+                        href="/signup"
+                        className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
+                      >
+                        Create account
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    Select an item in the tree
+                  </p>
+                )
               ) : null}
             </div>
           </div>
