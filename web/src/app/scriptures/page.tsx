@@ -6976,8 +6976,13 @@ function ScripturesContent() {
                     const canBrowseBook = authUserId !== null && canView;
                     const canCopyPreviewBookLink = canPreviewBook && !canBrowseBook;
                     const canCopyBrowseBookLink = false;
-                    const showRowMenu = canCopyPreviewBookLink;
-                    const showSingleBrowseAction = canBrowseBook;
+                    const isBookOwner =
+                      authUserId !== null &&
+                      (book.metadata_json?.owner_id === authUserId ||
+                        book.metadata?.owner_id === authUserId);
+                    const canToggleVisibility = canAdmin || isBookOwner;
+                    const showRowMenu = canCopyPreviewBookLink || canToggleVisibility;
+                    const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     return (
                       <div
                         key={book.id}
