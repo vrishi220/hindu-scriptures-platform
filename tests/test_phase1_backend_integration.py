@@ -777,6 +777,142 @@ class TestBookPrivacyAndPublishToggle:
         get_other_after = client.get(f"/api/content/books/{book_id}", headers=headers_other)
         assert get_other_after.status_code == status.HTTP_200_OK
 
+    def test_owner_can_toggle_public_book_back_to_private(self, client):
+        owner_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Toggle Schema {uuid4().hex[:8]}",
+                "description": "Schema for owner visibility toggle test",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Toggle Book {uuid4().hex[:6]}",
+                "book_code": f"toggle-book-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        publish_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=owner_headers,
+        )
+        assert publish_response.status_code == status.HTTP_200_OK
+        assert publish_response.json()["status"] == "published"
+        assert publish_response.json()["visibility"] == "public"
+
+        unpublish_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "draft", "visibility": "private"},
+            headers=owner_headers,
+        )
+        assert unpublish_response.status_code == status.HTTP_200_OK
+        assert unpublish_response.json()["status"] == "draft"
+        assert unpublish_response.json()["visibility"] == "private"
+
+    def test_non_owner_cannot_make_public_book_private(self, client):
+        owner_headers = _register_and_login(client)
+        other_headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Toggle Guard Schema {uuid4().hex[:8]}",
+                "description": "Schema for non-owner visibility toggle guard",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Toggle Guard Book {uuid4().hex[:6]}",
+                "book_code": f"toggle-guard-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        publish_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=owner_headers,
+        )
+        assert publish_response.status_code == status.HTTP_200_OK
+
+        unauthorized_toggle = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "draft", "visibility": "private"},
+            headers=other_headers,
+        )
+        assert unauthorized_toggle.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_admin_can_change_visibility_on_another_users_book(self, client):
+        owner_headers = _register_and_login(client)
+        admin_headers = _register_and_login_as_admin(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Admin Toggle Schema {uuid4().hex[:8]}",
+                "description": "Schema for admin visibility toggle test",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Admin Toggle Book {uuid4().hex[:6]}",
+                "book_code": f"admin-toggle-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        admin_publish = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=admin_headers,
+        )
+        assert admin_publish.status_code == status.HTTP_200_OK
+        assert admin_publish.json()["status"] == "published"
+        assert admin_publish.json()["visibility"] == "public"
+
+        admin_unpublish = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "draft", "visibility": "private"},
+            headers=admin_headers,
+        )
+        assert admin_unpublish.status_code == status.HTTP_200_OK
+        assert admin_unpublish.json()["status"] == "draft"
+        assert admin_unpublish.json()["visibility"] == "private"
+
 
 class TestDailyVerseVisibilityRegression:
     def test_daily_verse_uses_user_visible_books(self, client, monkeypatch):
