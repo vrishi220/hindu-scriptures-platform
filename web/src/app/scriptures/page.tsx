@@ -6983,6 +6983,11 @@ function ScripturesContent() {
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const showRowMenu = canCopyPreviewBookLink || canToggleVisibility;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
+                    // Anonymous users clicking a private book should still be clickable — loadTree will gate
+                    const isAnonymousPrivate = !authEmail && book.visibility === "private";
+                    const handleBookClick = isAnonymousPrivate
+                      ? () => handleBrowseBookFromRow(book)
+                      : () => void handlePreviewBookFromRow(book);
                     return (
                       <div
                         key={book.id}
@@ -7000,12 +7005,10 @@ function ScripturesContent() {
                       >
                         {isBooksGridView ? (
                           <>
-                            {canPreviewBook ? (
+                            {(canPreviewBook || isAnonymousPrivate) ? (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  void handlePreviewBookFromRow(book);
-                                }}
+                                onClick={handleBookClick}
                                 className="group absolute inset-0 block w-full bg-zinc-100 text-left"
                               >
                                 {thumbnailUrl ? (
@@ -7164,12 +7167,10 @@ function ScripturesContent() {
                                 ) : (
                                   <div className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 bg-zinc-100" />
                                 )}
-                                {canPreviewBook ? (
+                                {(canPreviewBook || isAnonymousPrivate) ? (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      void handlePreviewBookFromRow(book);
-                                    }}
+                                    onClick={handleBookClick}
                                     className="truncate font-medium text-[color:var(--accent)] underline-offset-2 transition hover:underline"
                                   >
                                     {book.book_name}
