@@ -1301,6 +1301,7 @@ function ScripturesContent() {
   const [, setAuthStatus] = useState<string | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
+  const [bookVisibilitySubmitting, setBookVisibilitySubmitting] = useState<number | null>(null);
   const [canView, setCanView] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
@@ -6724,6 +6725,42 @@ function ScripturesContent() {
     setShowBrowseBookModal(true);
   };
 
+  const handleToggleBookVisibility = async (book: BookOption) => {
+    const isPublic = (book.visibility ?? "private") === "public";
+    const payload = isPublic
+      ? { status: "draft", visibility: "private" }
+      : { status: "published", visibility: "public" };
+    setBookVisibilitySubmitting(book.id);
+    try {
+      const response = await fetch(`/api/books/${book.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as BookDetails | { detail?: string } | null;
+      if (!response.ok) {
+        alert((result as { detail?: string } | null)?.detail ?? "Failed to update visibility");
+        return;
+      }
+      const updated = result as BookDetails;
+      setBooks((prev) =>
+        prev.map((b) =>
+          b.id === updated.id
+            ? { ...b, status: updated.status, visibility: updated.visibility }
+            : b
+        )
+      );
+      if (currentBook && currentBook.id === updated.id) {
+        setCurrentBook(updated);
+      }
+    } catch {
+      alert("Failed to update visibility");
+    } finally {
+      setBookVisibilitySubmitting(null);
+    }
+  };
+
   const mediaManagerItemsLayoutClass = mediaManagerView === "icon" ? "grid gap-2 p-2" : "divide-y divide-black/5";
   const mediaManagerItemsLayoutStyle =
     mediaManagerView === "icon"
@@ -7074,6 +7111,21 @@ function ScripturesContent() {
                                           Browse book
                                         </button>
                                       )}
+                                      {(canAdmin ||
+                                        book.metadata_json?.owner_id === authUserId ||
+                                        book.metadata?.owner_id === authUserId) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenBookRowActionsId(null);
+                                            void handleToggleBookVisibility(book);
+                                          }}
+                                          disabled={bookVisibilitySubmitting === book.id}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                                        >
+                                          {book.visibility === "public" ? "Make private" : "Make public"}
+                                        </button>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -7197,6 +7249,21 @@ function ScripturesContent() {
                                       >
                                         <BookOpen size={14} />
                                         Browse book
+                                      </button>
+                                    )}
+                                    {(canAdmin ||
+                                      book.metadata_json?.owner_id === authUserId ||
+                                      book.metadata?.owner_id === authUserId) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenBookRowActionsId(null);
+                                          void handleToggleBookVisibility(book);
+                                        }}
+                                        disabled={bookVisibilitySubmitting === book.id}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                                      >
+                                        {book.visibility === "public" ? "Make private" : "Make public"}
                                       </button>
                                     )}
                                   </div>
