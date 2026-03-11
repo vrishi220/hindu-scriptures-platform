@@ -237,7 +237,7 @@ export default function BasketPanel({
     };
   }, [isDraggingWidget, clampWidgetPosition]);
 
-  const handleDragStart = (event: React.PointerEvent<HTMLButtonElement>) => {
+  const handleDragStart = (event: React.PointerEvent<HTMLElement>) => {
     event.preventDefault();
     activePointerIdRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -875,22 +875,21 @@ export default function BasketPanel({
         className="fixed z-40"
         style={{ left: `${widgetPosition.x}px`, top: `${widgetPosition.y}px` }}
       >
-        <div className="mb-1 flex justify-center">
+        <div className="group relative">
           <button
             type="button"
             onPointerDown={handleDragStart}
-            className="rounded-full border border-black/10 bg-white/95 px-2 py-1 text-xs text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 cursor-grab active:cursor-grabbing"
+            onClick={(event) => event.stopPropagation()}
+            className="absolute left-1/2 top-1 z-10 h-4 w-14 -translate-x-1/2 rounded-full border border-black/10 bg-white/95 text-[10px] text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 cursor-grab active:cursor-grabbing"
             style={{ touchAction: "none" }}
-            title="Drag basket widget"
-            aria-label="Drag basket widget"
+            title="Drag basket"
+            aria-label="Drag basket"
           >
             ⠿
           </button>
-        </div>
-        <div className="group relative">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-2 rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-3 font-medium text-white shadow-lg transition hover:shadow-xl"
+            className="flex items-center gap-2 rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 pb-3 pt-6 font-medium text-white shadow-lg transition hover:shadow-xl"
             title={basketButtonTooltip}
             aria-label={basketButtonTooltip}
           >
@@ -913,12 +912,18 @@ export default function BasketPanel({
           className="fixed z-40 w-96 rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-sm"
           style={{ left: `${panelLeft}px`, top: `${panelTop}px` }}
         >
-          <div className="flex items-center justify-between border-b border-black/10 p-4">
+          <div
+            className="flex items-center justify-between border-b border-black/10 p-4 cursor-grab active:cursor-grabbing"
+            onPointerDown={handleDragStart}
+            style={{ touchAction: "none" }}
+            title="Drag basket"
+          >
             <h3 className="font-[var(--font-display)] text-lg text-[color:var(--deep)]">
               Basket ({items.length})
             </h3>
             <button
               onClick={() => setIsExpanded(false)}
+              onPointerDown={(event) => event.stopPropagation()}
               className="text-xl text-zinc-400 hover:text-zinc-600"
             >
               ✕

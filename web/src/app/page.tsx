@@ -863,6 +863,13 @@ function HomeContent() {
   };
 
   const featuredBooks = [...books]
+    .filter((book) => {
+      if (authEmail) {
+        return true;
+      }
+      const visibility = (book as BookOption & { visibility?: string }).visibility;
+      return visibility === "public";
+    })
     .sort((left, right) => {
       const leftVisibility = (left as BookOption & { visibility?: string }).visibility;
       const rightVisibility = (right as BookOption & { visibility?: string }).visibility;
