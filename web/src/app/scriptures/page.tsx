@@ -6997,8 +6997,10 @@ function ScripturesContent() {
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
                     const isAnonymousPrivate = !authEmail && bookVisibility === "private";
+                    // For anonymous users on a private book, show the sign-in gate overlay directly
+                    // (the browse modal requires isExploreVisible which needs authUserId != null)
                     const handleBookClick = isAnonymousPrivate
-                      ? () => handleBrowseBookFromRow(book)
+                      ? () => { setPrivateBookGate(true); }
                       : () => void handlePreviewBookFromRow(book);
                     return (
                       <div
@@ -7330,6 +7332,38 @@ function ScripturesContent() {
               <span>{previewLoadingMessageWithElapsed}</span>
             </div>
           )}
+
+            {/* Anonymous private-book gate — rendered as standalone overlay, bypasses browse-modal auth requirements */}
+            {privateBookGate && !authEmail && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+                <div className="w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 text-center shadow-xl">
+                  <p className="text-2xl">🔒</p>
+                  <p className="mt-2 text-sm font-medium text-zinc-800">Private book</p>
+                  <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
+                  <div className="mt-5 flex flex-col gap-2">
+                    <a
+                      href="/signin"
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
+                    >
+                      Sign in
+                    </a>
+                    <a
+                      href="/signup"
+                      className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
+                    >
+                      Create account
+                    </a>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPrivateBookGate(false)}
+                    className="mt-4 text-xs text-zinc-400 transition hover:text-zinc-600"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
 
           {showBrowseBookModal && bookId && isExploreVisible && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
