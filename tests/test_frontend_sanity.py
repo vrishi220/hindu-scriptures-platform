@@ -248,6 +248,51 @@ class TestScripturesGateSourceAndVisibilityContract:
         assert 'onClick={handleClosePrivateBookGate}' in scriptures_page
 
 
+class TestModalCloseSourceAwareNavigation:
+    """Regression tests for Preview and Browse modal closes respecting source-aware navigation."""
+
+    def test_preview_modal_close_respects_from_home(self):
+        """Preview modal close should return to home when opened from home."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const handleClosePreview = () => {' in scriptures_page
+        assert 'const fromParam = searchParams.get("from");' in scriptures_page
+        assert 'if (fromParam === "home") {' in scriptures_page
+
+    def test_preview_modal_close_respects_from_search(self):
+        """Preview modal close should return to search when opened from search."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'if (fromParam === "search" && searchReturnUrl) {' in scriptures_page
+        assert 'router.push(searchReturnUrl, { scroll: false });' in scriptures_page
+
+    def test_browse_modal_close_respects_from_home(self):
+        """Browse modal close should return to home when opened from home."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const handleCloseBrowseModal = () => {' in scriptures_page
+        assert 'onClick={' in scriptures_page and 'handleCloseBrowseModal()' in scriptures_page
+
+    def test_all_modal_closes_have_source_aware_fallback(self):
+        """All modal closes should fall back to clearPreviewUrl/clearBrowseUrl if no source."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'clearPreviewUrl();' in scriptures_page
+        assert 'clearBrowseUrl();' in scriptures_page
+
+
 # Note: This file contains test stubs. To run these tests, install playwright:
 # 
 # pip install pytest-playwright

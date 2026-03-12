@@ -3482,6 +3482,25 @@ function ScripturesContent() {
     bookPreviewLoadingScope === "node" ? "Building level preview..." : "Building book preview...";
   const previewLoadingElapsedSeconds = Math.floor(bookPreviewLoadingElapsedMs / 1000);
   const previewLoadingMessageWithElapsed = `${previewLoadingMessage} ${previewLoadingElapsedSeconds}s`;
+  const previewParam = searchParams.get("preview");
+  const previewIntentScope =
+    previewParam === "book" || previewParam === "node" ? previewParam : null;
+  const previewIntentNodeId =
+    previewIntentScope === "node"
+      ? Number.parseInt(searchParams.get("node") || "", 10)
+      : null;
+  const isWaitingForPreviewNodeSelection =
+    previewIntentScope === "node" &&
+    Number.isFinite(previewIntentNodeId) &&
+    selectedId !== previewIntentNodeId;
+  const showPreviewTransitionOverlay =
+    previewIntentScope !== null &&
+    !showBookPreview &&
+    (bookPreviewLoading ||
+      isWaitingForPreviewNodeSelection ||
+      treeLoading ||
+      contentLoading ||
+      !bookId);
 
   const renderTransliterationByPreference = (value: string): string => {
     if (!value) return "";
@@ -3618,7 +3637,15 @@ function ScripturesContent() {
 
   // Watch for book ID changes and load tree with optional node auto-selection
   useEffect(() => {
-    if (!bookId || !urlInitialized) return;
+    if (!bookId || !urlInitialized) {
+      // Reset the cached book ID so re-opening the same book after navigating
+      // away (including a book that previously errored) triggers a fresh load.
+      if (!bookId) {
+        lastTreeBookId.current = null;
+        setTreeError(null);
+      }
+      return;
+    }
 
     const nodeParam = searchParams.get("node");
     const nodeIdFromUrl = nodeParam ? parseInt(nodeParam, 10) : undefined;
@@ -5231,7 +5258,11 @@ function ScripturesContent() {
     }
     nextParams.delete("browse");
     nextParams.set("preview", scope);
+    const currentQuery = searchParams.toString();
     const nextQuery = nextParams.toString();
+    if (nextQuery === currentQuery) {
+      return;
+    }
     const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
     if (historyMode === "push") {
       router.push(nextPath, { scroll: false });
@@ -5254,7 +5285,11 @@ function ScripturesContent() {
     }
     nextParams.delete("preview");
     nextParams.set("browse", "1");
+    const currentQuery = searchParams.toString();
     const nextQuery = nextParams.toString();
+    if (nextQuery === currentQuery) {
+      return;
+    }
     const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
     if (historyMode === "push") {
       router.push(nextPath, { scroll: false });
@@ -5286,7 +5321,36 @@ function ScripturesContent() {
   const handleClosePreview = () => {
     setShowBookPreview(false);
     setPreviewLinkMessage(null);
+
+    const fromParam = searchParams.get("from");
+    if (fromParam === "home") {
+      router.push("/", { scroll: false });
+      return;
+    }
+    if (fromParam === "search" && searchReturnUrl) {
+      router.push(searchReturnUrl, { scroll: false });
+      return;
+    }
+
     clearPreviewUrl();
+  };
+
+  const handleCloseBrowseModal = () => {
+    setShowBrowseBookModal(false);
+    setShowExploreStructure(false);
+    setMobilePanel("content");
+
+    const fromParam = searchParams.get("from");
+    if (fromParam === "home") {
+      router.push("/", { scroll: false });
+      return;
+    }
+    if (fromParam === "search" && searchReturnUrl) {
+      router.push(searchReturnUrl, { scroll: false });
+      return;
+    }
+
+    clearBrowseUrl();
   };
 
   const handleBrowseFromPreview = (targetBookId: string, targetNodeId?: number | null) => {
@@ -5465,6 +5529,9 @@ function ScripturesContent() {
     if (!urlInitialized || !bookId) {
       return;
     }
+    if (showBookPreview || bookPreviewLoading) {
+      return;
+    }
 
     let previewScope: "book" | "node" = "book";
     let requestNodeIdPart = "";
@@ -5486,7 +5553,7 @@ function ScripturesContent() {
 
     void handlePreviewBook(previewScope, bookId, "replace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlInitialized, bookId, selectedId, searchParams]);
+  }, [urlInitialized, bookId, selectedId, searchParams, showBookPreview, bookPreviewLoading]);
 
   useEffect(() => {
     const browseParam = searchParams.get("browse");
@@ -5506,6 +5573,19 @@ function ScripturesContent() {
     setMobilePanel("tree");
     void loadTree(bookId, Number.isFinite(nodeId ?? NaN) ? nodeId : undefined);
   }, [urlInitialized, bookId, canExploreStructure, searchParams]);
+
+  useEffect(() => {
+    if (!showBrowseBookModal || !isExploreVisible) {
+      return;
+    }
+
+    if (selectedId !== null) {
+      setMobilePanel((prev) => (prev === "content" ? prev : "content"));
+      return;
+    }
+
+    setMobilePanel((prev) => (prev === "tree" ? prev : "tree"));
+  }, [showBrowseBookModal, isExploreVisible, selectedId]);
 
   useEffect(() => {
     if (authEmail) {
@@ -6670,6 +6750,7 @@ function ScripturesContent() {
   };
 
   const selectedTreeNode = selectedId ? findNodeById(treeData, selectedId) : null;
+  const hasSelectedChildNode = selectedId !== null;
   const isLeafSelected = Boolean(
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
@@ -7086,7 +7167,7 @@ function ScripturesContent() {
                       : undefined
                   }
                 >
-                  {filteredBooks.map((book) => {
+                  {filteredBooks.map((book, bookIndex) => {
                     const isSelected = bookId === book.id.toString();
                     const thumbnailUrl = getBookThumbnailUrl(book);
                     const bookVisibility =
@@ -7105,6 +7186,15 @@ function ScripturesContent() {
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const showRowMenu = canCopyPreviewBookLink || canToggleVisibility;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
+                    const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
+                    const rowMenuPositionClass =
+                      isBooksGridView && booksGridColumns > 1
+                        ? gridColumnIndex === 0
+                          ? "left-0"
+                          : gridColumnIndex === booksGridColumns - 1
+                            ? "right-0"
+                            : "left-1/2 -translate-x-1/2"
+                        : "right-0";
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
                     const isAnonymousPrivate = !authEmail && bookVisibility === "private";
                     // For anonymous users on a private book, show the sign-in gate overlay directly
@@ -7117,7 +7207,7 @@ function ScripturesContent() {
                         key={book.id}
                         className={`flex items-center gap-2 text-sm transition ${
                           isBooksGridView
-                            ? `relative aspect-square overflow-hidden rounded-xl border border-black/10 ${
+                            ? `relative aspect-square rounded-xl border border-black/10 ${
                                 isSelected
                                   ? "bg-[color:var(--sand)]/45 text-[color:var(--accent)]"
                                   : "bg-white text-zinc-700 hover:border-black/20"
@@ -7129,45 +7219,47 @@ function ScripturesContent() {
                       >
                         {isBooksGridView ? (
                           <>
-                            {(canPreviewBook || isAnonymousPrivate) ? (
-                              <button
-                                type="button"
-                                onClick={handleBookClick}
-                                className="group absolute inset-0 block w-full bg-zinc-100 text-left"
-                              >
-                                {thumbnailUrl ? (
-                                  <img
-                                    src={thumbnailUrl}
-                                    alt={`${book.book_name} thumbnail`}
-                                    className="h-full w-full object-contain p-2 transition group-hover:scale-[1.01]"
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-                                    No thumbnail
-                                  </div>
-                                )}
-                              </button>
-                            ) : thumbnailUrl ? (
-                              <img
-                                src={thumbnailUrl}
-                                alt={`${book.book_name} thumbnail`}
-                                className="absolute inset-0 h-full w-full object-contain p-2"
-                              />
-                            ) : (
-                              <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-                                No thumbnail
-                              </div>
-                            )}
+                            <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
+                              {(canPreviewBook || isAnonymousPrivate) ? (
+                                <button
+                                  type="button"
+                                  onClick={handleBookClick}
+                                  className="group absolute inset-0 block w-full bg-zinc-100 text-left"
+                                >
+                                  {thumbnailUrl ? (
+                                    <img
+                                      src={thumbnailUrl}
+                                      alt={`${book.book_name} thumbnail`}
+                                      className="h-full w-full object-contain p-2 transition group-hover:scale-[1.01]"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                                      No thumbnail
+                                    </div>
+                                  )}
+                                </button>
+                              ) : thumbnailUrl ? (
+                                <img
+                                  src={thumbnailUrl}
+                                  alt={`${book.book_name} thumbnail`}
+                                  className="absolute inset-0 h-full w-full object-contain p-2"
+                                />
+                              ) : (
+                                <div className="absolute inset-0 flex h-full w-full items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                                  No thumbnail
+                                </div>
+                              )}
 
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/55 to-transparent px-3 pb-3 pt-8 text-white">
-                              <div className="flex items-end justify-between gap-2">
-                                <div className="line-clamp-2 text-sm font-semibold">{book.book_name}</div>
-                                <span className="rounded-full border border-white/35 bg-black/25 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-white/90">
-                                  {bookVisibility === "private" ? "Private" : "Public"}
-                                </span>
+                              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/55 to-transparent px-3 pb-3 pt-8 text-white">
+                                <div className="flex items-end justify-between gap-2">
+                                  <div className="line-clamp-2 text-sm font-semibold">{book.book_name}</div>
+                                  <span className="rounded-full border border-white/35 bg-black/25 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-white/90">
+                                    {bookVisibility === "private" ? "Private" : "Public"}
+                                  </span>
                               </div>
                             </div>
 
+                            </div>
                             <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5">
                               {showSingleBrowseAction && (
                                 <button
@@ -7203,7 +7295,7 @@ function ScripturesContent() {
                                     ⋮
                                   </button>
                                   {openBookRowActionsId === book.id && (
-                                    <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                                    <div className={`absolute z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl ${rowMenuPositionClass}`}>
                                       {canCopyPreviewBookLink && (
                                         <button
                                           type="button"
@@ -7490,6 +7582,20 @@ function ScripturesContent() {
             </div>
           )}
 
+          {showPreviewTransitionOverlay && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[color:var(--paper)]/96 backdrop-blur-[1px]">
+              <div className="rounded-2xl border border-black/10 bg-white/90 px-5 py-4 text-center shadow-lg">
+                <div className="flex items-center gap-3 text-sm text-zinc-700">
+                  <span
+                    aria-hidden
+                    className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+                  />
+                  <span>{previewLoadingMessageWithElapsed}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {showBrowseBookModal && bookId && isExploreVisible && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
@@ -7538,10 +7644,7 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      setShowBrowseBookModal(false);
-                      setShowExploreStructure(false);
-                      setMobilePanel("content");
-                      clearBrowseUrl();
+                      handleCloseBrowseModal();
                     }}
                     className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
                   >
@@ -7556,7 +7659,7 @@ function ScripturesContent() {
             {isExploreVisible && (
             <div
               className={`lg:col-span-1 min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 flex flex-col ${
-                mobilePanel === "tree" ? "flex" : "hidden"
+                !hasSelectedChildNode || mobilePanel === "tree" ? "flex" : "hidden"
               } lg:flex`}
             >
               <div className="sticky top-0 z-10 bg-white/90 pb-3">
@@ -7730,7 +7833,9 @@ function ScripturesContent() {
             {/* Content Section */}
             <div
               className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 overflow-y-auto overscroll-contain ${
-                !isExploreVisible || mobilePanel === "content" ? "block" : "hidden"
+                !isExploreVisible || (hasSelectedChildNode && mobilePanel === "content")
+                  ? "block"
+                  : "hidden"
               } lg:block`}
             >
               {breadcrumb.length > 0 && (
