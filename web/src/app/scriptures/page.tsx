@@ -3796,16 +3796,15 @@ function ScripturesContent() {
       return;
     }
 
-    // For anonymous users, gate access to private books before any API calls
+    // For anonymous users, gate access to private books before API calls when visibility is known
     setPrivateBookGate(false);
     if (!authEmail) {
       const selectedBook = books.find((b) => b.id.toString() === selectedId);
       const selectedBookVisibility =
         selectedBook?.visibility ??
         selectedBook?.metadata_json?.visibility ??
-        selectedBook?.metadata?.visibility ??
-        "private";
-      if (selectedBookVisibility === "private") {
+        selectedBook?.metadata?.visibility;
+      if (selectedBook && selectedBookVisibility === "private") {
         setPrivateBookGate(true);
         setTreeData([]);
         setCurrentBook(null);
@@ -3835,6 +3834,16 @@ function ScripturesContent() {
       });
         if (requestId !== activeTreeRequestId.current) return;
       if (!response.ok) {
+        if (!authEmail && (response.status === 401 || response.status === 403)) {
+          setPrivateBookGate(true);
+          setTreeData([]);
+          setCurrentBook(null);
+          setSelectedId(null);
+          setBreadcrumb([]);
+          setNodeContent(null);
+          setUrlInitialized(true);
+          return;
+        }
         const payload = (await response.json().catch(() => null)) as {
           detail?: string;
         } | null;
@@ -5290,6 +5299,38 @@ function ScripturesContent() {
     setMobilePanel("tree");
     syncBrowseUrl(targetBookId, targetNodeId, "push");
     void loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
+  };
+
+  const handleClosePrivateBookGate = () => {
+    setPrivateBookGate(false);
+    setShowBrowseBookModal(false);
+    setShowExploreStructure(false);
+    setMobilePanel("content");
+
+    const fromParam = searchParams.get("from");
+    if (fromParam === "home") {
+      router.push("/", { scroll: false });
+      return;
+    }
+    if (fromParam === "search" && searchReturnUrl) {
+      router.push(searchReturnUrl, { scroll: false });
+      return;
+    }
+
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.delete("preview");
+    nextParams.delete("browse");
+    nextParams.delete("book");
+    nextParams.delete("node");
+    nextParams.delete("from");
+    nextParams.delete("searchContext");
+    const nextQuery = nextParams.toString();
+    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
   };
 
   const handleCopyPreviewPath = async (relativePath: string) => {
@@ -7408,7 +7449,7 @@ function ScripturesContent() {
                 <div className="relative w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 text-center shadow-xl">
                   <button
                     type="button"
-                    onClick={() => setPrivateBookGate(false)}
+                    onClick={handleClosePrivateBookGate}
                     aria-label="Close"
                     className="absolute right-3 top-3 text-lg leading-none text-zinc-400 transition hover:text-zinc-600"
                   >

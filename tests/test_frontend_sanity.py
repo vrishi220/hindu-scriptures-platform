@@ -212,8 +212,41 @@ class TestDailyVerseNavigationContract:
         repo_root = Path(__file__).resolve().parents[1]
         home_page = (repo_root / "web" / "src" / "app" / "page.tsx").read_text(encoding="utf-8")
 
-        assert '&browse=1' in home_page
+        assert '&browse=1&from=home' in home_page
         assert '&preview=node' not in home_page
+
+    def test_home_featured_book_link_marks_home_source(self):
+        """Featured books links from Home should include from=home source marker."""
+        repo_root = Path(__file__).resolve().parents[1]
+        home_page = (repo_root / "web" / "src" / "app" / "page.tsx").read_text(encoding="utf-8")
+
+        assert '&preview=book&from=home' in home_page
+
+
+class TestScripturesGateSourceAndVisibilityContract:
+    """Regression tests for private gate source handling and visibility inference."""
+
+    def test_anonymous_pre_gate_does_not_default_unknown_visibility_to_private(self):
+        """When books metadata isn't hydrated yet, unknown visibility should not be treated as private."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'selectedBook?.metadata?.visibility;' in scriptures_page
+        assert 'if (selectedBook && selectedBookVisibility === "private") {' in scriptures_page
+
+    def test_private_gate_close_uses_source_aware_navigation(self):
+        """Private gate close should route back to source context (home/search/history fallback)."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const handleClosePrivateBookGate = () => {' in scriptures_page
+        assert 'if (fromParam === "home") {' in scriptures_page
+        assert 'router.push("/", { scroll: false });' in scriptures_page
+        assert 'onClick={handleClosePrivateBookGate}' in scriptures_page
 
 
 # Note: This file contains test stubs. To run these tests, install playwright:

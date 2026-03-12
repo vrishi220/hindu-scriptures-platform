@@ -950,7 +950,7 @@ function HomeContent() {
             return (
               <a
                 key={book.id}
-                href={`/scriptures?book=${book.id}&preview=book`}
+                href={`/scriptures?book=${book.id}&preview=book&from=home`}
                 aria-label={`Open preview for ${book.book_name}`}
                 className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
               >
@@ -1125,7 +1125,7 @@ function HomeContent() {
                   {(() => {
                     const versePreviewHref =
                       dailyVerse.book_id > 0 && dailyVerse.node_id
-                        ? `/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}&browse=1`
+                        ? `/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}&browse=1&from=home`
                         : null;
                     return (
                       <div
