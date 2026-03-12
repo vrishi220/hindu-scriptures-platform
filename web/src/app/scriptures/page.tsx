@@ -69,10 +69,12 @@ type BookOption = {
   visibility?: "private" | "public";
   metadata_json?: {
     owner_id?: number;
+    visibility?: "private" | "public";
     [key: string]: unknown;
   } | null;
   metadata?: {
     owner_id?: number;
+    visibility?: "private" | "public";
     [key: string]: unknown;
   } | null;
 };
@@ -3797,7 +3799,12 @@ function ScripturesContent() {
     setPrivateBookGate(false);
     if (!authEmail) {
       const selectedBook = books.find((b) => b.id.toString() === selectedId);
-      if (selectedBook?.visibility === "private") {
+      const selectedBookVisibility =
+        selectedBook?.visibility ??
+        selectedBook?.metadata_json?.visibility ??
+        selectedBook?.metadata?.visibility ??
+        "private";
+      if (selectedBookVisibility === "private") {
         setPrivateBookGate(true);
         setTreeData([]);
         setCurrentBook(null);
@@ -6972,7 +6979,12 @@ function ScripturesContent() {
                   {filteredBooks.map((book) => {
                     const isSelected = bookId === book.id.toString();
                     const thumbnailUrl = getBookThumbnailUrl(book);
-                    const canPreviewBook = Boolean(authEmail) || book.visibility === "public";
+                    const bookVisibility =
+                      book.visibility ??
+                      book.metadata_json?.visibility ??
+                      book.metadata?.visibility ??
+                      "private";
+                    const canPreviewBook = Boolean(authEmail) || bookVisibility === "public";
                     const canBrowseBook = authUserId !== null && canView;
                     const canCopyPreviewBookLink = canPreviewBook && !canBrowseBook;
                     const canCopyBrowseBookLink = false;
@@ -6984,7 +6996,7 @@ function ScripturesContent() {
                     const showRowMenu = canCopyPreviewBookLink || canToggleVisibility;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
-                    const isAnonymousPrivate = !authEmail && book.visibility === "private";
+                    const isAnonymousPrivate = !authEmail && bookVisibility === "private";
                     const handleBookClick = isAnonymousPrivate
                       ? () => handleBrowseBookFromRow(book)
                       : () => void handlePreviewBookFromRow(book);
@@ -7039,7 +7051,7 @@ function ScripturesContent() {
                               <div className="flex items-end justify-between gap-2">
                                 <div className="line-clamp-2 text-sm font-semibold">{book.book_name}</div>
                                 <span className="rounded-full border border-white/35 bg-black/25 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-white/90">
-                                  {book.visibility === "private" ? "Private" : "Public"}
+                                  {bookVisibility === "private" ? "Private" : "Public"}
                                 </span>
                               </div>
                             </div>
@@ -7145,7 +7157,7 @@ function ScripturesContent() {
                                           disabled={bookVisibilitySubmitting === book.id}
                                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                                         >
-                                          {book.visibility === "public" ? "Make private" : "Make public"}
+                                            {bookVisibility === "public" ? "Make private" : "Make public"}
                                         </button>
                                       )}
                                     </div>
@@ -7180,7 +7192,7 @@ function ScripturesContent() {
                                 )}
                               </div>
                               <span className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                                {book.visibility === "private" ? "Private" : "Public"}
+                                {bookVisibility === "private" ? "Private" : "Public"}
                               </span>
                             </div>
                             {showSingleBrowseAction && (
@@ -7283,7 +7295,7 @@ function ScripturesContent() {
                                         disabled={bookVisibilitySubmitting === book.id}
                                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                                       >
-                                        {book.visibility === "public" ? "Make private" : "Make public"}
+                                        {bookVisibility === "public" ? "Make private" : "Make public"}
                                       </button>
                                     )}
                                   </div>
