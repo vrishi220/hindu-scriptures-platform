@@ -123,6 +123,29 @@ class TestVersionMetadataContract:
         assert "process.env.NEXT_PUBLIC_APP_VERSION ||\n    packageJson.version" in about_page
 
 
+class TestScripturesPrivateGateContract:
+    """Regression tests for private-book gate behavior in scriptures browser."""
+
+    def test_browse_url_effect_clears_private_gate_before_opening_modal(self):
+        """Browse URL flow should clear stale private gate state before showing browse modal."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const browseParam = searchParams.get("browse");' in scriptures_page
+        assert "setPrivateBookGate(false);\n    setShowExploreStructure(true);\n    setShowBrowseBookModal(true);" in scriptures_page
+
+    def test_auth_recovery_effect_clears_private_gate(self):
+        """Authenticated sessions should force-clear private gate overlays from stale anonymous state."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert "useEffect(() => {\n    if (authEmail) {\n      setPrivateBookGate(false);\n    }\n  }, [authEmail]);" in scriptures_page
+
+
 # Note: This file contains test stubs. To run these tests, install playwright:
 # 
 # pip install pytest-playwright
