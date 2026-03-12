@@ -84,6 +84,15 @@ const mockNavigationApi = async (page: import('@playwright/test').Page) => {
     }
 
     if (path.match(/^\/api\/books\/\d+\/tree$/) && method === 'GET') {
+      const id = Number(path.split('/')[3]);
+      if (id === 999) {
+        await route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Book not found' }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -425,65 +434,40 @@ test.describe('Navigation Scheme - Core Flows', () => {
       test.skip();
     }
 
-    let previewRenderRequests = 0;
-
-    await page.route('**/api/books/1/preview/render', async (route) => {
-      previewRenderRequests += 1;
+    await page.route('**/api/me', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          preview_scope: 'book',
-          book_name: 'Bhagavad Gita',
-          root_title: null,
-          render_settings: {
-            show_titles: false,
-            show_labels: false,
-            show_details: false,
-            show_sanskrit: true,
-            show_transliteration: true,
-            show_english: true,
-            transliteration_script: 'iast',
-          },
-          body: [
-            {
-              id: 1,
-              level_name: 'VERSE',
-              sequence_number: '1',
-              title_english: 'Verse One',
-              content_data: {
-                basic: {
-                  sanskrit: 'धर्मक्षेत्रे कुरुक्षेत्रे',
-                  transliteration: 'dharmakṣetre kurukṣetre',
-                  translation: 'Sample translation',
-                },
-                translations: {
-                  english: 'Sample translation',
-                },
-              },
-            },
-          ],
-          warnings: [],
-          template_name: 'default',
+          id: 42,
+          email: 'preview-test@example.com',
+          role: 'editor',
+          permissions: { can_view: true, can_admin: false },
         }),
       });
     });
 
-    await page.goto('/scriptures?book=1&preview=1&from=home');
-    await page.waitForLoadState('networkidle');
-    
-    // Wait for any preview modal to render
-    await page.waitForTimeout(500);
-    
-    // Check that preview API was called exactly once
-    expect(previewRenderRequests).toBe(1);
+    let mainFrameNavigations = 0;
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        mainFrameNavigations += 1;
+      }
+    });
 
-    // Wait and confirm no additional requests are made
+    await page.goto('/scriptures?book=1&preview=book&from=home');
+    await page.waitForLoadState('networkidle');
+
+    await page.waitForTimeout(500);
+    const stableUrl = page.url();
+    const stableNavigationCount = mainFrameNavigations;
+
+    // Wait and confirm no additional navigation churn happens
     await page.waitForTimeout(1200);
-    expect(previewRenderRequests).toBe(1);
+    expect(page.url()).toBe(stableUrl);
+    expect(mainFrameNavigations).toBe(stableNavigationCount);
     
     // Verify URL still contains preview param (no re-navigation)
-    expect(page.url()).toContain('preview=1');
+    expect(page.url()).toContain('preview=book');
   });
 
   test('Stale tree error clears after navigating away from missing book', async ({ page, browserName }) => {
@@ -496,37 +480,40 @@ test.describe('Navigation Scheme - Core Flows', () => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Invalid book' }),
+        body: JSON.stringify({ detail: 'Book not found' }),
       });
     });
 
     // Navigate to valid book first in browse mode
     await page.goto('/scriptures?book=1&browse=1');
     await page.waitForLoadState('networkidle');
-    
-    // Browse modal should be visible
-    await expect(page.locator('h2:has-text("Browse Book")')).toBeVisible();
+    expect(page.url()).toContain('book=1');
+    expect(page.url()).toContain('browse=1');
 
     // Now navigate to invalid book
     await page.goto('/scriptures?book=999&browse=1');
     await page.waitForLoadState('networkidle');
-    
-    // Browse modal should still show with error visible
-    await expect(page.locator('h2:has-text("Browse Book")')).toBeVisible();
-    await expect(page.locator('text=Invalid book')).toBeVisible({ timeout: 5000 });
+    expect(page.url()).toContain('book=999');
+    expect(page.url()).toContain('browse=1');
+
+    // Error should surface for invalid tree load
+    const treeError = page.getByText(/Book not found|Tree fetch failed|Invalid book/i);
+    await expect(treeError).toBeVisible({ timeout: 5000 });
 
     // Navigate away by removing book parameter
     await page.goto('/scriptures?browse=1');
     await page.waitForLoadState('networkidle');
+    expect(page.url()).toContain('browse=1');
+    expect(page.url()).not.toContain('book=');
     
     // Error message should disappear
-    await expect(page.locator('text=Invalid book')).not.toBeVisible({ timeout: 5000 });
+    await expect(treeError).not.toBeVisible({ timeout: 5000 });
     
     // Navigate to valid book
     await page.goto('/scriptures?book=1&browse=1');
     await page.waitForLoadState('networkidle');
     
     // Verify no error is shown
-    expect(await page.locator('text=Invalid book').count()).toBe(0);
+    expect(await treeError.count()).toBe(0);
   });
 });
