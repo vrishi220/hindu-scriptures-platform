@@ -7336,7 +7336,15 @@ function ScripturesContent() {
             {/* Anonymous private-book gate — rendered as standalone overlay, bypasses browse-modal auth requirements */}
             {privateBookGate && !authEmail && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-                <div className="w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 text-center shadow-xl">
+                <div className="relative w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 text-center shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => setPrivateBookGate(false)}
+                    aria-label="Close"
+                    className="absolute right-3 top-3 text-lg leading-none text-zinc-400 transition hover:text-zinc-600"
+                  >
+                    ✕
+                  </button>
                   <p className="text-2xl">🔒</p>
                   <p className="mt-2 text-sm font-medium text-zinc-800">Private book</p>
                   <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
@@ -7354,13 +7362,6 @@ function ScripturesContent() {
                       Create account
                     </a>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setPrivateBookGate(false)}
-                    className="mt-4 text-xs text-zinc-400 transition hover:text-zinc-600"
-                  >
-                    Dismiss
-                  </button>
                 </div>
               </div>
             )}
