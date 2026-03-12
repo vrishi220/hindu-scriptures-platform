@@ -5423,10 +5423,17 @@ function ScripturesContent() {
     if (!urlInitialized || !bookId || !canExploreStructure) {
       return;
     }
+    setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
   }, [urlInitialized, bookId, canExploreStructure, searchParams]);
+
+  useEffect(() => {
+    if (authEmail) {
+      setPrivateBookGate(false);
+    }
+  }, [authEmail]);
 
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
