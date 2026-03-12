@@ -145,6 +145,76 @@ class TestScripturesPrivateGateContract:
 
         assert "useEffect(() => {\n    if (authEmail) {\n      setPrivateBookGate(false);\n    }\n  }, [authEmail]);" in scriptures_page
 
+    def test_preview_to_browse_handler_closes_preview_and_loads_tree(self):
+        """Browse action from preview should close preview and force open/populate browse state."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert "const handleBrowseFromPreview = (targetBookId: string, targetNodeId?: number | null) => {" in scriptures_page
+        assert "setShowBookPreview(false);" in scriptures_page
+        assert 'syncBrowseUrl(targetBookId, targetNodeId, "push");' in scriptures_page
+        assert "void loadTree(targetBookId, typeof targetNodeId === \"number\" ? targetNodeId : undefined);" in scriptures_page
+
+    def test_browse_effect_resets_preview_state(self):
+        """browse=1 URL flow should reset preview state to avoid modal overlap/flashing."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert "const browseParam = searchParams.get(\"browse\");" in scriptures_page
+        assert "setShowBookPreview(false);" in scriptures_page
+        assert "setPreviewLinkMessage(null);" in scriptures_page
+
+    def test_preview_to_browse_transition_renders_loading_handoff(self):
+        """Preview-to-browse should show transition/loading UI instead of flashing bare scriptures content."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const [browseTransitioningFromPreview, setBrowseTransitioningFromPreview] = useState(false);' in scriptures_page
+        assert 'setBrowseTransitioningFromPreview(true);' in scriptures_page
+        assert 'Opening browser…' in scriptures_page
+        assert 'Opening browse view…' in scriptures_page
+
+    def test_direct_preview_and_browse_use_push_history(self):
+        """User-initiated preview/browse transitions should create intuitive back-button history entries."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const handlePreviewBook = async (' in scriptures_page
+        assert 'historyMode: "push" | "replace" = "push"' in scriptures_page
+        assert 'await handlePreviewBook("book", nextBookId, "push");' in scriptures_page
+        assert 'syncBrowseUrl(nextBookId, undefined, "push");' in scriptures_page
+        assert 'syncBrowseUrl(targetBookId, targetNodeId, "push");' in scriptures_page
+
+    def test_row_modal_launches_skip_intermediate_book_history_entry(self):
+        """Opening preview/browse from the book list should not create an extra plain book route history step."""
+        repo_root = Path(__file__).resolve().parents[1]
+        scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        assert 'const handleSelectBook = (value: string, options?: { syncUrl?: boolean }): boolean => {' in scriptures_page
+        assert 'const didSelect = handleSelectBook(nextBookId, { syncUrl: false });' in scriptures_page
+
+
+class TestDailyVerseNavigationContract:
+    """Regression tests for Daily Verse deep-link navigation targets."""
+
+    def test_daily_verse_read_more_targets_browse_mode(self):
+        """Daily Verse read-more deep link should open scriptures browse mode directly."""
+        repo_root = Path(__file__).resolve().parents[1]
+        home_page = (repo_root / "web" / "src" / "app" / "page.tsx").read_text(encoding="utf-8")
+
+        assert '&browse=1' in home_page
+        assert '&preview=node' not in home_page
+
 
 # Note: This file contains test stubs. To run these tests, install playwright:
 # 

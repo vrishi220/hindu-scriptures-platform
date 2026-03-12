@@ -1433,6 +1433,7 @@ function ScripturesContent() {
   const [showBookPreview, setShowBookPreview] = useState(false);
   const [bookThumbnailUploading, setBookThumbnailUploading] = useState(false);
   const [showBrowseBookModal, setShowBrowseBookModal] = useState(false);
+  const [browseTransitioningFromPreview, setBrowseTransitioningFromPreview] = useState(false);
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
   const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
   const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
@@ -5209,7 +5210,8 @@ function ScripturesContent() {
   const syncPreviewUrl = (
     scope: "book" | "node",
     targetBookId: string,
-    targetNodeId?: number | null
+    targetNodeId?: number | null,
+    historyMode: "push" | "replace" = "replace"
   ) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set("book", targetBookId);
@@ -5221,10 +5223,19 @@ function ScripturesContent() {
     nextParams.delete("browse");
     nextParams.set("preview", scope);
     const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+    const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
+    if (historyMode === "push") {
+      router.push(nextPath, { scroll: false });
+    } else {
+      router.replace(nextPath);
+    }
   };
 
-  const syncBrowseUrl = (targetBookId: string, targetNodeId?: number | null) => {
+  const syncBrowseUrl = (
+    targetBookId: string,
+    targetNodeId?: number | null,
+    historyMode: "push" | "replace" = "replace"
+  ) => {
     const nextParams = new URLSearchParams(searchParams.toString());
     nextParams.set("book", targetBookId);
     if (typeof targetNodeId === "number") {
@@ -5235,7 +5246,12 @@ function ScripturesContent() {
     nextParams.delete("preview");
     nextParams.set("browse", "1");
     const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+    const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
+    if (historyMode === "push") {
+      router.push(nextPath, { scroll: false });
+    } else {
+      router.replace(nextPath);
+    }
   };
 
   const clearPreviewUrl = () => {
@@ -5264,6 +5280,18 @@ function ScripturesContent() {
     clearPreviewUrl();
   };
 
+  const handleBrowseFromPreview = (targetBookId: string, targetNodeId?: number | null) => {
+    setBrowseTransitioningFromPreview(true);
+    setShowBookPreview(false);
+    setPreviewLinkMessage(null);
+    setPrivateBookGate(false);
+    setShowExploreStructure(true);
+    setShowBrowseBookModal(true);
+    setMobilePanel("tree");
+    syncBrowseUrl(targetBookId, targetNodeId, "push");
+    void loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
+  };
+
   const handleCopyPreviewPath = async (relativePath: string) => {
     if (typeof window === "undefined" || !navigator.clipboard) {
       return;
@@ -5282,7 +5310,11 @@ function ScripturesContent() {
     }
   };
 
-  const handlePreviewBook = async (scope: "book" | "node" = "book", targetBookId?: string) => {
+  const handlePreviewBook = async (
+    scope: "book" | "node" = "book",
+    targetBookId?: string,
+    historyMode: "push" | "replace" = "push"
+  ) => {
     const previewBookId = targetBookId ?? bookId;
     if (!previewBookId) return;
     const previewNodeId = scope === "node" ? selectedId : null;
@@ -5374,7 +5406,7 @@ function ScripturesContent() {
 
       const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
       lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
-      syncPreviewUrl(scope, previewBookId, previewNodeId);
+      syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
       setShowBookPreview(true);
     } catch (err) {
       setShowBookPreview(false);
@@ -5411,7 +5443,7 @@ function ScripturesContent() {
     }
     lastHandledPreviewRequestKey.current = requestKey;
 
-    void handlePreviewBook(previewScope, bookId);
+    void handlePreviewBook(previewScope, bookId, "replace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlInitialized, bookId, selectedId, searchParams]);
 
@@ -5423,10 +5455,15 @@ function ScripturesContent() {
     if (!urlInitialized || !bookId || !canExploreStructure) {
       return;
     }
+    const nodeParam = searchParams.get("node");
+    const nodeId = nodeParam ? parseInt(nodeParam, 10) : undefined;
+    setShowBookPreview(false);
+    setPreviewLinkMessage(null);
     setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
+    void loadTree(bookId, Number.isFinite(nodeId ?? NaN) ? nodeId : undefined);
   }, [urlInitialized, bookId, canExploreStructure, searchParams]);
 
   useEffect(() => {
@@ -5434,6 +5471,27 @@ function ScripturesContent() {
       setPrivateBookGate(false);
     }
   }, [authEmail]);
+
+  useEffect(() => {
+    if (!browseTransitioningFromPreview) {
+      return;
+    }
+    if (!showBrowseBookModal) {
+      setBrowseTransitioningFromPreview(false);
+      return;
+    }
+    if (privateBookGate || treeError || selectedId !== null || (!treeLoading && treeData.length === 0)) {
+      setBrowseTransitioningFromPreview(false);
+    }
+  }, [
+    browseTransitioningFromPreview,
+    showBrowseBookModal,
+    privateBookGate,
+    treeError,
+    selectedId,
+    treeLoading,
+    treeData,
+  ]);
 
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -6701,7 +6759,8 @@ function ScripturesContent() {
     };
   }, [filteredBooks.length, loadBooksPage]);
 
-  const handleSelectBook = (value: string): boolean => {
+  const handleSelectBook = (value: string, options?: { syncUrl?: boolean }): boolean => {
+    const syncUrl = options?.syncUrl ?? true;
     if (value !== bookId && hasUnsavedInlineChanges()) {
       const shouldDiscard = window.confirm(
         "You have unsaved changes in Edit details. Discard changes and switch books?"
@@ -6724,13 +6783,16 @@ function ScripturesContent() {
     }
 
     setBookId(value);
-    if (value) {
-      router.push(`/scriptures?book=${value}`, { scroll: false });
-    } else {
-      router.push("/scriptures", { scroll: false });
+    if (syncUrl) {
+      if (value) {
+        router.push(`/scriptures?book=${value}`, { scroll: false });
+      } else {
+        router.push("/scriptures", { scroll: false });
+      }
     }
     setSelectedId(null);
     setBreadcrumb([]);
+    setNodeContent(null);
     setShowExploreStructure(false);
     setMobilePanel("content");
     return true;
@@ -6738,16 +6800,16 @@ function ScripturesContent() {
 
   const handlePreviewBookFromRow = async (book: BookOption) => {
     const nextBookId = book.id.toString();
-    const didSelect = handleSelectBook(nextBookId);
+    const didSelect = handleSelectBook(nextBookId, { syncUrl: false });
     if (!didSelect) return;
-    await handlePreviewBook("book", nextBookId);
+    await handlePreviewBook("book", nextBookId, "push");
   };
 
   const handleBrowseBookFromRow = (book: BookOption) => {
     const nextBookId = book.id.toString();
-    const didSelect = handleSelectBook(nextBookId);
+    const didSelect = handleSelectBook(nextBookId, { syncUrl: false });
     if (!didSelect) return;
-    syncBrowseUrl(nextBookId);
+    syncBrowseUrl(nextBookId, undefined, "push");
     setShowExploreStructure(true);
     setMobilePanel("tree");
     setShowBrowseBookModal(true);
@@ -7372,6 +7434,20 @@ function ScripturesContent() {
                 </div>
               </div>
             )}
+
+          {browseTransitioningFromPreview && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[color:var(--paper)]/96 backdrop-blur-[1px]">
+              <div className="rounded-2xl border border-black/10 bg-white/90 px-5 py-4 text-center shadow-lg">
+                <div className="flex items-center gap-3 text-sm text-zinc-700">
+                  <span
+                    aria-hidden
+                    className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+                  />
+                  <span>Opening browser…</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {showBrowseBookModal && bookId && isExploreVisible && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
@@ -9013,6 +9089,16 @@ function ScripturesContent() {
                   Unable to load content for this node.
                 </p>
               ) : !selectedId ? (
+                treeLoading || browseTransitioningFromPreview || contentLoading ? (
+                  <div className="flex flex-col items-center gap-3 py-10 text-center">
+                    <span
+                      aria-hidden
+                      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+                    />
+                    <p className="text-sm font-medium text-zinc-700">Opening browse view…</p>
+                    <p className="text-xs text-zinc-500">Loading the first available section.</p>
+                  </div>
+                ) : (
                 privateBookGate ? (
                   <div className="flex flex-col items-center gap-3 py-10 text-center">
                     <p className="text-sm font-medium text-zinc-700">🔒 This book is private</p>
@@ -9036,7 +9122,7 @@ function ScripturesContent() {
                   <p className="text-sm text-zinc-400">
                     Select an item in the tree
                   </p>
-                )
+                ))
               ) : null}
             </div>
           </div>
@@ -10204,7 +10290,6 @@ function ScripturesContent() {
                     const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
                     const targetNodeId = previewScope === "node" ? selectedId : null;
                     const previewPath = buildScripturesPreviewPath(previewScope, bookId, targetNodeId);
-                    const browsePath = buildScripturesBrowsePath(bookId, targetNodeId);
                     return (
                       <>
                         <button
@@ -10217,12 +10302,15 @@ function ScripturesContent() {
                           Copy Link
                         </button>
                         {canBrowseCurrentNode && (
-                          <a
-                            href={browsePath}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleBrowseFromPreview(bookId, targetNodeId);
+                            }}
                             className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
                           >
                             Browse
-                          </a>
+                          </button>
                         )}
                       </>
                     );
