@@ -208,12 +208,11 @@ class TestDailyVerseNavigationContract:
     """Regression tests for Daily Verse deep-link navigation targets."""
 
     def test_daily_verse_read_more_targets_browse_mode(self):
-        """Daily Verse read-more deep link should open scriptures browse mode directly."""
+        """Daily Verse read-more deep link should open canonical scriptures node preview."""
         repo_root = Path(__file__).resolve().parents[1]
         home_page = (repo_root / "web" / "src" / "app" / "page.tsx").read_text(encoding="utf-8")
 
-        assert '&browse=1&from=home' in home_page
-        assert '&preview=node' not in home_page
+        assert '&preview=node&from=home' in home_page
 
     def test_home_featured_book_link_marks_home_source(self):
         """Featured books links from Home should include from=home source marker."""

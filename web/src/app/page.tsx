@@ -1125,7 +1125,7 @@ function HomeContent() {
                   {(() => {
                     const versePreviewHref =
                       dailyVerse.book_id > 0 && dailyVerse.node_id
-                        ? `/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}&browse=1&from=home`
+                        ? `/scriptures?book=${dailyVerse.book_id}&node=${dailyVerse.node_id}&preview=node&from=home`
                         : null;
                     return (
                       <div
