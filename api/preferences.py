@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from api.users import get_current_user
 from models.user import User
@@ -12,6 +13,15 @@ from services import get_db
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
 
+def _ensure_preferences_schema(db: Session) -> None:
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_show_media BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.commit()
+
+
 @router.get("", response_model=UserPreferencePublic)
 def get_user_preferences(
     current_user: User = Depends(get_current_user),
@@ -19,6 +29,7 @@ def get_user_preferences(
 ):
     """Get user's display preferences (language/script)"""
     try:
+        _ensure_preferences_schema(db)
         pref = db.query(UserPreference).filter(
             UserPreference.user_id == current_user.id
         ).first()
@@ -37,6 +48,7 @@ def get_user_preferences(
                 preview_show_titles=False,
                 preview_show_labels=False,
                 preview_show_details=False,
+                preview_show_media=True,
                 preview_show_sanskrit=True,
                 preview_show_transliteration=True,
                 preview_show_english=True,
@@ -65,6 +77,7 @@ def update_user_preferences(
 ):
     """Update user's display preferences"""
     try:
+        _ensure_preferences_schema(db)
         pref = db.query(UserPreference).filter(
             UserPreference.user_id == current_user.id
         ).first()

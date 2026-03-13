@@ -333,6 +333,12 @@ type BookPreviewBlock = {
         fallback_badge_visible?: boolean;
       };
     }>;
+    media_items?: Array<{
+      id?: number | null;
+      media_type?: string;
+      url?: string;
+      metadata?: Record<string, unknown>;
+    }>;
   };
 };
 
@@ -341,6 +347,7 @@ type BookPreviewRenderSettings = {
   show_transliteration: boolean;
   show_english: boolean;
   show_metadata: boolean;
+  show_media: boolean;
   text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
 };
 
@@ -360,6 +367,7 @@ type BookPreviewArtifact = {
   sections: {
     body: BookPreviewBlock[];
   };
+  book_media_items?: BookMediaItem[];
   book_template?: {
     template_key: string;
     resolved_template_source: string;
@@ -1145,6 +1153,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_show_titles: false,
   preview_show_labels: false,
   preview_show_details: false,
+  preview_show_media: true,
   preview_show_sanskrit: true,
   preview_show_transliteration: true,
   preview_show_english: true,
@@ -1173,6 +1182,7 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   preview_show_titles: value?.preview_show_titles ?? false,
   preview_show_labels: value?.preview_show_labels ?? false,
   preview_show_details: value?.preview_show_details ?? false,
+  preview_show_media: value?.preview_show_media ?? true,
   preview_show_sanskrit: value?.preview_show_sanskrit ?? true,
   preview_show_transliteration: value?.preview_show_transliteration ?? true,
   preview_show_english: value?.preview_show_english ?? true,
@@ -1579,15 +1589,18 @@ function ScripturesContent() {
   const [showPreviewLabels, setShowPreviewLabels] = useState(false);
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
+  const [showPreviewMedia, setShowPreviewMedia] = useState(true);
   // Track the last applied preview options
   const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
   const [appliedShowPreviewDetails, setAppliedShowPreviewDetails] = useState(false);
   const [appliedShowPreviewTitles, setAppliedShowPreviewTitles] = useState(false);
+  const [appliedShowPreviewMedia, setAppliedShowPreviewMedia] = useState(true);
   const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [showPreviewControls, setShowPreviewControls] = useState(false);
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
+  const [bookBrowseMediaSearchQuery, setBookBrowseMediaSearchQuery] = useState("");
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
@@ -1860,6 +1873,7 @@ function ScripturesContent() {
         show_transliteration: true,
         show_english: true,
         show_metadata: true,
+        show_media: true,
         text_order: ["sanskrit", "transliteration", "english", "text"],
       };
 
@@ -3656,12 +3670,14 @@ function ScripturesContent() {
     setShowPreviewTitles(preferences.preview_show_titles);
     setShowPreviewLabels(preferences.preview_show_labels);
     setShowPreviewDetails(preferences.preview_show_details);
+    setShowPreviewMedia(preferences.preview_show_media);
     setBookPreviewLanguageSettings(previewLanguages);
     setBookPreviewTransliterationScript(previewScript);
 
     setAppliedShowPreviewTitles(preferences.preview_show_titles);
     setAppliedShowPreviewLabels(preferences.preview_show_labels);
     setAppliedShowPreviewDetails(preferences.preview_show_details);
+    setAppliedShowPreviewMedia(preferences.preview_show_media);
     setAppliedBookPreviewLanguageSettings(previewLanguages);
     setAppliedBookPreviewTransliterationScript(previewScript);
   }, [preferences]);
@@ -5638,6 +5654,7 @@ function ScripturesContent() {
     const nextShowPreviewLabels = showPreviewLabels;
     const nextShowPreviewDetails = showPreviewDetails;
     const nextShowPreviewTitles = showPreviewTitles;
+    const nextShowPreviewMedia = showPreviewMedia;
     const nextPreviewTransliterationScript = previewTransliterationScript;
 
     setBookPreviewLoadingScope(scope);
@@ -5679,6 +5696,7 @@ function ScripturesContent() {
           render_settings: {
             ...nextLanguageSettings,
             show_metadata: nextShowPreviewDetails,
+            show_media: nextShowPreviewMedia,
             text_order: ["sanskrit", "transliteration", "english", "text"],
           },
         }),
@@ -5699,6 +5717,7 @@ function ScripturesContent() {
       setAppliedShowPreviewLabels(nextShowPreviewLabels);
       setAppliedShowPreviewDetails(nextShowPreviewDetails);
       setAppliedShowPreviewTitles(nextShowPreviewTitles);
+      setAppliedShowPreviewMedia(nextShowPreviewMedia);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
 
       const nextPreferences = normalizePreferences({
@@ -5706,6 +5725,7 @@ function ScripturesContent() {
         preview_show_titles: nextShowPreviewTitles,
         preview_show_labels: nextShowPreviewLabels,
         preview_show_details: nextShowPreviewDetails,
+        preview_show_media: nextShowPreviewMedia,
         preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
         preview_show_transliteration: nextLanguageSettings.show_transliteration,
         preview_show_english: nextLanguageSettings.show_english,
@@ -8500,6 +8520,98 @@ function ScripturesContent() {
                       </div>
                     )}
 
+                    {showMedia && (bookMediaItems.length > 0 || canEditCurrentBook) && (
+                      <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                            Book multimedia
+                          </div>
+                          {canEditCurrentBook && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMediaManagerScope("book");
+                                setShowMediaManagerModal(true);
+                              }}
+                              disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating}
+                              className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {bookThumbnailUploading || mediaBankUploading || mediaBankUpdating
+                                ? "Working..."
+                                : "Manage multimedia"}
+                            </button>
+                          )}
+                        </div>
+                        <div className="group relative mb-2">
+                          <input
+                            type="text"
+                            value={bookBrowseMediaSearchQuery}
+                            onChange={(event) => setBookBrowseMediaSearchQuery(event.target.value)}
+                            placeholder="Filter media"
+                            className="w-full rounded-lg border border-black/10 bg-white px-3 py-1.5 pr-10 text-xs outline-none focus:border-[color:var(--accent)]"
+                          />
+                          <InlineClearButton
+                            visible={Boolean(bookBrowseMediaSearchQuery)}
+                            onClear={() => setBookBrowseMediaSearchQuery("")}
+                            ariaLabel="Clear book media filter"
+                          />
+                        </div>
+                        {propertiesMessage && (
+                          <p className="mb-2 text-xs text-zinc-600">{propertiesMessage}</p>
+                        )}
+                        {propertiesError && (
+                          <p className="mb-2 text-xs text-red-600">{propertiesError}</p>
+                        )}
+                        {bookMediaItems.length > 0 ? (
+                          <div className="flex flex-col gap-4">
+                            {Object.entries(
+                              bookMediaItems.reduce<Record<string, BookMediaItem[]>>((acc, item) => {
+                                const key = item.media_type || "other";
+                                if (!acc[key]) {
+                                  acc[key] = [];
+                                }
+                                acc[key].push(item);
+                                return acc;
+                              }, {})
+                            )
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([mediaType, items]) => {
+                                const filteredItems = items.filter((media) =>
+                                  bookMediaMatchesSearch(media, bookBrowseMediaSearchQuery)
+                                );
+                                if (filteredItems.length === 0) {
+                                  return null;
+                                }
+
+                                return (
+                                  <div key={mediaType} className="rounded-xl border border-black/10 bg-white p-3">
+                                    <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">
+                                      {mediaType}
+                                    </div>
+                                    <div className="flex flex-col gap-3">
+                                      {filteredItems.map((media, index) => {
+                                        const label = getBookMediaLabel(media);
+                                        return (
+                                          <div
+                                            key={`${media.media_type}:${media.url}:${media.asset_id || index}`}
+                                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                                          >
+                                            {renderInlineMediaPreview(media.media_type, media.url, label)}
+                                            <div className="mt-2 text-xs text-zinc-500">{label}</div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-zinc-500">No multimedia attached to this book.</p>
+                        )}
+                      </div>
+                    )}
+
 
 
                     {/* Titles (hide for verses) */}
@@ -10655,6 +10767,15 @@ function ScripturesContent() {
                             />
                             Show template details
                           </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={showPreviewMedia}
+                              onChange={(event) => setShowPreviewMedia(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            Show multimedia
+                          </label>
                         </div>
                       </div>
 
@@ -10740,6 +10861,7 @@ function ScripturesContent() {
                                 showPreviewLabels === appliedShowPreviewLabels &&
                                 showPreviewDetails === appliedShowPreviewDetails &&
                                 showPreviewTitles === appliedShowPreviewTitles &&
+                                showPreviewMedia === appliedShowPreviewMedia &&
                                 previewTransliterationScript === appliedBookPreviewTransliterationScript)
                             }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
@@ -10769,6 +10891,27 @@ function ScripturesContent() {
                           ? "No rendered level summary."
                           : "No rendered book-level summary.")}
                     </p>
+                  </div>
+                )}
+
+                {appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
+                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
+                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Multimedia</div>
+                    <div className="mt-2 flex flex-col gap-3">
+                      {(bookPreviewArtifact.book_media_items || []).map((media, index) => {
+                        const label = getBookMediaLabel(media);
+                        const mediaType = (media.media_type || "link").trim().toLowerCase();
+                        return (
+                          <div
+                            key={`${mediaType}:${media.url}:${media.asset_id || index}`}
+                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                          >
+                            {renderInlineMediaPreview(mediaType, media.url, label)}
+                            <div className="mt-2 text-xs text-zinc-500">{label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -10831,6 +10974,40 @@ function ScripturesContent() {
                               <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
                                 {wordMeaningInlineText}
                               </p>
+                            </div>
+                          )}
+                          {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
+                            <div className="mt-2 border-t border-black/10 pt-2">
+                              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
+                              <div className="flex flex-col gap-3">
+                                {block.content.media_items.map((media, mediaIndex) => {
+                                  const mediaType = (media?.media_type || "link").trim().toLowerCase();
+                                  const mediaUrl = (media?.url || "").trim();
+                                  if (!mediaUrl) {
+                                    return null;
+                                  }
+                                  const metadata =
+                                    media?.metadata && typeof media.metadata === "object"
+                                      ? media.metadata
+                                      : null;
+                                  const metadataLabel =
+                                    typeof metadata?.display_name === "string" && metadata.display_name.trim()
+                                      ? metadata.display_name.trim()
+                                      : typeof metadata?.original_filename === "string" && metadata.original_filename.trim()
+                                        ? metadata.original_filename.trim()
+                                        : `Media ${mediaIndex + 1}`;
+
+                                  return (
+                                    <div
+                                      key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`}
+                                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                                    >
+                                      {renderInlineMediaPreview(mediaType, mediaUrl, metadataLabel)}
+                                      <div className="mt-2 text-xs text-zinc-500">{metadataLabel}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                           {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (

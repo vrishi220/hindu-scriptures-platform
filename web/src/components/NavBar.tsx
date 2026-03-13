@@ -28,6 +28,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   preview_show_titles: false,
   preview_show_labels: false,
   preview_show_details: false,
+  preview_show_media: true,
   preview_show_sanskrit: true,
   preview_show_transliteration: true,
   preview_show_english: true,

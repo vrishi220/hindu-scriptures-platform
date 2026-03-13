@@ -24,6 +24,7 @@ from models.content_node import ContentNode
 from models.draft_book import DraftBook, EditionSnapshot
 from models.property_system import Category, MetadataBinding
 from models.provenance_record import ProvenanceRecord
+from models.media_file import MediaFile
 from models.template_library import RenderTemplate, RenderTemplateAssignment, RenderTemplateVersion
 from models.schemas import (
     AdminDraftBookCreate,
@@ -1919,6 +1920,7 @@ def _render_block_content_with_template(
 
     content["metadata"] = context.get("metadata", {})
     content["word_meanings_rows"] = context.get("word_meanings_rows", [])
+    content["media_items"] = item.get("media_items") if isinstance(item.get("media_items"), list) else []
 
     return content, template_source
 
@@ -1943,8 +1945,64 @@ def _extract_render_settings(snapshot_data: dict | None) -> SnapshotRenderSettin
         show_transliteration=bool(raw_settings.get("show_transliteration", True)),
         show_english=bool(raw_settings.get("show_english", True)),
         show_metadata=bool(raw_settings.get("show_metadata", True)),
+        show_media=bool(raw_settings.get("show_media", True)),
         text_order=parsed_order or ["sanskrit", "transliteration", "english", "text"],
     )
+
+
+def _normalize_preview_media_item(media_type: object, url: object, metadata: object, fallback_id: object) -> dict | None:
+    if not isinstance(url, str) or not url.strip():
+        return None
+    normalized_type = str(media_type).strip().lower() if isinstance(media_type, str) else "link"
+    resolved_metadata = metadata if isinstance(metadata, dict) else {}
+    return {
+        "id": int(fallback_id) if isinstance(fallback_id, int) else None,
+        "media_type": normalized_type or "link",
+        "url": url.strip(),
+        "metadata": resolved_metadata,
+    }
+
+
+def _extract_book_preview_media_items(book: Book) -> list[dict]:
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    raw_items = metadata.get("media_items")
+    if not isinstance(raw_items, list):
+        return []
+
+    parsed: list[dict] = []
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            continue
+        normalized = _normalize_preview_media_item(
+            item.get("media_type"),
+            item.get("url"),
+            item.get("metadata"),
+            item.get("asset_id") if isinstance(item.get("asset_id"), int) else index + 1,
+        )
+        if normalized:
+            parsed.append(normalized)
+    return parsed
+
+
+def _build_node_preview_media_map(db: Session, node_ids: list[int]) -> dict[int, list[dict]]:
+    if not node_ids:
+        return {}
+
+    rows = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id.in_(node_ids))
+        .all()
+    )
+    by_node_id: dict[int, list[dict]] = {}
+    for row in rows:
+        node_id = int(row.node_id) if isinstance(row.node_id, int) else None
+        if node_id is None:
+            continue
+        normalized = _normalize_preview_media_item(row.media_type, row.url, row.metadata_json, row.id)
+        if not normalized:
+            continue
+        by_node_id.setdefault(node_id, []).append(normalized)
+    return by_node_id
 
 
 def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
@@ -3170,6 +3228,8 @@ def preview_book_render(
         source_nodes,
         root_node.id if root_node else None,
     )
+    node_media_by_id = _build_node_preview_media_map(db, [node.id for node in source_nodes])
+    book_media_items = _extract_book_preview_media_items(book)
 
     body_items = [
         {
@@ -3178,6 +3238,7 @@ def preview_book_render(
             "level_name": node.level_name,
             "title": _book_title_for_preview(node),
             "order": index,
+          "media_items": node_media_by_id.get(node.id, []),
         }
         for index, node in enumerate(source_nodes, start=1)
     ]
@@ -3245,6 +3306,7 @@ def preview_book_render(
         root_node_id=root_node.id if root_node else None,
         root_title=display_title if root_node else None,
         sections={"body": sections.body},
+        book_media_items=book_media_items,
         book_template=book_template,
         render_settings=render_settings,
         template_metadata=template_metadata,

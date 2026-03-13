@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   preview_show_titles BOOLEAN NOT NULL DEFAULT false,
   preview_show_labels BOOLEAN NOT NULL DEFAULT false,
   preview_show_details BOOLEAN NOT NULL DEFAULT false,
+  preview_show_media BOOLEAN NOT NULL DEFAULT true,
   preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
   preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
   preview_show_english BOOLEAN NOT NULL DEFAULT true,

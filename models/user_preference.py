@@ -27,6 +27,7 @@ class UserPreference(Base):
     preview_show_titles = Column(Boolean, default=False, nullable=False)
     preview_show_labels = Column(Boolean, default=False, nullable=False)
     preview_show_details = Column(Boolean, default=False, nullable=False)
+    preview_show_media = Column(Boolean, default=True, nullable=False)
     preview_show_sanskrit = Column(Boolean, default=True, nullable=False)
     preview_show_transliteration = Column(Boolean, default=True, nullable=False)
     preview_show_english = Column(Boolean, default=True, nullable=False)

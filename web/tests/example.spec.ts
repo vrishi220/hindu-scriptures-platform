@@ -681,9 +681,9 @@ test.describe('Scripture Browser', () => {
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
 
     await page.locator('#tree-node-101').click();
-    await expect(page.getByRole('button', { name: 'Manage multimedia' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Manage multimedia' }).last()).toBeVisible();
 
-    await page.getByRole('button', { name: 'Manage multimedia' }).click();
+    await page.getByRole('button', { name: 'Manage multimedia' }).last().click();
     await expect(page.getByText('Node media manager')).toBeVisible();
 
     await page.getByRole('button', { name: 'More media actions' }).click();

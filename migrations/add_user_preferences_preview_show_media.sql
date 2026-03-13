@@ -1,0 +1,2 @@
+ALTER TABLE user_preferences
+ADD COLUMN IF NOT EXISTS preview_show_media BOOLEAN NOT NULL DEFAULT TRUE;

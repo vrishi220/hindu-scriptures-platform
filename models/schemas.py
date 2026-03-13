@@ -593,6 +593,7 @@ class UserPreferenceBase(BaseModel):
     preview_show_titles: bool = False
     preview_show_labels: bool = False
     preview_show_details: bool = False
+    preview_show_media: bool = True
     preview_show_sanskrit: bool = True
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
@@ -613,6 +614,7 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_titles: bool | None = None
     preview_show_labels: bool | None = None
     preview_show_details: bool | None = None
+    preview_show_media: bool | None = None
     preview_show_sanskrit: bool | None = None
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
@@ -802,6 +804,7 @@ class SnapshotRenderSettings(BaseModel):
     show_transliteration: bool = True
     show_english: bool = True
     show_metadata: bool = True
+    show_media: bool = True
     text_order: list[Literal["sanskrit", "transliteration", "english", "text"]] = Field(
         default_factory=lambda: ["sanskrit", "transliteration", "english", "text"]
     )
@@ -870,6 +873,7 @@ class BookPreviewRenderArtifactPublic(BaseModel):
     root_title: str | None = None
     section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
     sections: BookPreviewRenderSections
+    book_media_items: list[dict] = Field(default_factory=list)
     book_template: BookPreviewTemplatePublic | None = None
     render_settings: SnapshotRenderSettings = Field(default_factory=SnapshotRenderSettings)
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)

@@ -22,6 +22,7 @@ export type UserPreferences = {
   preview_show_titles: boolean;
   preview_show_labels: boolean;
   preview_show_details: boolean;
+  preview_show_media: boolean;
   preview_show_sanskrit: boolean;
   preview_show_transliteration: boolean;
   preview_show_english: boolean;
@@ -335,6 +336,19 @@ export function UserPreferencesForm({
           }
         />
         Show template details
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_media}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_media: event.target.checked,
+            })
+          }
+        />
+        Show multimedia
       </label>
 
       <div className="mt-1 border-t border-black/10 pt-3">
