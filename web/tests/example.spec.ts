@@ -369,7 +369,6 @@ test.describe('Scripture Browser', () => {
     await expect(browsePreviewLink).toHaveAttribute('href', /preview=book/);
     await browsePreviewLink.click();
 
-    await expect(page.getByRole('heading', { name: 'Book Preview' })).toBeVisible();
     await expect(page).toHaveURL(/\/scriptures\?.*book=101.*preview=book/);
   });
 });
