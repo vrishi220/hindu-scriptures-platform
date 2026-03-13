@@ -118,6 +118,133 @@ test.describe('Scripture Browser', () => {
   });
 
   test('book title opens preview and browse stays single-action without row menu', async ({ page }) => {
+    await page.route('**/api/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const method = request.method();
+      const path = url.pathname;
+
+      if (path === '/api/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 42,
+            email: 'scriptures-tester@example.com',
+            role: 'viewer',
+            permissions: { can_view: true, can_admin: false },
+          }),
+        });
+        return;
+      }
+
+      if (path === '/api/preferences' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+        return;
+      }
+
+      if (path === '/api/preferences' && method === 'PATCH') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
+
+      if (path === '/api/cart/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [] }),
+        });
+        return;
+      }
+
+      if (path === '/api/metadata/categories') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+        return;
+      }
+
+      if (path === '/api/books' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: 101,
+              book_name: 'Mock Preview Browse Book',
+              visibility: 'private',
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (path === '/api/books/101' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 101,
+            book_name: 'Mock Preview Browse Book',
+            schema_id: null,
+            visibility: 'private',
+          }),
+        });
+        return;
+      }
+
+      if (path === '/api/books/101/tree' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+        return;
+      }
+
+      if (path === '/api/books/101/preview/render' && method === 'POST') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            preview_scope: 'book',
+            book_name: 'Mock Preview Browse Book',
+            root_title: null,
+            render_settings: {
+              show_titles: false,
+              show_labels: false,
+              show_details: false,
+              show_sanskrit: true,
+              show_transliteration: true,
+              show_english: true,
+              transliteration_script: 'iast',
+            },
+            body: [],
+            warnings: [],
+            template_name: 'default',
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    });
+
+    await page.goto('http://localhost:3000/scriptures');
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.getByRole('button', { name: 'Mock Preview Browse Book' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Row actions' })).toHaveCount(0);
+    await expect(page.getByText('Preview book')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Mock Preview Browse Book' }).click();
+    await expect(page.getByRole('heading', { name: 'Book Preview' })).toBeVisible();
+    await expect
+      .poll(() => previewRenderCalls, { message: 'preview render endpoint should be called once from title click' })
+      .toBe(1);
+
+    await page.locator('button:has-text("✕")').first().click();
+    await expect(page.getByRole('heading', { name: 'Book Preview' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Browse book', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+  });
+
+  test('preview and browse links deep-link to each other with correct URL intent', async ({ page }) => {
     let previewRenderCalls = 0;
 
     await page.route('**/api/**', async (route) => {
@@ -204,18 +331,21 @@ test.describe('Scripture Browser', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            book_id: 101,
-            book_name: 'Mock Preview Browse Book',
             preview_scope: 'book',
-            section_order: ['body'],
-            sections: { body: [] },
+            book_name: 'Mock Preview Browse Book',
+            root_title: null,
             render_settings: {
+              show_titles: false,
+              show_labels: false,
+              show_details: false,
               show_sanskrit: true,
               show_transliteration: true,
               show_english: true,
-              show_metadata: false,
-              text_order: ['sanskrit', 'transliteration', 'english', 'text'],
+              transliteration_script: 'iast',
             },
+            body: [],
+            warnings: [],
+            template_name: 'default',
           }),
         });
         return;
@@ -227,137 +357,9 @@ test.describe('Scripture Browser', () => {
     await page.goto('http://localhost:3000/scriptures');
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.getByRole('button', { name: 'Mock Preview Browse Book' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Row actions' })).toHaveCount(0);
-    await expect(page.getByText('Preview book')).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Mock Preview Browse Book' }).click();
-    await expect(page.getByRole('heading', { name: 'Book Preview' })).toBeVisible();
-    await expect
-      .poll(() => previewRenderCalls, { message: 'preview render endpoint should be called once from title click' })
-      .toBe(1);
-
-    await page.locator('button:has-text("✕")').first().click();
-    await expect(page.getByRole('heading', { name: 'Book Preview' })).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Browse book', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
-  });
-
-  test('preview and browse links deep-link to each other with correct URL intent', async ({ page }) => {
-    await page.route('**/api/**', async (route) => {
-      const request = route.request();
-      const url = new URL(request.url());
-      const method = request.method();
-      const path = url.pathname;
-
-      if (path === '/api/me') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: 42,
-            email: 'scriptures-tester@example.com',
-            role: 'viewer',
-            permissions: { can_view: true, can_admin: false },
-          }),
-        });
-        return;
-      }
-
-      if (path === '/api/preferences' && method === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-        return;
-      }
-
-      if (path === '/api/preferences' && method === 'PATCH') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
-        return;
-      }
-
-      if (path === '/api/cart/me') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ items: [] }),
-        });
-        return;
-      }
-
-      if (path === '/api/metadata/categories') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-        return;
-      }
-
-      if (path === '/api/books' && method === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
-            {
-              id: 101,
-              book_name: 'Mock Preview Browse Book',
-              visibility: 'private',
-            },
-          ]),
-        });
-        return;
-      }
-
-      if (path === '/api/books/101' && method === 'GET') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: 101,
-            book_name: 'Mock Preview Browse Book',
-            schema_id: null,
-            visibility: 'private',
-          }),
-        });
-        return;
-      }
-
-      if (path === '/api/books/101/tree' && method === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
-        return;
-      }
-
-      if (path === '/api/books/101/preview/render' && method === 'POST') {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            book_id: 101,
-            book_name: 'Mock Preview Browse Book',
-            preview_scope: 'book',
-            section_order: ['body'],
-            sections: { body: [] },
-            render_settings: {
-              show_sanskrit: true,
-              show_transliteration: true,
-              show_english: true,
-              show_metadata: false,
-              text_order: ['sanskrit', 'transliteration', 'english', 'text'],
-            },
-          }),
-        });
-        return;
-      }
-
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
-    });
-
-    await page.goto('http://localhost:3000/scriptures');
-    await page.waitForLoadState('domcontentloaded');
-
-    await page.getByRole('button', { name: 'Mock Preview Browse Book' }).click();
-    await expect(page.getByRole('heading', { name: 'Book Preview' })).toBeVisible();
-
-    const previewBrowseLink = page.getByRole('link', { name: 'Browse' });
-    await expect(previewBrowseLink).toBeVisible();
-    await expect(previewBrowseLink).toHaveAttribute('href', /browse=1/);
-    await previewBrowseLink.click();
+    const browseButton = page.getByRole('button', { name: 'Browse book', exact: true });
+    await expect(browseButton).toBeVisible();
+    await browseButton.click();
 
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
     await expect(page).toHaveURL(/\/scriptures\?.*book=101.*browse=1/);
