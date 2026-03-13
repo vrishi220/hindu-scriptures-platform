@@ -4,6 +4,7 @@ import "./globals.css";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
 import SessionKeepalive from "@/components/SessionKeepalive";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
 
 const displayFont = Playfair_Display({
   variable: "--font-display",
@@ -26,9 +27,12 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
+
   return (
     <html lang="en">
       <body className={`${displayFont.variable} ${sansFont.variable} antialiased min-h-screen flex flex-col`}>
+        {gaMeasurementId ? <GoogleAnalytics measurementId={gaMeasurementId} /> : null}
         <SessionKeepalive />
         <NavBar />
         <div className="flex-1 min-h-0">

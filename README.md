@@ -138,6 +138,7 @@ See `.env.example` for required configuration. Key variables include:
 - `MEDIA_DIR`: Filesystem directory for uploaded media (set this to a persistent mount path on Railway, e.g. `/data/media`)
 - `MEDIA_URL_PREFIX`: Public URL prefix for local media serving (default `/media`)
 - `MAX_UPLOAD_MB`: Upload size limit in MB
+- `NEXT_PUBLIC_GA_MEASUREMENT_ID`: Google Analytics 4 Measurement ID for website traffic tracking (optional)
 
 ### Railway Persistent Media Setup
 
