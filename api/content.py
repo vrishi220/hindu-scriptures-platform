@@ -1792,7 +1792,7 @@ def _node_sequence_sort_key(node: ContentNode):
 def export_book_json(
     book_id: int,
     db: Session = Depends(get_db),
-    current_user: User | None = Depends(require_view_permission),
+    current_user: User = Depends(require_import_permission),
 ) -> BookExchangePayloadV1:
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
@@ -1842,7 +1842,7 @@ def export_book_json(
                 "parent_node_id": node.parent_node_id,
                 "referenced_node_id": node.referenced_node_id,
                 "level_name": node.level_name,
-                "level_order": node.level_order,
+                "level_order": node.level_order if isinstance(node.level_order, int) else 0,
                 "sequence_number": node.sequence_number,
                 "title_sanskrit": node.title_sanskrit,
                 "title_transliteration": node.title_transliteration,
@@ -1850,20 +1850,20 @@ def export_book_json(
                 "title_hindi": node.title_hindi,
                 "title_tamil": node.title_tamil,
                 "has_content": bool(node.has_content),
-                "content_data": node.content_data,
-                "summary_data": node.summary_data,
-                "metadata_json": node.metadata_json,
+                "content_data": node.content_data if isinstance(node.content_data, dict) else {},
+                "summary_data": node.summary_data if isinstance(node.summary_data, dict) else {},
+                "metadata_json": node.metadata_json if isinstance(node.metadata_json, dict) else {},
                 "source_attribution": node.source_attribution,
-                "license_type": node.license_type,
+                "license_type": node.license_type or "CC-BY-SA-4.0",
                 "original_source_url": node.original_source_url,
-                "tags": node.tags,
+                "tags": node.tags if isinstance(node.tags, list) else [],
                 "media_items": media_by_node_id.get(node.id, []),
             }
         )
 
     return BookExchangePayloadV1(
         schema_={
-            "id": book.schema.id if book.schema else None,
+            "id": book.schema.id if book.schema else book.schema_id,
             "name": book.schema.name if book.schema else None,
             "description": book.schema.description if book.schema else None,
             "levels": book.schema.levels if book.schema and isinstance(book.schema.levels, list) else [],

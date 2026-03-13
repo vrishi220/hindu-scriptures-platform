@@ -6067,6 +6067,52 @@ function ScripturesContent() {
     }
   };
 
+  const handleExportBookJson = async (targetBookId: number, targetBookName?: string) => {
+    if (!canImport) {
+      alert("You do not have permission to export books");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/content/books/${targetBookId}/export/json`, {
+        method: "GET",
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | Record<string, unknown>
+        | { detail?: string }
+        | null;
+
+      if (!response.ok || !payload) {
+        alert((payload as { detail?: string } | null)?.detail || "Failed to export book");
+        return;
+      }
+
+      const safeName = (targetBookName || `book-${targetBookId}`)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `book-${targetBookId}`;
+      const fileName = `${safeName}.json`;
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export book");
+    }
+  };
+
   const findNodeById = (nodes: TreeNode[], id: number): TreeNode | null => {
     for (const node of nodes) {
       if (node.id === id) return node;
@@ -7504,7 +7550,7 @@ function ScripturesContent() {
                       (book.metadata_json?.owner_id === authUserId ||
                         book.metadata?.owner_id === authUserId);
                     const canToggleVisibility = canAdmin || isBookOwner;
-                    const showRowMenu = canCopyPreviewBookLink || canToggleVisibility;
+                    const showRowMenu = canCopyPreviewBookLink || canToggleVisibility || canImport;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =
@@ -7669,6 +7715,18 @@ function ScripturesContent() {
                                           Browse book
                                         </button>
                                       )}
+                                      {canImport && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenBookRowActionsId(null);
+                                            void handleExportBookJson(book.id, book.book_name);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                        >
+                                          Export JSON
+                                        </button>
+                                      )}
                                       {(canAdmin ||
                                         book.metadata_json?.owner_id === authUserId ||
                                         book.metadata?.owner_id === authUserId) && (
@@ -7805,6 +7863,18 @@ function ScripturesContent() {
                                       >
                                         <BookOpen size={14} />
                                         Browse book
+                                      </button>
+                                    )}
+                                    {canImport && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenBookRowActionsId(null);
+                                          void handleExportBookJson(book.id, book.book_name);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                      >
+                                        Export JSON
                                       </button>
                                     )}
                                     {(canAdmin ||
@@ -8016,6 +8086,19 @@ function ScripturesContent() {
                             >
                               <Eye size={14} />
                               Preview book
+                            </button>
+                          )}
+                          {canImport && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                const selectedBook = books.find((book) => book.id.toString() === bookId);
+                                void handleExportBookJson(parseInt(bookId, 10), selectedBook?.book_name);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              Export JSON
                             </button>
                           )}
                           {canContribute && currentBook?.schema && (
