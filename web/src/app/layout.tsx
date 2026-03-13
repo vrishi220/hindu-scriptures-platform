@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Space_Grotesk } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
@@ -32,7 +33,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${displayFont.variable} ${sansFont.variable} antialiased min-h-screen flex flex-col`}>
-        {gaMeasurementId ? <GoogleAnalytics measurementId={gaMeasurementId} /> : null}
+        {gaMeasurementId ? (
+          <Suspense fallback={null}>
+            <GoogleAnalytics measurementId={gaMeasurementId} />
+          </Suspense>
+        ) : null}
         <SessionKeepalive />
         <NavBar />
         <div className="flex-1 min-h-0">
