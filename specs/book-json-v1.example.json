@@ -1,0 +1,84 @@
+{
+  "schema_version": "hsp-book-json-v1",
+  "exported_at": "2026-03-13T00:00:00Z",
+  "source": {
+    "app": "hindu-scriptures-platform",
+    "format": "canonical-book-json"
+  },
+  "schema": {
+    "id": 3,
+    "name": "Adhyaya-Shloka",
+    "description": "Chapter / verse schema",
+    "levels": [
+      "Adhyaya",
+      "Shloka"
+    ]
+  },
+  "book": {
+    "book_name": "Yoga Vasishtha",
+    "book_code": "yoga-vasishtha",
+    "language_primary": "sanskrit",
+    "metadata": {
+      "status": "draft",
+      "visibility": "private",
+      "work": "Yoga Vasishtha"
+    }
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Adhyaya",
+      "level_order": 0,
+      "sequence_number": "1",
+      "title_sanskrit": "वैराग्यप्रकरण",
+      "title_transliteration": "vairāgya prakaraṇa",
+      "title_english": "On Dispassion",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": false,
+      "content_data": {},
+      "summary_data": {},
+      "metadata_json": {
+        "chapter": 1
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [],
+      "media_items": []
+    },
+    {
+      "node_id": 2,
+      "parent_node_id": 1,
+      "referenced_node_id": null,
+      "level_name": "Shloka",
+      "level_order": 1,
+      "sequence_number": "1.1",
+      "title_sanskrit": "यतः सर्वाणि भूतानि...",
+      "title_transliteration": "yataḥ sarvāṇi bhūtāni...",
+      "title_english": "Salutations to that true Self",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": true,
+      "content_data": {
+        "basic": {
+          "sanskrit": "यतः सर्वाणि भूतानि...",
+          "transliteration": "yataḥ sarvāṇi bhūtāni...",
+          "english": "Salutations to that true Self"
+        }
+      },
+      "summary_data": {},
+      "metadata_json": {
+        "verse_number": 1,
+        "type": "mangalacarana"
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [],
+      "media_items": []
+    }
+  ]
+}

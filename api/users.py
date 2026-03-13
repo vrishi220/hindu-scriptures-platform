@@ -155,6 +155,7 @@ def create_user_admin(
         "viewer": {
             "can_view": True,
             "can_contribute": True,
+            "can_import": False,
             "can_edit": False,
             "can_moderate": False,
             "can_admin": False,
@@ -162,6 +163,7 @@ def create_user_admin(
         "contributor": {
             "can_view": True,
             "can_contribute": True,
+            "can_import": True,
             "can_edit": False,
             "can_moderate": False,
             "can_admin": False,
@@ -169,6 +171,7 @@ def create_user_admin(
         "editor": {
             "can_view": True,
             "can_contribute": True,
+            "can_import": True,
             "can_edit": True,
             "can_moderate": False,
             "can_admin": False,
@@ -176,6 +179,7 @@ def create_user_admin(
         "moderator": {
             "can_view": True,
             "can_contribute": True,
+            "can_import": True,
             "can_edit": True,
             "can_moderate": True,
             "can_admin": False,
@@ -183,6 +187,7 @@ def create_user_admin(
         "admin": {
             "can_view": True,
             "can_contribute": True,
+            "can_import": True,
             "can_edit": True,
             "can_moderate": True,
             "can_admin": True,

@@ -1966,22 +1966,42 @@ def _normalize_preview_media_item(media_type: object, url: object, metadata: obj
 def _extract_book_preview_media_items(book: Book) -> list[dict]:
     metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     raw_items = metadata.get("media_items")
-    if not isinstance(raw_items, list):
-        return []
-
     parsed: list[dict] = []
-    for index, item in enumerate(raw_items):
-        if not isinstance(item, dict):
-            continue
+
+    if isinstance(raw_items, list):
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, dict):
+                continue
+            normalized = _normalize_preview_media_item(
+                item.get("media_type"),
+                item.get("url"),
+                item.get("metadata"),
+                item.get("asset_id") if isinstance(item.get("asset_id"), int) else index + 1,
+            )
+            if normalized:
+                parsed.append(normalized)
+
+    if parsed:
+        return parsed
+
+    fallback_candidates = [
+        metadata.get("thumbnail_url"),
+        metadata.get("thumbnailUrl"),
+        metadata.get("cover_image_url"),
+        metadata.get("coverImageUrl"),
+    ]
+
+    for candidate in fallback_candidates:
         normalized = _normalize_preview_media_item(
-            item.get("media_type"),
-            item.get("url"),
-            item.get("metadata"),
-            item.get("asset_id") if isinstance(item.get("asset_id"), int) else index + 1,
+            "image",
+            candidate,
+            {"display_name": "Book Thumbnail"},
+            1,
         )
         if normalized:
-            parsed.append(normalized)
-    return parsed
+            return [normalized]
+
+    return []
 
 
 def _build_node_preview_media_map(db: Session, node_ids: list[int]) -> dict[int, list[dict]]:

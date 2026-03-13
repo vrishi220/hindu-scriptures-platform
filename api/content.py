@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -26,6 +27,7 @@ from models.media_file import MediaFile
 from models.media_asset import MediaAsset
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    BookExchangePayloadV1,
     BookCreate,
     BookPublic,
     BookShareCreate,
@@ -90,6 +92,13 @@ MEDIA_STORAGE = get_media_storage_from_env()
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
+
+
+def require_import_permission(current_user: User = Depends(get_current_user)) -> User:
+    perms = current_user.permissions or {}
+    if perms.get("can_import") or perms.get("can_admin") or current_user.role == "admin":
+        return current_user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def _save_upload_to_media_storage(file: UploadFile, relative_path: Path) -> int:
@@ -1174,7 +1183,7 @@ def get_daily_verse(
 def import_document(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("can_contribute")),
+    current_user: User = Depends(require_import_permission),
 ) -> ImportResponse:
     """
     Import a scripture document from HTML or PDF.
@@ -1383,6 +1392,10 @@ def _import_json(
     current_user: User,
 ) -> ImportResponse:
     """Import from JSON/API source."""
+    schema_version = payload.get("schema_version")
+    if isinstance(schema_version, str) and schema_version.strip() == "hsp-book-json-v1":
+        return _import_canonical_json_v1(payload, db, current_user)
+
     config = JSONImportConfig(**payload)
     
     # Get schema
@@ -1463,6 +1476,171 @@ def _import_json(
         book_id=book.id,
         nodes_created=nodes_created,
         warnings=warnings
+    )
+
+
+def _default_book_code_from_name(book_name: str) -> str:
+    normalized = "-".join((book_name or "").strip().lower().split())
+    return normalized or f"book-{uuid4().hex[:8]}"
+
+
+def _import_canonical_json_v1(
+    payload: dict,
+    db: Session,
+    current_user: User,
+) -> ImportResponse:
+    try:
+        canonical = BookExchangePayloadV1.model_validate(payload)
+    except Exception as exc:
+        return ImportResponse(
+            success=False,
+            error=f"Invalid canonical JSON payload: {str(exc)}",
+        )
+
+    schema_id = canonical.schema_.id
+    if not isinstance(schema_id, int) or schema_id <= 0:
+        return ImportResponse(
+            success=False,
+            error="Canonical payload must include schema.id",
+        )
+
+    schema = db.query(ScriptureSchema).filter(ScriptureSchema.id == schema_id).first()
+    if not schema:
+        return ImportResponse(
+            success=False,
+            error=f"Schema not found: {schema_id}",
+        )
+
+    book_code = canonical.book.book_code or _default_book_code_from_name(canonical.book.book_name)
+    warnings: list[str] = []
+    book = db.query(Book).filter(Book.book_code == book_code).first()
+    if book:
+        warnings.append(f"Book already exists: {book.book_name}")
+    else:
+        metadata = canonical.book.metadata if isinstance(canonical.book.metadata, dict) else {}
+        metadata_out = dict(metadata)
+        metadata_out.setdefault("status", BOOK_STATUS_DRAFT)
+        metadata_out.setdefault("visibility", BOOK_VISIBILITY_PRIVATE)
+
+        book = Book(
+            schema_id=schema.id,
+            book_name=canonical.book.book_name,
+            book_code=book_code,
+            language_primary=canonical.book.language_primary,
+            metadata_json=metadata_out,
+        )
+        db.add(book)
+        db.flush()
+
+    level_lookup = {level: idx for idx, level in enumerate(schema.levels or [])}
+    old_to_new_node_ids: dict[int, int] = {}
+    pending_nodes = list(canonical.nodes)
+    nodes_created = 0
+
+    while pending_nodes:
+        progress_made = False
+        still_pending: list = []
+
+        for node in pending_nodes:
+            parent_id = node.parent_node_id
+            if isinstance(parent_id, int) and parent_id not in old_to_new_node_ids:
+                still_pending.append(node)
+                continue
+
+            referenced_id = node.referenced_node_id
+            resolved_reference_id = (
+                old_to_new_node_ids.get(referenced_id)
+                if isinstance(referenced_id, int)
+                else None
+            )
+
+            resolved_level_order = level_lookup.get(node.level_name, node.level_order)
+            source_attribution = None
+            original_source_url = None
+            if isinstance(node.metadata_json, dict):
+                source_attribution = node.metadata_json.get("source_attribution")
+                original_source_url = node.metadata_json.get("original_source_url")
+
+            content_node = ContentNode(
+                book_id=book.id,
+                parent_node_id=old_to_new_node_ids.get(parent_id) if isinstance(parent_id, int) else None,
+                referenced_node_id=resolved_reference_id,
+                level_name=node.level_name,
+                level_order=resolved_level_order,
+                sequence_number=node.sequence_number,
+                title_sanskrit=node.title_sanskrit,
+                title_transliteration=node.title_transliteration,
+                title_english=node.title_english,
+                title_hindi=node.title_hindi,
+                title_tamil=node.title_tamil,
+                has_content=bool(node.has_content),
+                content_data=node.content_data if isinstance(node.content_data, dict) else {},
+                summary_data=node.summary_data if isinstance(node.summary_data, dict) else {},
+                metadata_json=node.metadata_json if isinstance(node.metadata_json, dict) else {},
+                source_attribution=node.source_attribution or source_attribution,
+                license_type=node.license_type,
+                original_source_url=node.original_source_url or original_source_url,
+                tags=node.tags if isinstance(node.tags, list) else [],
+                created_by=current_user.id,
+                last_modified_by=current_user.id,
+            )
+            db.add(content_node)
+            db.flush()
+
+            old_to_new_node_ids[node.node_id] = content_node.id
+            nodes_created += 1
+            progress_made = True
+
+            media_items = node.media_items if isinstance(node.media_items, list) else []
+            for media in media_items:
+                media_type = (media.media_type or "").strip().lower()
+                media_url = (media.url or "").strip()
+                if not media_type or not media_url:
+                    continue
+                if media_type not in ALLOWED_MEDIA_TYPES:
+                    continue
+                media_file = MediaFile(
+                    node_id=content_node.id,
+                    media_type=media_type,
+                    url=media_url,
+                    metadata_json=media.metadata if isinstance(media.metadata, dict) else {},
+                )
+                db.add(media_file)
+
+        if not progress_made:
+            unresolved_ids = [str(node.node_id) for node in still_pending]
+            db.rollback()
+            return ImportResponse(
+                success=False,
+                book_id=book.id if book and book.id else None,
+                nodes_created=0,
+                warnings=warnings,
+                error=(
+                    "Invalid node hierarchy in canonical JSON. "
+                    f"Could not resolve parent linkage for node_ids: {', '.join(unresolved_ids)}"
+                ),
+            )
+
+        pending_nodes = still_pending
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        return ImportResponse(
+            success=False,
+            book_id=book.id if book and book.id else None,
+            nodes_created=0,
+            warnings=warnings,
+            error=f"Failed to import canonical JSON: {str(exc)}",
+        )
+
+    warnings.append(f"Created {nodes_created} nodes from canonical JSON")
+    return ImportResponse(
+        success=True,
+        book_id=book.id,
+        nodes_created=nodes_created,
+        warnings=warnings,
     )
 
 
@@ -1598,6 +1776,111 @@ def list_book_tree(
     nodes = sorted(nodes, key=lambda n: (n.level_order, natural_sort_key(n)))
     
     return [ContentNodePublic.model_validate(item) for item in nodes]
+
+
+def _node_sequence_sort_key(node: ContentNode):
+    sequence = node.sequence_number
+    if not sequence:
+        return (float("inf"),)
+    try:
+        return tuple(int(part) for part in sequence.split("."))
+    except (ValueError, AttributeError):
+        return (float("inf"), str(sequence))
+
+
+@router.get("/books/{book_id}/export/json", response_model=BookExchangePayloadV1)
+def export_book_json(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> BookExchangePayloadV1:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, book, current_user)
+
+    nodes = (
+        db.query(ContentNode)
+        .filter(ContentNode.book_id == book_id)
+        .order_by(ContentNode.level_order)
+        .all()
+    )
+    nodes = sorted(nodes, key=lambda node: (node.level_order, _node_sequence_sort_key(node)))
+
+    node_ids = [node.id for node in nodes]
+    media_rows = (
+        db.query(MediaFile)
+        .filter(MediaFile.node_id.in_(node_ids))
+        .order_by(MediaFile.id)
+        .all()
+        if node_ids
+        else []
+    )
+
+    media_by_node_id: dict[int, list[dict]] = {}
+    for media in media_rows:
+        if not isinstance(media.node_id, int):
+            continue
+        media_by_node_id.setdefault(media.node_id, []).append(
+            {
+                "media_type": media.media_type,
+                "url": media.url,
+                "metadata": media.metadata_json if isinstance(media.metadata_json, dict) else {},
+            }
+        )
+
+    book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    metadata_out = dict(book_metadata)
+    metadata_out["status"] = _book_status(book)
+    metadata_out["visibility"] = _book_visibility(book)
+
+    exported_nodes: list[dict] = []
+    for node in nodes:
+        exported_nodes.append(
+            {
+                "node_id": node.id,
+                "parent_node_id": node.parent_node_id,
+                "referenced_node_id": node.referenced_node_id,
+                "level_name": node.level_name,
+                "level_order": node.level_order,
+                "sequence_number": node.sequence_number,
+                "title_sanskrit": node.title_sanskrit,
+                "title_transliteration": node.title_transliteration,
+                "title_english": node.title_english,
+                "title_hindi": node.title_hindi,
+                "title_tamil": node.title_tamil,
+                "has_content": bool(node.has_content),
+                "content_data": node.content_data,
+                "summary_data": node.summary_data,
+                "metadata_json": node.metadata_json,
+                "source_attribution": node.source_attribution,
+                "license_type": node.license_type,
+                "original_source_url": node.original_source_url,
+                "tags": node.tags,
+                "media_items": media_by_node_id.get(node.id, []),
+            }
+        )
+
+    return BookExchangePayloadV1(
+        schema_={
+            "id": book.schema.id if book.schema else None,
+            "name": book.schema.name if book.schema else None,
+            "description": book.schema.description if book.schema else None,
+            "levels": book.schema.levels if book.schema and isinstance(book.schema.levels, list) else [],
+        },
+        book={
+            "book_name": book.book_name,
+            "book_code": book.book_code,
+            "language_primary": book.language_primary,
+            "metadata": metadata_out,
+        },
+        nodes=exported_nodes,
+        exported_at=datetime.now(timezone.utc),
+        source={
+            "app": "hindu-scriptures-platform",
+            "format": "canonical-book-json",
+        },
+    )
 
 
 @router.get("/books/{book_id}/tree/nested", response_model=list[ContentNodeTree])

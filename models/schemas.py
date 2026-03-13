@@ -262,6 +262,7 @@ class UserAdminCreate(BaseModel):
 class UserPermissionsUpdate(BaseModel):
     can_view: bool | None = None
     can_contribute: bool | None = None
+    can_import: bool | None = None
     can_edit: bool | None = None
     can_moderate: bool | None = None
     can_admin: bool | None = None
@@ -423,6 +424,63 @@ class ContentNodePublic(ContentNodeBase):
 
 class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
+
+
+class BookExchangeSchemaV1(BaseModel):
+    id: int | None = None
+    name: str | None = None
+    description: str | None = None
+    levels: list[str] = Field(default_factory=list)
+
+
+class BookExchangeMediaItemV1(BaseModel):
+    media_type: str
+    url: str
+    metadata: dict | None = None
+
+
+class BookExchangeNodeV1(BaseModel):
+    node_id: int
+    parent_node_id: int | None = None
+    referenced_node_id: int | None = None
+    level_name: str
+    level_order: int
+    sequence_number: str | None = None
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool = False
+    content_data: dict | None = None
+    summary_data: dict | None = None
+    metadata_json: dict | None = None
+    source_attribution: str | None = None
+    license_type: str = "CC-BY-SA-4.0"
+    original_source_url: str | None = None
+    tags: list | None = None
+    media_items: list[BookExchangeMediaItemV1] = Field(default_factory=list)
+
+
+class BookExchangeBookV1(BaseModel):
+    book_name: str
+    book_code: str | None = None
+    language_primary: PrimaryLanguage = "sanskrit"
+    metadata: dict | None = None
+
+
+class BookExchangePayloadV1(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_version: Literal["hsp-book-json-v1"] = "hsp-book-json-v1"
+    exported_at: datetime | None = None
+    source: dict | None = None
+    schema_: BookExchangeSchemaV1 = Field(
+        validation_alias=AliasChoices("schema", "schema_"),
+        serialization_alias="schema",
+    )
+    book: BookExchangeBookV1
+    nodes: list[BookExchangeNodeV1]
 
 
 class SearchRequest(BaseModel):

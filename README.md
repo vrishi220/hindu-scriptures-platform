@@ -252,6 +252,73 @@ Playwright output directories such as `web/playwright-report/`, `web/test-result
 
 For more details, see [tests/README.md](tests/README.md).
 
+## Canonical Book JSON (Import/Export)
+
+The platform now supports a canonical, versioned JSON schema for round-trip book exchange.
+
+- **Schema version**: `hsp-book-json-v1`
+- **Export endpoint**: `GET /api/content/books/{book_id}/export/json`
+- **Import endpoint**: `POST /api/content/import` with `{"import_type":"json", ...canonical payload...}`
+
+### Canonical payload shape
+
+```json
+{
+  "schema_version": "hsp-book-json-v1",
+  "exported_at": "2026-03-13T10:15:00Z",
+  "source": {
+    "app": "hindu-scriptures-platform",
+    "format": "canonical-book-json"
+  },
+  "schema": {
+    "id": 3,
+    "name": "Adhyaya-Shloka",
+    "description": "Chapter / verse schema",
+    "levels": ["Adhyaya", "Shloka"]
+  },
+  "book": {
+    "book_name": "Yoga Vasishtha",
+    "book_code": "yoga-vasishtha",
+    "language_primary": "sanskrit",
+    "metadata": {
+      "status": "draft",
+      "visibility": "private"
+    }
+  },
+  "nodes": [
+    {
+      "node_id": 1001,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Adhyaya",
+      "level_order": 0,
+      "sequence_number": "1",
+      "title_sanskrit": "वैराग्यप्रकरण",
+      "title_transliteration": "vairāgya prakaraṇa",
+      "title_english": "On Dispassion",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": false,
+      "content_data": {},
+      "summary_data": {},
+      "metadata_json": {},
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [],
+      "media_items": []
+    }
+  ]
+}
+```
+
+### Notes
+
+- `node_id` is an import-time linkage key. IDs are remapped to DB IDs on import.
+- Parent links are validated; unresolved hierarchy returns an import error.
+- `media_items` are imported per node for `image|audio|video|link` types.
+- Existing `import_type=json` URL-based importer remains supported for non-canonical sources.
+
 ## Browser Support
 
 Modern browsers with ES2020+ support:

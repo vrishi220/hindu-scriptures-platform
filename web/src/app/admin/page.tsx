@@ -19,6 +19,7 @@ type User = {
 type PermissionKey =
   | "can_view"
   | "can_contribute"
+  | "can_import"
   | "can_edit"
   | "can_moderate"
   | "can_admin";
@@ -33,6 +34,7 @@ type ModalMode = "create" | "edit" | "view";
 const permissionLabels: Record<PermissionKey, string> = {
   can_view: "View",
   can_contribute: "Contribute",
+  can_import: "Import",
   can_edit: "Edit",
   can_moderate: "Moderate",
   can_admin: "Admin",
@@ -42,6 +44,7 @@ const rolePermissions: Record<string, Record<PermissionKey, boolean>> = {
   viewer: {
     can_view: true,
     can_contribute: false,
+    can_import: false,
     can_edit: false,
     can_moderate: false,
     can_admin: false,
@@ -49,6 +52,7 @@ const rolePermissions: Record<string, Record<PermissionKey, boolean>> = {
   contributor: {
     can_view: true,
     can_contribute: true,
+    can_import: true,
     can_edit: false,
     can_moderate: false,
     can_admin: false,
@@ -56,6 +60,7 @@ const rolePermissions: Record<string, Record<PermissionKey, boolean>> = {
   editor: {
     can_view: true,
     can_contribute: true,
+    can_import: true,
     can_edit: true,
     can_moderate: false,
     can_admin: false,
@@ -63,6 +68,7 @@ const rolePermissions: Record<string, Record<PermissionKey, boolean>> = {
   moderator: {
     can_view: true,
     can_contribute: true,
+    can_import: true,
     can_edit: true,
     can_moderate: true,
     can_admin: false,
@@ -70,6 +76,7 @@ const rolePermissions: Record<string, Record<PermissionKey, boolean>> = {
   admin: {
     can_view: true,
     can_contribute: true,
+    can_import: true,
     can_edit: true,
     can_moderate: true,
     can_admin: true,
@@ -393,6 +400,7 @@ export default function AdminPage() {
     ? {
         can_view: selectedUser.permissions?.can_view ?? true,
         can_contribute: selectedUser.permissions?.can_contribute ?? false,
+        can_import: selectedUser.permissions?.can_import ?? false,
         can_edit: selectedUser.permissions?.can_edit ?? false,
         can_moderate: selectedUser.permissions?.can_moderate ?? false,
         can_admin: selectedUser.permissions?.can_admin ?? false,
@@ -415,7 +423,7 @@ export default function AdminPage() {
         <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white px-3 py-1">Schemas</a>
         <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
         <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white px-3 py-1">Categories</a>
-        <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia Bank</a>
+        <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia Repo</a>
       </div>
 
       {toast && (
@@ -511,6 +519,7 @@ export default function AdminPage() {
                   const perms = {
                     can_view: user.permissions?.can_view ?? true,
                     can_contribute: user.permissions?.can_contribute ?? false,
+                    can_import: user.permissions?.can_import ?? false,
                     can_edit: user.permissions?.can_edit ?? false,
                     can_moderate: user.permissions?.can_moderate ?? false,
                     can_admin: user.permissions?.can_admin ?? false,

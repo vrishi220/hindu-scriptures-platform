@@ -16,6 +16,7 @@ import {
   ShoppingBasket,
   SlidersHorizontal,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
@@ -1443,6 +1444,7 @@ function ScripturesContent() {
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [canImport, setCanImport] = useState(false);
   const [nodeContent, setNodeContent] = useState<NodeContent | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
   const [nodeMedia, setNodeMedia] = useState<MediaFile[]>([]);
@@ -1521,6 +1523,7 @@ function ScripturesContent() {
   const mediaBankSuppressRenameBlurRef = useRef(false);
   const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const importBookInputRef = useRef<HTMLInputElement | null>(null);
   const activeNodeCommentaryRequestId = useRef(0);
   const activeNodeCommentaryAbortController = useRef<AbortController | null>(null);
   const activeNodeCommentaryNodeId = useRef<number | null>(null);
@@ -1546,6 +1549,7 @@ function ScripturesContent() {
   });
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
+  const [importSubmitting, setImportSubmitting] = useState(false);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
@@ -3063,16 +3067,19 @@ function ScripturesContent() {
         setCanAdmin(false);
         setCanContribute(false);
         setCanEdit(false);
+        setCanImport(false);
         return;
       }
       setAuthUserId(data.id ?? null);
       setAuthEmail(data.email || null);
       setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
       const canViewPermission = (data.permissions as { can_view?: boolean } | undefined)?.can_view;
+      const canImportPermission = (data.permissions as { can_import?: boolean } | undefined)?.can_import;
       setCanView(Boolean(canViewPermission || data.role === "viewer" || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
       setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
       setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
+      setCanImport(Boolean(canImportPermission || data.permissions?.can_admin || data.role === "admin"));
     } catch {
       setAuthEmail(null);
       setAuthUserId(null);
@@ -3081,6 +3088,7 @@ function ScripturesContent() {
       setCanAdmin(false);
       setCanContribute(false);
       setCanEdit(false);
+      setCanImport(false);
     } finally {
       setAuthResolved(true);
     }
@@ -6003,6 +6011,62 @@ function ScripturesContent() {
     }
   };
 
+  const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !canImport) return;
+
+    setImportSubmitting(true);
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        alert("Invalid JSON payload");
+        return;
+      }
+
+      const importPayload = {
+        ...(parsed as Record<string, unknown>),
+        import_type: "json",
+      };
+
+      const response = await fetch("/api/content/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(importPayload),
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | { success?: boolean; book_id?: number | null; nodes_created?: number; error?: string; detail?: string }
+        | null;
+
+      if (!response.ok || result?.success === false) {
+        alert(result?.detail || result?.error || "Failed to import book");
+        return;
+      }
+
+      await loadBooksRefresh();
+      const importedBookId =
+        typeof result?.book_id === "number" && Number.isFinite(result.book_id)
+          ? result.book_id
+          : null;
+      if (importedBookId !== null) {
+        setBookId(String(importedBookId));
+        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
+        loadTree(String(importedBookId));
+      }
+
+      alert(
+        `Import completed${typeof result?.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
+      );
+    } catch {
+      alert("Failed to import JSON file");
+    } finally {
+      setImportSubmitting(false);
+    }
+  };
+
   const findNodeById = (nodes: TreeNode[], id: number): TreeNode | null => {
     for (const node of nodes) {
       if (node.id === id) return node;
@@ -7342,6 +7406,31 @@ function ScripturesContent() {
                   </div>
                 )}
               </div>
+              {canImport && (
+                <>
+                  <input
+                    ref={importBookInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(event) => {
+                      void handleImportBookFile(event);
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      importBookInputRef.current?.click();
+                    }}
+                    disabled={importSubmitting}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Import JSON"
+                    title="Import JSON"
+                  >
+                    <Upload size={14} />
+                  </button>
+                </>
+              )}
               {canContribute && (
                 <button
                   type="button"
