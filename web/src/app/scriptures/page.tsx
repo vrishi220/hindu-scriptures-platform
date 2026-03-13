@@ -48,6 +48,7 @@ import {
 } from "../../lib/uiPreferences";
 import {
   inferDisplayNameFromUrl,
+  inferMediaTypeFromUrl,
   type ExternalMediaType,
 } from "../../lib/externalMedia";
 import {
@@ -252,6 +253,16 @@ type MediaAsset = {
 };
 
 type MediaLinkContext = "bank" | "node" | "book";
+
+type BookMediaItem = {
+  media_type: "image" | "audio" | "video" | "link" | string;
+  url: string;
+  display_name?: string;
+  content_type?: string;
+  asset_id?: number | string;
+  is_default?: boolean;
+  display_order?: number | string;
+};
 
 type CommentaryEntry = {
   id: number;
@@ -904,6 +915,119 @@ const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | nu
   return null;
 };
 
+const normalizeBookMediaType = (rawType: unknown, rawUrl: string): BookMediaItem["media_type"] => {
+  if (typeof rawType === "string" && rawType.trim()) {
+    return rawType.trim().toLowerCase();
+  }
+  return inferMediaTypeFromUrl(rawUrl);
+};
+
+const getBookMetadataObject = (book: BookDetails | BookOption | null): Record<string, unknown> | null => {
+  const metadata =
+    book?.metadata_json && typeof book.metadata_json === "object"
+      ? book.metadata_json
+      : book?.metadata && typeof book.metadata === "object"
+        ? book.metadata
+        : null;
+  return metadata ? { ...metadata } : null;
+};
+
+const getBookMediaItems = (book: BookDetails | BookOption | null): BookMediaItem[] => {
+  const metadata = getBookMetadataObject(book);
+  const mediaItemsRaw = metadata?.media_items;
+  const normalized: BookMediaItem[] = [];
+
+  if (Array.isArray(mediaItemsRaw)) {
+    for (const item of mediaItemsRaw) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const candidate = item as Record<string, unknown>;
+      const rawUrl = typeof candidate.url === "string" ? candidate.url.trim() : "";
+      if (!rawUrl) {
+        continue;
+      }
+      const mediaType = normalizeBookMediaType(candidate.media_type, rawUrl);
+      const assetIdRaw = candidate.asset_id;
+      const assetId =
+        typeof assetIdRaw === "number"
+          ? assetIdRaw
+          : typeof assetIdRaw === "string" && assetIdRaw.trim()
+            ? Number.parseInt(assetIdRaw, 10)
+            : undefined;
+      const displayOrderRaw = candidate.display_order;
+      const displayOrder =
+        typeof displayOrderRaw === "number"
+          ? displayOrderRaw
+          : typeof displayOrderRaw === "string" && displayOrderRaw.trim()
+            ? Number.parseInt(displayOrderRaw, 10)
+            : undefined;
+
+      normalized.push({
+        media_type: mediaType,
+        url: rawUrl,
+        display_name:
+          typeof candidate.display_name === "string" && candidate.display_name.trim()
+            ? candidate.display_name.trim()
+            : undefined,
+        content_type:
+          typeof candidate.content_type === "string" && candidate.content_type.trim()
+            ? candidate.content_type.trim()
+            : undefined,
+        asset_id: typeof assetId === "number" && Number.isFinite(assetId) ? assetId : undefined,
+        is_default: Boolean(candidate.is_default),
+        display_order: typeof displayOrder === "number" && Number.isFinite(displayOrder) ? displayOrder : undefined,
+      });
+    }
+  }
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  const fallbackThumbnailUrl = getBookThumbnailUrl(book);
+  if (!fallbackThumbnailUrl) {
+    return [];
+  }
+
+  return [
+    {
+      media_type: "image",
+      url: fallbackThumbnailUrl,
+      display_name: "Book Thumbnail",
+      is_default: true,
+      display_order: 0,
+    },
+  ];
+};
+
+const getBookMediaDisplayOrder = (media: BookMediaItem): number => {
+  const raw = media.display_order;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+};
+
+const sortBookMediaItems = (items: BookMediaItem[]): BookMediaItem[] =>
+  [...items].sort((a, b) => {
+    const typeCompare = (a.media_type || "").localeCompare(b.media_type || "");
+    if (typeCompare !== 0) {
+      return typeCompare;
+    }
+    const defaultCompare = Number(Boolean(b.is_default)) - Number(Boolean(a.is_default));
+    if (defaultCompare !== 0) {
+      return defaultCompare;
+    }
+    return getBookMediaDisplayOrder(a) - getBookMediaDisplayOrder(b);
+  });
+
 const getNodeThumbnailUrl = (mediaItems: MediaFile[]): string | null => {
   const imageItems = mediaItems.filter((item) => item.media_type === "image" && typeof item.url === "string" && item.url.trim());
   if (imageItems.length === 0) {
@@ -1387,7 +1511,6 @@ function ScripturesContent() {
   const mediaBankSuppressRenameBlurRef = useRef(false);
   const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
-  const bookThumbnailInputRef = useRef<HTMLInputElement | null>(null);
   const activeNodeCommentaryRequestId = useRef(0);
   const activeNodeCommentaryAbortController = useRef<AbortController | null>(null);
   const activeNodeCommentaryNodeId = useRef<number | null>(null);
@@ -4070,6 +4193,78 @@ function ScripturesContent() {
     return haystack.includes(normalized);
   };
 
+  const bookMediaMatchesSearch = (media: BookMediaItem, query: string): boolean => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+    const haystack = [media.display_name, media.media_type, media.url]
+      .map((value) => value || "")
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(normalized);
+  };
+
+  const renderInlineMediaPreview = (
+    mediaType: string,
+    rawUrl: string,
+    label: string,
+    mode: "thumb" | "full" = "full"
+  ) => {
+    const mediaUrl = resolveMediaUrl(rawUrl);
+    const normalizedType = (mediaType || "").trim().toLowerCase();
+
+    if (normalizedType === "image") {
+      return (
+        <img
+          src={mediaUrl}
+          alt={label}
+          className={
+            mode === "thumb"
+              ? "h-10 w-10 rounded-md border border-black/10 object-cover"
+              : "max-h-[260px] w-full rounded-lg border border-black/10 object-contain"
+          }
+        />
+      );
+    }
+
+    if (normalizedType === "audio") {
+      return <audio controls className="w-full"><source src={mediaUrl} /></audio>;
+    }
+
+    if (normalizedType === "video") {
+      const youtubeEmbedUrl = getYouTubeEmbedUrl(rawUrl);
+      if (youtubeEmbedUrl) {
+        return (
+          <iframe
+            src={youtubeEmbedUrl}
+            title={label}
+            className="h-[260px] w-full rounded-lg border border-black/10"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        );
+      }
+      return (
+        <video controls className="max-h-[260px] w-full rounded-lg border border-black/10">
+          <source src={mediaUrl} />
+        </video>
+      );
+    }
+
+    return (
+      <a
+        href={mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="text-sm text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
+      >
+        Open media: {label}
+      </a>
+    );
+  };
+
   const mediaAssetMatchesSearch = (asset: MediaAsset, query: string): boolean => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
@@ -4258,7 +4453,10 @@ function ScripturesContent() {
         setNodeMediaMessage("Link added to repo and attached to node.");
         await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
       } else if (externalMediaFormContext === "book") {
-        setPropertiesMessage("External media added to repo.");
+        const attached = await handleAttachMediaBankAssetToBook(createdAsset);
+        if (!attached) {
+          throw new Error("Failed to attach external media to book.");
+        }
         await loadMediaBankAssets();
       } else {
         setMediaBankMessage("External media link added.");
@@ -4406,6 +4604,164 @@ function ScripturesContent() {
     }
   };
 
+  const getBookMediaLabel = (media: BookMediaItem): string => {
+    if (typeof media.display_name === "string" && media.display_name.trim()) {
+      return media.display_name.trim();
+    }
+    const matchingAsset =
+      typeof media.asset_id === "number"
+        ? mediaBankAssets.find((asset) => asset.id === media.asset_id)
+        : undefined;
+    if (matchingAsset) {
+      return getMediaBankAssetDisplayName(matchingAsset);
+    }
+    return inferDisplayNameFromUrl(media.url) || `${media.media_type || "media"}`;
+  };
+
+  const saveBookMetadata = async (
+    nextMetadata: Record<string, unknown>,
+    successMessage: string,
+    failureMessage: string
+  ): Promise<boolean> => {
+    if (!bookId) {
+      setPropertiesError("Select a book first.");
+      return false;
+    }
+
+    setBookThumbnailUploading(true);
+    setPropertiesError(null);
+    setPropertiesMessage(null);
+
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: nextMetadata }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || failureMessage);
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                metadata_json: updatedBook.metadata_json,
+                metadata: updatedBook.metadata,
+              }
+            : book
+        )
+      );
+      setPropertiesMessage(successMessage);
+      return true;
+    } catch (err) {
+      setPropertiesError(err instanceof Error ? err.message : failureMessage);
+      return false;
+    } finally {
+      setBookThumbnailUploading(false);
+    }
+  };
+
+  const saveBookMediaItems = async (
+    items: BookMediaItem[],
+    successMessage: string,
+    failureMessage: string
+  ): Promise<boolean> => {
+    const existingMetadata = getBookMetadataObject(currentBook) || {};
+    const sortedItems = sortBookMediaItems(items);
+    const withOrder = sortedItems.map((item, index) => ({
+      ...item,
+      display_order: index,
+    }));
+    const imageDefault = withOrder.find((item) => item.media_type === "image" && item.is_default) ||
+      withOrder.find((item) => item.media_type === "image") ||
+      null;
+
+    const nextMetadata: Record<string, unknown> = {
+      ...existingMetadata,
+      media_items: withOrder,
+      thumbnail_url: imageDefault?.url || null,
+      thumbnailUrl: imageDefault?.url || null,
+    };
+
+    return saveBookMetadata(nextMetadata, successMessage, failureMessage);
+  };
+
+  const handleAttachMediaBankAssetToBook = async (asset: MediaAsset): Promise<boolean> => {
+    const currentItems = getBookMediaItems(currentBook);
+    const assetDisplayName = getMediaBankAssetDisplayName(asset);
+    const mediaLookupKey = getMediaLookupKey(asset.media_type, asset.url || "");
+
+    const exists = currentItems.some((item) => {
+      const itemLookupKey = getMediaLookupKey(item.media_type, item.url || "");
+      if (typeof item.asset_id === "number" && item.asset_id === asset.id) {
+        return true;
+      }
+      return itemLookupKey === mediaLookupKey;
+    });
+    if (exists) {
+      setPropertiesMessage("Media is already attached to this book.");
+      return true;
+    }
+
+    const normalizedType = normalizeBookMediaType(asset.media_type, asset.url || "");
+    const sameTypeItems = currentItems.filter((item) => item.media_type === normalizedType);
+    const isDefault = sameTypeItems.length === 0;
+
+    const nextItems = [
+      ...currentItems,
+      {
+        media_type: normalizedType,
+        url: asset.url,
+        display_name: assetDisplayName,
+        content_type:
+          typeof asset.metadata?.content_type === "string" && asset.metadata.content_type.trim()
+            ? asset.metadata.content_type.trim()
+            : undefined,
+        asset_id: asset.id,
+        is_default: isDefault,
+      },
+    ];
+    return saveBookMediaItems(nextItems, "Media attached to book.", "Failed to attach media to book");
+  };
+
+  const handleDeleteBookMedia = async (targetMedia: BookMediaItem) => {
+    const items = getBookMediaItems(currentBook);
+    const targetLookup = getMediaLookupKey(targetMedia.media_type, targetMedia.url || "");
+    const removedIndex = items.findIndex((item) => {
+      const itemLookup = getMediaLookupKey(item.media_type, item.url || "");
+      if (typeof targetMedia.asset_id === "number" && typeof item.asset_id === "number") {
+        return targetMedia.asset_id === item.asset_id;
+      }
+      return itemLookup === targetLookup;
+    });
+    if (removedIndex < 0) {
+      return;
+    }
+
+    const removedItem = items[removedIndex];
+    const nextItems = items.filter((_, index) => index !== removedIndex);
+    if (removedItem?.is_default) {
+      const fallbackIndex = nextItems.findIndex((item) => item.media_type === removedItem.media_type);
+      if (fallbackIndex >= 0) {
+        nextItems[fallbackIndex] = {
+          ...nextItems[fallbackIndex],
+          is_default: true,
+        };
+      }
+    }
+
+    await saveBookMediaItems(nextItems, "Book media removed.", "Failed to remove book media");
+  };
+
   const handleUploadNodeMediaViaBank = async (file: File) => {
     if (!selectedId) {
       setNodeMediaError("Select a node first to attach media.");
@@ -4438,9 +4794,11 @@ function ScripturesContent() {
     setPropertiesError(null);
     setPropertiesMessage(null);
     try {
-      await uploadMediaBankAssetAndReturn(file);
-      setPropertiesMessage("Media uploaded to repo.");
-      await loadMediaBankAssets();
+      const uploadedAsset = await uploadMediaBankAssetAndReturn(file);
+      const attached = await handleAttachMediaBankAssetToBook(uploadedAsset);
+      if (attached) {
+        await loadMediaBankAssets();
+      }
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to upload media");
     } finally {
@@ -4607,98 +4965,6 @@ function ScripturesContent() {
     }
   };
 
-  const handleUploadBookThumbnail = async (file: File) => {
-    if (!bookId) {
-      setPropertiesError("Select a book first.");
-      return;
-    }
-
-    setBookThumbnailUploading(true);
-    setPropertiesError(null);
-    setPropertiesMessage(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(contentPath(`/books/${bookId}/thumbnail`), {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookDetails
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to upload thumbnail");
-      }
-
-      const updatedBook = payload as BookDetails;
-      setCurrentBook(updatedBook);
-      setBooks((prev) =>
-        prev.map((book) =>
-          book.id === updatedBook.id
-            ? {
-                ...book,
-                metadata_json: updatedBook.metadata_json,
-                metadata: updatedBook.metadata,
-              }
-            : book
-        )
-      );
-      setPropertiesMessage("Book thumbnail saved.");
-    } catch (err) {
-      setPropertiesError(err instanceof Error ? err.message : "Failed to upload thumbnail");
-    } finally {
-      setBookThumbnailUploading(false);
-    }
-  };
-
-  const handleDeleteBookThumbnail = async () => {
-    if (!bookId) {
-      setPropertiesError("Select a book first.");
-      return;
-    }
-
-    setBookThumbnailUploading(true);
-    setPropertiesError(null);
-    setPropertiesMessage(null);
-
-    try {
-      const response = await fetch(contentPath(`/books/${bookId}/thumbnail`), {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookDetails
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to remove thumbnail");
-      }
-
-      const updatedBook = payload as BookDetails;
-      setCurrentBook(updatedBook);
-      setBooks((prev) =>
-        prev.map((book) =>
-          book.id === updatedBook.id
-            ? {
-                ...book,
-                metadata_json: updatedBook.metadata_json,
-                metadata: updatedBook.metadata,
-              }
-            : book
-        )
-      );
-      setPropertiesMessage("Book thumbnail removed.");
-    } catch (err) {
-      setPropertiesError(err instanceof Error ? err.message : "Failed to remove thumbnail");
-    } finally {
-      setBookThumbnailUploading(false);
-    }
-  };
-
   const openNodeMediaManager = (targetNodeId?: number | null) => {
     const nextNodeId =
       typeof targetNodeId === "number" && Number.isFinite(targetNodeId)
@@ -4717,67 +4983,6 @@ function ScripturesContent() {
     void loadNodeMedia(nextNodeId, true);
     setMediaManagerScope("node");
     setShowMediaManagerModal(true);
-  };
-
-  const handleSetBookThumbnailFromMediaBankAsset = async (asset: MediaAsset): Promise<boolean> => {
-    if (!bookId) {
-      setPropertiesError("Select a book first.");
-      return false;
-    }
-
-    setBookThumbnailUploading(true);
-    setPropertiesError(null);
-    setPropertiesMessage(null);
-
-    try {
-      const existingMetadata =
-        currentBook?.metadata_json && typeof currentBook.metadata_json === "object"
-          ? { ...currentBook.metadata_json }
-          : currentBook?.metadata && typeof currentBook.metadata === "object"
-            ? { ...currentBook.metadata }
-            : {};
-
-      const nextMetadata = {
-        ...existingMetadata,
-        thumbnail_url: asset.url,
-        thumbnailUrl: asset.url,
-      };
-
-      const response = await fetch(`/api/books/${bookId}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: nextMetadata }),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookDetails
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to set book thumbnail");
-      }
-
-      const updatedBook = payload as BookDetails;
-      setCurrentBook(updatedBook);
-      setBooks((prev) =>
-        prev.map((book) =>
-          book.id === updatedBook.id
-            ? {
-                ...book,
-                metadata_json: updatedBook.metadata_json,
-                metadata: updatedBook.metadata,
-              }
-            : book
-        )
-      );
-      setPropertiesMessage("Book thumbnail set from repo.");
-      return true;
-    } catch (err) {
-      setPropertiesError(err instanceof Error ? err.message : "Failed to set book thumbnail");
-      return false;
-    } finally {
-      setBookThumbnailUploading(false);
-    }
   };
 
   const loadNodeCommentary = async (nodeId: number, force = false) => {
@@ -6980,6 +7185,12 @@ function ScripturesContent() {
           gridTemplateColumns: `repeat(${mediaManagerGridColumns}, minmax(0, 1fr))`,
         }
       : undefined;
+  const bookMediaItems = sortBookMediaItems(getBookMediaItems(currentBook));
+  const filteredBookMediaItems = bookMediaItems.filter((media) => {
+    const mediaType = (media.media_type || "").trim();
+    const matchesType = mediaManagerTypeFilter === "all" || mediaType === mediaManagerTypeFilter;
+    return matchesType && bookMediaMatchesSearch(media, mediaManagerSearchQuery);
+  });
 
   const renderMediaManagerSearchInput = (placeholder: string, ariaLabel: string) => (
     <div className="group relative min-w-0 w-full sm:min-w-[220px] sm:flex-1">
@@ -8765,7 +8976,6 @@ function ScripturesContent() {
                                         </div>
                                         <div className="flex flex-col gap-3">
                                           {filteredItems.map((media, index) => {
-                                            const mediaUrl = resolveMediaUrl(media.url);
                                             const mediaMetadata =
                                               media.metadata && typeof media.metadata === "object"
                                                 ? media.metadata
@@ -8780,48 +8990,7 @@ function ScripturesContent() {
 
                                             return (
                                               <div key={media.id} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5">
-                                                {media.media_type === "image" ? (
-                                                  <img
-                                                    src={mediaUrl}
-                                                    alt={label}
-                                                    className="max-h-[260px] w-full rounded-lg border border-black/10 object-contain"
-                                                  />
-                                                ) : media.media_type === "audio" ? (
-                                                  <audio controls className="w-full">
-                                                    <source src={mediaUrl} />
-                                                  </audio>
-                                                ) : media.media_type === "video" ? (
-                                                  (() => {
-                                                    const youtubeEmbedUrl = getYouTubeEmbedUrl(media.url);
-                                                    if (youtubeEmbedUrl) {
-                                                      return (
-                                                        <iframe
-                                                          src={youtubeEmbedUrl}
-                                                          title={label}
-                                                          className="h-[260px] w-full rounded-lg border border-black/10"
-                                                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                                          referrerPolicy="strict-origin-when-cross-origin"
-                                                          allowFullScreen
-                                                        />
-                                                      );
-                                                    }
-
-                                                    return (
-                                                      <video controls className="max-h-[260px] w-full rounded-lg border border-black/10">
-                                                        <source src={mediaUrl} />
-                                                      </video>
-                                                    );
-                                                  })()
-                                                ) : (
-                                                  <a
-                                                    href={mediaUrl}
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="text-sm text-[color:var(--accent)] underline decoration-transparent underline-offset-2 hover:decoration-current"
-                                                  >
-                                                    Open media: {label}
-                                                  </a>
-                                                )}
+                                                {renderInlineMediaPreview(media.media_type, media.url, label)}
 
                                                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                                                   <div className="text-xs text-zinc-500">
@@ -9413,14 +9582,26 @@ function ScripturesContent() {
                       className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
                     >
                       <option value="all">All types</option>
-                      <option value="image">image</option>
+                      {Array.from(
+                        new Set(
+                          bookMediaItems
+                            .map((item) => (item.media_type || "").trim())
+                            .filter((item) => item.length > 0)
+                        )
+                      )
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
                     </select>
                     {renderMediaManagerDensityControl()}
                     <input
                       ref={bookMediaUploadInputRef}
                       type="file"
                       className="hidden"
-                      accept="image/*"
+                      accept="image/*,audio/*,video/*"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
                         event.currentTarget.value = "";
@@ -9500,77 +9681,76 @@ function ScripturesContent() {
                         <span className="text-right">Actions</span>
                       </div>
                     )}
-                    {(() => {
-                      const thumbnailUrl = getBookThumbnailUrl(currentBook);
-                      if (!thumbnailUrl) {
-                        return <div className="px-3 py-6 text-sm text-zinc-500">No multimedia attached to this book.</div>;
-                      }
-                      const query = mediaManagerSearchQuery.trim().toLowerCase();
-                      const rowLabel = "Book Thumbnail";
-                      const haystack = `${rowLabel} image ${thumbnailUrl}`.toLowerCase();
-                      const matchesType = mediaManagerTypeFilter === "all" || mediaManagerTypeFilter === "image";
-                      if (!matchesType || (query && !haystack.includes(query))) {
-                        return <div className="px-3 py-6 text-sm text-zinc-500">No matching media found.</div>;
-                      }
-                      return (
-                        <div
-                          className={mediaManagerItemsLayoutClass}
-                          style={mediaManagerItemsLayoutStyle}
-                        >
-                          <div
-                            className={
-                              mediaManagerView === "icon"
-                                ? "overflow-visible rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
-                                : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
-                            }
-                          >
-                            {mediaManagerView === "icon" ? (
-                              <>
-                                <img
-                                  src={thumbnailUrl}
-                                  alt="Book thumbnail"
-                                  className="aspect-square w-full object-cover"
-                                />
-                                <div className="space-y-2 p-3">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                      <div className="truncate font-medium">{rowLabel}</div>
-                                      <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">image</div>
-                                    </div>
-                                    <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">Default</span>
+                    {filteredBookMediaItems.length === 0 ? (
+                      <div className="px-3 py-6 text-sm text-zinc-500">
+                        {bookMediaItems.length === 0
+                          ? "No multimedia attached to this book."
+                          : "No matching media found."}
+                      </div>
+                    ) : (
+                      <div
+                        className={mediaManagerItemsLayoutClass}
+                        style={mediaManagerItemsLayoutStyle}
+                      >
+                        {filteredBookMediaItems.map((media, index) => {
+                          const label = getBookMediaLabel(media);
+                          const mediaType = (media.media_type || "other").trim() || "other";
+                          const isDefault = Boolean(media.is_default);
+                          return (
+                            <div
+                              key={`${mediaType}:${media.url}:${media.asset_id || index}`}
+                              className={
+                                mediaManagerView === "icon"
+                                  ? "overflow-visible rounded-xl border border-black/10 bg-white text-sm text-zinc-700"
+                                  : "grid grid-cols-[2fr_1fr_1fr_1.5fr] items-center gap-3 px-3 py-2.5 text-sm text-zinc-700"
+                              }
+                            >
+                              {mediaManagerView === "icon" ? (
+                                <>
+                                  <div className="p-2">
+                                    {renderInlineMediaPreview(mediaType, media.url, label)}
                                   </div>
+                                  <div className="space-y-2 p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <div className="truncate font-medium">{label}</div>
+                                        <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">{mediaType}</div>
+                                      </div>
+                                      <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-zinc-600">
+                                        {isDefault ? "Default" : "Normal"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          void handleDeleteBookMedia(media);
+                                        }}
+                                        disabled={bookThumbnailUploading}
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
+                                        aria-label="Remove"
+                                        title="Remove"
+                                      >
+                                        <Trash2 size={12} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium">{label}</div>
+                                    <div className="mt-1">
+                                      {renderInlineMediaPreview(mediaType, media.url, label, "thumb")}
+                                    </div>
+                                  </div>
+                                  <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{mediaType}</span>
+                                  <span className="text-xs text-zinc-600">{isDefault ? "Yes" : "No"}</span>
                                   <div className="flex items-center justify-end gap-1">
                                     <button
                                       type="button"
-                                      disabled
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Move up"
-                                      title="Move up"
-                                    >
-                                      <ChevronsUp size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Move down"
-                                      title="Move down"
-                                    >
-                                      <ChevronsDown size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                      aria-label="Set default"
-                                      title="Set default"
-                                    >
-                                      <SlidersHorizontal size={12} />
-                                    </button>
-                                    <button
-                                      type="button"
                                       onClick={() => {
-                                        void handleDeleteBookThumbnail();
+                                        void handleDeleteBookMedia(media);
                                       }}
                                       disabled={bookThumbnailUploading}
                                       className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
@@ -9580,69 +9760,13 @@ function ScripturesContent() {
                                       <Trash2 size={12} />
                                     </button>
                                   </div>
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="min-w-0">
-                                  <div className="truncate font-medium">{rowLabel}</div>
-                                  <div className="mt-1">
-                                    <img
-                                      src={thumbnailUrl}
-                                      alt="Book thumbnail"
-                                      className="h-12 w-12 rounded-md border border-black/10 object-cover"
-                                    />
-                                  </div>
-                                </div>
-                                <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">image</span>
-                                <span className="text-xs text-zinc-600">Yes</span>
-                                <div className="flex items-center justify-end gap-1">
-                                  <button
-                                    type="button"
-                                    disabled
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                    aria-label="Move up"
-                                    title="Move up"
-                                  >
-                                    <ChevronsUp size={12} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                    aria-label="Move down"
-                                    title="Move down"
-                                  >
-                                    <ChevronsDown size={12} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white text-zinc-700 disabled:opacity-50"
-                                    aria-label="Set default"
-                                    title="Set default"
-                                  >
-                                    <SlidersHorizontal size={12} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void handleDeleteBookThumbnail();
-                                    }}
-                                    disabled={bookThumbnailUploading}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded border border-red-300 bg-red-50 text-red-700 disabled:opacity-50"
-                                    aria-label="Remove"
-                                    title="Remove"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : mediaManagerScope === "bank" ? (
@@ -9721,7 +9845,7 @@ function ScripturesContent() {
                   {(mediaBankViewMode === "pick-node" || mediaBankViewMode === "pick-book") && (
                     <div className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                       {mediaBankViewMode === "pick-book"
-                        ? "Pick an image item for the book default image, or use Back to return."
+                        ? "Pick an item to attach to this book, or use Back to return."
                         : "Pick an item to attach to the selected node, or use Back to return."}
                     </div>
                   )}
@@ -9828,7 +9952,7 @@ function ScripturesContent() {
                                               type="button"
                                               onClick={async () => {
                                                 if (mediaBankViewMode === "pick-book") {
-                                                  const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
+                                                  const picked = await handleAttachMediaBankAssetToBook(asset);
                                                   if (picked) {
                                                     setMediaBankViewMode("manage");
                                                     setMediaManagerScope("book");
@@ -9846,7 +9970,6 @@ function ScripturesContent() {
                                                 mediaBankUpdating ||
                                                 mediaBankUploading ||
                                                 bookThumbnailUploading ||
-                                                (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
                                                 (mediaBankViewMode === "pick-node" && !selectedId)
                                               }
                                               className="rounded border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 disabled:opacity-50"
@@ -9977,7 +10100,7 @@ function ScripturesContent() {
                                             type="button"
                                             onClick={async () => {
                                               if (mediaBankViewMode === "pick-book") {
-                                                const picked = await handleSetBookThumbnailFromMediaBankAsset(asset);
+                                                const picked = await handleAttachMediaBankAssetToBook(asset);
                                                 if (picked) {
                                                   setMediaBankViewMode("manage");
                                                   setMediaManagerScope("book");
@@ -9995,7 +10118,6 @@ function ScripturesContent() {
                                               mediaBankUpdating ||
                                               mediaBankUploading ||
                                               bookThumbnailUploading ||
-                                              (mediaBankViewMode === "pick-book" && asset.media_type !== "image") ||
                                               (mediaBankViewMode === "pick-node" && !selectedId)
                                             }
                                             className="rounded border border-black/10 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 disabled:opacity-50"
@@ -10399,7 +10521,7 @@ function ScripturesContent() {
                 submitting={externalMediaFormSubmitting}
                 description={
                   externalMediaFormContext === "book"
-                    ? "Add an external media link to repo for this book."
+                    ? "Add an external media link to repo and attach to this book."
                     : externalMediaFormContext === "node"
                       ? "Add an external media link to repo and attach to this node."
                       : "Add an external media link to repo."
