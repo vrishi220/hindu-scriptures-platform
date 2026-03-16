@@ -6091,12 +6091,25 @@ function ScripturesContent() {
         }),
       });
 
-      const result = (await response.json().catch(() => null)) as
-        | { success?: boolean; book_id?: number | null; nodes_created?: number; error?: string; detail?: string }
-        | null;
+      const rawText = await response.text();
+      let result: {
+        success?: boolean;
+        book_id?: number | null;
+        nodes_created?: number;
+        error?: string;
+        detail?: string;
+      } | null = null;
+      if (rawText) {
+        try {
+          result = JSON.parse(rawText) as typeof result;
+        } catch {
+          result = null;
+        }
+      }
 
       if (!response.ok || result?.success === false) {
-        alert(result?.detail || result?.error || "Failed to import book from URL");
+        const fallbackDetail = rawText.trim() || `Import failed (${response.status} ${response.statusText})`;
+        alert(result?.detail || result?.error || fallbackDetail);
         return;
       }
 
@@ -6116,8 +6129,9 @@ function ScripturesContent() {
       alert(
         `Import completed${typeof result?.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
       );
-    } catch {
-      alert("Failed to import JSON from URL");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to import JSON from URL";
+      alert(message);
     } finally {
       setImportSubmitting(false);
     }
