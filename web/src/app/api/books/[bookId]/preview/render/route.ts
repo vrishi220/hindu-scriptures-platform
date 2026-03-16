@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+export const maxDuration = 120;
+
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
@@ -8,6 +10,23 @@ const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again 
 
 const buildAuthHeader = (token?: string): Record<string, string> =>
   token ? { Authorization: `Bearer ${token}` } : {};
+
+const readResponsePayload = async (response: Response) => {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  }
+
+  const text = await response.text().catch(() => "");
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return {
+    detail: trimmed.length > 1000 ? `${trimmed.slice(0, 997)}...` : trimmed,
+  };
+};
 
 const refreshAccessToken = async (refreshToken: string) => {
   let response: Response;
@@ -80,7 +99,7 @@ export async function POST(
     return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
   }
 
-  let payload = await response.json().catch(() => null);
+  let payload = await readResponsePayload(response);
 
   if (response.status === 401 && refreshToken) {
     const newTokens = await refreshAccessToken(refreshToken);
@@ -91,13 +110,13 @@ export async function POST(
       } catch {
         return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
       }
-      payload = await response.json().catch(() => null);
+      payload = await readResponsePayload(response);
     }
   }
 
   if (!response.ok) {
     return NextResponse.json(
-      payload || { detail: "Book preview render failed" },
+      payload || { detail: `Book preview render failed (${response.status})` },
       { status: response.status }
     );
   }

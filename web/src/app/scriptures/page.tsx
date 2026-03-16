@@ -5742,7 +5742,7 @@ function ScripturesContent() {
         preview_transliteration_script: nextPreviewTransliterationScript,
       });
       setPreferences(nextPreferences);
-      await savePreferences(nextPreferences);
+      void savePreferences(nextPreferences);
 
       const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
       lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
