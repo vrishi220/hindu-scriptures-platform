@@ -1,5 +1,4 @@
 import os
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -28,6 +27,7 @@ from models.commentary_entry import CommentaryEntry
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
+from models.import_job import ImportJob
 from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
@@ -261,10 +261,6 @@ class MediaAssetCreateLinkPayload(BaseModel):
 
 class MediaBankAttachNodePayload(BaseModel):
     is_default: bool = False
-
-
-IMPORT_JOBS: dict[str, dict] = {}
-IMPORT_JOBS_LOCK = threading.Lock()
 
 
 def _build_license_policy_report_for_node_ids(
@@ -1229,12 +1225,33 @@ def _dispatch_import(
 
 
 def _set_import_job(job_id: str, **updates) -> None:
-    with IMPORT_JOBS_LOCK:
-        current = IMPORT_JOBS.get(job_id)
-        if not current:
+    db = SessionLocal()
+    try:
+        job = db.query(ImportJob).filter(ImportJob.job_id == job_id).first()
+        if not job:
             return
-        current.update(updates)
-        current["updated_at"] = _utc_now_iso()
+
+        if "status" in updates:
+            job.status = updates["status"]
+        if "error" in updates:
+            job.error = updates["error"]
+        if "progress_message" in updates:
+            job.progress_message = updates["progress_message"]
+        if "progress_current" in updates:
+            job.progress_current = updates["progress_current"]
+        if "progress_total" in updates:
+            job.progress_total = updates["progress_total"]
+        if "result" in updates:
+            result_value = updates["result"]
+            if isinstance(result_value, ImportResponse):
+                job.result_json = result_value.model_dump()
+            else:
+                job.result_json = result_value
+
+        job.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
 
 
 def _make_import_job_progress_callback(
@@ -1274,20 +1291,23 @@ def _canonical_import_identity(payload: dict) -> tuple[str | None, str | None]:
     return normalized_url, normalized_book_code
 
 
-def _find_inflight_duplicate_import_job(payload: dict) -> dict | None:
+def _find_inflight_duplicate_import_job(payload: dict, db: Session) -> ImportJob | None:
     candidate_url, candidate_book_code = _canonical_import_identity(payload)
     if not candidate_url and not candidate_book_code:
         return None
 
-    with IMPORT_JOBS_LOCK:
-        for job in IMPORT_JOBS.values():
-            if job.get("status") not in {"queued", "running"}:
-                continue
-            if candidate_url and job.get("canonical_json_url") == candidate_url:
-                return job
-            if candidate_book_code and job.get("canonical_book_code") == candidate_book_code:
-                return job
-    return None
+    query = db.query(ImportJob).filter(ImportJob.status.in_(["queued", "running"]))
+    if candidate_url and candidate_book_code:
+        query = query.filter(
+            (ImportJob.canonical_json_url == candidate_url)
+            | (ImportJob.canonical_book_code == candidate_book_code)
+        )
+    elif candidate_url:
+        query = query.filter(ImportJob.canonical_json_url == candidate_url)
+    else:
+        query = query.filter(ImportJob.canonical_book_code == candidate_book_code)
+
+    return query.order_by(ImportJob.created_at.asc()).first()
 
 
 def _allow_existing_content(payload: dict) -> bool:
@@ -1340,6 +1360,23 @@ def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
         db.close()
 
 
+def _to_iso(value: datetime | None) -> str:
+    if value is None:
+        return _utc_now_iso()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
+    if not isinstance(job.result_json, dict):
+        return None
+    try:
+        return ImportResponse.model_validate(job.result_json)
+    except Exception:
+        return None
+
+
 @router.post("/import", response_model=ImportResponse, status_code=status.HTTP_202_ACCEPTED)
 def import_document(
     payload: dict,
@@ -1368,36 +1405,36 @@ def import_document(
 def start_import_job(
     payload: dict,
     background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_import_permission),
 ) -> ImportJobAcceptedResponse:
-    duplicate_job = _find_inflight_duplicate_import_job(payload)
+    duplicate_job = _find_inflight_duplicate_import_job(payload, db)
     if duplicate_job:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 "A matching canonical import is already in progress "
-                f"(job_id={duplicate_job['job_id']})."
+                f"(job_id={duplicate_job.job_id})."
             ),
         )
 
     canonical_json_url, canonical_book_code = _canonical_import_identity(payload)
     job_id = str(uuid4())
-    now_iso = _utc_now_iso()
-    with IMPORT_JOBS_LOCK:
-        IMPORT_JOBS[job_id] = {
-            "job_id": job_id,
-            "status": "queued",
-            "created_at": now_iso,
-            "updated_at": now_iso,
-            "requested_by": current_user.id,
-            "canonical_json_url": canonical_json_url,
-            "canonical_book_code": canonical_book_code,
-            "progress_message": "Queued",
-            "progress_current": 0,
-            "progress_total": None,
-            "error": None,
-            "result": None,
-        }
+    job = ImportJob(
+        job_id=job_id,
+        status="queued",
+        requested_by=current_user.id,
+        canonical_json_url=canonical_json_url,
+        canonical_book_code=canonical_book_code,
+        payload_json=payload,
+        progress_message="Queued",
+        progress_current=0,
+        progress_total=None,
+        error=None,
+        result_json=None,
+    )
+    db.add(job)
+    db.commit()
 
     background_tasks.add_task(_run_import_job, job_id, payload, current_user.id)
     return ImportJobAcceptedResponse(job_id=job_id, status="queued")
@@ -1406,29 +1443,29 @@ def start_import_job(
 @router.get("/import/jobs/{job_id}", response_model=ImportJobStatusResponse)
 def get_import_job_status(
     job_id: str,
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_import_permission),
 ) -> ImportJobStatusResponse:
-    with IMPORT_JOBS_LOCK:
-        job = IMPORT_JOBS.get(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Import job not found")
-        requested_by = job.get("requested_by")
-        if requested_by != current_user.id and not (
-            current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
-        ):
-            raise HTTPException(status_code=403, detail="Forbidden")
+    job = db.query(ImportJob).filter(ImportJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Import job not found")
 
-        return ImportJobStatusResponse(
-            job_id=job["job_id"],
-            status=job["status"],
-            created_at=job["created_at"],
-            updated_at=job["updated_at"],
-            progress_message=job.get("progress_message"),
-            progress_current=job.get("progress_current"),
-            progress_total=job.get("progress_total"),
-            error=job.get("error"),
-            result=job.get("result"),
-        )
+    if job.requested_by != current_user.id and not (
+        current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return ImportJobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        created_at=_to_iso(job.created_at),
+        updated_at=_to_iso(job.updated_at),
+        progress_message=job.progress_message,
+        progress_current=job.progress_current,
+        progress_total=job.progress_total,
+        error=job.error,
+        result=_job_result_to_import_response(job),
+    )
 
 
 def _import_html(

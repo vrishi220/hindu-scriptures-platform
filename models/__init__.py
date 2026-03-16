@@ -10,6 +10,7 @@ from models.commentary_entry import CommentaryEntry
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
+from models.import_job import ImportJob
 from models.provenance_record import ProvenanceRecord
 from models.search_query import SearchQuery
 from models.session import UserSession
@@ -49,6 +50,7 @@ __all__ = [
 	"MetadataBinding",
 	"MediaFile",
 	"MediaAsset",
+	"ImportJob",
 	"PropertyDefinition",
 	"ProvenanceRecord",
 	"SearchQuery",
