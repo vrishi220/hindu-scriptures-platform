@@ -1,10 +1,12 @@
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 import requests
 from sqlalchemy import Integer, cast, text
@@ -26,6 +28,7 @@ from models.commentary_entry import CommentaryEntry
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
+from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
     BookExchangePayloadV1,
@@ -210,6 +213,20 @@ class ImportResponse(BaseModel):
     error: str | None = None
 
 
+class ImportJobAcceptedResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+
+
+class ImportJobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    created_at: str
+    updated_at: str
+    error: str | None = None
+    result: ImportResponse | None = None
+
+
 class InsertReferencesPayload(BaseModel):
     parent_node_id: int | None = None
     node_ids: list[int]
@@ -241,6 +258,10 @@ class MediaAssetCreateLinkPayload(BaseModel):
 
 class MediaBankAttachNodePayload(BaseModel):
     is_default: bool = False
+
+
+IMPORT_JOBS: dict[str, dict] = {}
+IMPORT_JOBS_LOCK = threading.Lock()
 
 
 def _build_license_policy_report_for_node_ids(
@@ -1180,6 +1201,62 @@ def get_daily_verse(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _dispatch_import(payload: dict, db: Session, current_user: User) -> ImportResponse:
+    import_type = payload.get("import_type", "html")
+
+    if import_type == "html":
+        return _import_html(payload, db, current_user)
+    if import_type == "pdf":
+        return _import_pdf(payload, db, current_user)
+    if import_type == "json":
+        return _import_json(payload, db, current_user)
+    return ImportResponse(
+        success=False,
+        error=f"Unknown import_type: {import_type}",
+    )
+
+
+def _set_import_job(job_id: str, **updates) -> None:
+    with IMPORT_JOBS_LOCK:
+        current = IMPORT_JOBS.get(job_id)
+        if not current:
+            return
+        current.update(updates)
+        current["updated_at"] = _utc_now_iso()
+
+
+def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            _set_import_job(job_id, status="failed", error="User not found", result=None)
+            return
+
+        _set_import_job(job_id, status="running", error=None)
+        try:
+            result = _dispatch_import(payload, db, user)
+        except Exception as exc:
+            db.rollback()
+            result = ImportResponse(success=False, error=f"Import failed: {str(exc)}")
+
+        if result.success:
+            _set_import_job(job_id, status="succeeded", result=result, error=None)
+        else:
+            _set_import_job(
+                job_id,
+                status="failed",
+                result=result,
+                error=result.error or "Import failed",
+            )
+    finally:
+        db.close()
+
+
 @router.post("/import", response_model=ImportResponse, status_code=status.HTTP_202_ACCEPTED)
 def import_document(
     payload: dict,
@@ -1191,25 +1268,64 @@ def import_document(
     Accepts unified import config with 'import_type' field.
     """
     try:
-        import_type = payload.get("import_type", "html")
-        
-        if import_type == "html":
-            return _import_html(payload, db, current_user)
-        elif import_type == "pdf":
-            return _import_pdf(payload, db, current_user)
-        elif import_type == "json":
-            return _import_json(payload, db, current_user)
-        else:
-            return ImportResponse(
-                success=False,
-                error=f"Unknown import_type: {import_type}"
-            )
-        
+        return _dispatch_import(payload, db, current_user)
     except Exception as e:
         db.rollback()
         return ImportResponse(
             success=False,
             error=f"Import failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/import/jobs",
+    response_model=ImportJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_import_job(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_import_permission),
+) -> ImportJobAcceptedResponse:
+    job_id = str(uuid4())
+    now_iso = _utc_now_iso()
+    with IMPORT_JOBS_LOCK:
+        IMPORT_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "requested_by": current_user.id,
+            "error": None,
+            "result": None,
+        }
+
+    background_tasks.add_task(_run_import_job, job_id, payload, current_user.id)
+    return ImportJobAcceptedResponse(job_id=job_id, status="queued")
+
+
+@router.get("/import/jobs/{job_id}", response_model=ImportJobStatusResponse)
+def get_import_job_status(
+    job_id: str,
+    current_user: User = Depends(require_import_permission),
+) -> ImportJobStatusResponse:
+    with IMPORT_JOBS_LOCK:
+        job = IMPORT_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Import job not found")
+        requested_by = job.get("requested_by")
+        if requested_by != current_user.id and not (
+            current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
+        ):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        return ImportJobStatusResponse(
+            job_id=job["job_id"],
+            status=job["status"],
+            created_at=job["created_at"],
+            updated_at=job["updated_at"],
+            error=job.get("error"),
+            result=job.get("result"),
         )
 
 
