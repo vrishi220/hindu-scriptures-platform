@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import status
 
 import api.content as content_api
+from models.content_node import ContentNode
 from models.database import SessionLocal
 from models.scripture_schema import ScriptureSchema
 
@@ -46,6 +47,167 @@ def _create_schema(db, name_prefix: str = "COV01 Schema") -> ScriptureSchema:
 
 
 class TestContentCoverageNextSliceCOV01:
+    def test_import_canonical_json_force_reimport_replaces_existing_nodes(self):
+        db = SessionLocal()
+        try:
+            schema = _create_schema(db, "COV01 Canonical Replace")
+            user = SimpleNamespace(id=1)
+
+            initial_payload = {
+                "schema_version": "hsp-book-json-v1",
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Replace Book",
+                    "book_code": f"canonical-replace-{uuid4().hex[:6]}",
+                    "language_primary": "sanskrit",
+                },
+                "nodes": [
+                    {
+                        "node_id": 1,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "1",
+                        "title_english": "Chapter 1",
+                        "has_content": False,
+                    },
+                    {
+                        "node_id": 2,
+                        "parent_node_id": 1,
+                        "level_name": "Verse",
+                        "level_order": 1,
+                        "sequence_number": "1",
+                        "title_english": "Verse 1",
+                        "has_content": True,
+                        "content_data": {"text": "Original"},
+                    },
+                ],
+            }
+
+            initial_result = content_api._import_canonical_json_v1(initial_payload, db, user)
+            assert initial_result.success is True
+            assert initial_result.book_id is not None
+
+            replaced_payload = {
+                "schema_version": "hsp-book-json-v1",
+                "force_reimport": True,
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Replace Book",
+                    "book_code": initial_payload["book"]["book_code"],
+                    "language_primary": "sanskrit",
+                },
+                "nodes": [
+                    {
+                        "node_id": 1,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "2",
+                        "title_english": "Replacement Chapter",
+                        "has_content": False,
+                    }
+                ],
+            }
+
+            replaced_result = content_api._import_canonical_json_v1(replaced_payload, db, user)
+            assert replaced_result.success is True
+            assert replaced_result.book_id == initial_result.book_id
+            assert replaced_result.nodes_created == 1
+            assert any("Replaced 2 existing nodes" in warning for warning in replaced_result.warnings)
+
+            nodes = (
+                db.query(ContentNode)
+                .filter(ContentNode.book_id == initial_result.book_id)
+                .order_by(ContentNode.id.asc())
+                .all()
+            )
+            assert len(nodes) == 1
+            assert nodes[0].title_english == "Replacement Chapter"
+        finally:
+            db.close()
+
+    def test_import_canonical_json_allow_existing_content_appends_nodes(self):
+        db = SessionLocal()
+        try:
+            schema = _create_schema(db, "COV01 Canonical Append")
+            user = SimpleNamespace(id=1)
+            book_code = f"canonical-append-{uuid4().hex[:6]}"
+
+            initial_payload = {
+                "schema_version": "hsp-book-json-v1",
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Append Book",
+                    "book_code": book_code,
+                    "language_primary": "sanskrit",
+                },
+                "nodes": [
+                    {
+                        "node_id": 1,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "1",
+                        "title_english": "Original Chapter",
+                        "has_content": False,
+                    }
+                ],
+            }
+
+            initial_result = content_api._import_canonical_json_v1(initial_payload, db, user)
+            assert initial_result.success is True
+
+            append_payload = {
+                "schema_version": "hsp-book-json-v1",
+                "allow_existing_content": True,
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Append Book",
+                    "book_code": book_code,
+                    "language_primary": "sanskrit",
+                },
+                "nodes": [
+                    {
+                        "node_id": 10,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "2",
+                        "title_english": "Appended Chapter",
+                        "has_content": False,
+                    }
+                ],
+            }
+
+            append_result = content_api._import_canonical_json_v1(append_payload, db, user)
+            assert append_result.success is True
+            assert append_result.nodes_created == 1
+            assert any("Appending imported nodes" in warning for warning in append_result.warnings)
+
+            nodes = (
+                db.query(ContentNode)
+                .filter(ContentNode.book_id == initial_result.book_id)
+                .order_by(ContentNode.sequence_number.asc())
+                .all()
+            )
+            assert len(nodes) == 2
+            assert [node.title_english for node in nodes] == ["Original Chapter", "Appended Chapter"]
+        finally:
+            db.close()
+
     def test_import_endpoint_unknown_type_returns_structured_failure(self, client):
         headers = _register_and_login(client)
         response = client.post(

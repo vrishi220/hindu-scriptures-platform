@@ -1317,6 +1317,10 @@ def _allow_existing_content(payload: dict) -> bool:
     )
 
 
+def _force_reimport(payload: dict) -> bool:
+    return bool(isinstance(payload, dict) and payload.get("force_reimport") is True)
+
+
 def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
     db = SessionLocal()
     try:
@@ -1830,13 +1834,16 @@ def _import_canonical_json_v1(
     book = db.query(Book).filter(Book.book_code == book_code).first()
     if book:
         warnings.append(f"Book already exists: {book.book_name}")
-        if not _allow_existing_content(payload):
-            existing_node = (
-                db.query(ContentNode.id)
-                .filter(ContentNode.book_id == book.id)
-                .first()
-            )
-            if existing_node:
+        existing_content_query = db.query(ContentNode).filter(ContentNode.book_id == book.id)
+        existing_node = existing_content_query.with_entities(ContentNode.id).first()
+        if existing_node:
+            if _force_reimport(payload):
+                if progress_callback:
+                    progress_callback("Removing existing content", 0, None)
+                deleted_nodes = existing_content_query.delete(synchronize_session=False)
+                db.flush()
+                warnings.append(f"Replaced {deleted_nodes} existing nodes before reimport")
+            elif not _allow_existing_content(payload):
                 return ImportResponse(
                     success=False,
                     book_id=book.id,
@@ -1844,9 +1851,12 @@ def _import_canonical_json_v1(
                     warnings=warnings,
                     error=(
                         "Book already contains imported nodes. "
-                        "Set allow_existing_content=true to import again explicitly."
+                        "Set allow_existing_content=true to append again explicitly, "
+                        "or force_reimport=true to replace existing content."
                     ),
                 )
+            else:
+                warnings.append("Appending imported nodes to existing book content")
     else:
         metadata = canonical.book.metadata if isinstance(canonical.book.metadata, dict) else {}
         metadata_out = dict(metadata)
