@@ -6078,6 +6078,28 @@ function ScripturesContent() {
       return;
     }
 
+    let canonicalJsonUrl = trimmedUrl;
+    let forceReimport = false;
+    let allowExistingContent = false;
+
+    try {
+      const parsedUrl = new URL(trimmedUrl);
+      const forceParam = parsedUrl.searchParams.get("force_reimport");
+      const allowParam = parsedUrl.searchParams.get("allow_existing_content");
+      forceReimport = forceParam === "true";
+      allowExistingContent = allowParam === "true";
+
+      if (forceParam !== null) {
+        parsedUrl.searchParams.delete("force_reimport");
+      }
+      if (allowParam !== null) {
+        parsedUrl.searchParams.delete("allow_existing_content");
+      }
+      canonicalJsonUrl = parsedUrl.toString();
+    } catch {
+      canonicalJsonUrl = trimmedUrl;
+    }
+
     setImportSubmitting(true);
     try {
       const response = await fetch("/api/content/import/jobs", {
@@ -6087,7 +6109,9 @@ function ScripturesContent() {
         body: JSON.stringify({
           import_type: "json",
           schema_version: "hsp-book-json-v1",
-          canonical_json_url: trimmedUrl,
+          canonical_json_url: canonicalJsonUrl,
+          ...(forceReimport ? { force_reimport: true } : {}),
+          ...(allowExistingContent ? { allow_existing_content: true } : {}),
         }),
       });
 
