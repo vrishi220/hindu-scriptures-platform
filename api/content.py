@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
+import requests
 from sqlalchemy import Integer, cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -1394,6 +1395,29 @@ def _import_json(
     """Import from JSON/API source."""
     schema_version = payload.get("schema_version")
     if isinstance(schema_version, str) and schema_version.strip() == "hsp-book-json-v1":
+        canonical_json_url = payload.get("canonical_json_url")
+        if isinstance(canonical_json_url, str) and canonical_json_url.strip():
+            canonical_json_url = canonical_json_url.strip()
+            try:
+                response = requests.get(canonical_json_url, timeout=180)
+                response.raise_for_status()
+                fetched_payload = response.json()
+            except Exception as exc:
+                return ImportResponse(
+                    success=False,
+                    error=f"Failed to fetch canonical JSON from URL: {str(exc)}",
+                )
+
+            if not isinstance(fetched_payload, dict):
+                return ImportResponse(
+                    success=False,
+                    error="Canonical JSON URL did not return a valid JSON object",
+                )
+
+            fetched_payload.setdefault("import_type", "json")
+            fetched_payload.setdefault("schema_version", "hsp-book-json-v1")
+            return _import_canonical_json_v1(fetched_payload, db, current_user)
+
         return _import_canonical_json_v1(payload, db, current_user)
 
     config = JSONImportConfig(**payload)
@@ -1955,6 +1979,42 @@ def list_book_tree_nested(
     return roots
 
 
+def _resolve_level_name_for_schema(level_name: str, schema_levels: list[str]) -> str:
+    if not schema_levels:
+        return level_name
+
+    requested = (level_name or "").strip()
+    if not requested:
+        return requested
+
+    if requested in schema_levels:
+        return requested
+
+    requested_lower = requested.lower()
+    case_insensitive_match = next(
+        (level for level in schema_levels if isinstance(level, str) and level.lower() == requested_lower),
+        None,
+    )
+    if case_insensitive_match:
+        return case_insensitive_match
+
+    alias_map = {
+        "shloka": "verse",
+        "sloka": "verse",
+        "verse": "shloka",
+    }
+    mapped_lower = alias_map.get(requested_lower)
+    if mapped_lower:
+        alias_match = next(
+            (level for level in schema_levels if isinstance(level, str) and level.lower() == mapped_lower),
+            None,
+        )
+        if alias_match:
+            return alias_match
+
+    return requested
+
+
 @router.post(
     "/nodes",
     response_model=ContentNodePublic,
@@ -1972,6 +2032,13 @@ def create_node(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid book")
 
     _ensure_book_edit_access(db, current_user, book)
+
+    schema_levels = (
+        book.schema.levels
+        if book.schema and isinstance(book.schema.levels, list)
+        else []
+    )
+    resolved_level_name = _resolve_level_name_for_schema(payload.level_name, schema_levels)
 
     if (
         not _user_can_edit_any(current_user)
@@ -2009,7 +2076,11 @@ def create_node(
 
         resolved_parent_node_id = insert_after_node.parent_node_id
 
-        if insert_after_node.level_name != payload.level_name:
+        insert_after_level_name = _resolve_level_name_for_schema(
+            insert_after_node.level_name,
+            schema_levels,
+        )
+        if insert_after_level_name != resolved_level_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Insert-after node must share the same level",
@@ -2027,22 +2098,20 @@ def create_node(
 
     # Validate hierarchy against schema if book has one
     if book.schema and book.schema.levels:
-        schema_levels = book.schema.levels if isinstance(book.schema.levels, list) else []
-        
         if schema_levels:
             # Check if level_name is valid in the schema
-            if payload.level_name not in schema_levels:
+            if resolved_level_name not in schema_levels:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid level '{payload.level_name}'. Valid levels: {', '.join(schema_levels)}"
                 )
 
             # Get the index of this level in the schema
-            level_index = schema_levels.index(payload.level_name)
+            level_index = schema_levels.index(resolved_level_name)
             leaf_level = schema_levels[-1]
 
             # Content nodes (with content) can only be at leaf level
-            if payload.has_content and payload.level_name != leaf_level:
+            if payload.has_content and resolved_level_name != leaf_level:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Content items can only be placed at the '{leaf_level}' level"
@@ -2076,7 +2145,7 @@ def create_node(
                     # Child must be at the next level
                     if expected_child_level_index < len(schema_levels):
                         expected_child_level = schema_levels[expected_child_level_index]
-                        if payload.level_name != expected_child_level:
+                        if resolved_level_name != expected_child_level:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"'{payload.level_name}' cannot be a child of '{parent.level_name}'. Expected child level: '{expected_child_level}'"
@@ -2164,13 +2233,13 @@ def create_node(
         payload.title_transliteration,
     )
     content_data = _autofill_content_data_pair(payload.content_data or {})
-    _ensure_word_meanings_level_is_enabled(book, payload.level_name, content_data)
+    _ensure_word_meanings_level_is_enabled(book, resolved_level_name, content_data)
 
     node = ContentNode(
         book_id=payload.book_id,
         parent_node_id=resolved_parent_node_id,
         referenced_node_id=payload.referenced_node_id,
-        level_name=payload.level_name,
+        level_name=resolved_level_name,
         level_order=payload.level_order,
         sequence_number=sequence_number,
         title_sanskrit=title_sanskrit,

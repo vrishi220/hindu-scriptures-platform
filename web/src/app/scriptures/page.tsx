@@ -6313,6 +6313,36 @@ function ScripturesContent() {
     return ""; // Beyond defined levels
   };
 
+  const getSchemaMatchedLevelName = (
+    levelName: string,
+    levelOrder?: number | null
+  ): string => {
+    const schemaLevels = currentBook?.schema?.levels;
+    if (!schemaLevels || schemaLevels.length === 0) {
+      return levelName;
+    }
+
+    const normalized = normalizeLevelName(levelName || "");
+    if (normalized) {
+      const exact = schemaLevels.find(
+        (level) => normalizeLevelName(level) === normalized
+      );
+      if (exact) {
+        return exact;
+      }
+    }
+
+    if (
+      typeof levelOrder === "number" &&
+      levelOrder > 0 &&
+      levelOrder <= schemaLevels.length
+    ) {
+      return schemaLevels[levelOrder - 1];
+    }
+
+    return levelName;
+  };
+
   const canAddChild = (node: TreeNode): boolean => {
     if (!currentBook?.schema?.levels) {
       return false; // No schema, don't show add button
@@ -6444,6 +6474,38 @@ function ScripturesContent() {
             : actionNode.id
         : null;
 
+      const schemaLevels = currentBook?.schema?.levels || [];
+      let resolvedLevelName = formData.levelName;
+      if (schemaLevels.length > 0) {
+        const matchedLevel = getSchemaMatchedLevelName(
+          formData.levelName,
+          actionNode?.level_order
+        );
+
+        if (matchedLevel && schemaLevels.includes(matchedLevel)) {
+          resolvedLevelName = matchedLevel;
+        } else if (isAddAction && createInsertAfterNodeId !== null) {
+          resolvedLevelName = getSchemaMatchedLevelName(
+            actionNode?.level_name || formData.levelName,
+            actionNode?.level_order
+          );
+        } else if (isAddAction && resolvedParentNodeId === null) {
+          resolvedLevelName = schemaLevels[0];
+        } else if (isAddAction) {
+          const parentNode =
+            resolvedParentNodeId !== null
+              ? findNodeById(treeData, resolvedParentNodeId)
+              : null;
+          const nextLevel = parentNode ? getNextLevelName(parentNode) : "";
+          resolvedLevelName = nextLevel || schemaLevels[0];
+        } else {
+          resolvedLevelName = getSchemaMatchedLevelName(
+            formData.levelName || actionNode?.level_name || "",
+            actionNode?.level_order
+          );
+        }
+      }
+
       // Calculate level_order based on parent or sibling-insert context
       let levelOrder = 1;
       if (isAddAction && actionNode) {
@@ -6469,7 +6531,7 @@ function ScripturesContent() {
       }
 
       const basePayload = {
-        level_name: formData.levelName,
+        level_name: resolvedLevelName,
         sequence_number: formData.sequenceNumber ? formData.sequenceNumber.trim() : null,
         title_sanskrit: titlePair.sanskrit || null,
         title_transliteration: titlePair.transliteration || null,
@@ -6654,8 +6716,13 @@ function ScripturesContent() {
         }
       }
 
+      const normalizedInlineLevelName = getSchemaMatchedLevelName(
+        inlineFormData.levelName || nodeContent.level_name || "",
+        nodeContent.level_order
+      );
+
       const payload = {
-        level_name: inlineFormData.levelName,
+        level_name: normalizedInlineLevelName,
         sequence_number: inlineFormData.sequenceNumber
           ? inlineFormData.sequenceNumber.trim()
           : null,
@@ -8526,16 +8593,21 @@ function ScripturesContent() {
                                           ? breadcrumb[breadcrumb.length - 2]
                                           : null;
                                     const defaultHasContent = isLeafLevelName(nodeContent.level_name || "");
+                                    const siblingLevelName = getSchemaMatchedLevelName(
+                                      nodeContent.level_name || "",
+                                      nodeContent.level_order
+                                    );
+                                    const siblingHasContent = isLeafLevelName(siblingLevelName);
                                     setActionNode(fallbackNode);
                                     setCreateParentNodeIdOverride(parentNode ? parentNode.id : null);
                                     setCreateInsertAfterNodeId(nodeContent.id);
                                     setFormData({
-                                      levelName: nodeContent.level_name || "",
+                                      levelName: siblingLevelName,
                                       titleSanskrit: "",
                                       titleTransliteration: "",
                                       titleEnglish: "",
                                       sequenceNumber: "",
-                                      hasContent: defaultHasContent,
+                                      hasContent: siblingHasContent || defaultHasContent,
                                       contentSanskrit: "",
                                       contentTransliteration: "",
                                       contentEnglish: "",

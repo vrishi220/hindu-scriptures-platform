@@ -28,10 +28,25 @@ export async function POST(request: Request) {
     body: JSON.stringify(body),
   });
 
-  const payload = await response.json().catch(() => null);
+  const rawText = await response.text();
+  let payload: unknown = null;
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
   if (!response.ok) {
+    const detail =
+      payload && typeof payload === "object" && "detail" in payload
+        ? (payload as { detail?: string }).detail
+        : payload && typeof payload === "object" && "error" in payload
+          ? (payload as { error?: string }).error
+          : `Import failed (${response.status} ${response.statusText})`;
+
     return NextResponse.json(
-      payload || { detail: "Import failed" },
+      payload || { detail },
       { status: response.status }
     );
   }
