@@ -1251,6 +1251,52 @@ def _make_import_job_progress_callback(
     return _callback
 
 
+def _canonical_import_identity(payload: dict) -> tuple[str | None, str | None]:
+    if not isinstance(payload, dict):
+        return None, None
+    if payload.get("schema_version") != "hsp-book-json-v1":
+        return None, None
+
+    canonical_json_url = payload.get("canonical_json_url")
+    normalized_url = canonical_json_url.strip() if isinstance(canonical_json_url, str) and canonical_json_url.strip() else None
+
+    book_payload = payload.get("book")
+    normalized_book_code: str | None = None
+    if isinstance(book_payload, dict):
+        raw_book_code = book_payload.get("book_code")
+        if isinstance(raw_book_code, str) and raw_book_code.strip():
+            normalized_book_code = raw_book_code.strip()
+        else:
+            raw_book_name = book_payload.get("book_name")
+            if isinstance(raw_book_name, str) and raw_book_name.strip():
+                normalized_book_code = _default_book_code_from_name(raw_book_name)
+
+    return normalized_url, normalized_book_code
+
+
+def _find_inflight_duplicate_import_job(payload: dict) -> dict | None:
+    candidate_url, candidate_book_code = _canonical_import_identity(payload)
+    if not candidate_url and not candidate_book_code:
+        return None
+
+    with IMPORT_JOBS_LOCK:
+        for job in IMPORT_JOBS.values():
+            if job.get("status") not in {"queued", "running"}:
+                continue
+            if candidate_url and job.get("canonical_json_url") == candidate_url:
+                return job
+            if candidate_book_code and job.get("canonical_book_code") == candidate_book_code:
+                return job
+    return None
+
+
+def _allow_existing_content(payload: dict) -> bool:
+    return bool(
+        isinstance(payload, dict)
+        and (payload.get("force_reimport") is True or payload.get("allow_existing_content") is True)
+    )
+
+
 def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
     db = SessionLocal()
     try:
@@ -1324,6 +1370,17 @@ def start_import_job(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_import_permission),
 ) -> ImportJobAcceptedResponse:
+    duplicate_job = _find_inflight_duplicate_import_job(payload)
+    if duplicate_job:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A matching canonical import is already in progress "
+                f"(job_id={duplicate_job['job_id']})."
+            ),
+        )
+
+    canonical_json_url, canonical_book_code = _canonical_import_identity(payload)
     job_id = str(uuid4())
     now_iso = _utc_now_iso()
     with IMPORT_JOBS_LOCK:
@@ -1333,6 +1390,8 @@ def start_import_job(
             "created_at": now_iso,
             "updated_at": now_iso,
             "requested_by": current_user.id,
+            "canonical_json_url": canonical_json_url,
+            "canonical_book_code": canonical_book_code,
             "progress_message": "Queued",
             "progress_current": 0,
             "progress_total": None,
@@ -1727,6 +1786,23 @@ def _import_canonical_json_v1(
     book = db.query(Book).filter(Book.book_code == book_code).first()
     if book:
         warnings.append(f"Book already exists: {book.book_name}")
+        if not _allow_existing_content(payload):
+            existing_node = (
+                db.query(ContentNode.id)
+                .filter(ContentNode.book_id == book.id)
+                .first()
+            )
+            if existing_node:
+                return ImportResponse(
+                    success=False,
+                    book_id=book.id,
+                    nodes_created=0,
+                    warnings=warnings,
+                    error=(
+                        "Book already contains imported nodes. "
+                        "Set allow_existing_content=true to import again explicitly."
+                    ),
+                )
     else:
         metadata = canonical.book.metadata if isinstance(canonical.book.metadata, dict) else {}
         metadata_out = dict(metadata)
