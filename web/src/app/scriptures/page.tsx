@@ -6108,6 +6108,9 @@ function ScripturesContent() {
       type ImportJobStatus = {
         job_id?: string;
         status?: "queued" | "running" | "succeeded" | "failed";
+        progress_message?: string;
+        progress_current?: number;
+        progress_total?: number;
         error?: string;
         detail?: string;
         result?: ImportResult | null;
