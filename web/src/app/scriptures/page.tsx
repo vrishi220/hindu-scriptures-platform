@@ -6092,16 +6092,20 @@ function ScripturesContent() {
       });
 
       const rawText = await response.text();
-      let result: {
+      type ImportResult = {
         success?: boolean;
         book_id?: number | null;
         nodes_created?: number;
         error?: string;
         detail?: string;
-      } | null = null;
+      };
+      let result: ImportResult | null = null;
       if (rawText) {
         try {
-          result = JSON.parse(rawText) as typeof result;
+          const parsed = JSON.parse(rawText) as unknown;
+          if (parsed && typeof parsed === "object") {
+            result = parsed as ImportResult;
+          }
         } catch {
           result = null;
         }
