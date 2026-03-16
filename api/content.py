@@ -2,7 +2,7 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -223,6 +223,9 @@ class ImportJobStatusResponse(BaseModel):
     status: Literal["queued", "running", "succeeded", "failed"]
     created_at: str
     updated_at: str
+    progress_message: str | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
     error: str | None = None
     result: ImportResponse | None = None
 
@@ -1205,7 +1208,12 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _dispatch_import(payload: dict, db: Session, current_user: User) -> ImportResponse:
+def _dispatch_import(
+    payload: dict,
+    db: Session,
+    current_user: User,
+    progress_callback: Callable[[str, int | None, int | None], None] | None = None,
+) -> ImportResponse:
     import_type = payload.get("import_type", "html")
 
     if import_type == "html":
@@ -1213,7 +1221,7 @@ def _dispatch_import(payload: dict, db: Session, current_user: User) -> ImportRe
     if import_type == "pdf":
         return _import_pdf(payload, db, current_user)
     if import_type == "json":
-        return _import_json(payload, db, current_user)
+        return _import_json(payload, db, current_user, progress_callback=progress_callback)
     return ImportResponse(
         success=False,
         error=f"Unknown import_type: {import_type}",
@@ -1229,6 +1237,20 @@ def _set_import_job(job_id: str, **updates) -> None:
         current["updated_at"] = _utc_now_iso()
 
 
+def _make_import_job_progress_callback(
+    job_id: str,
+) -> Callable[[str, int | None, int | None], None]:
+    def _callback(message: str, current: int | None = None, total: int | None = None) -> None:
+        _set_import_job(
+            job_id,
+            progress_message=message,
+            progress_current=current,
+            progress_total=total,
+        )
+
+    return _callback
+
+
 def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
     db = SessionLocal()
     try:
@@ -1237,21 +1259,36 @@ def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
             _set_import_job(job_id, status="failed", error="User not found", result=None)
             return
 
-        _set_import_job(job_id, status="running", error=None)
+        progress_callback = _make_import_job_progress_callback(job_id)
+        _set_import_job(
+            job_id,
+            status="running",
+            error=None,
+            progress_message="Starting import",
+            progress_current=0,
+            progress_total=None,
+        )
         try:
-            result = _dispatch_import(payload, db, user)
+            result = _dispatch_import(payload, db, user, progress_callback=progress_callback)
         except Exception as exc:
             db.rollback()
             result = ImportResponse(success=False, error=f"Import failed: {str(exc)}")
 
         if result.success:
-            _set_import_job(job_id, status="succeeded", result=result, error=None)
+            _set_import_job(
+                job_id,
+                status="succeeded",
+                result=result,
+                error=None,
+                progress_message="Import completed",
+            )
         else:
             _set_import_job(
                 job_id,
                 status="failed",
                 result=result,
                 error=result.error or "Import failed",
+                progress_message=result.error or "Import failed",
             )
     finally:
         db.close()
@@ -1296,6 +1333,9 @@ def start_import_job(
             "created_at": now_iso,
             "updated_at": now_iso,
             "requested_by": current_user.id,
+            "progress_message": "Queued",
+            "progress_current": 0,
+            "progress_total": None,
             "error": None,
             "result": None,
         }
@@ -1324,6 +1364,9 @@ def get_import_job_status(
             status=job["status"],
             created_at=job["created_at"],
             updated_at=job["updated_at"],
+            progress_message=job.get("progress_message"),
+            progress_current=job.get("progress_current"),
+            progress_total=job.get("progress_total"),
             error=job.get("error"),
             result=job.get("result"),
         )
@@ -1507,6 +1550,7 @@ def _import_json(
     payload: dict,
     db: Session,
     current_user: User,
+    progress_callback: Callable[[str, int | None, int | None], None] | None = None,
 ) -> ImportResponse:
     """Import from JSON/API source."""
     schema_version = payload.get("schema_version")
@@ -1515,6 +1559,8 @@ def _import_json(
         if isinstance(canonical_json_url, str) and canonical_json_url.strip():
             canonical_json_url = canonical_json_url.strip()
             try:
+                if progress_callback:
+                    progress_callback("Fetching canonical JSON", 0, None)
                 response = requests.get(canonical_json_url, timeout=600)
                 response.raise_for_status()
                 fetched_payload = response.json()
@@ -1532,9 +1578,19 @@ def _import_json(
 
             fetched_payload.setdefault("import_type", "json")
             fetched_payload.setdefault("schema_version", "hsp-book-json-v1")
-            return _import_canonical_json_v1(fetched_payload, db, current_user)
+            return _import_canonical_json_v1(
+                fetched_payload,
+                db,
+                current_user,
+                progress_callback=progress_callback,
+            )
 
-        return _import_canonical_json_v1(payload, db, current_user)
+        return _import_canonical_json_v1(
+            payload,
+            db,
+            current_user,
+            progress_callback=progress_callback,
+        )
 
     config = JSONImportConfig(**payload)
     
@@ -1642,6 +1698,7 @@ def _import_canonical_json_v1(
     payload: dict,
     db: Session,
     current_user: User,
+    progress_callback: Callable[[str, int | None, int | None], None] | None = None,
 ) -> ImportResponse:
     try:
         canonical = BookExchangePayloadV1.model_validate(payload)
@@ -1690,8 +1747,14 @@ def _import_canonical_json_v1(
     old_to_new_node_ids: dict[int, int] = {}
     pending_nodes = list(canonical.nodes)
     nodes_created = 0
+    total_nodes = len(pending_nodes)
+
+    if progress_callback:
+        progress_callback("Validated canonical payload", 0, total_nodes)
 
     try:
+        if progress_callback:
+            progress_callback("Synchronizing database sequence", 0, total_nodes)
         _sync_content_nodes_id_sequence(db)
     except Exception as exc:
         db.rollback()
@@ -1706,6 +1769,9 @@ def _import_canonical_json_v1(
     while pending_nodes:
         progress_made = False
         still_pending: list = []
+
+        if progress_callback:
+            progress_callback("Importing nodes", nodes_created, total_nodes)
 
         for node in pending_nodes:
             parent_id = node.parent_node_id
@@ -1757,6 +1823,9 @@ def _import_canonical_json_v1(
             nodes_created += 1
             progress_made = True
 
+            if progress_callback and (nodes_created % 100 == 0 or nodes_created == total_nodes):
+                progress_callback("Importing nodes", nodes_created, total_nodes)
+
             media_items = node.media_items if isinstance(node.media_items, list) else []
             for media in media_items:
                 media_type = (media.media_type or "").strip().lower()
@@ -1790,6 +1859,8 @@ def _import_canonical_json_v1(
         pending_nodes = still_pending
 
     try:
+        if progress_callback:
+            progress_callback("Finalizing import", nodes_created, total_nodes)
         db.commit()
     except Exception as exc:
         db.rollback()
