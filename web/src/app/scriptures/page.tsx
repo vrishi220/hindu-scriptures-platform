@@ -1550,6 +1550,8 @@ function ScripturesContent() {
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
+  const [showImportUrlInput, setShowImportUrlInput] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
@@ -6067,6 +6069,60 @@ function ScripturesContent() {
     }
   };
 
+  const handleImportBookUrl = async () => {
+    if (!canImport) return;
+
+    const trimmedUrl = importUrl.trim();
+    if (!trimmedUrl) {
+      alert("Enter a public raw JSON URL");
+      return;
+    }
+
+    setImportSubmitting(true);
+    try {
+      const response = await fetch("/api/content/import", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          import_type: "json",
+          schema_version: "hsp-book-json-v1",
+          canonical_json_url: trimmedUrl,
+        }),
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | { success?: boolean; book_id?: number | null; nodes_created?: number; error?: string; detail?: string }
+        | null;
+
+      if (!response.ok || result?.success === false) {
+        alert(result?.detail || result?.error || "Failed to import book from URL");
+        return;
+      }
+
+      await loadBooksRefresh();
+      const importedBookId =
+        typeof result?.book_id === "number" && Number.isFinite(result.book_id)
+          ? result.book_id
+          : null;
+      if (importedBookId !== null) {
+        setBookId(String(importedBookId));
+        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
+        loadTree(String(importedBookId));
+      }
+
+      setShowImportUrlInput(false);
+      setImportUrl("");
+      alert(
+        `Import completed${typeof result?.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
+      );
+    } catch {
+      alert("Failed to import JSON from URL");
+    } finally {
+      setImportSubmitting(false);
+    }
+  };
+
   const handleExportBookJson = async (targetBookId: number, targetBookName?: string) => {
     if (!canImport) {
       alert("You do not have permission to export books");
@@ -7542,6 +7598,16 @@ function ScripturesContent() {
                   >
                     <Upload size={14} />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowImportUrlInput((prev) => !prev)}
+                    disabled={importSubmitting}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-label="Import from URL"
+                    title="Import from URL"
+                  >
+                    <Link2 size={14} />
+                  </button>
                 </>
               )}
               {canContribute && (
@@ -7567,6 +7633,38 @@ function ScripturesContent() {
               </div>
             )}
           </div>
+          {canImport && showImportUrlInput && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-black/10 bg-zinc-50 p-2">
+              <input
+                type="url"
+                value={importUrl}
+                onChange={(event) => setImportUrl(event.target.value)}
+                placeholder="Paste public raw JSON URL"
+                className="min-w-[16rem] flex-1 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void handleImportBookUrl();
+                }}
+                disabled={importSubmitting || !importUrl.trim()}
+                className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-zinc-900 px-3 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {importSubmitting ? "Importing..." : "Import URL"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImportUrlInput(false);
+                  setImportUrl("");
+                }}
+                disabled={importSubmitting}
+                className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
 
           <div className="mt-2 flex min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white">
             <div
