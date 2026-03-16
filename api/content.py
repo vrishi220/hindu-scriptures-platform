@@ -1399,7 +1399,7 @@ def _import_json(
         if isinstance(canonical_json_url, str) and canonical_json_url.strip():
             canonical_json_url = canonical_json_url.strip()
             try:
-                response = requests.get(canonical_json_url, timeout=180)
+                response = requests.get(canonical_json_url, timeout=600)
                 response.raise_for_status()
                 fetched_payload = response.json()
             except Exception as exc:
