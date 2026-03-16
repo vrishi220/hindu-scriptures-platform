@@ -429,7 +429,7 @@ export default function MetadataCategoriesAdminPage() {
         <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white px-3 py-1">Schemas</a>
         <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
         <a href="/admin/metadata/categories" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Categories</a>
-        <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia Bank</a>
+        <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia Repo</a>
       </div>
 
       {toast && (
