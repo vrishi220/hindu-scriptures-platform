@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 import requests
-from sqlalchemy import Integer, cast
+from sqlalchemy import Integer, cast, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -1508,6 +1508,20 @@ def _default_book_code_from_name(book_name: str) -> str:
     return normalized or f"book-{uuid4().hex[:8]}"
 
 
+def _sync_content_nodes_id_sequence(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            SELECT setval(
+                pg_get_serial_sequence('content_nodes', 'id'),
+                COALESCE((SELECT MAX(id) FROM content_nodes), 1),
+                true
+            )
+            """
+        )
+    )
+
+
 def _import_canonical_json_v1(
     payload: dict,
     db: Session,
@@ -1560,6 +1574,18 @@ def _import_canonical_json_v1(
     old_to_new_node_ids: dict[int, int] = {}
     pending_nodes = list(canonical.nodes)
     nodes_created = 0
+
+    try:
+        _sync_content_nodes_id_sequence(db)
+    except Exception as exc:
+        db.rollback()
+        return ImportResponse(
+            success=False,
+            book_id=book.id if book and book.id else None,
+            nodes_created=0,
+            warnings=warnings,
+            error=f"Failed to synchronize content node sequence: {str(exc)}",
+        )
 
     while pending_nodes:
         progress_made = False
@@ -1679,6 +1705,8 @@ def _insert_content_nodes(
     """Insert content nodes recursively into database."""
     nodes_created = 0
     level_lookup = {level: idx for idx, level in enumerate(schema.levels)}
+
+    _sync_content_nodes_id_sequence(db)
     
     def insert_nodes(nodes: list, parent_id: int | None = None):
         nonlocal nodes_created
