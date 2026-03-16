@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 from urllib.parse import urlparse
@@ -96,6 +96,7 @@ MEDIA_STORAGE = get_media_storage_from_env()
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
+IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "300"))
 
 
 def require_import_permission(current_user: User = Depends(get_current_user)) -> User:
@@ -1291,6 +1292,43 @@ def _canonical_import_identity(payload: dict) -> tuple[str | None, str | None]:
     return normalized_url, normalized_book_code
 
 
+def _is_import_job_stale(job: ImportJob, now: datetime | None = None) -> bool:
+    if job.status not in {"queued", "running"}:
+        return False
+    if IMPORT_JOB_STALE_AFTER_SECONDS <= 0:
+        return False
+
+    current_time = now or datetime.now(timezone.utc)
+    last_updated = job.updated_at or job.created_at
+    if last_updated is None:
+        return False
+    if last_updated.tzinfo is None:
+        last_updated = last_updated.replace(tzinfo=timezone.utc)
+
+    return current_time - last_updated > timedelta(seconds=IMPORT_JOB_STALE_AFTER_SECONDS)
+
+
+def _mark_import_job_stale_if_needed(
+    job: ImportJob,
+    db: Session,
+    now: datetime | None = None,
+) -> bool:
+    if not _is_import_job_stale(job, now=now):
+        return False
+
+    stale_message = (
+        "Import job stalled before completion. "
+        "The worker likely stopped or restarted. Please retry the import."
+    )
+    job.status = "failed"
+    job.error = stale_message
+    job.progress_message = stale_message
+    job.updated_at = now or datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(job)
+    return True
+
+
 def _find_inflight_duplicate_import_job(payload: dict, db: Session) -> ImportJob | None:
     candidate_url, candidate_book_code = _canonical_import_identity(payload)
     if not candidate_url and not candidate_book_code:
@@ -1307,7 +1345,14 @@ def _find_inflight_duplicate_import_job(payload: dict, db: Session) -> ImportJob
     else:
         query = query.filter(ImportJob.canonical_book_code == candidate_book_code)
 
-    return query.order_by(ImportJob.created_at.asc()).first()
+    now = datetime.now(timezone.utc)
+    candidate_jobs = query.order_by(ImportJob.created_at.asc()).all()
+    for job in candidate_jobs:
+        if _mark_import_job_stale_if_needed(job, db, now=now):
+            continue
+        return job
+
+    return None
 
 
 def _allow_existing_content(payload: dict) -> bool:
@@ -1458,6 +1503,8 @@ def get_import_job_status(
         current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
     ):
         raise HTTPException(status_code=403, detail="Forbidden")
+
+    _mark_import_job_stale_if_needed(job, db)
 
     return ImportJobStatusResponse(
         job_id=job.job_id,

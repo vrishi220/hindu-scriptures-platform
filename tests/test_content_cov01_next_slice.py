@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -6,7 +7,9 @@ from fastapi import status
 import api.content as content_api
 from models.content_node import ContentNode
 from models.database import SessionLocal
+from models.import_job import ImportJob
 from models.scripture_schema import ScriptureSchema
+from models.user import User
 
 
 def _register_and_login(client):
@@ -46,7 +49,108 @@ def _create_schema(db, name_prefix: str = "COV01 Schema") -> ScriptureSchema:
     return schema
 
 
+def _create_user(db, name_prefix: str = "cov01") -> User:
+    suffix = uuid4().hex[:8]
+    user = User(
+        email=f"{name_prefix}_{suffix}@example.com",
+        username=f"{name_prefix}_{suffix}",
+        password_hash="test-hash",
+        full_name="COV01 User",
+        role="editor",
+        permissions={
+            "can_view": True,
+            "can_contribute": True,
+            "can_import": True,
+            "can_edit": True,
+            "can_moderate": False,
+            "can_admin": False,
+        },
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 class TestContentCoverageNextSliceCOV01:
+    def test_find_inflight_duplicate_import_job_ignores_stale_running_job(self):
+        db = SessionLocal()
+        try:
+            user = _create_user(db, "cov01_stale_duplicate")
+            stale_job = ImportJob(
+                job_id=str(uuid4()),
+                status="running",
+                requested_by=user.id,
+                canonical_json_url="https://example.com/canonical.json",
+                canonical_book_code="cov01-stale-book",
+                payload_json={
+                    "schema_version": "hsp-book-json-v1",
+                    "canonical_json_url": "https://example.com/canonical.json",
+                },
+                progress_message="Importing nodes",
+                progress_current=2900,
+                progress_total=29084,
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+                updated_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            )
+            db.add(stale_job)
+            db.commit()
+
+            duplicate = content_api._find_inflight_duplicate_import_job(
+                {
+                    "schema_version": "hsp-book-json-v1",
+                    "canonical_json_url": "https://example.com/canonical.json",
+                },
+                db,
+            )
+
+            assert duplicate is None
+
+            db.refresh(stale_job)
+            assert stale_job.status == "failed"
+            assert stale_job.error is not None
+            assert "Please retry the import" in stale_job.error
+        finally:
+            db.close()
+
+    def test_get_import_job_status_marks_stale_job_failed(self):
+        db = SessionLocal()
+        try:
+            user = _create_user(db, "cov01_stale_status")
+            stale_job = ImportJob(
+                job_id=str(uuid4()),
+                status="running",
+                requested_by=user.id,
+                canonical_json_url="https://example.com/status.json",
+                canonical_book_code="cov01-status-book",
+                payload_json={
+                    "schema_version": "hsp-book-json-v1",
+                    "canonical_json_url": "https://example.com/status.json",
+                },
+                progress_message="Importing nodes",
+                progress_current=2900,
+                progress_total=29084,
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+                updated_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            )
+            db.add(stale_job)
+            db.commit()
+
+            status_response = content_api.get_import_job_status(
+                stale_job.job_id,
+                db=db,
+                current_user=user,
+            )
+
+            assert status_response.status == "failed"
+            assert status_response.error is not None
+            assert "Please retry the import" in status_response.error
+
+            db.refresh(stale_job)
+            assert stale_job.status == "failed"
+        finally:
+            db.close()
+
     def test_import_canonical_json_force_reimport_replaces_existing_nodes(self):
         db = SessionLocal()
         try:
