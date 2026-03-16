@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const store = await cookies();
