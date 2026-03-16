@@ -6080,7 +6080,7 @@ function ScripturesContent() {
 
     setImportSubmitting(true);
     try {
-      const response = await fetch("/api/content/import", {
+      const response = await fetch("/api/content/import/jobs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -6099,27 +6099,103 @@ function ScripturesContent() {
         error?: string;
         detail?: string;
       };
-      let result: ImportResult | null = null;
+      type ImportJobStart = {
+        job_id?: string;
+        status?: "queued" | "running" | "succeeded" | "failed";
+        detail?: string;
+        error?: string;
+      };
+      type ImportJobStatus = {
+        job_id?: string;
+        status?: "queued" | "running" | "succeeded" | "failed";
+        error?: string;
+        detail?: string;
+        result?: ImportResult | null;
+      };
+
+      let startResult: ImportJobStart | null = null;
       if (rawText) {
         try {
           const parsed = JSON.parse(rawText) as unknown;
           if (parsed && typeof parsed === "object") {
-            result = parsed as ImportResult;
+            startResult = parsed as ImportJobStart;
           }
         } catch {
-          result = null;
+          startResult = null;
         }
       }
 
-      if (!response.ok || result?.success === false) {
-        const fallbackDetail = rawText.trim() || `Import failed (${response.status} ${response.statusText})`;
-        alert(result?.detail || result?.error || fallbackDetail);
+      if (!response.ok) {
+        const fallbackDetail = rawText.trim() || `Import start failed (${response.status} ${response.statusText})`;
+        alert(startResult?.detail || startResult?.error || fallbackDetail);
         return;
       }
 
+      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
+      if (!jobId) {
+        alert("Import job did not return a valid job ID");
+        return;
+      }
+
+      const pollIntervalMs = 2000;
+      const maxPollAttempts = 900;
+      let finalResult: ImportResult | null = null;
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        const statusResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+
+        const statusRawText = await statusResponse.text();
+        let statusPayload: ImportJobStatus | null = null;
+        if (statusRawText) {
+          try {
+            const parsed = JSON.parse(statusRawText) as unknown;
+            if (parsed && typeof parsed === "object") {
+              statusPayload = parsed as ImportJobStatus;
+            }
+          } catch {
+            statusPayload = null;
+          }
+        }
+
+        if (!statusResponse.ok) {
+          const fallbackDetail = statusRawText.trim() || `Import status failed (${statusResponse.status} ${statusResponse.statusText})`;
+          alert(statusPayload?.detail || statusPayload?.error || fallbackDetail);
+          return;
+        }
+
+        if (statusPayload?.status === "queued" || statusPayload?.status === "running") {
+          continue;
+        }
+
+        if (statusPayload?.status === "failed") {
+          alert(statusPayload.error || statusPayload.result?.error || "Import job failed");
+          return;
+        }
+
+        finalResult = statusPayload?.result ?? null;
+        break;
+      }
+
+      if (!finalResult) {
+        alert("Import is still running. Please wait and try again in a minute.");
+        return;
+      }
+
+      if (finalResult.success === false) {
+        alert(finalResult.detail || finalResult.error || "Import failed");
+        return;
+      }
+
+      const result = finalResult;
+
       await loadBooksRefresh();
       const importedBookId =
-        typeof result?.book_id === "number" && Number.isFinite(result.book_id)
+        typeof result.book_id === "number" && Number.isFinite(result.book_id)
           ? result.book_id
           : null;
       if (importedBookId !== null) {
@@ -6131,7 +6207,7 @@ function ScripturesContent() {
       setShowImportUrlInput(false);
       setImportUrl("");
       alert(
-        `Import completed${typeof result?.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
+        `Import completed${typeof result.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON from URL";
