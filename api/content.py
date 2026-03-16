@@ -1674,6 +1674,13 @@ def _import_json(
 
             fetched_payload.setdefault("import_type", "json")
             fetched_payload.setdefault("schema_version", "hsp-book-json-v1")
+            
+            # Preserve override flags from the original payload
+            if payload.get("force_reimport") is True:
+                fetched_payload["force_reimport"] = True
+            if payload.get("allow_existing_content") is True:
+                fetched_payload["allow_existing_content"] = True
+            
             return _import_canonical_json_v1(
                 fetched_payload,
                 db,
