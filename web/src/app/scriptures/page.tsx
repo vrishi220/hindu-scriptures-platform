@@ -208,6 +208,43 @@ type NodeContent = {
   tags?: string[] | null;
 };
 
+type ImportJobLifecycleStatus = "queued" | "running" | "succeeded" | "failed";
+
+type ImportResult = {
+  success?: boolean;
+  book_id?: number | null;
+  nodes_created?: number;
+  error?: string;
+  detail?: string;
+};
+
+type ImportJobStart = {
+  job_id?: string;
+  status?: ImportJobLifecycleStatus;
+  detail?: string;
+  error?: string;
+};
+
+type ImportJobStatus = {
+  job_id?: string;
+  status?: ImportJobLifecycleStatus;
+  progress_message?: string;
+  progress_current?: number;
+  progress_total?: number;
+  error?: string;
+  detail?: string;
+  result?: ImportResult | null;
+};
+
+type PersistedImportJobState = {
+  jobId: string;
+  status?: ImportJobLifecycleStatus;
+  progressMessage?: string | null;
+  progressCurrent?: number | null;
+  progressTotal?: number | null;
+  canonicalJsonUrl?: string | null;
+};
+
 type MediaFile = {
   id: number;
   node_id: number;
@@ -528,6 +565,7 @@ const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
 };
 
 const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
+const ACTIVE_IMPORT_JOB_STORAGE_KEY = "scriptures_active_import_job";
 const SCRIPTURES_BOOK_BROWSER_VIEW_KEY = "scriptures_book_browser_view";
 const SCRIPTURES_BOOK_BROWSER_DENSITY_KEY = "scriptures_book_browser_density";
 const SCRIPTURES_MEDIA_MANAGER_VIEW_KEY = "scriptures_media_manager_view";
@@ -540,6 +578,50 @@ const DEFAULT_CONTENT_FIELD_LABELS = {
   transliteration: "Transliteration",
   english: "English",
 } as const;
+
+const readPersistedImportJobState = (): PersistedImportJobState | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_IMPORT_JOB_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as PersistedImportJobState | null;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.jobId !== "string" || !parsed.jobId) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writePersistedImportJobState = (state: PersistedImportJobState) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(ACTIVE_IMPORT_JOB_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures
+  }
+};
+
+const clearPersistedImportJobState = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(ACTIVE_IMPORT_JOB_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures
+  }
+};
 
 const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
   if (typeof window === "undefined") {
@@ -1532,6 +1614,8 @@ function ScripturesContent() {
   const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
+  const importPollingRunIdRef = useRef(0);
+  const activeImportJobIdRef = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
@@ -1550,6 +1634,9 @@ function ScripturesContent() {
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importProgressMessage, setImportProgressMessage] = useState<string | null>(null);
+  const [importProgressCurrent, setImportProgressCurrent] = useState<number | null>(null);
+  const [importProgressTotal, setImportProgressTotal] = useState<number | null>(null);
   const [showImportUrlInput, setShowImportUrlInput] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
@@ -6013,12 +6100,221 @@ function ScripturesContent() {
     }
   };
 
+  const pollImportJob = useCallback(
+    async (
+      jobId: string,
+      options?: {
+        canonicalJsonUrl?: string | null;
+        showResumeMessage?: boolean;
+      }
+    ) => {
+      if (!jobId) {
+        return;
+      }
+
+      importPollingRunIdRef.current += 1;
+      const runId = importPollingRunIdRef.current;
+      activeImportJobIdRef.current = jobId;
+
+      const updateProgressState = (
+        status: ImportJobLifecycleStatus,
+        message: string | null,
+        current: number | null,
+        total: number | null
+      ) => {
+        if (importPollingRunIdRef.current !== runId) {
+          return false;
+        }
+
+        setImportSubmitting(status === "queued" || status === "running");
+        setImportProgressMessage(message);
+        setImportProgressCurrent(current);
+        setImportProgressTotal(total);
+        writePersistedImportJobState({
+          jobId,
+          status,
+          progressMessage: message,
+          progressCurrent: current,
+          progressTotal: total,
+          canonicalJsonUrl: options?.canonicalJsonUrl ?? null,
+        });
+        return true;
+      };
+
+      if (options?.showResumeMessage) {
+        updateProgressState("running", "Resuming import status...", null, null);
+      }
+
+      const pollIntervalMs = 2000;
+      const maxPollAttempts = 900;
+      let finalResult: ImportResult | null = null;
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        if (importPollingRunIdRef.current !== runId) {
+          return;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+        if (importPollingRunIdRef.current !== runId) {
+          return;
+        }
+
+        const statusResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
+          method: "GET",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+
+        const statusRawText = await statusResponse.text();
+        let statusPayload: ImportJobStatus | null = null;
+        if (statusRawText) {
+          try {
+            const parsed = JSON.parse(statusRawText) as unknown;
+            if (parsed && typeof parsed === "object") {
+              statusPayload = parsed as ImportJobStatus;
+            }
+          } catch {
+            statusPayload = null;
+          }
+        }
+
+        if (!statusResponse.ok) {
+          clearPersistedImportJobState();
+          activeImportJobIdRef.current = null;
+          setImportSubmitting(false);
+          setImportProgressMessage(null);
+          setImportProgressCurrent(null);
+          setImportProgressTotal(null);
+          const fallbackDetail =
+            statusRawText.trim() || `Import status failed (${statusResponse.status} ${statusResponse.statusText})`;
+          alert(statusPayload?.detail || statusPayload?.error || fallbackDetail);
+          return;
+        }
+
+        const nextStatus = statusPayload?.status || "running";
+        const nextMessage = statusPayload?.progress_message || nextStatus || "Importing...";
+        const nextCurrent =
+          typeof statusPayload?.progress_current === "number" ? statusPayload.progress_current : null;
+        const nextTotal =
+          typeof statusPayload?.progress_total === "number" ? statusPayload.progress_total : null;
+
+        if (!updateProgressState(nextStatus, nextMessage, nextCurrent, nextTotal)) {
+          return;
+        }
+
+        if (nextStatus === "queued" || nextStatus === "running") {
+          continue;
+        }
+
+        if (nextStatus === "failed") {
+          clearPersistedImportJobState();
+          activeImportJobIdRef.current = null;
+          setImportSubmitting(false);
+          setImportProgressMessage(null);
+          setImportProgressCurrent(null);
+          setImportProgressTotal(null);
+          alert(statusPayload?.error || statusPayload?.result?.error || "Import job failed");
+          return;
+        }
+
+        finalResult = statusPayload?.result ?? null;
+        break;
+      }
+
+      if (importPollingRunIdRef.current !== runId) {
+        return;
+      }
+
+      if (!finalResult) {
+        alert("Import is still running. Please wait and try again in a minute.");
+        return;
+      }
+
+      if (finalResult.success === false) {
+        clearPersistedImportJobState();
+        activeImportJobIdRef.current = null;
+        setImportSubmitting(false);
+        setImportProgressMessage(null);
+        setImportProgressCurrent(null);
+        setImportProgressTotal(null);
+        alert(finalResult.detail || finalResult.error || "Import failed");
+        return;
+      }
+
+      await loadBooksRefresh();
+      const importedBookId =
+        typeof finalResult.book_id === "number" && Number.isFinite(finalResult.book_id)
+          ? finalResult.book_id
+          : null;
+      if (importedBookId !== null) {
+        setBookId(String(importedBookId));
+        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
+        loadTree(String(importedBookId));
+      }
+
+      clearPersistedImportJobState();
+      activeImportJobIdRef.current = null;
+      setImportSubmitting(false);
+      setImportProgressMessage(null);
+      setImportProgressCurrent(null);
+      setImportProgressTotal(null);
+      setShowImportUrlInput(false);
+      setImportUrl("");
+      alert(
+        `Import completed${typeof finalResult.nodes_created === "number" ? ` (${finalResult.nodes_created} nodes)` : ""}`
+      );
+    },
+    [loadBooksRefresh, loadTree, router]
+  );
+
+  useEffect(() => {
+    return () => {
+      importPollingRunIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    const persistedJob = readPersistedImportJobState();
+    if (!persistedJob?.jobId) {
+      return;
+    }
+    if (persistedJob.status === "succeeded" || persistedJob.status === "failed") {
+      clearPersistedImportJobState();
+      return;
+    }
+    if (activeImportJobIdRef.current === persistedJob.jobId) {
+      return;
+    }
+
+    setImportSubmitting(true);
+    setShowImportUrlInput(true);
+    if (typeof persistedJob.canonicalJsonUrl === "string" && persistedJob.canonicalJsonUrl) {
+      setImportUrl(persistedJob.canonicalJsonUrl);
+    }
+    setImportProgressMessage(persistedJob.progressMessage || "Resuming import status...");
+    setImportProgressCurrent(
+      typeof persistedJob.progressCurrent === "number" ? persistedJob.progressCurrent : null
+    );
+    setImportProgressTotal(
+      typeof persistedJob.progressTotal === "number" ? persistedJob.progressTotal : null
+    );
+
+    void pollImportJob(persistedJob.jobId, {
+      canonicalJsonUrl: persistedJob.canonicalJsonUrl ?? null,
+      showResumeMessage: true,
+    });
+  }, [pollImportJob]);
+
   const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.currentTarget.value = "";
     if (!file || !canImport) return;
 
     setImportSubmitting(true);
+    setImportProgressMessage("Reading JSON file...");
+    setImportProgressCurrent(null);
+    setImportProgressTotal(null);
     try {
       const raw = await file.text();
       const parsed = JSON.parse(raw) as unknown;
@@ -6031,6 +6327,8 @@ function ScripturesContent() {
         ...(parsed as Record<string, unknown>),
         import_type: "json",
       };
+
+      setImportProgressMessage("Uploading import payload...");
 
       const response = await fetch("/api/content/import", {
         method: "POST",
@@ -6066,6 +6364,9 @@ function ScripturesContent() {
       alert("Failed to import JSON file");
     } finally {
       setImportSubmitting(false);
+      setImportProgressMessage(null);
+      setImportProgressCurrent(null);
+      setImportProgressTotal(null);
     }
   };
 
@@ -6101,6 +6402,9 @@ function ScripturesContent() {
     }
 
     setImportSubmitting(true);
+    setImportProgressMessage("Starting import...");
+    setImportProgressCurrent(0);
+    setImportProgressTotal(null);
     try {
       const response = await fetch("/api/content/import/jobs", {
         method: "POST",
@@ -6116,29 +6420,6 @@ function ScripturesContent() {
       });
 
       const rawText = await response.text();
-      type ImportResult = {
-        success?: boolean;
-        book_id?: number | null;
-        nodes_created?: number;
-        error?: string;
-        detail?: string;
-      };
-      type ImportJobStart = {
-        job_id?: string;
-        status?: "queued" | "running" | "succeeded" | "failed";
-        detail?: string;
-        error?: string;
-      };
-      type ImportJobStatus = {
-        job_id?: string;
-        status?: "queued" | "running" | "succeeded" | "failed";
-        progress_message?: string;
-        progress_current?: number;
-        progress_total?: number;
-        error?: string;
-        detail?: string;
-        result?: ImportResult | null;
-      };
 
       let startResult: ImportJobStart | null = null;
       if (rawText) {
@@ -6164,83 +6445,28 @@ function ScripturesContent() {
         return;
       }
 
-      const pollIntervalMs = 2000;
-      const maxPollAttempts = 900;
-      let finalResult: ImportResult | null = null;
+      const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
+      setImportProgressMessage(queuedMessage);
+      writePersistedImportJobState({
+        jobId,
+        status: startResult?.status || "queued",
+        progressMessage: queuedMessage,
+        progressCurrent: 0,
+        progressTotal: null,
+        canonicalJsonUrl,
+      });
 
-      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-        const statusResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
-          method: "GET",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-
-        const statusRawText = await statusResponse.text();
-        let statusPayload: ImportJobStatus | null = null;
-        if (statusRawText) {
-          try {
-            const parsed = JSON.parse(statusRawText) as unknown;
-            if (parsed && typeof parsed === "object") {
-              statusPayload = parsed as ImportJobStatus;
-            }
-          } catch {
-            statusPayload = null;
-          }
-        }
-
-        if (!statusResponse.ok) {
-          const fallbackDetail = statusRawText.trim() || `Import status failed (${statusResponse.status} ${statusResponse.statusText})`;
-          alert(statusPayload?.detail || statusPayload?.error || fallbackDetail);
-          return;
-        }
-
-        if (statusPayload?.status === "queued" || statusPayload?.status === "running") {
-          continue;
-        }
-
-        if (statusPayload?.status === "failed") {
-          alert(statusPayload.error || statusPayload.result?.error || "Import job failed");
-          return;
-        }
-
-        finalResult = statusPayload?.result ?? null;
-        break;
-      }
-
-      if (!finalResult) {
-        alert("Import is still running. Please wait and try again in a minute.");
-        return;
-      }
-
-      if (finalResult.success === false) {
-        alert(finalResult.detail || finalResult.error || "Import failed");
-        return;
-      }
-
-      const result = finalResult;
-
-      await loadBooksRefresh();
-      const importedBookId =
-        typeof result.book_id === "number" && Number.isFinite(result.book_id)
-          ? result.book_id
-          : null;
-      if (importedBookId !== null) {
-        setBookId(String(importedBookId));
-        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
-        loadTree(String(importedBookId));
-      }
-
-      setShowImportUrlInput(false);
-      setImportUrl("");
-      alert(
-        `Import completed${typeof result.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
-      );
+      await pollImportJob(jobId, { canonicalJsonUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON from URL";
       alert(message);
     } finally {
-      setImportSubmitting(false);
+      if (activeImportJobIdRef.current === null) {
+        setImportSubmitting(false);
+        setImportProgressMessage(null);
+        setImportProgressCurrent(null);
+        setImportProgressTotal(null);
+      }
     }
   };
 
@@ -7784,6 +8010,28 @@ function ScripturesContent() {
               >
                 Cancel
               </button>
+              {(importSubmitting || importProgressMessage) && (
+                <div className="basis-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{importProgressMessage || "Importing..."}</span>
+                    {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
+                      <span className="text-xs text-blue-800">
+                        {importProgressCurrent} / {importProgressTotal}
+                      </span>
+                    )}
+                  </div>
+                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                      <div
+                        className="h-full rounded-full bg-blue-600 transition-all"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
