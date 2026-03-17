@@ -414,6 +414,10 @@ type BookPreviewArtifact = {
   };
   render_settings: BookPreviewRenderSettings;
   warnings?: string[];
+  offset?: number;
+  limit?: number;
+  total_blocks?: number;
+  has_more?: boolean;
 };
 
 type BasketItem = {
@@ -573,6 +577,8 @@ const SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY = "scriptures_media_manager_density";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY = "scriptures_media_manager_density_node";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY = "scriptures_media_manager_density_book";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY = "scriptures_media_manager_density_bank";
+const BOOK_PREVIEW_PAGE_SIZE = 500;
+const BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX = 240;
 const DEFAULT_CONTENT_FIELD_LABELS = {
   sanskrit: "Sanskrit",
   transliteration: "Transliteration",
@@ -1614,6 +1620,7 @@ function ScripturesContent() {
   const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
+  const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const importPollingRunIdRef = useRef(0);
   const activeImportJobIdRef = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
@@ -1661,6 +1668,7 @@ function ScripturesContent() {
   const [showBrowseBookModal, setShowBrowseBookModal] = useState(false);
   const [browseTransitioningFromPreview, setBrowseTransitioningFromPreview] = useState(false);
   const [bookPreviewLoading, setBookPreviewLoading] = useState(false);
+  const [bookPreviewLoadingMore, setBookPreviewLoadingMore] = useState(false);
   const [bookPreviewLoadingScope, setBookPreviewLoadingScope] = useState<"book" | "node">("book");
   const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
@@ -5736,7 +5744,9 @@ function ScripturesContent() {
   const handlePreviewBook = async (
     scope: "book" | "node" = "book",
     targetBookId?: string,
-    historyMode: "push" | "replace" = "push"
+    historyMode: "push" | "replace" = "push",
+    pageOffset: number = 0,
+    append: boolean = false
   ) => {
     const previewBookId = targetBookId ?? bookId;
     if (!previewBookId) return;
@@ -5745,18 +5755,24 @@ function ScripturesContent() {
       return;
     }
 
-    const nextLanguageSettings = {
-      ...bookPreviewLanguageSettings,
-    };
-    const nextShowPreviewLabels = showPreviewLabels;
-    const nextShowPreviewDetails = showPreviewDetails;
-    const nextShowPreviewTitles = showPreviewTitles;
-    const nextShowPreviewMedia = showPreviewMedia;
-    const nextPreviewTransliterationScript = previewTransliterationScript;
+    const nextLanguageSettings = append
+      ? { ...appliedBookPreviewLanguageSettings }
+      : { ...bookPreviewLanguageSettings };
+    const nextShowPreviewLabels = append ? appliedShowPreviewLabels : showPreviewLabels;
+    const nextShowPreviewDetails = append ? appliedShowPreviewDetails : showPreviewDetails;
+    const nextShowPreviewTitles = append ? appliedShowPreviewTitles : showPreviewTitles;
+    const nextShowPreviewMedia = append ? appliedShowPreviewMedia : showPreviewMedia;
+    const nextPreviewTransliterationScript = append
+      ? appliedBookPreviewTransliterationScript
+      : previewTransliterationScript;
 
     setBookPreviewLoadingScope(scope);
-    setBookPreviewLoading(true);
     setBookPreviewError(null);
+    if (append) {
+      setBookPreviewLoadingMore(true);
+    } else {
+      setBookPreviewLoading(true);
+    }
 
     try {
       const response = await fetch(`/api/books/${previewBookId}/preview/render`, {
@@ -5796,6 +5812,8 @@ function ScripturesContent() {
             show_media: nextShowPreviewMedia,
             text_order: ["sanskrit", "transliteration", "english", "text"],
           },
+          offset: pageOffset,
+          limit: scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -5809,7 +5827,43 @@ function ScripturesContent() {
       }
 
       const artifact = payload as BookPreviewArtifact;
-      setBookPreviewArtifact(artifact);
+      const normalizedArtifact: BookPreviewArtifact = {
+        ...artifact,
+        offset: typeof artifact.offset === "number" ? artifact.offset : pageOffset,
+        limit:
+          typeof artifact.limit === "number"
+            ? artifact.limit
+            : scope === "book"
+              ? BOOK_PREVIEW_PAGE_SIZE
+              : 5000,
+        total_blocks:
+          typeof artifact.total_blocks === "number"
+            ? artifact.total_blocks
+            : artifact.sections.body.length,
+        has_more: Boolean(artifact.has_more),
+      };
+
+      if (append) {
+        setBookPreviewArtifact((prev) => {
+          if (!prev) {
+            return normalizedArtifact;
+          }
+          return {
+            ...normalizedArtifact,
+            book_template: prev.book_template || normalizedArtifact.book_template,
+            book_media_items: prev.book_media_items || normalizedArtifact.book_media_items,
+            warnings: Array.from(new Set([...(prev.warnings || []), ...(normalizedArtifact.warnings || [])])),
+            sections: {
+              body: [...prev.sections.body, ...normalizedArtifact.sections.body],
+            },
+            offset: 0,
+            total_blocks: normalizedArtifact.total_blocks ?? prev.sections.body.length,
+            has_more: Boolean(normalizedArtifact.has_more),
+          };
+        });
+      } else {
+        setBookPreviewArtifact(normalizedArtifact);
+      }
       setAppliedBookPreviewLanguageSettings(nextLanguageSettings);
       setAppliedShowPreviewLabels(nextShowPreviewLabels);
       setAppliedShowPreviewDetails(nextShowPreviewDetails);
@@ -5817,29 +5871,66 @@ function ScripturesContent() {
       setAppliedShowPreviewMedia(nextShowPreviewMedia);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
 
-      const nextPreferences = normalizePreferences({
-        ...(preferences || DEFAULT_USER_PREFERENCES),
-        preview_show_titles: nextShowPreviewTitles,
-        preview_show_labels: nextShowPreviewLabels,
-        preview_show_details: nextShowPreviewDetails,
-        preview_show_media: nextShowPreviewMedia,
-        preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
-        preview_show_transliteration: nextLanguageSettings.show_transliteration,
-        preview_show_english: nextLanguageSettings.show_english,
-        preview_transliteration_script: nextPreviewTransliterationScript,
-      });
-      setPreferences(nextPreferences);
-      void savePreferences(nextPreferences);
+      if (!append) {
+        const nextPreferences = normalizePreferences({
+          ...(preferences || DEFAULT_USER_PREFERENCES),
+          preview_show_titles: nextShowPreviewTitles,
+          preview_show_labels: nextShowPreviewLabels,
+          preview_show_details: nextShowPreviewDetails,
+          preview_show_media: nextShowPreviewMedia,
+          preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
+          preview_show_transliteration: nextLanguageSettings.show_transliteration,
+          preview_show_english: nextLanguageSettings.show_english,
+          preview_transliteration_script: nextPreviewTransliterationScript,
+        });
+        setPreferences(nextPreferences);
+        void savePreferences(nextPreferences);
+      }
 
-      const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
-      lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
-      syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
-      setShowBookPreview(true);
+      if (!append) {
+        const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
+        lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
+        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
+        setShowBookPreview(true);
+      }
     } catch (err) {
-      setShowBookPreview(false);
+      if (!append) {
+        setShowBookPreview(false);
+      }
       setBookPreviewError(err instanceof Error ? err.message : "Failed to render book preview");
     } finally {
-      setBookPreviewLoading(false);
+      if (append) {
+        setBookPreviewLoadingMore(false);
+      } else {
+        setBookPreviewLoading(false);
+      }
+    }
+  };
+
+  const loadMoreBookPreview = async () => {
+    if (
+      !bookPreviewArtifact ||
+      bookPreviewArtifact.preview_scope !== "book" ||
+      !bookPreviewArtifact.has_more ||
+      bookPreviewLoading ||
+      bookPreviewLoadingMore
+    ) {
+      return;
+    }
+
+    const nextOffset = bookPreviewArtifact.sections.body.length;
+    await handlePreviewBook("book", String(bookPreviewArtifact.book_id), "replace", nextOffset, true);
+  };
+
+  const handleBookPreviewScroll = () => {
+    const container = bookPreviewScrollContainerRef.current;
+    if (!container || !bookPreviewArtifact?.has_more || bookPreviewLoading || bookPreviewLoadingMore) {
+      return;
+    }
+
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (remaining <= BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX) {
+      void loadMoreBookPreview();
     }
   };
 

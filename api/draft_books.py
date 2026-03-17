@@ -3248,7 +3248,12 @@ def preview_book_render(
         source_nodes,
         root_node.id if root_node else None,
     )
-    node_media_by_id = _build_node_preview_media_map(db, [node.id for node in source_nodes])
+    total_nodes = len(source_nodes)
+    page_offset = max(payload.offset, 0)
+    page_limit = max(payload.limit, 1)
+    paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
+
+    node_media_by_id = _build_node_preview_media_map(db, [node.id for node in paged_source_nodes])
     book_media_items = _extract_book_preview_media_items(book)
 
     body_items = [
@@ -3257,10 +3262,10 @@ def preview_book_render(
             "source_book_id": book.id,
             "level_name": node.level_name,
             "title": _book_title_for_preview(node),
-            "order": index,
+            "order": page_offset + index,
           "media_items": node_media_by_id.get(node.id, []),
         }
-        for index, node in enumerate(source_nodes, start=1)
+        for index, node in enumerate(paged_source_nodes, start=1)
     ]
 
     preview_payload: dict = {
@@ -3332,6 +3337,10 @@ def preview_book_render(
         template_metadata=template_metadata,
         preview_mode="book",
         warnings=template_warnings,
+        offset=page_offset,
+        limit=page_limit,
+        total_blocks=total_nodes,
+        has_more=(page_offset + len(paged_source_nodes)) < total_nodes,
     )
 
 

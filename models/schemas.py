@@ -910,6 +910,8 @@ class BookPreviewRenderRequest(BaseModel):
     session_template_bindings: dict | None = None
     render_settings: dict | None = None
     metadata_bindings: dict | None = None
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=500, ge=1, le=5000)
 
 
 class BookPreviewRenderSections(BaseModel):
@@ -937,6 +939,10 @@ class BookPreviewRenderArtifactPublic(BaseModel):
     template_metadata: SnapshotTemplateMetadata = Field(default_factory=SnapshotTemplateMetadata)
     preview_mode: Literal["book"] = "book"
     warnings: list[str] = Field(default_factory=list)
+    offset: int = 0
+    limit: int = 500
+    total_blocks: int = 0
+    has_more: bool = False
 
 
 class ProvenanceRecordPublic(BaseModel):
