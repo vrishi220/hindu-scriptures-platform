@@ -165,9 +165,7 @@ type NodeContent = {
       transliteration?: string;
       translation?: string;
     };
-    translations?: {
-      english?: string;
-    };
+    translations?: Record<string, string>;
     word_meanings?: {
       version?: string;
       rows?: Array<{
@@ -198,9 +196,7 @@ type NodeContent = {
       transliteration?: string;
       translation?: string;
     };
-    translations?: {
-      english?: string;
-    };
+    translations?: Record<string, string>;
     [key: string]: unknown;
   } | null;
   metadata_json?: Record<string, unknown> | null;
@@ -358,6 +354,9 @@ type BookPreviewBlock = {
     word_meanings_rows?: Array<{
       id?: string;
       order?: number;
+      source?: {
+        language?: string | null;
+      };
       resolved_source?: {
         text?: string;
         mode?: string | null;
@@ -1247,12 +1246,117 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_show_transliteration: true,
   preview_show_english: true,
   preview_transliteration_script: "iast",
+  preview_word_meanings_display_mode: "inline",
   ui_theme: "classic",
   ui_density: "comfortable",
   scriptures_book_browser_view: "list",
   scriptures_book_browser_density: 0,
   scriptures_media_manager_view: "list",
   admin_media_bank_browser_view: "list",
+};
+
+const TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL: Record<string, string> = {
+  en: "english",
+  eng: "english",
+  english: "english",
+  hi: "hindi",
+  hindi: "hindi",
+  te: "telugu",
+  telugu: "telugu",
+  kn: "kannada",
+  kannada: "kannada",
+  ta: "tamil",
+  tamil: "tamil",
+  ml: "malayalam",
+  malayalam: "malayalam",
+  sa: "sanskrit",
+  sanskrit: "sanskrit",
+};
+
+const TRANSLATION_CANONICAL_TO_CODE: Record<string, string> = {
+  english: "en",
+  hindi: "hi",
+  telugu: "te",
+  kannada: "kn",
+  tamil: "ta",
+  malayalam: "ml",
+  sanskrit: "sa",
+};
+
+const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
+  english: "English",
+  hindi: "Hindi",
+  telugu: "Telugu",
+  kannada: "Kannada",
+  tamil: "Tamil",
+  malayalam: "Malayalam",
+  sanskrit: "Sanskrit",
+};
+
+const normalizeTranslationLanguage = (value?: string | null): string => {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "english";
+  }
+  return TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL[normalized] || normalized;
+};
+
+const translationLanguageToCode = (value?: string | null): string => {
+  const canonical = normalizeTranslationLanguage(value);
+  return TRANSLATION_CANONICAL_TO_CODE[canonical] || canonical;
+};
+
+const translationLanguageLabel = (value?: string | null): string => {
+  const canonical = normalizeTranslationLanguage(value);
+  return TRANSLATION_LANGUAGE_LABELS[canonical] || canonical.toUpperCase();
+};
+
+const toTranslationRecord = (value: unknown): Record<string, string> => {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const record: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof key !== "string" || !key.trim()) {
+      continue;
+    }
+    if (typeof rawValue !== "string" || !rawValue.trim()) {
+      continue;
+    }
+    record[key.trim().toLowerCase()] = rawValue.trim();
+  }
+  return record;
+};
+
+const getTranslationLookupKeys = (language: string): string[] => {
+  const canonical = normalizeTranslationLanguage(language);
+  const code = translationLanguageToCode(canonical);
+  const keys = [canonical, code];
+  if (canonical === "english") {
+    keys.push("english", "en");
+  }
+  return Array.from(new Set(keys.filter(Boolean)));
+};
+
+const pickPreferredTranslationText = (
+  translations: Record<string, string>,
+  preferredLanguage: string,
+  ...fallbackValues: unknown[]
+): string => {
+  const preferredKeys = getTranslationLookupKeys(preferredLanguage);
+  const englishKeys = getTranslationLookupKeys("english");
+  const candidateValues = [
+    ...preferredKeys.map((key) => translations[key]),
+    ...englishKeys.map((key) => translations[key]),
+    ...fallbackValues,
+  ];
+
+  for (const value of candidateValues) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
 };
 
 type StoredScripturesPreferences = {
@@ -1278,6 +1382,9 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   preview_transliteration_script: normalizeTransliterationScript(
     value?.preview_transliteration_script
   ),
+  preview_word_meanings_display_mode: normalizePreviewWordMeaningsDisplayMode(
+    value?.preview_word_meanings_display_mode
+  ),
   ui_theme: normalizeUiTheme(value?.ui_theme),
   ui_density: normalizeUiDensity(value?.ui_density),
   scriptures_book_browser_view: normalizeBrowserView(value?.scriptures_book_browser_view),
@@ -1286,18 +1393,14 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   admin_media_bank_browser_view: normalizeBrowserView(value?.admin_media_bank_browser_view),
 });
 
-const normalizeSourceLanguage = (value?: string | null): "english" | "sanskrit" | "hindi" => {
+const normalizeSourceLanguage = (value?: string | null): string =>
+  normalizeTranslationLanguage(value);
+
+const normalizePreviewWordMeaningsDisplayMode = (
+  value?: string | null
+): "inline" | "table" => {
   const normalized = (value || "").trim().toLowerCase();
-  if (normalized === "en" || normalized === "eng" || normalized === "english") {
-    return "english";
-  }
-  if (normalized === "sa" || normalized === "sanskrit") {
-    return "sanskrit";
-  }
-  if (normalized === "hi" || normalized === "hindi") {
-    return "hindi";
-  }
-  return "english";
+  return normalized === "table" ? "table" : "inline";
 };
 
 const isBookScopedCategory = (category: MetadataCategory): boolean => {
@@ -1691,11 +1794,15 @@ function ScripturesContent() {
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
   const [showPreviewMedia, setShowPreviewMedia] = useState(true);
+  const [previewWordMeaningsDisplayMode, setPreviewWordMeaningsDisplayMode] =
+    useState<"inline" | "table">("inline");
   // Track the last applied preview options
   const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
   const [appliedShowPreviewDetails, setAppliedShowPreviewDetails] = useState(false);
   const [appliedShowPreviewTitles, setAppliedShowPreviewTitles] = useState(false);
   const [appliedShowPreviewMedia, setAppliedShowPreviewMedia] = useState(true);
+  const [appliedPreviewWordMeaningsDisplayMode, setAppliedPreviewWordMeaningsDisplayMode] =
+    useState<"inline" | "table">("inline");
   const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [showPreviewControls, setShowPreviewControls] = useState(false);
@@ -2109,14 +2216,32 @@ function ScripturesContent() {
     return rows
       .map((row, index) => {
         const sourceText = (row?.resolved_source?.text || "").trim();
+        const sourceMode = (row?.resolved_source?.mode || "").trim().toLowerCase();
+        const sourceScheme = (row?.resolved_source?.scheme || "").trim().toLowerCase();
+        const sourceLanguage = (row?.source?.language || "").trim().toLowerCase();
         const meaningText = (row?.resolved_meaning?.text || "").trim();
         if (!sourceText && !meaningText) {
           return null;
         }
 
+        let renderedSourceText = sourceText;
+        if (sourceText && sourceLanguage === "sa") {
+          if (hasDevanagariLetters(sourceText)) {
+            renderedSourceText = transliterateFromDevanagari(
+              sourceText,
+              appliedPreviewTransliterationScript
+            );
+          } else if (sourceMode === "transliteration" && (!sourceScheme || sourceScheme === "iast")) {
+            renderedSourceText = transliterateFromIast(
+              sourceText,
+              appliedPreviewTransliterationScript
+            );
+          }
+        }
+
         return {
           key: `${row?.id || "wm"}_${row?.order || index + 1}_${index}`,
-          sourceText,
+          sourceText: renderedSourceText,
           meaningText,
           meaningLanguage: (row?.resolved_meaning?.language || "").trim().toLowerCase(),
           fallbackBadgeVisible: Boolean(row?.resolved_meaning?.fallback_badge_visible),
@@ -2206,9 +2331,7 @@ function ScripturesContent() {
         transliteration?: string;
         translation?: string;
       };
-      translations?: {
-        english?: string;
-      };
+      translations?: Record<string, string>;
       [key: string]: unknown;
     } | null;
     summary_data?: {
@@ -2217,9 +2340,7 @@ function ScripturesContent() {
         transliteration?: string;
         translation?: string;
       };
-      translations?: {
-        english?: string;
-      };
+      translations?: Record<string, string>;
       [key: string]: unknown;
     } | null;
   }): Record<string, unknown> => {
@@ -2228,8 +2349,8 @@ function ScripturesContent() {
     const summaryData = toRecord(nodePayload.summary_data);
     const basic = toRecord(contentData.basic);
     const summaryBasic = toRecord(summaryData.basic);
-    const translations = toRecord(contentData.translations);
-    const summaryTranslations = toRecord(summaryData.translations);
+    const translations = toTranslationRecord(contentData.translations);
+    const summaryTranslations = toTranslationRecord(summaryData.translations);
     const pickFirstNonEmptyString = (...values: unknown[]): string => {
       for (const value of values) {
         if (typeof value === "string" && value.trim()) {
@@ -2263,17 +2384,18 @@ function ScripturesContent() {
       summaryData.text_transliteration,
       nodePayload.title_transliteration
     );
-    const englishText = pickFirstNonEmptyString(
-      translations.english,
-      translations.en,
+    const translationText = pickPreferredTranslationText(
+      {
+        ...summaryTranslations,
+        ...translations,
+      },
+      sourceLanguage,
       basic.translation,
       basic.english,
       contentData.english,
       contentData.en,
       contentData.translation,
       contentData.text_english,
-      summaryTranslations.english,
-      summaryTranslations.en,
       summaryBasic.translation,
       summaryBasic.english,
       summaryData.english,
@@ -2312,13 +2434,13 @@ function ScripturesContent() {
       fallback.transliteration_text = transliterationText;
       fallback.verse_transliteration = transliterationText;
     }
-    if (englishText) {
-      fallback.translation = englishText;
-      fallback.english = englishText;
-      fallback.text_english = englishText;
-      fallback.english_text = englishText;
-      fallback.english_translation = englishText;
-      fallback.verse_translation = englishText;
+    if (translationText) {
+      fallback.translation = translationText;
+      fallback.english = translationText;
+      fallback.text_english = translationText;
+      fallback.english_text = translationText;
+      fallback.english_translation = translationText;
+      fallback.verse_translation = translationText;
     }
     const sequenceNumberValue =
       nodePayload.sequence_number !== null && nodePayload.sequence_number !== undefined
@@ -3776,6 +3898,9 @@ function ScripturesContent() {
     setShowPreviewLabels(preferences.preview_show_labels);
     setShowPreviewDetails(preferences.preview_show_details);
     setShowPreviewMedia(preferences.preview_show_media);
+    setPreviewWordMeaningsDisplayMode(
+      normalizePreviewWordMeaningsDisplayMode(preferences.preview_word_meanings_display_mode)
+    );
     setBookPreviewLanguageSettings(previewLanguages);
     setBookPreviewTransliterationScript(previewScript);
 
@@ -3783,6 +3908,9 @@ function ScripturesContent() {
     setAppliedShowPreviewLabels(preferences.preview_show_labels);
     setAppliedShowPreviewDetails(preferences.preview_show_details);
     setAppliedShowPreviewMedia(preferences.preview_show_media);
+    setAppliedPreviewWordMeaningsDisplayMode(
+      normalizePreviewWordMeaningsDisplayMode(preferences.preview_word_meanings_display_mode)
+    );
     setAppliedBookPreviewLanguageSettings(previewLanguages);
     setAppliedBookPreviewTransliterationScript(previewScript);
   }, [preferences]);
@@ -5762,6 +5890,9 @@ function ScripturesContent() {
     const nextShowPreviewDetails = append ? appliedShowPreviewDetails : showPreviewDetails;
     const nextShowPreviewTitles = append ? appliedShowPreviewTitles : showPreviewTitles;
     const nextShowPreviewMedia = append ? appliedShowPreviewMedia : showPreviewMedia;
+    const nextPreviewWordMeaningsDisplayMode = append
+      ? appliedPreviewWordMeaningsDisplayMode
+      : previewWordMeaningsDisplayMode;
     const nextPreviewTransliterationScript = append
       ? appliedBookPreviewTransliterationScript
       : previewTransliterationScript;
@@ -5797,13 +5928,14 @@ function ScripturesContent() {
                   allow_runtime_transliteration_generation: true,
                 },
                 meanings: {
-                  meaning_language: preferences?.source_language === "hindi" ? "hi" : "en",
+                  meaning_language: translationLanguageToCode(preferences?.source_language),
                   fallback_order: ["user_preference", "en", "first_available"],
                 },
                 rendering: {
                   show_language_badge_when_fallback_used: true,
                 },
               },
+              translation_language: translationLanguageToCode(preferences?.source_language),
             },
           },
           render_settings: {
@@ -5869,6 +6001,7 @@ function ScripturesContent() {
       setAppliedShowPreviewDetails(nextShowPreviewDetails);
       setAppliedShowPreviewTitles(nextShowPreviewTitles);
       setAppliedShowPreviewMedia(nextShowPreviewMedia);
+      setAppliedPreviewWordMeaningsDisplayMode(nextPreviewWordMeaningsDisplayMode);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
 
       if (!append) {
@@ -5882,6 +6015,7 @@ function ScripturesContent() {
           preview_show_transliteration: nextLanguageSettings.show_transliteration,
           preview_show_english: nextLanguageSettings.show_english,
           preview_transliteration_script: nextPreviewTransliterationScript,
+          preview_word_meanings_display_mode: nextPreviewWordMeaningsDisplayMode,
         });
         setPreferences(nextPreferences);
         void savePreferences(nextPreferences);
@@ -5933,6 +6067,25 @@ function ScripturesContent() {
       void loadMoreBookPreview();
     }
   };
+
+  useEffect(() => {
+    if (!showBookPreview || !bookPreviewArtifact || bookPreviewArtifact.preview_scope !== "book") {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      handleBookPreviewScroll();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [
+    showBookPreview,
+    bookPreviewArtifact,
+    bookPreviewLoading,
+    bookPreviewLoadingMore,
+  ]);
 
   useEffect(() => {
     const previewParam = searchParams.get("preview");
@@ -6620,15 +6773,18 @@ function ScripturesContent() {
 
   const buildFormDataFromNode = (node: NodeContent) => {
     const contentBasic = node.content_data?.basic;
-    const contentTranslations = node.content_data?.translations;
-    const englishTranslation =
-      contentTranslations?.english || contentBasic?.translation || "";
+    const contentTranslations = toTranslationRecord(node.content_data?.translations);
+    const preferredTranslation = pickPreferredTranslationText(
+      contentTranslations,
+      sourceLanguage,
+      contentBasic?.translation
+    );
     const hasContent = Boolean(
       node.has_content ||
         contentBasic?.sanskrit ||
         contentBasic?.transliteration ||
         contentBasic?.translation ||
-        contentTranslations?.english
+        preferredTranslation
     );
 
     return {
@@ -6642,7 +6798,7 @@ function ScripturesContent() {
       hasContent,
       contentSanskrit: contentBasic?.sanskrit || "",
       contentTransliteration: contentBasic?.transliteration || "",
-      contentEnglish: englishTranslation,
+      contentEnglish: preferredTranslation,
       tags: node.tags?.join(", ") || "",
       wordMeanings: mapWordMeaningsRowsFromContent(node),
     };
@@ -6935,14 +7091,46 @@ function ScripturesContent() {
 
       const contentData: Record<string, unknown> = {};
       if (formData.hasContent) {
+        const translationLanguage = normalizeTranslationLanguage(preferences?.source_language);
+        const translationCode = translationLanguageToCode(translationLanguage);
+        const existingTranslations = toTranslationRecord(nodeContent?.content_data?.translations);
+        const existingBasic =
+          nodeContent?.content_data?.basic && typeof nodeContent.content_data.basic === "object"
+            ? nodeContent.content_data.basic
+            : undefined;
+
+        const nextTranslations: Record<string, string> = {
+          ...existingTranslations,
+        };
+        if (formData.contentEnglish.trim()) {
+          nextTranslations[translationCode] = formData.contentEnglish.trim();
+          if (translationCode === "en") {
+            nextTranslations.english = formData.contentEnglish.trim();
+          }
+        } else {
+          delete nextTranslations[translationCode];
+          if (translationCode === "en") {
+            delete nextTranslations.english;
+          }
+        }
+
+        const englishFallback = pickPreferredTranslationText(
+          nextTranslations,
+          "english",
+          existingBasic?.translation
+        );
+
         contentData.basic = {
           sanskrit: contentPair.sanskrit || undefined,
           transliteration: contentPair.transliteration || undefined,
-          translation: formData.contentEnglish || undefined,
+          translation:
+            translationCode === "en"
+              ? formData.contentEnglish || undefined
+              : englishFallback || undefined,
         };
-        contentData.translations = {
-          english: formData.contentEnglish || undefined,
-        };
+        contentData.translations = Object.keys(nextTranslations).length > 0
+          ? nextTranslations
+          : undefined;
 
         const wordMeaningRows = modalWordMeaningPayloadRows;
         const validationErrors = validateWordMeaningPayloadRows(wordMeaningRows);
@@ -7185,14 +7373,46 @@ function ScripturesContent() {
 
       const contentData: Record<string, unknown> = {};
       if (inlineFormData.hasContent) {
+        const translationLanguage = normalizeTranslationLanguage(preferences?.source_language);
+        const translationCode = translationLanguageToCode(translationLanguage);
+        const existingTranslations = toTranslationRecord(nodeContent?.content_data?.translations);
+        const existingBasic =
+          nodeContent?.content_data?.basic && typeof nodeContent.content_data.basic === "object"
+            ? nodeContent.content_data.basic
+            : undefined;
+
+        const nextTranslations: Record<string, string> = {
+          ...existingTranslations,
+        };
+        if (inlineFormData.contentEnglish.trim()) {
+          nextTranslations[translationCode] = inlineFormData.contentEnglish.trim();
+          if (translationCode === "en") {
+            nextTranslations.english = inlineFormData.contentEnglish.trim();
+          }
+        } else {
+          delete nextTranslations[translationCode];
+          if (translationCode === "en") {
+            delete nextTranslations.english;
+          }
+        }
+
+        const englishFallback = pickPreferredTranslationText(
+          nextTranslations,
+          "english",
+          existingBasic?.translation
+        );
+
         contentData.basic = {
           sanskrit: contentPair.sanskrit || undefined,
           transliteration: contentPair.transliteration || undefined,
-          translation: inlineFormData.contentEnglish || undefined,
+          translation:
+            translationCode === "en"
+              ? inlineFormData.contentEnglish || undefined
+              : englishFallback || undefined,
         };
-        contentData.translations = {
-          english: inlineFormData.contentEnglish || undefined,
-        };
+        contentData.translations = Object.keys(nextTranslations).length > 0
+          ? nextTranslations
+          : undefined;
 
         const wordMeaningRows = inlineWordMeaningPayloadRows;
 
@@ -9601,7 +9821,9 @@ function ScripturesContent() {
                             </div>
                             <div>
                               <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                {contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
+                                {sourceLanguage === "english"
+                                  ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
+                                  : `${translationLanguageLabel(sourceLanguage)} Translation`}
                               </label>
                               <div className="group relative mt-1">
                                 <textarea
@@ -9620,7 +9842,7 @@ function ScripturesContent() {
                                   onClear={() =>
                                     setInlineFormData((prev) => ({ ...prev, contentEnglish: "" }))
                                   }
-                                  ariaLabel="Clear inline content English"
+                                  ariaLabel="Clear inline translation"
                                   position="top"
                                 />
                               </div>
@@ -9736,31 +9958,37 @@ function ScripturesContent() {
                                 sanskrit,
                                 transliterationRaw
                               );
-                              const english = formatValue(
-                                nodeContent.content_data?.translations?.english ||
-                                  nodeContent.content_data?.basic?.translation
+                              const translations = toTranslationRecord(
+                                nodeContent.content_data?.translations
+                              );
+                              const preferredTranslationLabel = translationLanguageLabel(
+                                sourceLanguage
+                              );
+                              const translationValue = pickPreferredTranslationText(
+                                translations,
+                                sourceLanguage,
+                                nodeContent.content_data?.basic?.translation
                               );
                               const sanskritLabel = contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
                               const transliterationLabel =
                                 contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
-                              const englishLabel = contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english;
+                              const translationLabel =
+                                sourceLanguage === "english"
+                                  ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
+                                  : `${preferredTranslationLabel} Translation`;
 
                               const primaryContent =
                                 showOnlyPreferredScript
                                   ? sourceLanguage === "sanskrit"
-                                    ? preferredSanskrit || english
-                                    : sourceLanguage === "hindi"
-                                    ? english || originalSanskrit
-                                    : english || originalSanskrit
-                                  : originalSanskrit || english;
+                                    ? preferredSanskrit || translationValue
+                                    : translationValue || originalSanskrit
+                                  : originalSanskrit || translationValue;
 
                               const primaryLabel =
                                 showOnlyPreferredScript
                                   ? sourceLanguage === "sanskrit"
                                     ? sanskritLabel
-                                    : sourceLanguage === "hindi"
-                                    ? "Hindi/Translation"
-                                    : englishLabel
+                                    : translationLabel
                                   : "Sanskrit (Original)";
 
                               const showSecondaryTransliteration =
@@ -9804,13 +10032,15 @@ function ScripturesContent() {
                                       </div>
                                     </div>
                                   )}
-                                  {!showOnlyPreferredScript && english && english !== primaryContent && (
+                                  {!showOnlyPreferredScript &&
+                                    translationValue &&
+                                    translationValue !== primaryContent && (
                                     <div>
                                       <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                        {englishLabel}
+                                        {translationLabel}
                                       </div>
                                       <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                        {english}
+                                        {translationValue}
                                       </div>
                                     </div>
                                   )}
@@ -11500,7 +11730,11 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => setShowPreviewControls((prev) => !prev)}
-                    className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                    className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition sm:text-xs ${
+                      showPreviewControls
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white shadow-sm"
+                        : "border-black/10 text-zinc-600 hover:border-black/20"
+                    }`}
                   >
                     {showPreviewControls ? "Hide Controls" : "Show Controls"}
                   </button>
@@ -11514,30 +11748,9 @@ function ScripturesContent() {
                 </div>
               </div>
 
-              <div className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4">
-                {previewLinkMessage && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs text-zinc-700">
-                    {previewLinkMessage}
-                  </div>
-                )}
-                {bookPreviewLoading && (
-                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
-                    <span
-                      aria-hidden
-                      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
-                    />
-                    <span>{previewLoadingMessageWithElapsed}</span>
-                  </div>
-                )}
-
-                {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
-                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                    {bookPreviewArtifact.warnings.join(" ")}
-                  </div>
-                )}
-
-                {showPreviewControls && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
+              {showPreviewControls && (
+                <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
+                  <div className="mx-auto w-full max-w-5xl rounded-lg border border-black/10 bg-white/90 p-2.5">
                     <div className="space-y-2">
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
@@ -11577,6 +11790,22 @@ function ScripturesContent() {
                               disabled={bookPreviewLoading}
                             />
                             Show multimedia
+                          </label>
+                          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                            Word meanings
+                            <select
+                              value={previewWordMeaningsDisplayMode}
+                              onChange={(event) =>
+                                setPreviewWordMeaningsDisplayMode(
+                                  normalizePreviewWordMeaningsDisplayMode(event.target.value)
+                                )
+                              }
+                              disabled={bookPreviewLoading}
+                              className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <option value="inline">Inline</option>
+                              <option value="table">Table</option>
+                            </select>
                           </label>
                         </div>
                       </div>
@@ -11664,6 +11893,7 @@ function ScripturesContent() {
                                 showPreviewDetails === appliedShowPreviewDetails &&
                                 showPreviewTitles === appliedShowPreviewTitles &&
                                 showPreviewMedia === appliedShowPreviewMedia &&
+                                previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
                                 previewTransliterationScript === appliedBookPreviewTransliterationScript)
                             }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
@@ -11673,6 +11903,33 @@ function ScripturesContent() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              <div
+                ref={bookPreviewScrollContainerRef}
+                onScroll={handleBookPreviewScroll}
+                className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4"
+              >
+                {previewLinkMessage && (
+                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs text-zinc-700">
+                    {previewLinkMessage}
+                  </div>
+                )}
+                {bookPreviewLoading && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                    <span
+                      aria-hidden
+                      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
+                    />
+                    <span>{previewLoadingMessageWithElapsed}</span>
+                  </div>
+                )}
+
+                {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                    {bookPreviewArtifact.warnings.join(" ")}
                   </div>
                 )}
 
@@ -11773,9 +12030,43 @@ function ScripturesContent() {
                           </div>
                           {wordMeaningRows.length > 0 && (
                             <div className="mt-2 border-t border-black/10 pt-2">
-                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                                {wordMeaningInlineText}
-                              </p>
+                              {appliedPreviewWordMeaningsDisplayMode === "table" ? (
+                                <div className="overflow-x-auto rounded-lg border border-black/10 bg-white/80">
+                                  <table className="min-w-full border-collapse text-sm text-zinc-700">
+                                    <thead className="bg-zinc-50/70 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                                      <tr>
+                                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                                          Source
+                                        </th>
+                                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                                          Meaning
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {wordMeaningRows.map((row) => (
+                                        <tr key={row.key} className="border-b border-black/5 last:border-b-0">
+                                          <td className="px-2 py-1.5 align-top text-zinc-800">
+                                            {row.sourceText || "—"}
+                                          </td>
+                                          <td className="px-2 py-1.5 align-top text-zinc-700">
+                                            {row.meaningText || "—"}
+                                            {row.fallbackBadgeVisible && row.meaningLanguage ? (
+                                              <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                                                ({row.meaningLanguage})
+                                              </span>
+                                            ) : null}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                                  {wordMeaningInlineText}
+                                </p>
+                              )}
                             </div>
                           )}
                           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
@@ -11824,6 +12115,12 @@ function ScripturesContent() {
                         </article>
                       );
                     })
+                  )}
+
+                  {(bookPreviewLoadingMore || (bookPreviewArtifact.preview_scope === "book" && bookPreviewArtifact.has_more)) && (
+                    <div className="py-3 text-center text-xs text-zinc-500">
+                      {bookPreviewLoadingMore ? "Loading more…" : "Scroll to load more"}
+                    </div>
                   )}
                 </div>
               </div>
@@ -12384,7 +12681,9 @@ function ScripturesContent() {
                     </div>
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        {contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
+                        {sourceLanguage === "english"
+                          ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
+                          : `${translationLanguageLabel(sourceLanguage)} Translation`}
                       </label>
                       <div className="group relative mt-1">
                         <textarea
@@ -12399,7 +12698,7 @@ function ScripturesContent() {
                         <InlineClearButton
                           visible={Boolean(formData.contentEnglish)}
                           onClear={() => setFormData((prev) => ({ ...prev, contentEnglish: "" }))}
-                          ariaLabel="Clear content English"
+                          ariaLabel="Clear translation"
                           position="top"
                         />
                       </div>

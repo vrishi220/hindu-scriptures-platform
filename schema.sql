@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
   preview_show_english BOOLEAN NOT NULL DEFAULT true,
   preview_transliteration_script VARCHAR(50) NOT NULL DEFAULT 'iast',
+  preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline',
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)

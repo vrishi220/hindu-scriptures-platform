@@ -19,6 +19,11 @@ def _ensure_preferences_schema(db: Session) -> None:
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_show_media BOOLEAN NOT NULL DEFAULT TRUE"
         )
     )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline'"
+        )
+    )
     db.commit()
 
 
@@ -53,6 +58,7 @@ def get_user_preferences(
                 preview_show_transliteration=True,
                 preview_show_english=True,
                 preview_transliteration_script="iast",
+                preview_word_meanings_display_mode="inline",
                 scriptures_book_browser_view="list",
                 scriptures_media_manager_view="list",
                 admin_media_bank_browser_view="list",

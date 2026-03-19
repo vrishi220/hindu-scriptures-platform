@@ -8,6 +8,7 @@ export async function GET(request: Request) {
   const store = await cookies();
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q") || "";
+  const mode = (searchParams.get("mode") || "").trim().toLowerCase();
 
   if (!query.trim()) {
     return NextResponse.json(
@@ -16,8 +17,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const target = new URL("/api/search", API_BASE_URL);
+  const target = new URL(mode === "fulltext" ? "/api/search/fulltext" : "/api/search", API_BASE_URL);
   for (const [key, value] of searchParams.entries()) {
+    if (key === "mode") {
+      continue;
+    }
     if (value !== "") {
       target.searchParams.set(key, value);
     }

@@ -75,6 +75,7 @@ export default function ExplorerPage() {
   const [levelFilters, setLevelFilters] = useState<LevelFilter[]>([]);
   const [selectedNode, setSelectedNode] = useState<ContentNode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [useFullTextSearch, setUseFullTextSearch] = useState(false);
   const [searchResults, setSearchResults] = useState<{node: ContentNode, snippet: string}[]>([]);
   const [loading, setLoading] = useState(false);
   const [pickedNodes, setPickedNodes] = useState<ContentNode[]>([]);
@@ -396,6 +397,9 @@ export default function ExplorerPage() {
         q: searchQuery,
         book_id: selectedBookId.toString(),
       });
+      if (useFullTextSearch) {
+        params.set("mode", "fulltext");
+      }
       const response = await fetch(`/api/search?${params}`, {
         credentials: "include",
       });
@@ -964,15 +968,32 @@ export default function ExplorerPage() {
               <div className="rounded-2xl border border-black/10 bg-white/80 p-4">
                 <div className="flex gap-2">
                   <input
+                    type="search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                     placeholder={`Search in ${selectedBook?.book_name || "book"}...`}
+                    aria-label={`Search in ${selectedBook?.book_name || "book"}`}
                     className="flex-1 rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
                   />
                   <button
+                    type="button"
+                    onClick={() => setUseFullTextSearch((prev) => !prev)}
+                    className={`rounded-xl border px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
+                      useFullTextSearch
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white"
+                        : "border-black/10 bg-white/90 text-zinc-600 hover:border-[color:var(--accent)]/40"
+                    }`}
+                    aria-pressed={useFullTextSearch}
+                    title={useFullTextSearch ? "Using full-text search" : "Using basic search"}
+                  >
+                    {useFullTextSearch ? "Full-text" : "Basic"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleSearch}
                     disabled={loading}
+                    aria-label="Run search"
                     className="rounded-xl border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                   >
                     Search
@@ -1093,9 +1114,14 @@ export default function ExplorerPage() {
                         {renderBreadcrumbExplorer(node)}
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <h4 className="font-semibold text-[color:var(--deep)]">
-                              {nodeTitle}
-                            </h4>
+                            <div className="flex items-center justify-between gap-3">
+                              <h4 className="font-semibold text-[color:var(--deep)]">
+                                {nodeTitle}
+                              </h4>
+                              <span className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent)]">
+                                {useFullTextSearch ? "Full-text" : "Basic"}
+                              </span>
+                            </div>
                             <p className="mt-2 text-sm text-zinc-700">
                               {nodeText ? (nodeText.substring(0, 200) + (nodeText.length > 200 ? "..." : "")) : "No content"}
                             </p>

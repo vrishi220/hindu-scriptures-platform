@@ -16,6 +16,77 @@ from services.transliteration import (
 
 router = APIRouter(prefix="/search", tags=["search"])
 
+_TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL = {
+    "en": "english",
+    "eng": "english",
+    "english": "english",
+    "hi": "hindi",
+    "hindi": "hindi",
+    "te": "telugu",
+    "telugu": "telugu",
+    "kn": "kannada",
+    "kannada": "kannada",
+    "ta": "tamil",
+    "tamil": "tamil",
+    "ml": "malayalam",
+    "malayalam": "malayalam",
+    "sa": "sanskrit",
+    "sanskrit": "sanskrit",
+}
+
+_TRANSLATION_CANONICAL_TO_CODE = {
+    "english": "en",
+    "hindi": "hi",
+    "telugu": "te",
+    "kannada": "kn",
+    "tamil": "ta",
+    "malayalam": "ml",
+    "sanskrit": "sa",
+}
+
+
+def _normalize_translation_language(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return "en"
+    canonical = _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL.get(normalized, normalized)
+    return _TRANSLATION_CANONICAL_TO_CODE.get(canonical, canonical)
+
+
+def _translation_lookup_keys(language: str | None) -> list[str]:
+    normalized_code = _normalize_translation_language(language)
+    canonical = _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL.get(normalized_code, "")
+    keys = [normalized_code, canonical]
+    if normalized_code == "en":
+        keys.extend(["english", "en"])
+    return [key for key in dict.fromkeys([item for item in keys if item])]
+
+
+def _pick_translation_text_from_content_data(content_data: object, language: str | None) -> str:
+    if not isinstance(content_data, dict):
+        return ""
+
+    translations = content_data.get("translations")
+    basic = content_data.get("basic") if isinstance(content_data.get("basic"), dict) else {}
+    fallback_values: list[str] = []
+    if isinstance(basic, dict):
+        for key in ("translation", "english"):
+            value = basic.get(key)
+            if isinstance(value, str) and value.strip():
+                fallback_values.append(value.strip())
+
+    if isinstance(translations, dict):
+        for key in _translation_lookup_keys(language) + _translation_lookup_keys("en"):
+            value = translations.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    for value in fallback_values:
+        if value:
+            return value
+
+    return ""
+
 
 def apply_stable_search_order(query, rank):
     return query.order_by(
@@ -32,6 +103,7 @@ def build_search_query(
     book_id: int | None,
     level_name: str | None,
     has_content: bool | None,
+    language: str | None = None,
 ) -> tuple:
     if not text or not text.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Query required")
@@ -41,16 +113,21 @@ def build_search_query(
     translit_raw = func.coalesce(
         ContentNode.content_data["basic"]["transliteration"].astext, ""
     )
-    english_raw = func.coalesce(
-        ContentNode.content_data["translations"]["english"].astext, ""
-    )
+    translation_keys = _translation_lookup_keys(language)
+    english_keys = _translation_lookup_keys("en")
+    translation_raw_candidates = [
+        func.coalesce(ContentNode.content_data["translations"][key].astext, "")
+        for key in [*translation_keys, *english_keys]
+    ]
+    translation_raw = func.coalesce(*translation_raw_candidates, "")
+    all_translations_raw = func.coalesce(ContentNode.content_data["translations"].astext, "")
     word_meanings_raw = func.coalesce(
         ContentNode.content_data["word_meanings"].astext, ""
     )
 
     sanskrit = func.nullif(func.trim(sanskrit_raw), "")
     translit = func.nullif(func.trim(translit_raw), "")
-    english = func.nullif(func.trim(english_raw), "")
+    translation = func.nullif(func.trim(translation_raw), "")
     # Title fields
     title_english = func.coalesce(ContentNode.title_english, "")
     title_sanskrit = func.coalesce(ContentNode.title_sanskrit, "")
@@ -62,7 +139,8 @@ def build_search_query(
         " ",
         sanskrit_raw,
         translit_raw,
-        english_raw,
+        translation_raw,
+        all_translations_raw,
         word_meanings_raw,
         title_english,
         title_sanskrit,
@@ -70,7 +148,7 @@ def build_search_query(
         level_name_text,
     )
 
-    display_combined = func.concat_ws("\n", sanskrit, translit, english)
+    display_combined = func.concat_ws("\n", sanskrit, translit, translation)
     snippet_source = func.coalesce(func.nullif(display_combined, ""), searchable_combined)
     
     # Check if search term is in quotes for exact matching
@@ -165,12 +243,13 @@ def basic_search(
     book_id: int | None = None,
     level_name: str | None = None,
     has_content: bool | None = None,
+    language: str = "en",
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> SearchResponse:
-    query, rank, headline = build_search_query(db, q, book_id, level_name, has_content)
+    query, rank, headline = build_search_query(db, q, book_id, level_name, has_content, language)
     total = query.count()
     rows = (
         apply_stable_search_order(query.add_columns(rank, headline), rank)
@@ -190,6 +269,7 @@ def basic_search(
             "book_id": book_id,
             "level_name": level_name,
             "has_content": has_content,
+            "language": language,
             "limit": limit,
             "offset": offset,
         },
@@ -210,6 +290,7 @@ def advanced_search(
         payload.book_id,
         payload.level_name,
         payload.has_content,
+        payload.language,
     )
     total = query.count()
     rows = (
@@ -230,6 +311,7 @@ def advanced_search(
             "book_id": payload.book_id,
             "level_name": payload.level_name,
             "has_content": payload.has_content,
+            "language": payload.language,
             "limit": payload.limit,
             "offset": payload.offset,
         },
@@ -261,6 +343,7 @@ def fulltext_search(
         )
 
     query_text = q.strip()
+    normalized_language = _normalize_translation_language(language)
     latin_query_variants = get_latin_query_variants(query_text)
     devanagari_query = (
         query_text if contains_devanagari(query_text) else latin_to_devanagari(query_text)
@@ -276,6 +359,14 @@ def fulltext_search(
     # to_tsquery converts search text to tsquery format
     tsquery = func.plainto_tsquery('english', latin_query_variants[0] if latin_query_variants else query_text)
     fulltext_conditions = [ContentNode.search_vector.op('@@')(tsquery)]
+    translations_raw = func.coalesce(ContentNode.content_data["translations"].astext, "")
+    fulltext_conditions.extend(
+        [
+            func.lower(translations_raw).like(f"%{variant.lower()}%")
+            for variant in latin_query_variants
+            if variant
+        ]
+    )
 
     sanskrit_source = func.concat_ws(
         " ",
@@ -314,7 +405,7 @@ def fulltext_search(
     results = [
         SearchResult(
             node=ContentNodePublic.model_validate(row[0]),
-            snippet=extract_snippet(row[0], q)
+            snippet=extract_snippet(row[0], q, language=normalized_language),
         )
         for row in rows
     ]
@@ -337,13 +428,23 @@ def fulltext_search(
     return SearchResponse(query=q, total=total, results=results)
 
 
-def extract_snippet(node: ContentNode, query: str, max_length: int = 150) -> str | None:
+def extract_snippet(
+    node: ContentNode,
+    query: str,
+    max_length: int = 150,
+    language: str | None = None,
+) -> str | None:
     """Extract a snippet from content_data with query highlighted"""
-    # Try to extract from English translation first
+    text = ""
     if node.content_data and isinstance(node.content_data, dict):
-        text = node.content_data.get('text') or node.content_data.get('english', '')
-    else:
-        text = ""
+        text = _pick_translation_text_from_content_data(node.content_data, language)
+        if not text:
+            text = (
+                node.content_data.get("text")
+                or node.content_data.get("english")
+                or node.content_data.get("translation")
+                or ""
+            )
     
     if not text:
         return None

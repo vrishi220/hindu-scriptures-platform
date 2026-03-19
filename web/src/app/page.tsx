@@ -91,6 +91,7 @@ function HomeContent() {
   const [bookId, setBookId] = useState("");
   const [levelName, setLevelName] = useState("");
   const [hasContent, setHasContent] = useState(false);
+  const [useFullTextSearch, setUseFullTextSearch] = useState(false);
   const [books, setBooks] = useState<BookOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -480,15 +481,17 @@ function HomeContent() {
       const urlBookId = searchParams.get("book_id");
       const urlLevelName = searchParams.get("level_name");
       const urlHasContent = searchParams.get("has_content");
+      const urlMode = searchParams.get("mode");
       
       if (urlQuery) {
         setQuery(urlQuery);
         if (urlBookId) setBookId(urlBookId);
         if (urlLevelName) setLevelName(urlLevelName);
         if (urlHasContent) setHasContent(urlHasContent === "true");
+        setUseFullTextSearch(urlMode === "fulltext");
         // Run search after state is set
         setTimeout(() => {
-          runSearch(urlQuery, urlBookId || "", urlLevelName || "", urlHasContent === "true");
+          runSearch(urlQuery, urlBookId || "", urlLevelName || "", urlHasContent === "true", urlMode === "fulltext");
         }, 50);
       }
     };
@@ -536,11 +539,19 @@ function HomeContent() {
     };
   }, []);
 
-  const runSearch = async (term: string, searchBookId?: string, searchLevelName?: string, searchHasContent?: boolean) => {
+  const runSearch = async (
+    term: string,
+    searchBookId?: string,
+    searchLevelName?: string,
+    searchHasContent?: boolean,
+    searchUseFullText?: boolean
+  ) => {
     const searchTerm = term || query;
     const finalBookId = searchBookId !== undefined ? searchBookId : bookId;
     const finalLevelName = searchLevelName !== undefined ? searchLevelName : levelName;
     const finalHasContent = searchHasContent !== undefined ? searchHasContent : hasContent;
+    const finalUseFullText =
+      searchUseFullText !== undefined ? searchUseFullText : useFullTextSearch;
     
     if (!searchTerm.trim()) {
       setResults([]);
@@ -566,6 +577,9 @@ function HomeContent() {
       if (finalHasContent) {
         params.set("has_content", "true");
       }
+      if (finalUseFullText) {
+        params.set("mode", "fulltext");
+      }
 
       const response = await fetch(`/api/search?${params.toString()}`, {
         credentials: "include",
@@ -587,6 +601,7 @@ function HomeContent() {
       if (finalBookId.trim()) urlParams.set("book_id", finalBookId.trim());
       if (finalLevelName.trim()) urlParams.set("level_name", finalLevelName.trim());
       if (finalHasContent) urlParams.set("has_content", "true");
+      if (finalUseFullText) urlParams.set("mode", "fulltext");
       router.push(`/?${urlParams.toString()}`, { scroll: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -597,7 +612,7 @@ function HomeContent() {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    runSearch(query);
+    runSearch(query, undefined, undefined, undefined, useFullTextSearch);
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1027,6 +1042,54 @@ function HomeContent() {
               A new editorial platform for scripture library.
             </p>
 
+            <form onSubmit={handleSubmit} className="rounded-2xl border border-black/10 bg-white/85 p-3 shadow-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search scriptures"
+                  aria-label="Search scriptures"
+                  className="h-10 flex-1 rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent)]/20"
+                />
+                <div role="group" aria-label="Search mode" className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUseFullTextSearch(false)}
+                  aria-pressed={!useFullTextSearch}
+                  className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                    !useFullTextSearch
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                      : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                  }`}
+                >
+                  Basic
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseFullTextSearch(true)}
+                  aria-pressed={useFullTextSearch}
+                  className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                    useFullTextSearch
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                      : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                  }`}
+                >
+                  Full-text
+                </button>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading || !query.trim()}
+                  aria-label="Run search"
+                  className="h-10 rounded-lg bg-[color:var(--accent)] px-4 text-xs font-medium uppercase tracking-[0.14em] text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? "Searching..." : "Search"}
+                </button>
+              </div>
+              {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+            </form>
+
             {renderFeaturedBooksCard("hidden rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:block", true)}
           </div>
 
@@ -1170,6 +1233,48 @@ function HomeContent() {
           </div>
 
           {renderFeaturedBooksCard("order-3 rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:hidden")}
+
+          {query.trim() && (
+            <div className="order-4 rounded-3xl border border-black/10 bg-white/80 p-4 shadow-lg lg:col-span-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-600">
+                  Search Results
+                </p>
+                <p className="text-xs text-zinc-500" aria-live="polite">{loading ? "Searching..." : `${total} found`}</p>
+              </div>
+              {!loading && results.length === 0 ? (
+                <p className="mt-3 text-sm text-zinc-600">No matches found.</p>
+              ) : null}
+              <div className="mt-3 space-y-3">
+                {results.map((result) => {
+                  const title =
+                    result.node.title_english ||
+                    result.node.title_sanskrit ||
+                    result.node.title_transliteration ||
+                    `${result.node.level_name} ${result.node.sequence_number || ""}`.trim();
+                  const previewHref = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&preview=node&from=home`;
+                  return (
+                    <a
+                      key={result.node.id}
+                      href={previewHref}
+                      className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-medium text-[color:var(--deep)]">{title}</p>
+                        <span className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent)]">
+                          {useFullTextSearch ? "Full-text" : "Basic"}
+                        </span>
+                      </div>
+                      <div className="mt-1">{renderBreadcrumb(result)}</div>
+                      {result.snippet ? (
+                        <p className="mt-2 text-sm text-zinc-700">{result.snippet}</p>
+                      ) : null}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </section>
       </main>
 

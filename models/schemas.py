@@ -488,6 +488,7 @@ class SearchRequest(BaseModel):
     book_id: int | None = None
     level_name: str | None = None
     has_content: bool | None = None
+    language: str = "en"
     limit: int = Field(default=20, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
 
@@ -656,6 +657,7 @@ class UserPreferenceBase(BaseModel):
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
     preview_transliteration_script: str = "iast"
+    preview_word_meanings_display_mode: Literal["inline", "table"] = "inline"
     scriptures_book_browser_view: Literal["list", "icon"] = "list"
     scriptures_media_manager_view: Literal["list", "icon"] = "list"
     admin_media_bank_browser_view: Literal["list", "icon"] = "list"
@@ -677,6 +679,7 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
     preview_transliteration_script: str | None = None
+    preview_word_meanings_display_mode: Literal["inline", "table"] | None = None
     scriptures_book_browser_view: Literal["list", "icon"] | None = None
     scriptures_media_manager_view: Literal["list", "icon"] | None = None
     admin_media_bank_browser_view: Literal["list", "icon"] | None = None

@@ -4,14 +4,11 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import requests
 from indic_transliteration import sanscript
 from indic_transliteration.sanscript import transliterate
-
-GITHUB_API_CONTENTS = "https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-RAW_BASE = "https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
 
 DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
@@ -21,6 +18,42 @@ class SourceFile:
     prakarana_num: int
     sarga_num: int
     path: str
+
+
+@dataclass
+class SargaClosure:
+    line: str
+    sarga_name_sanskrit: Optional[str]
+    sarga_ordinal_sanskrit: Optional[str]
+    sarga_number: int
+
+
+LEADING_MATRA_TO_INDEPENDENT_VOWEL = {
+    "ा": "अ",
+    "ि": "इ",
+    "ी": "ई",
+    "ु": "उ",
+    "ू": "ऊ",
+    "े": "ए",
+    "ै": "ए",
+    "ो": "ओ",
+    "ौ": "औ",
+    "ृ": "ऋ",
+}
+
+
+def build_sarga_label_sanskrit(ordinal: Optional[str], number: int) -> str:
+    if ordinal:
+        return f"{ordinal} सर्गः"
+    return f"सर्गः {number}"
+
+
+def normalize_combined_ordinal_token(token: str) -> str:
+    if token.startswith("नाम"):
+        token = token[len("नाम"):]
+    if token and token[0] in LEADING_MATRA_TO_INDEPENDENT_VOWEL:
+        token = LEADING_MATRA_TO_INDEPENDENT_VOWEL[token[0]] + token[1:]
+    return token
 
 
 def to_int_safe(value: str) -> int:
@@ -38,17 +71,16 @@ def parse_filename(name: str) -> Optional[Tuple[int, int]]:
     return int(m.group(1)), int(m.group(2))
 
 
-def list_source_files(owner: str, repo: str, branch: str, path: str) -> List[SourceFile]:
-    url = GITHUB_API_CONTENTS.format(owner=owner, repo=repo, path=path)
-    resp = requests.get(url, params={"ref": branch}, timeout=30)
-    resp.raise_for_status()
-    rows = resp.json()
+def list_source_files(input_dir: str) -> List[SourceFile]:
+    base_dir = Path(input_dir)
+    if not base_dir.exists() or not base_dir.is_dir():
+        raise SystemExit(f"Input directory not found: {input_dir}")
 
     files: List[SourceFile] = []
-    for row in rows:
-        if row.get("type") != "file":
+    for p in sorted(base_dir.glob("*.txt")):
+        if not p.is_file():
             continue
-        name = row.get("name", "")
+        name = p.name
         parsed = parse_filename(name)
         if not parsed:
             continue
@@ -57,18 +89,15 @@ def list_source_files(owner: str, repo: str, branch: str, path: str) -> List[Sou
             SourceFile(
                 prakarana_num=prakarana_num,
                 sarga_num=sarga_num,
-                path=row["path"],
+                path=p.as_posix(),
             )
         )
     files.sort(key=lambda x: (x.prakarana_num, x.sarga_num))
     return files
 
 
-def fetch_text(owner: str, repo: str, branch: str, path: str) -> str:
-    raw_url = RAW_BASE.format(owner=owner, repo=repo, branch=branch, path=path)
-    r = requests.get(raw_url, timeout=30)
-    r.raise_for_status()
-    return r.text
+def fetch_text(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
 
 
 def extract_sarga_title(lines: List[str], sarga_num: int) -> str:
@@ -78,7 +107,56 @@ def extract_sarga_title(lines: List[str], sarga_num: int) -> str:
     return f"सर्गः {sarga_num}"
 
 
-def split_shlokas(text: str) -> List[Tuple[str, str]]:
+def parse_sarga_closure(lines: List[str], fallback_sarga_num: int) -> Optional[SargaClosure]:
+    if not lines:
+        return None
+
+    closure_line = ""
+    for ln in reversed(lines):
+        text = ln.strip()
+        if not text:
+            continue
+        if "सर्गः" in text:
+            closure_line = text
+            break
+
+    if not closure_line:
+        return None
+
+    number_re = re.compile(r"(?:।।|॥)\s*([०-९0-9]+)\s*(?:।।|॥)?\s*$")
+    num_match = number_re.search(closure_line)
+    sarga_number = to_int_safe(num_match.group(1)) if num_match else fallback_sarga_num
+    if sarga_number <= 0:
+        sarga_number = fallback_sarga_num
+
+    # e.g.
+    #   "... सूत्रपातनको नाम प्रथमः सर्गः ॥ १ ॥"
+    #   "... राघवसमाश्वासनं नामैकादशः सर्गः ।। ११ ।।"
+    sarga_name = None
+    sarga_ordinal = None
+
+    spaced_match = re.search(r"([^\s।॥]+)\s+नाम\s+([^\s।॥]+)\s+सर्गः", closure_line)
+    combined_match = re.search(r"([^\s।॥]+)\s+(नाम[^\s।॥]+)\s+सर्गः", closure_line)
+
+    if spaced_match:
+        sarga_name = spaced_match.group(1)
+        sarga_ordinal = spaced_match.group(2)
+    elif combined_match:
+        sarga_name = combined_match.group(1)
+        sarga_ordinal = normalize_combined_ordinal_token(combined_match.group(2))
+
+    if sarga_name and sarga_name.endswith("ो"):
+        sarga_name = sarga_name[:-1] + "ः"
+
+    return SargaClosure(
+        line=closure_line,
+        sarga_name_sanskrit=sarga_name,
+        sarga_ordinal_sanskrit=sarga_ordinal,
+        sarga_number=sarga_number,
+    )
+
+
+def split_shlokas(text: str, closure_line: Optional[str] = None) -> List[Tuple[str, str]]:
     """
     Split by shloka-ending markers like:
     ... ।। १
@@ -86,6 +164,13 @@ def split_shlokas(text: str) -> List[Tuple[str, str]]:
     """
     lines = [ln.strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
+
+    if closure_line:
+        normalized = closure_line.strip()
+        for idx in range(len(lines) - 1, -1, -1):
+            if lines[idx] == normalized:
+                del lines[idx]
+                break
 
     # Remove obvious file headers / separators noise
     cleaned = []
@@ -132,9 +217,7 @@ def build_payload(
     schema_id: int,
     book_name: str,
     book_code: str,
-    owner: str,
-    repo: str,
-    branch: str,
+    input_dir: str,
     files: List[SourceFile],
 ) -> dict:
     payload = {
@@ -143,8 +226,7 @@ def build_payload(
         "source": {
             "app": "yv-text-converter",
             "format": "canonical-book-json",
-            "repo": f"https://github.com/{owner}/{repo}",
-            "branch": branch,
+            "input_dir": input_dir,
         },
         "schema": {
             "id": schema_id,
@@ -193,14 +275,20 @@ def build_payload(
                 "metadata_json": {"prakarana_number": sf.prakarana_num},
                 "source_attribution": None,
                 "license_type": "CC-BY-SA-4.0",
-                "original_source_url": f"https://github.com/{owner}/{repo}/blob/{branch}/{sf.path}",
+                "original_source_url": sf.path,
                 "tags": ["yoga-vasishtha"],
                 "media_items": [],
             })
 
-        text = fetch_text(owner, repo, branch, sf.path)
+        text = fetch_text(sf.path)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        sarga_title = extract_sarga_title(lines, sf.sarga_num)
+        closure = parse_sarga_closure(lines, sf.sarga_num)
+        sarga_title = closure.sarga_name_sanskrit if closure and closure.sarga_name_sanskrit else extract_sarga_title(lines, sf.sarga_num)
+        sarga_num_from_closure = closure.sarga_number if closure else sf.sarga_num
+        sarga_label_sanskrit = build_sarga_label_sanskrit(
+            closure.sarga_ordinal_sanskrit if closure else None,
+            sarga_num_from_closure,
+        )
 
         sid = next_id
         next_id += 1
@@ -210,10 +298,10 @@ def build_payload(
             "referenced_node_id": None,
             "level_name": "Sarga",
             "level_order": 1,
-            "sequence_number": str(sf.sarga_num),
+            "sequence_number": str(sarga_num_from_closure),
             "title_sanskrit": sarga_title,
-            "title_transliteration": devanagari_to_iast(sarga_title) or f"Sarga {sf.sarga_num}",
-            "title_english": f"Sarga {sf.sarga_num}",
+            "title_transliteration": devanagari_to_iast(sarga_title) or f"Sarga {sarga_num_from_closure}",
+            "title_english": f"Sarga {sarga_num_from_closure}",
             "title_hindi": None,
             "title_tamil": None,
             "has_content": False,
@@ -221,17 +309,21 @@ def build_payload(
             "summary_data": {},
             "metadata_json": {
                 "prakarana_number": sf.prakarana_num,
-                "sarga_number": sf.sarga_num,
+                "sarga_number": sarga_num_from_closure,
+                "sarga_number_from_filename": sf.sarga_num,
+                "sarga_ordinal_sanskrit": closure.sarga_ordinal_sanskrit if closure else None,
+                "sarga_label_sanskrit": sarga_label_sanskrit,
+                "sarga_closure_line": closure.line if closure else None,
                 "source_file": sf.path,
             },
             "source_attribution": None,
             "license_type": "CC-BY-SA-4.0",
-            "original_source_url": f"https://github.com/{owner}/{repo}/blob/{branch}/{sf.path}",
+            "original_source_url": sf.path,
             "tags": ["yoga-vasishtha"],
             "media_items": [],
         })
 
-        for verse_no, shloka_text in split_shlokas(text):
+        for verse_no, shloka_text in split_shlokas(text, closure_line=closure.line if closure else None):
             vid = next_id
             next_id += 1
             shloka_title = f"श्लोक {verse_no}"
@@ -259,13 +351,13 @@ def build_payload(
                 "summary_data": {},
                 "metadata_json": {
                     "prakarana_number": sf.prakarana_num,
-                    "sarga_number": sf.sarga_num,
+                    "sarga_number": sarga_num_from_closure,
                     "shloka_number": to_int_safe(verse_no) or verse_no,
                     "source_file": sf.path,
                 },
                 "source_attribution": None,
                 "license_type": "CC-BY-SA-4.0",
-                "original_source_url": f"https://github.com/{owner}/{repo}/blob/{branch}/{sf.path}",
+                "original_source_url": sf.path,
                 "tags": ["yoga-vasishtha"],
                 "media_items": [],
             })
@@ -275,17 +367,14 @@ def build_payload(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--schema-id", type=int, required=True, help="Scriptle schema id for 3-level hierarchy")
-    ap.add_argument("--owner", default="lokeshh")
-    ap.add_argument("--repo", default="yv_text")
-    ap.add_argument("--branch", default="master")
-    ap.add_argument("--path", default="wiki_yv")
+    ap.add_argument("--schema-id", type=int, default=2, help="Scripture schema id for 3-level hierarchy (default: 2)")
+    ap.add_argument("--input-dir", default="external/wiki_yv_txt", help="Local directory containing <prakarana>_<chapter>.txt files")
     ap.add_argument("--book-name", default="Yoga Vasiṣṭha")
     ap.add_argument("--book-code", default="yoga-vasishtha")
     ap.add_argument("--out", default="specs/yoga_vasishtha.book-json-v1.json")
     args = ap.parse_args()
 
-    files = list_source_files(args.owner, args.repo, args.branch, args.path)
+    files = list_source_files(args.input_dir)
     if not files:
         raise SystemExit("No matching <prakarana>_<chapter>.txt files found.")
 
@@ -293,9 +382,7 @@ def main() -> None:
         schema_id=args.schema_id,
         book_name=args.book_name,
         book_code=args.book_code,
-        owner=args.owner,
-        repo=args.repo,
-        branch=args.branch,
+        input_dir=args.input_dir,
         files=files,
     )
 

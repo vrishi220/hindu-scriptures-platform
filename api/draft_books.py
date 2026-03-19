@@ -1134,6 +1134,91 @@ def _as_clean_string(value: object) -> str:
     return ""
 
 
+_TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL = {
+    "en": "english",
+    "eng": "english",
+    "english": "english",
+    "hi": "hindi",
+    "hindi": "hindi",
+    "te": "telugu",
+    "telugu": "telugu",
+    "kn": "kannada",
+    "kannada": "kannada",
+    "ta": "tamil",
+    "tamil": "tamil",
+    "ml": "malayalam",
+    "malayalam": "malayalam",
+    "sa": "sanskrit",
+    "sanskrit": "sanskrit",
+}
+
+_TRANSLATION_CANONICAL_TO_CODE = {
+    "english": "en",
+    "hindi": "hi",
+    "telugu": "te",
+    "kannada": "kn",
+    "tamil": "ta",
+    "malayalam": "ml",
+    "sanskrit": "sa",
+}
+
+
+def _normalize_translation_language(value: object) -> str:
+    if not isinstance(value, str):
+        return "en"
+    normalized = value.strip().lower()
+    if not normalized:
+        return "en"
+    canonical = _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL.get(normalized, normalized)
+    return _TRANSLATION_CANONICAL_TO_CODE.get(canonical, canonical)
+
+
+def _translation_lookup_keys(language: object) -> list[str]:
+    normalized_code = _normalize_translation_language(language)
+    canonical = _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL.get(normalized_code, "")
+    keys = [normalized_code, canonical]
+    if normalized_code == "en":
+        keys.extend(["english", "en"])
+    return [key for key in dict.fromkeys([item for item in keys if item])]
+
+
+def _normalize_translation_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for raw_key, raw_text in value.items():
+        if not isinstance(raw_key, str):
+            continue
+        text_value = _as_clean_string(raw_text)
+        if not text_value:
+            continue
+        normalized[raw_key.strip().lower()] = text_value
+
+    return normalized
+
+
+def _pick_preferred_translation_text(
+    translations: dict[str, str],
+    preferred_language: object,
+    *fallback_values: object,
+) -> str:
+    preferred_keys = _translation_lookup_keys(preferred_language)
+    english_keys = _translation_lookup_keys("en")
+
+    for key in [*preferred_keys, *english_keys]:
+        value = _as_clean_string(translations.get(key))
+        if value:
+            return value
+
+    for fallback in fallback_values:
+        fallback_value = _as_clean_string(fallback)
+        if fallback_value:
+            return fallback_value
+
+    return ""
+
+
 _DEVANAGARI_CHAR_PATTERN = re.compile(r"[\u0900-\u097F]")
 _DEVANAGARI_TOKEN_PATTERN = re.compile(r"^[\u0900-\u097F]+$")
 _DANDA_ONLY_LINE_PATTERN = re.compile(r"^[।॥|]+$")
@@ -1618,6 +1703,13 @@ def _build_template_context(
         summary_translations = (
             summary_data.get("translations") if isinstance(summary_data.get("translations"), dict) else {}
         )
+        merged_translations = {
+            **_normalize_translation_map(summary_translations),
+            **_normalize_translation_map(translations_data),
+        }
+        preferred_translation_language = _normalize_translation_language(
+            resolved_metadata.get("translation_language") if isinstance(resolved_metadata, dict) else None
+        )
 
         sanskrit_text = (
             basic_data.get("sanskrit")
@@ -1641,25 +1733,22 @@ def _build_template_context(
             or source_node.title_transliteration
             or ""
         )
-        english_text = (
-            translations_data.get("english")
-            or translations_data.get("en")
-            or summary_translations.get("english")
-            or summary_translations.get("en")
-            or basic_data.get("english")
-            or basic_data.get("translation")
-            or content_data.get("text_english")
-            or content_data.get("english")
-            or content_data.get("en")
-            or content_data.get("translation")
-            or summary_basic.get("english")
-            or summary_basic.get("translation")
-            or summary_data.get("text_english")
-            or summary_data.get("english")
-            or summary_data.get("en")
-            or summary_data.get("translation")
-            or source_node.title_english
-            or ""
+        english_text = _pick_preferred_translation_text(
+            merged_translations,
+            preferred_translation_language,
+            basic_data.get("english"),
+            basic_data.get("translation"),
+            content_data.get("text_english"),
+            content_data.get("english"),
+            content_data.get("en"),
+            content_data.get("translation"),
+            summary_basic.get("english"),
+            summary_basic.get("translation"),
+            summary_data.get("text_english"),
+            summary_data.get("english"),
+            summary_data.get("en"),
+            summary_data.get("translation"),
+            source_node.title_english,
         )
         fallback_text = (
             basic_data.get("text")

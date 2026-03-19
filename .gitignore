@@ -109,3 +109,7 @@ backups/*.dump
 
 # Runtime media uploads
 media/bank/
+
+# Misc
+external/
+specs/

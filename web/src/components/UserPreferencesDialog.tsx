@@ -27,6 +27,7 @@ export type UserPreferences = {
   preview_show_transliteration: boolean;
   preview_show_english: boolean;
   preview_transliteration_script: string;
+  preview_word_meanings_display_mode: "inline" | "table";
   ui_theme: UiThemePreference;
   ui_density: UiDensityPreference;
   scriptures_book_browser_view?: "list" | "icon";
@@ -190,9 +191,13 @@ export function UserPreferencesForm({
           }
           className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
         >
-          <option value="sanskrit">Sanskrit</option>
-          <option value="hindi">Hindi</option>
           <option value="english">English</option>
+          <option value="hindi">Hindi</option>
+          <option value="telugu">Telugu</option>
+          <option value="kannada">Kannada</option>
+          <option value="tamil">Tamil</option>
+          <option value="malayalam">Malayalam</option>
+          <option value="sanskrit">Sanskrit</option>
         </select>
       </label>
       <label className="flex flex-col gap-1">
