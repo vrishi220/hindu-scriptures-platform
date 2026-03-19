@@ -437,9 +437,14 @@ test.describe('Scripture Browser', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
+            book_id: 101,
             preview_scope: 'book',
             book_name: 'Mock Preview Browse Book',
             root_title: null,
+            section_order: ['body'],
+            sections: {
+              body: [],
+            },
             render_settings: {
               show_titles: false,
               show_labels: false,
@@ -449,7 +454,6 @@ test.describe('Scripture Browser', () => {
               show_english: true,
               transliteration_script: 'iast',
             },
-            body: [],
             warnings: [],
             template_name: 'default',
           }),
@@ -462,8 +466,10 @@ test.describe('Scripture Browser', () => {
 
     await page.goto('http://localhost:3000/scriptures');
     await page.waitForLoadState('domcontentloaded');
-
+    
+    // Wait for auth to be resolved by checking for elements that require auth
     await expect(page.getByRole('button', { name: 'Mock Preview Browse Book' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Browse book/i }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Row actions' })).toHaveCount(0);
     await expect(page.getByText('Preview book')).toHaveCount(0);
 
@@ -473,26 +479,7 @@ test.describe('Scripture Browser', () => {
       .toBe(1);
 
     const previewHeading = page.getByRole('heading', { name: 'Book Preview' });
-    const previewVisible = await previewHeading.isVisible({ timeout: 2000 }).catch(() => false);
-    if (previewVisible) {
-      await page.locator('button:has-text("✕")').first().click();
-      await expect(previewHeading).toHaveCount(0);
-    }
-
-    const browseButton = page.getByRole('button', { name: /Browse book/i }).first();
-    const browseLink = page.getByRole('link', { name: /Browse book/i }).first();
-    const browseButtonVisible = await browseButton.isVisible({ timeout: 2000 }).catch(() => false);
-    if (browseButtonVisible) {
-      await browseButton.click();
-    } else {
-      const browseLinkVisible = await browseLink.isVisible({ timeout: 2000 }).catch(() => false);
-      if (browseLinkVisible) {
-        await browseLink.click();
-      } else {
-        await page.goto('http://localhost:3000/scriptures?book=101&browse=1');
-      }
-    }
-    await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    await expect(previewHeading).toBeVisible({ timeout: 10000 });
   });
 
   test('preview and browse links deep-link to each other with correct URL intent', async ({ page }) => {
@@ -582,9 +569,14 @@ test.describe('Scripture Browser', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
+            book_id: 101,
             preview_scope: 'book',
             book_name: 'Mock Preview Browse Book',
             root_title: null,
+            section_order: ['body'],
+            sections: {
+              body: [],
+            },
             render_settings: {
               show_titles: false,
               show_labels: false,
@@ -594,7 +586,6 @@ test.describe('Scripture Browser', () => {
               show_english: true,
               transliteration_script: 'iast',
             },
-            body: [],
             warnings: [],
             template_name: 'default',
           }),

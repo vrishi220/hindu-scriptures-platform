@@ -5917,7 +5917,7 @@ function ScripturesContent() {
               word_meanings: {
                 source: {
                   source_display_mode: nextLanguageSettings.show_sanskrit
-                    ? "script"
+                      ? "script"
                     : "transliteration",
                   preferred_transliteration_scheme:
                     nextPreviewTransliterationScript === "harvard_kyoto"
@@ -5959,8 +5959,21 @@ function ScripturesContent() {
       }
 
       const artifact = payload as BookPreviewArtifact;
+      const legacyBody = (artifact as BookPreviewArtifact & { body?: unknown }).body;
+      const normalizedBody = Array.isArray(artifact.sections?.body)
+        ? artifact.sections.body
+        : Array.isArray(legacyBody)
+          ? legacyBody
+          : [];
       const normalizedArtifact: BookPreviewArtifact = {
         ...artifact,
+        section_order:
+          Array.isArray(artifact.section_order) && artifact.section_order.length > 0
+            ? artifact.section_order
+            : ["body"],
+        sections: {
+          body: normalizedBody,
+        },
         offset: typeof artifact.offset === "number" ? artifact.offset : pageOffset,
         limit:
           typeof artifact.limit === "number"
@@ -5971,7 +5984,7 @@ function ScripturesContent() {
         total_blocks:
           typeof artifact.total_blocks === "number"
             ? artifact.total_blocks
-            : artifact.sections.body.length,
+            : normalizedBody.length,
         has_more: Boolean(artifact.has_more),
       };
 
