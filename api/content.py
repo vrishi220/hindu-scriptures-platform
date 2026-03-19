@@ -1,4 +1,6 @@
 import os
+import random
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -1090,10 +1092,10 @@ def get_daily_verse(
     try:
         from datetime import date
         
-        # Get all verses with content from books visible to the current user.
-        # Anonymous users only see public books.
-        visible_book_ids = [
-            book.id
+        # Get books visible to the current user, then select a book first so
+        # large books do not dominate daily/random verse selection.
+        visible_books = [
+            book
             for book in db.query(Book).all()
             if (
                 _book_visibility(book) == BOOK_VISIBILITY_PUBLIC
@@ -1101,97 +1103,90 @@ def get_daily_verse(
                 else _book_is_visible_to_user(db, book, current_user)
             )
         ]
+        visible_book_ids = [book.id for book in visible_books]
         if not visible_book_ids:
             return None
 
-        verses_query = db.query(ContentNode).filter(
-            ContentNode.has_content == True,
-            ContentNode.book_id.in_(visible_book_ids),
-        )
-        
+        eligible_book_ids = [
+            row[0]
+            for row in db.query(ContentNode.book_id)
+            .filter(
+                ContentNode.has_content == True,
+                ContentNode.book_id.in_(visible_book_ids),
+            )
+            .distinct()
+            .order_by(ContentNode.book_id.asc())
+            .all()
+        ]
+        if not eligible_book_ids:
+            return None
+
+        book_by_id = {book.id: book for book in visible_books}
+
         if mode == "daily":
-            # Use current date as seed for consistent daily verse
+            # Use current date as seed for consistent daily book + verse selection.
             today = date.today()
             seed = today.year * 10000 + today.month * 100 + today.day
-            
-            # Get total count
-            total_verses = verses_query.count()
-            if total_verses == 0:
-                return None
-            
-            # Use seed to select a consistent verse for the day
-            offset = seed % total_verses
-            verse = verses_query.offset(offset).first()
+            selected_book_id = eligible_book_ids[seed % len(eligible_book_ids)]
         else:
-            # Truly random verse
-            verse = verses_query.order_by(func.random()).first()
-        
-        if not verse:
+            selected_book_id = random.choice(eligible_book_ids)
+
+        book = book_by_id.get(selected_book_id) or db.query(Book).filter(Book.id == selected_book_id).first()
+        verses = (
+            db.query(ContentNode)
+            .filter(
+                ContentNode.has_content == True,
+                ContentNode.book_id == selected_book_id,
+            )
+            .order_by(ContentNode.id.asc())
+            .all()
+        )
+        if not verses:
             return None
-        
-        book = db.query(Book).filter(Book.id == verse.book_id).first()
-        
-        # Extract content from content_data JSONB - handle nested structure
+
+        verse_candidates = verses[:]
+        if mode == "daily":
+            start_offset = (seed // max(len(eligible_book_ids), 1)) % len(verse_candidates)
+            verse_candidates = verse_candidates[start_offset:] + verse_candidates[:start_offset]
+        else:
+            random.shuffle(verse_candidates)
+
+        verse = verse_candidates[0]
         content_text = ""
         sanskrit_text = ""
         transliteration_text = ""
-        
-        if verse.content_data and isinstance(verse.content_data, dict):
-            # Try nested structure first (basic.sanskrit, translations.english, etc.)
-            if "translations" in verse.content_data and isinstance(verse.content_data["translations"], dict):
-                content_text = verse.content_data["translations"].get("english", "")
-            
-            if "basic" in verse.content_data and isinstance(verse.content_data["basic"], dict):
-                basic = verse.content_data["basic"]
-                if not content_text:
-                    content_text = basic.get("translation", "")
-                sanskrit_text = basic.get("sanskrit", "")
-                transliteration_text = basic.get("transliteration", "")
-            
-            # Fallback to top-level fields
-            if not content_text:
-                content_text = (
-                    verse.content_data.get("text_english") or
-                    verse.content_data.get("text") or
-                    verse.content_data.get("content") or
-                    verse.content_data.get("english") or
-                    verse.content_data.get("translation") or
-                    ""
-                )
-        
-        # Skip verses with placeholder content
-        if content_text and ("placeholder" in content_text.lower() or "chapter" in content_text.lower() and "verse" in content_text.lower() and len(content_text) < 100):
-            # Try to find another verse in random mode
-            if mode == "random":
-                # Recursively try to get another verse, with a limit
-                attempts = 0
-                while attempts < 10:
-                    verse = verses_query.order_by(func.random()).first()
-                    if verse:
-                        content_text = ""
-                        if verse.content_data and isinstance(verse.content_data, dict):
-                            if "translations" in verse.content_data and isinstance(verse.content_data["translations"], dict):
-                                content_text = verse.content_data["translations"].get("english", "")
-                            if not content_text and "basic" in verse.content_data and isinstance(verse.content_data["basic"], dict):
-                                basic = verse.content_data["basic"]
-                                content_text = basic.get("translation", "")
-                                sanskrit_text = basic.get("sanskrit", "")
-                                transliteration_text = basic.get("transliteration", "")
-                        
-                        # Check if this verse has valid content
-                        if content_text and not ("placeholder" in content_text.lower() and len(content_text) < 100):
-                            book = db.query(Book).filter(Book.id == verse.book_id).first()
-                            break
-                    attempts += 1
-        
-        # If still no valid content, use sanskrit or transliteration as fallback
+
+        for candidate in verse_candidates:
+            extracted_content_text, extracted_sanskrit_text, extracted_transliteration_text = _extract_daily_verse_texts(candidate)
+            candidate_has_placeholder = (
+                extracted_content_text
+                and "placeholder" in extracted_content_text.lower()
+            ) or (
+                extracted_content_text
+                and "chapter" in extracted_content_text.lower()
+                and "verse" in extracted_content_text.lower()
+                and len(extracted_content_text) < 100
+            )
+
+            verse = candidate
+            content_text = extracted_content_text
+            sanskrit_text = extracted_sanskrit_text
+            transliteration_text = extracted_transliteration_text
+
+            if not candidate_has_placeholder:
+                break
+
         if not content_text or len(content_text.strip()) < 5:
             content_text = sanskrit_text or transliteration_text or "Content not available"
         
+        numeric_title = _node_numeric_path(db, verse)
+
         return {
             "id": verse.id,
-            "title": verse.title_english or verse.title_transliteration or verse.title_sanskrit or f"{verse.level_name} {verse.sequence_number or verse.id}",
+            "title": numeric_title or _sequence_number_segment(verse.sequence_number) or str(verse.id),
             "content": content_text,
+            "sanskrit": sanskrit_text or "",
+            "transliteration": transliteration_text or "",
             "book_name": book.book_name if book else "Scripture",
             "book_id": book.id if book else None,
             "node_id": verse.id,
@@ -1199,6 +1194,66 @@ def get_daily_verse(
     except Exception as e:
         print(f"Error in get_daily_verse: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _sequence_number_segment(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, int):
+        return str(value)
+    match = re.search(r"(\d+)(?!.*\d)", str(value))
+    return match.group(1) if match else ""
+
+
+def _node_numeric_path(db: Session, node: ContentNode | None) -> str:
+    if node is None:
+        return ""
+
+    segments: list[str] = []
+    current = node
+    seen_ids: set[int] = set()
+
+    while current is not None and current.id not in seen_ids:
+        seen_ids.add(current.id)
+        segment = _sequence_number_segment(current.sequence_number)
+        if segment:
+            segments.append(segment)
+        if not current.parent_node_id:
+            break
+        current = db.query(ContentNode).filter(ContentNode.id == current.parent_node_id).first()
+
+    return ".".join(reversed(segments))
+
+
+def _extract_daily_verse_texts(node: ContentNode | None) -> tuple[str, str, str]:
+    if node is None or not node.content_data or not isinstance(node.content_data, dict):
+        return "", "", ""
+
+    content_text = ""
+    sanskrit_text = ""
+    transliteration_text = ""
+
+    if "translations" in node.content_data and isinstance(node.content_data["translations"], dict):
+        content_text = node.content_data["translations"].get("english", "")
+
+    if "basic" in node.content_data and isinstance(node.content_data["basic"], dict):
+        basic = node.content_data["basic"]
+        if not content_text:
+            content_text = basic.get("translation", "")
+        sanskrit_text = basic.get("sanskrit", "")
+        transliteration_text = basic.get("transliteration", "")
+
+    if not content_text:
+        content_text = (
+            node.content_data.get("text_english")
+            or node.content_data.get("text")
+            or node.content_data.get("content")
+            or node.content_data.get("english")
+            or node.content_data.get("translation")
+            or ""
+        )
+
+    return content_text, sanskrit_text, transliteration_text
 
 
 def _utc_now_iso() -> str:

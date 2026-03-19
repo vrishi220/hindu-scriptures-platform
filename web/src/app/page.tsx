@@ -2,20 +2,17 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Eye, MoreVertical, ShoppingBasket, SlidersHorizontal } from "lucide-react";
+import { Eye, MoreVertical, ShoppingBasket } from "lucide-react";
 import { contentPath } from "../lib/apiPaths";
 import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
-import UserPreferencesDialog, {
-  type UserPreferences,
-} from "../components/UserPreferencesDialog";
-import { normalizeTransliterationScript } from "../lib/indicScript";
+import { type UserPreferences } from "../components/UserPreferencesDialog";
+import { normalizeTransliterationScript, transliterateFromIast, transliterateFromDevanagari, hasDevanagariLetters } from "../lib/indicScript";
 import { resolveMediaUrl } from "../lib/mediaUrl";
 import {
   applyUiPreferencesToDocument,
   normalizeUiDensity,
   normalizeUiTheme,
-  persistUiPreferences,
   readStoredUiPreferences,
 } from "../lib/uiPreferences";
 
@@ -84,6 +81,8 @@ type TreeNode = {
   children?: TreeNode[];
 };
 
+const HOME_FEATURED_BOOKS_DENSITY_KEY = "home_featured_books_density";
+
 function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -107,9 +106,6 @@ function HomeContent() {
   const [, setShowLogin] = useState(false);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
-  const [preferencesSaving, setPreferencesSaving] = useState(false);
-  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
-  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [, setTreeData] = useState<TreeNode[]>([]);
   const [, setTreeLoading] = useState(false);
   const [, setTreeError] = useState<string | null>(null);
@@ -124,6 +120,8 @@ function HomeContent() {
     id: number;
     title: string;
     content: string;
+    sanskrit?: string;
+    transliteration?: string;
     book_name: string;
     book_id: number;
     node_id?: number;
@@ -139,6 +137,7 @@ function HomeContent() {
     order: number;
   }>>([]);
   const [openResultActionsId, setOpenResultActionsId] = useState<number | null>(null);
+  const [featuredBooksDensity, setFeaturedBooksDensity] = useState<"comfortable" | "compact">("comfortable");
   const resultActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   const loadBasket = async () => {
@@ -432,38 +431,28 @@ function HomeContent() {
     }
   };
 
-  const savePreferences = async () => {
-    if (!preferences) return;
-    try {
-      setPreferencesSaving(true);
-      setPreferencesMessage(null);
-      persistUiPreferences(preferences);
-      const response = await fetch("/api/preferences", {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(preferences),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to save preferences");
-      }
-      setPreferencesMessage("Preferences saved");
-    } catch (err) {
-      setPreferencesMessage(
-        err instanceof Error ? err.message : "Failed to save preferences"
-      );
-    } finally {
-      setPreferencesSaving(false);
-      setTimeout(() => setPreferencesMessage(null), 2000);
-    }
-  };
-
   useEffect(() => {
     applyUiPreferencesToDocument(preferences);
   }, [preferences]);
+
+  useEffect(() => {
+    try {
+      const storedDensity = window.localStorage.getItem(HOME_FEATURED_BOOKS_DENSITY_KEY);
+      if (storedDensity === "compact" || storedDensity === "comfortable") {
+        setFeaturedBooksDensity(storedDensity);
+      }
+    } catch {
+      // Ignore storage failures
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(HOME_FEATURED_BOOKS_DENSITY_KEY, featuredBooksDensity);
+    } catch {
+      // Ignore storage failures
+    }
+  }, [featuredBooksDensity]);
 
 
   useEffect(() => {
@@ -789,6 +778,24 @@ function HomeContent() {
     );
   };
 
+  const renderHighlightedSnippet = (snippet: string) => {
+    const parts = snippet.split(/(<mark>.*?<\/mark>)/g);
+    return parts.filter(Boolean).map((part, index) => {
+      if (part.startsWith("<mark>") && part.endsWith("</mark>")) {
+        const highlightedText = part.slice(6, -7);
+        return (
+          <mark
+            key={`snippet-mark-${index}`}
+            className="rounded bg-[color:var(--accent)]/20 px-0.5 text-inherit"
+          >
+            {highlightedText}
+          </mark>
+        );
+      }
+      return <span key={`snippet-text-${index}`}>{part}</span>;
+    });
+  };
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const renderTree = (nodes: TreeNode[], depth = 0) => {
     return nodes.map((node) => (
@@ -949,17 +956,49 @@ function HomeContent() {
     >
       <div className="flex items-center justify-between border-b border-black/10 px-2 pb-3">
         <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Featured Books</p>
-        <a
-          href="/scriptures"
-          className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-        >
-          Browse All Books
-        </a>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-full border border-black/10 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setFeaturedBooksDensity("comfortable")}
+              aria-pressed={featuredBooksDensity === "comfortable"}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] transition ${
+                featuredBooksDensity === "comfortable"
+                  ? "bg-[color:var(--accent)] text-white"
+                  : "text-zinc-600 hover:text-[color:var(--accent)]"
+              }`}
+            >
+              Cozy
+            </button>
+            <button
+              type="button"
+              onClick={() => setFeaturedBooksDensity("compact")}
+              aria-pressed={featuredBooksDensity === "compact"}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] transition ${
+                featuredBooksDensity === "compact"
+                  ? "bg-[color:var(--accent)] text-white"
+                  : "text-zinc-600 hover:text-[color:var(--accent)]"
+              }`}
+            >
+              Dense
+            </button>
+          </div>
+          <a
+            href="/scriptures"
+            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+          >
+            Browse All Books
+          </a>
+        </div>
       </div>
       {featuredBooks.length === 0 ? (
         <div className="px-2 py-6 text-sm text-zinc-600">No books available yet.</div>
       ) : (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className={`mt-3 grid gap-3 ${
+          featuredBooksDensity === "compact"
+            ? "grid-cols-2 xl:grid-cols-3"
+            : "sm:grid-cols-2"
+        }`}>
           {featuredBooks.map((book) => {
             const thumbnailUrl = getBookThumbnailUrl(book);
             return (
@@ -967,9 +1006,13 @@ function HomeContent() {
                 key={book.id}
                 href={`/scriptures?book=${book.id}&preview=book&from=home`}
                 aria-label={`Open preview for ${book.book_name}`}
-                className="rounded-2xl border border-black/10 bg-white/90 p-4 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)]"
+                className={`rounded-2xl border border-black/10 bg-white/90 transition hover:border-[color:var(--accent)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]/35 focus-visible:border-[color:var(--accent)] ${
+                  featuredBooksDensity === "compact" ? "p-3" : "p-4"
+                }`}
               >
-                <div className="mb-3 aspect-square overflow-hidden rounded-xl border border-black/10 bg-zinc-100">
+                <div className={`overflow-hidden rounded-xl border border-black/10 bg-zinc-100 ${
+                  featuredBooksDensity === "compact" ? "mb-2 aspect-[4/3]" : "mb-3 aspect-square"
+                }`}>
                   {thumbnailUrl ? (
                     <img
                       src={thumbnailUrl}
@@ -983,7 +1026,9 @@ function HomeContent() {
                     </div>
                   )}
                 </div>
-                <p className="font-[var(--font-display)] text-xl text-[color:var(--deep)]">
+                <p className={`font-[var(--font-display)] text-[color:var(--deep)] ${
+                  featuredBooksDensity === "compact" ? "text-lg leading-tight" : "text-xl"
+                }`}>
                   {book.book_name}
                 </p>
                 <p className="mt-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -1023,18 +1068,6 @@ function HomeContent() {
       <main className="relative mx-auto flex w-full max-w-6xl flex-col gap-14 px-4 pb-14 pt-8 sm:px-6">
         <section className="grid gap-7 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="order-1 flex flex-col gap-4 lg:order-1">
-            {authEmail && preferences && (
-              <div className="flex justify-start">
-                <button
-                  type="button"
-                  onClick={() => setShowPreferencesDialog(true)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                >
-                  <SlidersHorizontal size={14} />
-                  Preferences
-                </button>
-              </div>
-            )}
             <h2 className="font-[var(--font-display)] text-4xl leading-tight text-[color:var(--deep)] sm:text-5xl">
               Read, reflect, and explore
             </h2>
@@ -1042,55 +1075,116 @@ function HomeContent() {
               A new editorial platform for scripture library.
             </p>
 
-            <form onSubmit={handleSubmit} className="rounded-2xl border border-black/10 bg-white/85 p-3 shadow-sm">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search scriptures"
-                  aria-label="Search scriptures"
-                  className="h-10 flex-1 rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent)]/20"
-                />
-                <div role="group" aria-label="Search mode" className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setUseFullTextSearch(false)}
-                  aria-pressed={!useFullTextSearch}
-                  className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
-                    !useFullTextSearch
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
-                      : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
-                  }`}
-                >
-                  Basic
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUseFullTextSearch(true)}
-                  aria-pressed={useFullTextSearch}
-                  className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
-                    useFullTextSearch
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
-                      : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
-                  }`}
-                >
-                  Full-text
-                </button>
+            <div className="rounded-[28px] border border-black/10 bg-white/85 p-4 shadow-lg">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Search the library
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-600">
+                    Search and review results in one place.
+                  </p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={loading || !query.trim()}
-                  aria-label="Run search"
-                  className="h-10 rounded-lg bg-[color:var(--accent)] px-4 text-xs font-medium uppercase tracking-[0.14em] text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? "Searching..." : "Search"}
-                </button>
+                {query.trim() ? (
+                  <span className="rounded-full border border-black/10 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-600">
+                    {loading ? "Searching..." : `${total} result${total === 1 ? "" : "s"}`}
+                  </span>
+                ) : null}
               </div>
-              {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-            </form>
 
-            {renderFeaturedBooksCard("hidden rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:block", true)}
+              <form onSubmit={handleSubmit} className="mt-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search scriptures"
+                    aria-label="Search scriptures"
+                    className="h-10 flex-1 rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-800 outline-none transition focus:border-[color:var(--accent)] focus:ring-2 focus:ring-[color:var(--accent)]/20"
+                  />
+                  <div role="group" aria-label="Search mode" className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setUseFullTextSearch(false)}
+                      aria-pressed={!useFullTextSearch}
+                      className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                        !useFullTextSearch
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                          : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                      }`}
+                    >
+                      Basic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUseFullTextSearch(true)}
+                      aria-pressed={useFullTextSearch}
+                      className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                        useFullTextSearch
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                          : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                      }`}
+                    >
+                      Full-text
+                    </button>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={loading || !query.trim()}
+                    aria-label="Run search"
+                    className="h-10 rounded-lg bg-[color:var(--accent)] px-4 text-xs font-medium uppercase tracking-[0.14em] text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? "Searching..." : "Search"}
+                  </button>
+                </div>
+                {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
+              </form>
+
+              {query.trim() ? (
+                <div className="mt-4 border-t border-black/10 pt-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-600">
+                      Search Results
+                    </p>
+                    <p className="text-xs text-zinc-500" aria-live="polite">{loading ? "Searching..." : `${total} found`}</p>
+                  </div>
+                  {!loading && results.length === 0 ? (
+                    <p className="mt-3 text-sm text-zinc-600">No matches found.</p>
+                  ) : null}
+                  <div className="mt-3 space-y-3">
+                    {results.map((result) => {
+                      const title =
+                        result.node.title_english ||
+                        result.node.title_sanskrit ||
+                        result.node.title_transliteration ||
+                        `${result.node.level_name} ${result.node.sequence_number || ""}`.trim();
+                      const previewHref = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&preview=node&from=home`;
+                      return (
+                        <a
+                          key={result.node.id}
+                          href={previewHref}
+                          className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="font-medium text-[color:var(--deep)]">{title}</p>
+                            <span className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent)]">
+                              {useFullTextSearch ? "Full-text" : "Basic"}
+                            </span>
+                          </div>
+                          <div className="mt-1">{renderBreadcrumb(result)}</div>
+                          {result.snippet ? (
+                            <p className="mt-2 text-sm text-zinc-700">{renderHighlightedSnippet(result.snippet)}</p>
+                          ) : null}
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {renderFeaturedBooksCard("rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg", true)}
+
           </div>
 
           <div className="order-2 flex flex-col gap-4 lg:order-2">
@@ -1169,7 +1263,7 @@ function HomeContent() {
                   <p className="mt-3 text-sm text-zinc-600">
                     Add content to your books to see a verse here.
                   </p>
-                  <div className="mt-6 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)]">
+                  <div className="mt-4 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)]">
                     <p className="text-sm text-zinc-700">
                       Visit the <a href="/scriptures" className="text-[color:var(--accent)] hover:underline">Scriptures</a> page to browse books, or go to <a href="/explorer" className="text-[color:var(--accent)] hover:underline">Explorer</a> to start building your collection.
                     </p>
@@ -1180,11 +1274,6 @@ function HomeContent() {
                   <h3 className="mt-3 font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     {dailyVerse.book_name}
                   </h3>
-                  <p className="mt-3 text-sm text-zinc-600">
-                    {verseMode === "daily" 
-                      ? "Today's verse from the library."
-                      : "A randomly selected verse."}
-                  </p>
                   {(() => {
                     const versePreviewHref =
                       dailyVerse.book_id > 0 && dailyVerse.node_id
@@ -1192,7 +1281,7 @@ function HomeContent() {
                         : null;
                     return (
                       <div
-                        className={`mt-6 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)] transition ${
+                        className={`mt-4 rounded-2xl border border-black/5 bg-[color:var(--sand)] p-4 text-sm text-[color:var(--deep)] transition ${
                           versePreviewHref
                             ? "cursor-pointer hover:border-[color:var(--accent)] focus-within:border-[color:var(--accent)]"
                             : ""
@@ -1212,9 +1301,35 @@ function HomeContent() {
                         }}
                       >
                         <p className="font-semibold">{dailyVerse.title}</p>
-                        <p className="mt-2 text-sm text-zinc-700">
-                          {dailyVerse.content || "Content not available"}
-                        </p>
+                        {(() => {
+                          const script = normalizeTransliterationScript(preferences?.transliteration_script);
+                          const showTranslit = preferences?.preview_show_transliteration !== false;
+                          const showEnglish = preferences?.preview_show_english !== false;
+                          const rawTranslit = dailyVerse.transliteration || "";
+                          const transliterated = rawTranslit
+                            ? hasDevanagariLetters(rawTranslit)
+                              ? transliterateFromDevanagari(rawTranslit, script)
+                              : transliterateFromIast(rawTranslit, script)
+                            : "";
+                          return (
+                            <>
+                              {showTranslit && transliterated ? (
+                                <p className="mt-2 whitespace-pre-line text-sm text-zinc-700">
+                                  {transliterated}
+                                </p>
+                              ) : null}
+                              {showEnglish ? (
+                                <p className="mt-2 whitespace-pre-line text-sm text-zinc-700">
+                                  {dailyVerse.content || "Content not available"}
+                                </p>
+                              ) : !transliterated ? (
+                                <p className="mt-2 whitespace-pre-line text-sm text-zinc-700">
+                                  {dailyVerse.content || "Content not available"}
+                                </p>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                         {versePreviewHref && (
                           <a
                             href={versePreviewHref}
@@ -1232,49 +1347,6 @@ function HomeContent() {
             </div>
           </div>
 
-          {renderFeaturedBooksCard("order-3 rounded-3xl border border-black/10 bg-white/70 p-3 shadow-lg lg:hidden")}
-
-          {query.trim() && (
-            <div className="order-4 rounded-3xl border border-black/10 bg-white/80 p-4 shadow-lg lg:col-span-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-600">
-                  Search Results
-                </p>
-                <p className="text-xs text-zinc-500" aria-live="polite">{loading ? "Searching..." : `${total} found`}</p>
-              </div>
-              {!loading && results.length === 0 ? (
-                <p className="mt-3 text-sm text-zinc-600">No matches found.</p>
-              ) : null}
-              <div className="mt-3 space-y-3">
-                {results.map((result) => {
-                  const title =
-                    result.node.title_english ||
-                    result.node.title_sanskrit ||
-                    result.node.title_transliteration ||
-                    `${result.node.level_name} ${result.node.sequence_number || ""}`.trim();
-                  const previewHref = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&preview=node&from=home`;
-                  return (
-                    <a
-                      key={result.node.id}
-                      href={previewHref}
-                      className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="font-medium text-[color:var(--deep)]">{title}</p>
-                        <span className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent)]">
-                          {useFullTextSearch ? "Full-text" : "Basic"}
-                        </span>
-                      </div>
-                      <div className="mt-1">{renderBreadcrumb(result)}</div>
-                      {result.snippet ? (
-                        <p className="mt-2 text-sm text-zinc-700">{result.snippet}</p>
-                      ) : null}
-                    </a>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </section>
       </main>
 
@@ -1291,16 +1363,6 @@ function HomeContent() {
           }}
         />
       ) : null}
-
-      <UserPreferencesDialog
-        open={showPreferencesDialog}
-        onClose={() => setShowPreferencesDialog(false)}
-        preferences={preferences}
-        onChange={(next) => setPreferences(next)}
-        onSave={savePreferences}
-        saving={preferencesSaving}
-        message={preferencesMessage}
-      />
     </div>
   );
 }

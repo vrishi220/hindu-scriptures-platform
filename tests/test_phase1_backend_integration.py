@@ -1215,6 +1215,140 @@ class TestDailyVerseVisibilityRegression:
         finally:
             monkeypatch.setattr(content_api, "_book_visibility", original_book_visibility)
 
+    def test_random_verse_selects_book_before_verse(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Random Verse Fairness Schema {uuid4().hex[:8]}",
+                "description": "Schema for random verse fairness regression",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        small_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Small Random Book {uuid4().hex[:6]}",
+                "book_code": f"small-random-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert small_book_response.status_code == status.HTTP_201_CREATED
+        small_book_id = small_book_response.json()["id"]
+
+        large_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Large Random Book {uuid4().hex[:6]}",
+                "book_code": f"large-random-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert large_book_response.status_code == status.HTTP_201_CREATED
+        large_book_id = large_book_response.json()["id"]
+
+        def create_chapter(book_id: int, title: str) -> int:
+            response = client.post(
+                "/api/content/nodes",
+                json={
+                    "book_id": book_id,
+                    "parent_node_id": None,
+                    "level_name": "Chapter",
+                    "level_order": 1,
+                    "sequence_number": "1",
+                    "title_english": title,
+                    "has_content": False,
+                },
+                headers=headers,
+            )
+            assert response.status_code == status.HTTP_201_CREATED
+            return response.json()["id"]
+
+        small_chapter_id = create_chapter(small_book_id, "Small Chapter")
+        large_chapter_id = create_chapter(large_book_id, "Large Chapter")
+
+        small_marker = f"small-random-marker-{uuid4().hex}"
+        small_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": small_book_id,
+                "parent_node_id": small_chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Small Verse 1",
+                "has_content": True,
+                "content_data": {"translations": {"english": small_marker}},
+            },
+            headers=headers,
+        )
+        assert small_verse_response.status_code == status.HTTP_201_CREATED
+
+        for index in range(1, 4):
+            large_verse_response = client.post(
+                "/api/content/nodes",
+                json={
+                    "book_id": large_book_id,
+                    "parent_node_id": large_chapter_id,
+                    "level_name": "Verse",
+                    "level_order": 2,
+                    "sequence_number": str(index),
+                    "title_english": f"Large Verse {index}",
+                    "has_content": True,
+                    "content_data": {
+                        "translations": {"english": f"large-random-marker-{index}-{uuid4().hex}"}
+                    },
+                },
+                headers=headers,
+            )
+            assert large_verse_response.status_code == status.HTTP_201_CREATED
+
+        observed_choice_options: list[list[int]] = []
+        observed_shuffle_sizes: list[int] = []
+        original_choice = content_api.random.choice
+        original_shuffle = content_api.random.shuffle
+
+        def track_choice(options):
+            option_list = list(options)
+            observed_choice_options.append(option_list)
+            if sorted(option_list) == sorted([small_book_id, large_book_id]):
+                return small_book_id
+            return original_choice(option_list)
+
+        def track_shuffle(items):
+            observed_shuffle_sizes.append(len(items))
+            # no-op to keep the selected book's verse order deterministic for assertion
+
+        original_book_visibility = content_api._book_is_visible_to_user
+
+        def only_target_books_visible(db, book, current_user):
+            return book.id in {small_book_id, large_book_id}
+
+        monkeypatch.setattr(content_api.random, "choice", track_choice)
+        monkeypatch.setattr(content_api.random, "shuffle", track_shuffle)
+        monkeypatch.setattr(content_api, "_book_is_visible_to_user", only_target_books_visible)
+
+        try:
+            response = client.get("/api/content/daily-verse?mode=random", headers=headers)
+            assert response.status_code == status.HTTP_200_OK
+            payload = response.json()
+            assert payload is not None
+            assert payload["book_id"] == small_book_id
+            assert small_marker in payload["content"]
+            assert any(sorted(options) == sorted([small_book_id, large_book_id]) for options in observed_choice_options)
+            assert observed_shuffle_sizes == [1]
+        finally:
+            monkeypatch.setattr(content_api, "_book_is_visible_to_user", original_book_visibility)
+
 
 class TestBookSharesPhase2:
     def test_owner_can_share_private_book_with_selected_users(self, client):

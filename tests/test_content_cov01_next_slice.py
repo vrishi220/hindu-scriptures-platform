@@ -28,6 +28,16 @@ def _register_and_login(client):
     )
     assert register_response.status_code == status.HTTP_201_CREATED
 
+    # Grant import permission so the user can reach the import endpoint
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.permissions = {**(user.permissions or {}), "can_import": True}
+            db.commit()
+    finally:
+        db.close()
+
     login_response = client.post(
         "/api/auth/login",
         json={"email": email, "password": password},
