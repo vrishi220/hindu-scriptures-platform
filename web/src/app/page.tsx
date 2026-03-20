@@ -95,6 +95,7 @@ function HomeContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [hasRunSearch, setHasRunSearch] = useState(false);
   const [total, setTotal] = useState(0);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -535,6 +536,7 @@ function HomeContent() {
     searchHasContent?: boolean,
     searchUseFullText?: boolean
   ) => {
+    setHasRunSearch(true);
     const searchTerm = term || query;
     const finalBookId = searchBookId !== undefined ? searchBookId : bookId;
     const finalLevelName = searchLevelName !== undefined ? searchLevelName : levelName;
@@ -1105,7 +1107,13 @@ function HomeContent() {
                   <div role="group" aria-label="Search mode" className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setUseFullTextSearch(false)}
+                      onClick={() => {
+                        setUseFullTextSearch(false);
+                        setHasRunSearch(false);
+                        setResults([]);
+                        setTotal(0);
+                        setError(null);
+                      }}
                       aria-pressed={!useFullTextSearch}
                       className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
                         !useFullTextSearch
@@ -1117,7 +1125,13 @@ function HomeContent() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setUseFullTextSearch(true)}
+                      onClick={() => {
+                        setUseFullTextSearch(true);
+                        setHasRunSearch(false);
+                        setResults([]);
+                        setTotal(0);
+                        setError(null);
+                      }}
                       aria-pressed={useFullTextSearch}
                       className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
                         useFullTextSearch
@@ -1140,7 +1154,7 @@ function HomeContent() {
                 {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
               </form>
 
-              {query.trim() ? (
+              {query.trim() && hasRunSearch ? (
                 <div className="mt-4 border-t border-black/10 pt-4">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold uppercase tracking-[0.16em] text-zinc-600">
@@ -1167,9 +1181,6 @@ function HomeContent() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <p className="font-medium text-[color:var(--deep)]">{title}</p>
-                            <span className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[color:var(--accent)]">
-                              {useFullTextSearch ? "Full-text" : "Basic"}
-                            </span>
                           </div>
                           <div className="mt-1">{renderBreadcrumb(result)}</div>
                           {result.snippet ? (
@@ -1232,7 +1243,7 @@ function HomeContent() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
+                      onClick={() => {
                       setVerseMode("random");
                       loadDailyVerse("random");
                     }}
