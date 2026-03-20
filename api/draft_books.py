@@ -1216,6 +1216,13 @@ def _pick_preferred_translation_text(
         if fallback_value:
             return fallback_value
 
+    # Last resort: return any available translation (e.g. translations.te when
+    # preferred language is English but only Telugu is stored).
+    for value in translations.values():
+        clean = _as_clean_string(value)
+        if clean:
+            return clean
+
     return ""
 
 

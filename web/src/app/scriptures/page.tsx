@@ -1356,6 +1356,13 @@ const pickPreferredTranslationText = (
       return value.trim();
     }
   }
+  // Last resort: return any available translation value (e.g. translations.te
+  // when preferred language is English but only Telugu is stored).
+  for (const v of Object.values(translations)) {
+    if (typeof v === "string" && v.trim()) {
+      return v.trim();
+    }
+  }
   return "";
 };
 
