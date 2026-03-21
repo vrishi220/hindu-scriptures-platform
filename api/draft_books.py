@@ -1203,24 +1203,32 @@ def _pick_preferred_translation_text(
     preferred_language: object,
     *fallback_values: object,
 ) -> str:
+    def _looks_like_label(value: str) -> bool:
+        """Check if value looks like a label (e.g., 'Verse 1', 'Chapter 2') rather than actual translation."""
+        if not value or len(value) > 250:  # Labels are short, translations are longer
+            return False
+        # Check for patterns like "Verse 1", "Chapter 2", etc.
+        import re
+        return bool(re.match(r"^(verse|chapter|section|shloka|śloka)\s+\d+$", value.strip(), re.IGNORECASE))
+    
     preferred_keys = _translation_lookup_keys(preferred_language)
     english_keys = _translation_lookup_keys("en")
 
     for key in [*preferred_keys, *english_keys]:
         value = _as_clean_string(translations.get(key))
-        if value:
+        if value and not _looks_like_label(value):
             return value
 
     for fallback in fallback_values:
         fallback_value = _as_clean_string(fallback)
-        if fallback_value:
+        if fallback_value and not _looks_like_label(fallback_value):
             return fallback_value
 
     # Last resort: return any available translation (e.g. translations.te when
     # preferred language is English but only Telugu is stored).
     for value in translations.values():
         clean = _as_clean_string(value)
-        if clean:
+        if clean and not _looks_like_label(clean):
             return clean
 
     return ""
@@ -1697,6 +1705,7 @@ def _build_template_context(
             "transliteration": "",
             "english": "",
             "text": "",
+            "translations": {},
             "word_meanings_rows": [],
         }
     else:
@@ -1777,6 +1786,7 @@ def _build_template_context(
             "transliteration": _as_clean_string(transliteration_text),
             "english": _as_clean_string(english_text),
             "text": _as_clean_string(fallback_text),
+            "translations": merged_translations,
             "word_meanings_rows": _resolve_word_meanings_rows(content_data, resolved_metadata),
         }
 
@@ -2015,6 +2025,7 @@ def _render_block_content_with_template(
         content[field_name] = value
 
     content["metadata"] = context.get("metadata", {})
+    content["translations"] = _normalize_translation_map(context.get("translations"))
     content["word_meanings_rows"] = context.get("word_meanings_rows", [])
     content["media_items"] = item.get("media_items") if isinstance(item.get("media_items"), list) else []
 
@@ -2175,7 +2186,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
             "english": render_settings.show_english,
             "text": True,
         }
-        lines: list[tuple[str, str]] = []
+        rendered_entries: list[tuple[str, str, str]] = []
         previous_field_name: str | None = None
         for line in rendered_lines:
             if not isinstance(line, dict):
@@ -2183,6 +2194,8 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
 
             field_name = _as_clean_string(line.get("field")).lower()
             raw_label = _as_clean_string(line.get("label"))
+            if raw_label and not re.search(r"[A-Za-z0-9\u0900-\u097F]", raw_label):
+                raw_label = ""
             label = raw_label if raw_label else _DEFAULT_TEMPLATE_FIELD_LABELS.get(field_name, field_name.title())
             value = _as_clean_string(line.get("value"))
             if not value:
@@ -2192,17 +2205,29 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
                 continue
 
             if not raw_label and field_name == "text":
-                lines.append(("", value))
+                rendered_entries.append((field_name, "", value))
             else:
                 display_label = label
+                if field_name == "sanskrit":
+                    display_label = ""
                 if field_name and field_name == previous_field_name:
                     display_label = ""
-                lines.append((display_label, value))
+                rendered_entries.append((field_name, display_label, value))
 
             previous_field_name = field_name or None
 
-        if lines:
-            return lines + word_meaning_lines
+        if rendered_entries:
+            non_translation_lines = [
+                (label, value)
+                for field_name, label, value in rendered_entries
+                if field_name != "english"
+            ]
+            translation_lines = [
+                (label, value)
+                for field_name, label, value in rendered_entries
+                if field_name == "english"
+            ]
+            return non_translation_lines + word_meaning_lines + translation_lines
 
     visible_by_key: dict[str, bool] = {
         "sanskrit": render_settings.show_sanskrit,
@@ -2217,7 +2242,7 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
         "text": "Text",
     }
 
-    lines: list[tuple[str, str]] = []
+    fallback_entries: list[tuple[str, str, str]] = []
     for key in render_settings.text_order:
         if not visible_by_key.get(key, False):
             continue
@@ -2230,14 +2255,25 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
         if not cleaned:
             continue
 
-        lines.append((labels.get(key, key.title()), cleaned))
+        fallback_entries.append((key, labels.get(key, key.title()), cleaned))
 
-    if not lines:
+    if not fallback_entries:
         fallback = resolved_content.get("text")
         if isinstance(fallback, str) and fallback.strip():
-            lines.append(("Text", fallback.strip()))
+            fallback_entries.append(("text", "Text", fallback.strip()))
 
-    return lines + word_meaning_lines
+    non_translation_lines = [
+        (label, value)
+        for field_name, label, value in fallback_entries
+        if field_name != "english"
+    ]
+    translation_lines = [
+        (label, value)
+        for field_name, label, value in fallback_entries
+        if field_name == "english"
+    ]
+
+    return non_translation_lines + word_meaning_lines + translation_lines
 
 
 def _render_book_preview_template(
@@ -2766,14 +2802,14 @@ def _build_draft_revision_events(draft: DraftBook, db: Session) -> list[DraftRev
     return events
 
 
-def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
-    appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
-    appendix_entries = []
-    if isinstance(appendix_raw, dict):
-        raw_entries = appendix_raw.get("entries")
-        if isinstance(raw_entries, list):
-            appendix_entries = [entry for entry in raw_entries if isinstance(entry, dict)]
-
+def _generate_rendered_pdf(
+    document_heading: str,
+    effective_title: str,
+    heading_metadata_lines: list[str],
+    sections: SnapshotRenderSections,
+    render_settings: SnapshotRenderSettings,
+    appendix_entries: list[dict] | None = None,
+) -> bytes:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
     page_width, page_height = letter
@@ -2800,15 +2836,10 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, d
         pdf.drawString(left_margin, y, text)
         y -= devanagari_line_height if use_devanagari else line_height
 
-    effective_title = draft_title or f"Draft {snapshot.draft_book_id}"
-    write_line(f"Edition Snapshot Export — {effective_title}", "Helvetica-Bold", 14)
-    write_line(f"Version: v{snapshot.version}", "Helvetica", 10)
-    write_line(f"Snapshot ID: {snapshot.id}", "Helvetica", 10)
-    write_line(f"Created At: {snapshot.created_at.isoformat()}", "Helvetica", 10)
+    write_line(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
+    for metadata_line in heading_metadata_lines:
+        write_line(metadata_line, "Helvetica", 10)
     write_line("", "Helvetica", 10)
-
-    sections = _materialize_snapshot_render_sections(snapshot.snapshot_data, db)
-    render_settings = _extract_render_settings(snapshot.snapshot_data)
 
     write_line("Rendered Content", "Helvetica-Bold", 12)
     for section_name in ("front", "body", "back"):
@@ -2852,29 +2883,56 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, d
 
     write_line("", "Helvetica", 10)
 
-    write_line("Provenance Appendix", "Helvetica-Bold", 12)
-    if not appendix_entries:
-        write_line("No provenance appendix entries available.")
-    else:
-        write_line(f"Total entries: {len(appendix_entries)}")
-        write_line("", "Helvetica", 10)
-        for index, entry in enumerate(appendix_entries, start=1):
-            section = str(entry.get("section") or "body")
-            title = str(entry.get("title") or f"Node {entry.get('source_node_id', 'unknown')}")
-            source_node_id = entry.get("source_node_id", "unknown")
-            source_book_id = entry.get("source_book_id", "unknown")
-            license_type = str(entry.get("license_type") or "UNKNOWN")
-            source_author = str(entry.get("source_author") or "Unknown")
-            source_version = str(entry.get("source_version") or "latest")
-
-            write_line(f"{index}. [{section}] {title}")
-            write_line(f"   source_node_id={source_node_id} source_book_id={source_book_id}")
-            write_line(f"   license={license_type} author={source_author} version={source_version}")
+    if appendix_entries is not None:
+        write_line("Provenance Appendix", "Helvetica-Bold", 12)
+        if not appendix_entries:
+            write_line("No provenance appendix entries available.")
+        else:
+            write_line(f"Total entries: {len(appendix_entries)}")
             write_line("", "Helvetica", 10)
+            for index, entry in enumerate(appendix_entries, start=1):
+                section = str(entry.get("section") or "body")
+                title = str(entry.get("title") or f"Node {entry.get('source_node_id', 'unknown')}")
+                source_node_id = entry.get("source_node_id", "unknown")
+                source_book_id = entry.get("source_book_id", "unknown")
+                license_type = str(entry.get("license_type") or "UNKNOWN")
+                source_author = str(entry.get("source_author") or "Unknown")
+                source_version = str(entry.get("source_version") or "latest")
+
+                write_line(f"{index}. [{section}] {title}")
+                write_line(f"   source_node_id={source_node_id} source_book_id={source_book_id}")
+                write_line(f"   license={license_type} author={source_author} version={source_version}")
+                write_line("", "Helvetica", 10)
 
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
+    appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
+    appendix_entries = []
+    if isinstance(appendix_raw, dict):
+        raw_entries = appendix_raw.get("entries")
+        if isinstance(raw_entries, list):
+            appendix_entries = [entry for entry in raw_entries if isinstance(entry, dict)]
+
+    sections = _materialize_snapshot_render_sections(snapshot.snapshot_data, db)
+    render_settings = _extract_render_settings(snapshot.snapshot_data)
+    effective_title = draft_title or f"Draft {snapshot.draft_book_id}"
+
+    return _generate_rendered_pdf(
+        document_heading="Edition Snapshot Export",
+        effective_title=effective_title,
+        heading_metadata_lines=[
+            f"Version: v{snapshot.version}",
+            f"Snapshot ID: {snapshot.id}",
+            f"Created At: {snapshot.created_at.isoformat()}",
+        ],
+        sections=sections,
+        render_settings=render_settings,
+        appendix_entries=appendix_entries,
+    )
 
 
 @router.post("/draft-books", response_model=DraftBookPublic, status_code=status.HTTP_201_CREATED)
@@ -3465,6 +3523,132 @@ def export_snapshot_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _export_book_pdf_with_options(
+    book_id: int,
+    payload: BookPreviewRenderRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    current_user_id = current_user.id if current_user else None
+    if not _book_is_visible_to_user(db, book, current_user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    source_nodes = (
+        db.query(ContentNode)
+        .filter(ContentNode.book_id == book.id)
+        .all()
+    )
+    root_node: ContentNode | None = None
+    if payload.node_id is not None:
+        root_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == payload.node_id, ContentNode.book_id == book.id)
+            .first()
+        )
+        if not root_node:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
+
+    ordered_nodes = _ordered_nodes_for_preview_scope(source_nodes, root_node.id if root_node else None)
+
+    body_items = [
+        {
+            "node_id": node.id,
+            "source_book_id": book.id,
+            "level_name": node.level_name,
+            "title": _book_title_for_preview(node),
+            "order": index,
+        }
+        for index, node in enumerate(ordered_nodes, start=1)
+    ]
+
+    preview_payload: dict = {
+        "front": [],
+        "body": body_items,
+        "back": [],
+    }
+
+    if isinstance(payload.render_settings, dict):
+        preview_payload["render_settings"] = payload.render_settings
+    if isinstance(payload.metadata_bindings, dict):
+        preview_payload["metadata_bindings"] = payload.metadata_bindings
+
+    if current_user is not None:
+        _apply_assignment_template_bindings(
+            preview_payload=preview_payload,
+            db=db,
+            owner_id=current_user.id,
+            entity_type="book",
+            entity_id=book.id,
+        )
+
+    _apply_session_template_bindings(preview_payload, payload.session_template_bindings)
+    _apply_template_metadata(preview_payload)
+    sections = _materialize_snapshot_render_sections(preview_payload, db)
+    render_settings = _extract_render_settings(preview_payload)
+    exported_at = datetime.now(timezone.utc).isoformat()
+
+    pdf_bytes = _generate_rendered_pdf(
+        document_heading="Book Export",
+        effective_title=book.book_name,
+        heading_metadata_lines=[
+            f"Book ID: {book.id}",
+            f"Scope: {'node' if root_node else 'book'}",
+            f"Exported At: {exported_at}",
+        ],
+        sections=sections,
+        render_settings=render_settings,
+        appendix_entries=None,
+    )
+
+    safe_book_name = re.sub(r"[^a-z0-9]+", "-", (book.book_name or "book").strip().lower()).strip("-")
+    filename = f"{safe_book_name or f'book-{book.id}'}-{book.id}.pdf"
+    if current_user is not None:
+        _audit_event(
+            "book.pdf_exported",
+            current_user.id,
+            book_id=book.id,
+        )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/books/{book_id}/export/pdf")
+def export_book_pdf(
+    book_id: int,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    return _export_book_pdf_with_options(
+        book_id=book_id,
+        payload=BookPreviewRenderRequest(),
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post("/books/{book_id}/export/pdf")
+def export_book_pdf_with_payload(
+    book_id: int,
+    payload: BookPreviewRenderRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+):
+    return _export_book_pdf_with_options(
+        book_id=book_id,
+        payload=payload,
+        current_user=current_user,
+        db=db,
     )
 
 

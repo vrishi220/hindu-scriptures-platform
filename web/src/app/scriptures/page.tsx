@@ -345,6 +345,7 @@ type BookPreviewBlock = {
     sanskrit?: string;
     transliteration?: string;
     english?: string;
+    translations?: Record<string, string>;
     text?: string;
     rendered_lines?: Array<{
       field?: string;
@@ -1293,6 +1294,28 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
   sanskrit: "Sanskrit",
 };
 
+const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
+const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
+
+const EDITABLE_TRANSLATION_LANGUAGES = [
+  "english",
+  "hindi",
+  "kannada",
+  "malayalam",
+  "sanskrit",
+  "tamil",
+  "telugu",
+] as const;
+
+type EditableTranslationLanguage = (typeof EDITABLE_TRANSLATION_LANGUAGES)[number];
+
+const sortEditableTranslationLanguages = (
+  values: EditableTranslationLanguage[]
+): EditableTranslationLanguage[] =>
+  [...values].sort((left, right) =>
+    translationLanguageLabel(left).localeCompare(translationLanguageLabel(right))
+  );
+
 const normalizeTranslationLanguage = (value?: string | null): string => {
   const normalized = (value || "").trim().toLowerCase();
   if (!normalized) {
@@ -1364,6 +1387,81 @@ const pickPreferredTranslationText = (
     }
   }
   return "";
+};
+
+const pickTranslationTextForLanguageOnly = (
+  translations: Record<string, string>,
+  language: string
+): string => {
+  const keys = getTranslationLookupKeys(language);
+  for (const key of keys) {
+    const value = translations[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+};
+
+const buildEditableTranslationDrafts = (
+  translations: Record<string, string>
+): Record<EditableTranslationLanguage, string> => {
+  const drafts = {} as Record<EditableTranslationLanguage, string>;
+  for (const language of EDITABLE_TRANSLATION_LANGUAGES) {
+    drafts[language] = pickTranslationTextForLanguageOnly(translations, language);
+  }
+  return drafts;
+};
+
+const normalizeSelectedEditableTranslationLanguages = (
+  values: string[] | undefined,
+  fallbackLanguage: string
+): EditableTranslationLanguage[] => {
+  const allowed = new Set<string>(EDITABLE_TRANSLATION_LANGUAGES);
+  const normalized = Array.from(
+    new Set(
+      (values || [])
+        .map((value) => normalizeTranslationLanguage(value))
+        .filter((value) => allowed.has(value))
+    )
+  ) as EditableTranslationLanguage[];
+
+  if (normalized.length > 0) {
+    return sortEditableTranslationLanguages(normalized);
+  }
+
+  const fallbackCanonical = normalizeTranslationLanguage(fallbackLanguage);
+  if (allowed.has(fallbackCanonical)) {
+    return sortEditableTranslationLanguages([fallbackCanonical as EditableTranslationLanguage]);
+  }
+  return sortEditableTranslationLanguages(["english"]);
+};
+
+const normalizeTranslationDraftsForCompare = (
+  drafts: Record<EditableTranslationLanguage, string>,
+  selectedLanguages: EditableTranslationLanguage[]
+) => {
+  const normalizedSelected = [...selectedLanguages].sort();
+  const normalizedDrafts = normalizedSelected.reduce<Record<string, string>>((acc, language) => {
+    acc[language] = (drafts[language] || "").trim();
+    return acc;
+  }, {});
+  return {
+    selectedLanguages: normalizedSelected,
+    drafts: normalizedDrafts,
+  };
+};
+
+const areEditableLanguageSelectionsEqual = (
+  left: EditableTranslationLanguage[],
+  right: EditableTranslationLanguage[]
+) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const normalizedLeft = [...left].sort();
+  const normalizedRight = [...right].sort();
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
 };
 
 type StoredScripturesPreferences = {
@@ -1770,6 +1868,12 @@ function ScripturesContent() {
     tags: "",
     wordMeanings: [] as WordMeaningRow[],
   });
+  const [inlineTranslationDrafts, setInlineTranslationDrafts] =
+    useState<Record<EditableTranslationLanguage, string>>(
+      buildEditableTranslationDrafts({})
+    );
+  const [inlineSelectedTranslationLanguages, setInlineSelectedTranslationLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
@@ -1790,6 +1894,8 @@ function ScripturesContent() {
       show_transliteration: true,
       show_english: true,
     });
+  const [previewTranslationLanguages, setPreviewTranslationLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
   // Track the last applied settings to enable/disable Apply button
   const [appliedBookPreviewLanguageSettings, setAppliedBookPreviewLanguageSettings] =
     useState<BookPreviewLanguageSettings>({
@@ -1797,6 +1903,10 @@ function ScripturesContent() {
       show_transliteration: true,
       show_english: true,
     });
+  const [appliedPreviewTranslationLanguages, setAppliedPreviewTranslationLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
+  const [browseTranslationLanguages, setBrowseTranslationLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
   const [showPreviewLabels, setShowPreviewLabels] = useState(false);
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
@@ -1819,6 +1929,12 @@ function ScripturesContent() {
   const [showShareManager, setShowShareManager] = useState(false);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
+  const [modalTranslationDrafts, setModalTranslationDrafts] =
+    useState<Record<EditableTranslationLanguage, string>>(
+      buildEditableTranslationDrafts({})
+    );
+  const [modalSelectedTranslationLanguages, setModalSelectedTranslationLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
   const [createBookStep, setCreateBookStep] = useState<"schema" | "details">("schema");
   const [bookFormData, setBookFormData] = useState({
     bookName: "",
@@ -2128,6 +2244,34 @@ function ScripturesContent() {
       isFieldStart: boolean;
     }> = [];
     const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
+    const blockTranslations = toTranslationRecord(block.content.translations);
+    const primaryPreviewTranslationLanguage =
+      appliedPreviewTranslationLanguages[0] ||
+      (normalizeTranslationLanguage(sourceLanguage) as EditableTranslationLanguage);
+    const appendSelectedTranslationLines = () => {
+      if (!resolvedSettings.show_english) {
+        return;
+      }
+      const existingValues = new Set(lines.map((line) => (line.value || "").trim()).filter(Boolean));
+      for (const language of appliedPreviewTranslationLanguages) {
+        if (language === primaryPreviewTranslationLanguage) {
+          continue;
+        }
+        const value = pickTranslationTextForLanguageOnly(blockTranslations, language);
+        if (!value || existingValues.has(value)) {
+          continue;
+        }
+        lines.push({
+          key: `translation-${language}`,
+          label: appliedShowPreviewLabels ? `${translationLanguageLabel(language)} Translation` : "",
+          value,
+          className: lineClassNameForField("english"),
+          fieldName: "english",
+          isFieldStart: true,
+        });
+        existingValues.add(value);
+      }
+    };
     if (renderedLines.length > 0) {
       let previousFieldName = "";
       for (let index = 0; index < renderedLines.length; index += 1) {
@@ -2168,6 +2312,7 @@ function ScripturesContent() {
         previousFieldName = fieldName;
       }
 
+      appendSelectedTranslationLines();
       if (lines.length > 0) {
         return lines;
       }
@@ -2197,6 +2342,8 @@ function ScripturesContent() {
 
       lines.push({ key, label, value, className, fieldName: key, isFieldStart: true });
     }
+
+    appendSelectedTranslationLines();
 
     if (lines.length === 0) {
       const fallback = (block.content.text || "").trim();
@@ -3936,6 +4083,64 @@ function ScripturesContent() {
 
     return () => window.clearInterval(intervalId);
   }, [bookPreviewLoading]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY);
+    let parsed: string[] | undefined;
+    if (raw) {
+      try {
+        const candidate = JSON.parse(raw);
+        if (Array.isArray(candidate)) {
+          parsed = candidate.filter((item): item is string => typeof item === "string");
+        }
+      } catch {
+        parsed = undefined;
+      }
+    }
+
+    const normalized = normalizeSelectedEditableTranslationLanguages(
+      parsed,
+      preferences?.source_language || sourceLanguage || "english"
+    );
+    setPreviewTranslationLanguages(normalized);
+    setAppliedPreviewTranslationLanguages(normalized);
+  }, [preferences?.source_language, sourceLanguage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY);
+    let parsed: string[] | undefined;
+    if (raw) {
+      try {
+        const candidate = JSON.parse(raw);
+        if (Array.isArray(candidate)) {
+          parsed = candidate.filter((item): item is string => typeof item === "string");
+        }
+      } catch {
+        parsed = undefined;
+      }
+    }
+    const normalized = normalizeSelectedEditableTranslationLanguages(
+      parsed,
+      preferences?.source_language || sourceLanguage || "english"
+    );
+    setBrowseTranslationLanguages(normalized);
+  }, [preferences?.source_language, sourceLanguage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY,
+      JSON.stringify(browseTranslationLanguages)
+    );
+  }, [browseTranslationLanguages]);
 
   const renderSanskritByPreference = (
     sanskritValue: string,
@@ -5903,6 +6108,15 @@ function ScripturesContent() {
     const nextPreviewTransliterationScript = append
       ? appliedBookPreviewTransliterationScript
       : previewTransliterationScript;
+    const nextPreviewTranslationLanguages = append
+      ? [...appliedPreviewTranslationLanguages]
+      : [...previewTranslationLanguages];
+    const resolvedPreviewTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+      nextPreviewTranslationLanguages,
+      sourceLanguage
+    );
+    nextLanguageSettings.show_english =
+      nextLanguageSettings.show_english || resolvedPreviewTranslationLanguages.length > 0;
 
     setBookPreviewLoadingScope(scope);
     setBookPreviewError(null);
@@ -5942,7 +6156,9 @@ function ScripturesContent() {
                   show_language_badge_when_fallback_used: true,
                 },
               },
-              translation_language: translationLanguageToCode(preferences?.source_language),
+              translation_language: translationLanguageToCode(
+                resolvedPreviewTranslationLanguages[0] || preferences?.source_language
+              ),
             },
           },
           render_settings: {
@@ -6023,6 +6239,13 @@ function ScripturesContent() {
       setAppliedShowPreviewMedia(nextShowPreviewMedia);
       setAppliedPreviewWordMeaningsDisplayMode(nextPreviewWordMeaningsDisplayMode);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
+      setAppliedPreviewTranslationLanguages(resolvedPreviewTranslationLanguages);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY,
+          JSON.stringify(resolvedPreviewTranslationLanguages)
+        );
+      }
 
       if (!append) {
         const nextPreferences = normalizePreferences({
@@ -6780,6 +7003,119 @@ function ScripturesContent() {
     }
   };
 
+  const handleExportBookPdf = async (
+    targetBookId: number,
+    targetBookName?: string,
+    options?: { respectCurrentPreviewScope?: boolean }
+  ) => {
+    try {
+      const useAppliedPreviewSettings = Boolean(showBookPreview && bookPreviewArtifact);
+      const activeTranslationLanguages = useAppliedPreviewSettings
+        ? appliedPreviewTranslationLanguages
+        : previewTranslationLanguages;
+      const activePreviewLanguageSettings = useAppliedPreviewSettings
+        ? appliedBookPreviewLanguageSettings
+        : bookPreviewLanguageSettings;
+      const activeShowPreviewDetails = useAppliedPreviewSettings
+        ? appliedShowPreviewDetails
+        : showPreviewDetails;
+      const activeShowPreviewMedia = useAppliedPreviewSettings
+        ? appliedShowPreviewMedia
+        : showPreviewMedia;
+      const activeTransliterationScript = useAppliedPreviewSettings
+        ? appliedBookPreviewTransliterationScript
+        : previewTransliterationScript;
+
+      const resolvedPreviewTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+        activeTranslationLanguages,
+        sourceLanguage
+      );
+      const effectivePreviewLanguageSettings = {
+        ...activePreviewLanguageSettings,
+        show_english:
+          activePreviewLanguageSettings.show_english || resolvedPreviewTranslationLanguages.length > 0,
+      };
+      const exportNodeId =
+        options?.respectCurrentPreviewScope &&
+        bookPreviewArtifact?.preview_scope === "node" &&
+        typeof bookPreviewArtifact.root_node_id === "number"
+          ? bookPreviewArtifact.root_node_id
+          : undefined;
+
+      const response = await fetch(`/api/books/${targetBookId}/export/pdf`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          Accept: "application/pdf",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          node_id: exportNodeId,
+          selected_translation_languages: resolvedPreviewTranslationLanguages,
+          metadata_bindings: {
+            global: {
+              word_meanings: {
+                source: {
+                  source_display_mode: effectivePreviewLanguageSettings.show_sanskrit
+                    ? "script"
+                    : "transliteration",
+                  preferred_transliteration_scheme:
+                    activeTransliterationScript === "harvard_kyoto"
+                      ? "hk"
+                      : activeTransliterationScript === "itrans"
+                        ? "itrans"
+                        : "iast",
+                  allow_runtime_transliteration_generation: true,
+                },
+                meanings: {
+                  meaning_language: translationLanguageToCode(preferences?.source_language),
+                  fallback_order: ["user_preference", "en", "first_available"],
+                },
+                rendering: {
+                  show_language_badge_when_fallback_used: true,
+                },
+              },
+              translation_language: translationLanguageToCode(
+                resolvedPreviewTranslationLanguages[0] || preferences?.source_language
+              ),
+            },
+          },
+          render_settings: {
+            ...effectivePreviewLanguageSettings,
+            show_metadata: activeShowPreviewDetails,
+            show_media: activeShowPreviewMedia,
+            text_order: ["sanskrit", "transliteration", "english", "text"],
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        alert(payload?.detail || "Failed to export book PDF");
+        return;
+      }
+
+      const blob = await response.blob();
+      const safeName = (targetBookName || `book-${targetBookId}`)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `book-${targetBookId}`;
+      const fileName = `${safeName}.pdf`;
+
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export book PDF");
+    }
+  };
+
   const findNodeById = (nodes: TreeNode[], id: number): TreeNode | null => {
     for (const node of nodes) {
       if (node.id === id) return node;
@@ -6798,6 +7134,10 @@ function ScripturesContent() {
       contentTranslations,
       sourceLanguage,
       contentBasic?.translation
+    );
+    const languageSpecificTranslation = pickTranslationTextForLanguageOnly(
+      contentTranslations,
+      sourceLanguage
     );
     const hasContent = Boolean(
       node.has_content ||
@@ -6818,9 +7158,25 @@ function ScripturesContent() {
       hasContent,
       contentSanskrit: contentBasic?.sanskrit || "",
       contentTransliteration: contentBasic?.transliteration || "",
-      contentEnglish: preferredTranslation,
+      contentEnglish: languageSpecificTranslation,
       tags: node.tags?.join(", ") || "",
       wordMeanings: mapWordMeaningsRowsFromContent(node),
+    };
+  };
+
+  const buildTranslationEditorStateFromNode = (node: NodeContent) => {
+    const translations = toTranslationRecord(node.content_data?.translations);
+    const drafts = buildEditableTranslationDrafts(translations);
+    const selectedFromData = EDITABLE_TRANSLATION_LANGUAGES.filter(
+      (language) => Boolean((drafts[language] || "").trim())
+    ) as EditableTranslationLanguage[];
+    const selectedLanguages = normalizeSelectedEditableTranslationLanguages(
+      selectedFromData,
+      sourceLanguage
+    );
+    return {
+      drafts,
+      selectedLanguages,
     };
   };
 
@@ -6871,7 +7227,19 @@ function ScripturesContent() {
     }
     const baseline = normalizeInlineFormForCompare(buildFormDataFromNode(nodeContent));
     const current = normalizeInlineFormForCompare(inlineFormData);
-    return JSON.stringify(baseline) !== JSON.stringify(current);
+    const baselineTranslationState = buildTranslationEditorStateFromNode(nodeContent);
+    const baselineTranslations = normalizeTranslationDraftsForCompare(
+      baselineTranslationState.drafts,
+      baselineTranslationState.selectedLanguages
+    );
+    const currentTranslations = normalizeTranslationDraftsForCompare(
+      inlineTranslationDrafts,
+      inlineSelectedTranslationLanguages
+    );
+    return (
+      JSON.stringify(baseline) !== JSON.stringify(current) ||
+      JSON.stringify(baselineTranslations) !== JSON.stringify(currentTranslations)
+    );
   }
 
   const inlineHasChanges = hasUnsavedInlineChanges();
@@ -6933,6 +7301,9 @@ function ScripturesContent() {
   useEffect(() => {
     if (nodeContent) {
       setInlineFormData(buildFormDataFromNode(nodeContent));
+      const translationState = buildTranslationEditorStateFromNode(nodeContent);
+      setInlineTranslationDrafts(translationState.drafts);
+      setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
     }
   }, [nodeContent]);
 
@@ -7111,8 +7482,6 @@ function ScripturesContent() {
 
       const contentData: Record<string, unknown> = {};
       if (formData.hasContent) {
-        const translationLanguage = normalizeTranslationLanguage(preferences?.source_language);
-        const translationCode = translationLanguageToCode(translationLanguage);
         const existingTranslations = toTranslationRecord(nodeContent?.content_data?.translations);
         const existingBasic =
           nodeContent?.content_data?.basic && typeof nodeContent.content_data.basic === "object"
@@ -7122,31 +7491,33 @@ function ScripturesContent() {
         const nextTranslations: Record<string, string> = {
           ...existingTranslations,
         };
-        if (formData.contentEnglish.trim()) {
-          nextTranslations[translationCode] = formData.contentEnglish.trim();
-          if (translationCode === "en") {
-            nextTranslations.english = formData.contentEnglish.trim();
-          }
-        } else {
-          delete nextTranslations[translationCode];
-          if (translationCode === "en") {
-            delete nextTranslations.english;
+        const selectedTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+          modalSelectedTranslationLanguages,
+          sourceLanguage
+        );
+
+        for (const language of selectedTranslationLanguages) {
+          const translationCode = translationLanguageToCode(language);
+          const value = (modalTranslationDrafts[language] || "").trim();
+          if (value) {
+            nextTranslations[translationCode] = value;
+            if (translationCode === "en") {
+              nextTranslations.english = value;
+            }
+          } else {
+            delete nextTranslations[translationCode];
+            if (translationCode === "en") {
+              delete nextTranslations.english;
+            }
           }
         }
 
-        const englishFallback = pickPreferredTranslationText(
-          nextTranslations,
-          "english",
-          existingBasic?.translation
-        );
+        const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
 
         contentData.basic = {
           sanskrit: contentPair.sanskrit || undefined,
           transliteration: contentPair.transliteration || undefined,
-          translation:
-            translationCode === "en"
-              ? formData.contentEnglish || undefined
-              : englishFallback || undefined,
+          translation: englishFallback || undefined,
         };
         contentData.translations = Object.keys(nextTranslations).length > 0
           ? nextTranslations
@@ -7298,6 +7669,10 @@ function ScripturesContent() {
             tags: "",
             wordMeanings: [],
           }));
+          setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+          setModalSelectedTranslationLanguages(
+            normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+          );
         } else {
           // Reset form and close modal
           setAction(null);
@@ -7318,6 +7693,10 @@ function ScripturesContent() {
             tags: "",
             wordMeanings: [],
           });
+          setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+          setModalSelectedTranslationLanguages(
+            normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+          );
         }
         // Refresh tree without losing context
         if (bookId) {
@@ -7393,8 +7772,6 @@ function ScripturesContent() {
 
       const contentData: Record<string, unknown> = {};
       if (inlineFormData.hasContent) {
-        const translationLanguage = normalizeTranslationLanguage(preferences?.source_language);
-        const translationCode = translationLanguageToCode(translationLanguage);
         const existingTranslations = toTranslationRecord(nodeContent?.content_data?.translations);
         const existingBasic =
           nodeContent?.content_data?.basic && typeof nodeContent.content_data.basic === "object"
@@ -7404,31 +7781,33 @@ function ScripturesContent() {
         const nextTranslations: Record<string, string> = {
           ...existingTranslations,
         };
-        if (inlineFormData.contentEnglish.trim()) {
-          nextTranslations[translationCode] = inlineFormData.contentEnglish.trim();
-          if (translationCode === "en") {
-            nextTranslations.english = inlineFormData.contentEnglish.trim();
-          }
-        } else {
-          delete nextTranslations[translationCode];
-          if (translationCode === "en") {
-            delete nextTranslations.english;
+        const selectedTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+          inlineSelectedTranslationLanguages,
+          sourceLanguage
+        );
+
+        for (const language of selectedTranslationLanguages) {
+          const translationCode = translationLanguageToCode(language);
+          const value = (inlineTranslationDrafts[language] || "").trim();
+          if (value) {
+            nextTranslations[translationCode] = value;
+            if (translationCode === "en") {
+              nextTranslations.english = value;
+            }
+          } else {
+            delete nextTranslations[translationCode];
+            if (translationCode === "en") {
+              delete nextTranslations.english;
+            }
           }
         }
 
-        const englishFallback = pickPreferredTranslationText(
-          nextTranslations,
-          "english",
-          existingBasic?.translation
-        );
+        const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
 
         contentData.basic = {
           sanskrit: contentPair.sanskrit || undefined,
           transliteration: contentPair.transliteration || undefined,
-          translation:
-            translationCode === "en"
-              ? inlineFormData.contentEnglish || undefined
-              : englishFallback || undefined,
+          translation: englishFallback || undefined,
         };
         contentData.translations = Object.keys(nextTranslations).length > 0
           ? nextTranslations
@@ -7529,6 +7908,9 @@ function ScripturesContent() {
   const handleStartInlineEdit = () => {
     if (!nodeContent || !canEditCurrentBook) return;
     setInlineFormData(buildFormDataFromNode(nodeContent));
+    const translationState = buildTranslationEditorStateFromNode(nodeContent);
+    setInlineTranslationDrafts(translationState.drafts);
+    setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
     setInlineMessage(null);
     setInlineEditMode(true);
   };
@@ -7536,6 +7918,9 @@ function ScripturesContent() {
   const handleCancelInlineEdit = () => {
     if (nodeContent) {
       setInlineFormData(buildFormDataFromNode(nodeContent));
+      const translationState = buildTranslationEditorStateFromNode(nodeContent);
+      setInlineTranslationDrafts(translationState.drafts);
+      setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
     }
     setInlineMessage(null);
     setInlineEditMode(false);
@@ -7820,6 +8205,10 @@ function ScripturesContent() {
                   tags: "",
                   wordMeanings: [],
                 });
+                setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+                setModalSelectedTranslationLanguages(
+                  normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+                );
                 setAction("add");
               }}
               title={`Add ${getNextLevelName(node)}`}
@@ -8592,6 +8981,18 @@ function ScripturesContent() {
                                           Export JSON
                                         </button>
                                       )}
+                                      {(Boolean(authEmail) || book.visibility === "public") && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenBookRowActionsId(null);
+                                            void handleExportBookPdf(book.id, book.book_name);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                        >
+                                          Download PDF
+                                        </button>
+                                      )}
                                       {(canAdmin ||
                                         book.metadata_json?.owner_id === authUserId ||
                                         book.metadata?.owner_id === authUserId) && (
@@ -8740,6 +9141,18 @@ function ScripturesContent() {
                                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                       >
                                         Export JSON
+                                      </button>
+                                    )}
+                                    {(Boolean(authEmail) || book.visibility === "public") && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenBookRowActionsId(null);
+                                          void handleExportBookPdf(book.id, book.book_name);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                      >
+                                        Download PDF
                                       </button>
                                     )}
                                     {(canAdmin ||
@@ -8966,6 +9379,19 @@ function ScripturesContent() {
                               Export JSON
                             </button>
                           )}
+                          {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowBookTreeActionsMenu(false);
+                                const selectedBook = books.find((book) => book.id.toString() === bookId);
+                                void handleExportBookPdf(parseInt(bookId, 10), selectedBook?.book_name);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                            >
+                              Download PDF
+                            </button>
+                          )}
                           {canContribute && currentBook?.schema && (
                             <button
                               type="button"
@@ -8996,6 +9422,10 @@ function ScripturesContent() {
                                   tags: "",
                                   wordMeanings: [],
                                 });
+                                setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+                                setModalSelectedTranslationLanguages(
+                                  normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+                                );
                                 setAction("add");
                               }}
                               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -9412,6 +9842,10 @@ function ScripturesContent() {
                                       tags: "",
                                       wordMeanings: [],
                                     });
+                                    setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+                                    setModalSelectedTranslationLanguages(
+                                      normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+                                    );
                                     setAction("add");
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -9494,6 +9928,9 @@ function ScripturesContent() {
                                     setCreateParentNodeIdOverride(null);
                                     setCreateInsertAfterNodeId(null);
                                     setFormData(buildFormDataFromNode(nodeContent));
+                                    const translationState = buildTranslationEditorStateFromNode(nodeContent);
+                                    setModalTranslationDrafts(translationState.drafts);
+                                    setModalSelectedTranslationLanguages(translationState.selectedLanguages);
                                     setAction("edit");
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -9840,31 +10277,58 @@ function ScripturesContent() {
                               </div>
                             </div>
                             <div>
-                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                {sourceLanguage === "english"
-                                  ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
-                                  : `${translationLanguageLabel(sourceLanguage)} Translation`}
-                              </label>
-                              <div className="group relative mt-1">
-                                <textarea
-                                  rows={3}
-                                  value={inlineFormData.contentEnglish}
-                                  onChange={(event) =>
-                                    setInlineFormData((prev) => ({
-                                      ...prev,
-                                      contentEnglish: event.target.value,
-                                    }))
-                                  }
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                                />
-                                <InlineClearButton
-                                  visible={Boolean(inlineFormData.contentEnglish)}
-                                  onClear={() =>
-                                    setInlineFormData((prev) => ({ ...prev, contentEnglish: "" }))
-                                  }
-                                  ariaLabel="Clear inline translation"
-                                  position="top"
-                                />
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                                {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                  <label key={`inline-translation-select-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={inlineSelectedTranslationLanguages.includes(language)}
+                                      onChange={(event) => {
+                                        const nextValues = event.target.checked
+                                          ? [...inlineSelectedTranslationLanguages, language]
+                                          : inlineSelectedTranslationLanguages.filter((value) => value !== language);
+                                        setInlineSelectedTranslationLanguages(
+                                          normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                        );
+                                      }}
+                                    />
+                                    {translationLanguageLabel(language)}
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="mt-2 flex flex-col gap-2">
+                                {inlineSelectedTranslationLanguages.map((language) => (
+                                  <div key={`inline-translation-input-${language}`}>
+                                    <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                                      {translationLanguageLabel(language)} Translation
+                                    </label>
+                                    <div className="group relative mt-1">
+                                      <textarea
+                                        rows={3}
+                                        value={inlineTranslationDrafts[language] || ""}
+                                        onChange={(event) =>
+                                          setInlineTranslationDrafts((prev) => ({
+                                            ...prev,
+                                            [language]: event.target.value,
+                                          }))
+                                        }
+                                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <InlineClearButton
+                                        visible={Boolean((inlineTranslationDrafts[language] || "").trim())}
+                                        onClear={() =>
+                                          setInlineTranslationDrafts((prev) => ({
+                                            ...prev,
+                                            [language]: "",
+                                          }))
+                                        }
+                                        ariaLabel={`Clear inline ${translationLanguageLabel(language)} translation`}
+                                        position="top"
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
 
@@ -9981,6 +10445,18 @@ function ScripturesContent() {
                               const translations = toTranslationRecord(
                                 nodeContent.content_data?.translations
                               );
+                              const selectedBrowseTranslationLanguages =
+                                normalizeSelectedEditableTranslationLanguages(
+                                  browseTranslationLanguages,
+                                  sourceLanguage
+                                );
+                              const selectedBrowseTranslations = selectedBrowseTranslationLanguages
+                                .map((language) => ({
+                                  language,
+                                  label: `${translationLanguageLabel(language)} Translation`,
+                                  value: pickTranslationTextForLanguageOnly(translations, language),
+                                }))
+                                .filter((entry) => Boolean(entry.value));
                               const preferredTranslationLabel = translationLanguageLabel(
                                 sourceLanguage
                               );
@@ -9989,20 +10465,25 @@ function ScripturesContent() {
                                 sourceLanguage,
                                 nodeContent.content_data?.basic?.translation
                               );
+                              const selectedPrimaryTranslationValue =
+                                selectedBrowseTranslations[0]?.value || "";
+                              const resolvedTranslationValue =
+                                selectedPrimaryTranslationValue || translationValue;
                               const sanskritLabel = contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
                               const transliterationLabel =
                                 contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
                               const translationLabel =
-                                sourceLanguage === "english"
+                                selectedBrowseTranslations[0]?.label ||
+                                (sourceLanguage === "english"
                                   ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
-                                  : `${preferredTranslationLabel} Translation`;
+                                  : `${preferredTranslationLabel} Translation`);
 
                               const primaryContent =
                                 showOnlyPreferredScript
                                   ? sourceLanguage === "sanskrit"
-                                    ? preferredSanskrit || translationValue
-                                    : translationValue || originalSanskrit
-                                  : originalSanskrit || translationValue;
+                                    ? preferredSanskrit || resolvedTranslationValue
+                                    : resolvedTranslationValue || originalSanskrit
+                                  : originalSanskrit || resolvedTranslationValue;
 
                               const primaryLabel =
                                 showOnlyPreferredScript
@@ -10020,6 +10501,32 @@ function ScripturesContent() {
 
                               return (
                                 <>
+                                  {Object.keys(translations).length > 0 && (
+                                    <div className="rounded-lg border border-black/10 bg-white/70 p-2">
+                                      <div className="mb-1 text-xs uppercase tracking-[0.18em] text-zinc-500">
+                                        Translation Languages
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                          <label key={`browse-translation-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                                            <input
+                                              type="checkbox"
+                                              checked={browseTranslationLanguages.includes(language)}
+                                              onChange={(event) => {
+                                                const nextValues = event.target.checked
+                                                  ? [...browseTranslationLanguages, language]
+                                                  : browseTranslationLanguages.filter((value) => value !== language);
+                                                setBrowseTranslationLanguages(
+                                                  normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                                );
+                                              }}
+                                            />
+                                            {translationLanguageLabel(language)}
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
                                   {primaryContent && (
                                     <div>
                                       <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -10053,17 +10560,31 @@ function ScripturesContent() {
                                     </div>
                                   )}
                                   {!showOnlyPreferredScript &&
+                                    selectedBrowseTranslations
+                                      .filter((entry) => entry.value !== primaryContent)
+                                      .map((entry) => (
+                                        <div key={`browse-translation-line-${entry.language}`}>
+                                          <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                            {entry.label}
+                                          </div>
+                                          <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                            {entry.value}
+                                          </div>
+                                        </div>
+                                      ))}
+                                  {!showOnlyPreferredScript &&
+                                    selectedBrowseTranslations.length === 0 &&
                                     translationValue &&
                                     translationValue !== primaryContent && (
-                                    <div>
-                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                        {translationLabel}
+                                      <div>
+                                        <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                          {translationLabel}
+                                        </div>
+                                        <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                          {translationValue}
+                                        </div>
                                       </div>
-                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                        {translationValue}
-                                      </div>
-                                    </div>
-                                  )}
+                                    )}
                                 </>
                               );
                             })()}
@@ -11760,6 +12281,17 @@ function ScripturesContent() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => {
+                      void handleExportBookPdf(bookPreviewArtifact.book_id, bookPreviewArtifact.book_name, {
+                        respectCurrentPreviewScope: true,
+                      });
+                    }}
+                    className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                  >
+                    Download PDF
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleClosePreview}
                     className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
                   >
@@ -11892,8 +12424,28 @@ function ScripturesContent() {
                               }
                               disabled={bookPreviewLoading}
                             />
-                            English
+                            Translations
                           </label>
+                          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                            {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                              <label key={`preview-translation-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                                <input
+                                  type="checkbox"
+                                  checked={previewTranslationLanguages.includes(language)}
+                                  onChange={(event) => {
+                                    const nextValues = event.target.checked
+                                      ? [...previewTranslationLanguages, language]
+                                      : previewTranslationLanguages.filter((value) => value !== language);
+                                    setPreviewTranslationLanguages(
+                                      normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                    );
+                                  }}
+                                  disabled={bookPreviewLoading}
+                                />
+                                {translationLanguageLabel(language)}
+                              </label>
+                            ))}
+                          </div>
                           <button
                             type="button"
                             onClick={() => {
@@ -11909,6 +12461,10 @@ function ScripturesContent() {
                               (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
                                 bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
                                 bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
+                                areEditableLanguageSelectionsEqual(
+                                  previewTranslationLanguages,
+                                  appliedPreviewTranslationLanguages
+                                ) &&
                                 showPreviewLabels === appliedShowPreviewLabels &&
                                 showPreviewDetails === appliedShowPreviewDetails &&
                                 showPreviewTitles === appliedShowPreviewTitles &&
@@ -12004,6 +12560,18 @@ function ScripturesContent() {
                   ) : (
                     bookPreviewArtifact.sections.body.map((block) => {
                       const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
+                      // Deduplicate consecutive lines with the same value to avoid duplicate translations
+                      const deduplicatedLines = contentLines.filter((line, index) => {
+                        if (index === 0) return true;
+                        const prevLine = contentLines[index - 1];
+                        return line.value !== prevLine.value;
+                      });
+                      const nonTranslationLines = deduplicatedLines.filter(
+                        (line) => line.fieldName !== "english"
+                      );
+                      const translationLines = deduplicatedLines.filter(
+                        (line) => line.fieldName === "english"
+                      );
                       const wordMeaningRows = resolvePreviewWordMeanings(block);
                       const wordMeaningInlineText = wordMeaningRows
                         .map((row) => {
@@ -12028,10 +12596,10 @@ function ScripturesContent() {
                             <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
                           )}
                           <div className="mt-1">
-                            {contentLines.length === 0 ? (
+                            {nonTranslationLines.length === 0 && translationLines.length === 0 ? (
                               <p className="text-sm text-zinc-500">No textual content in this block.</p>
                             ) : (
-                              contentLines.map((line, lineIndex) => (
+                              nonTranslationLines.map((line, lineIndex) => (
                                 <div
                                   key={`${line.key}-${line.value.slice(0, 24)}`}
                                   className={
@@ -12087,6 +12655,25 @@ function ScripturesContent() {
                                   {wordMeaningInlineText}
                                 </p>
                               )}
+                            </div>
+                          )}
+                          {translationLines.length > 0 && (
+                            <div className="mt-2 border-t border-black/10 pt-2">
+                              {translationLines.map((line, lineIndex) => (
+                                <div
+                                  key={`${line.key}-translation-${line.value.slice(0, 24)}`}
+                                  className={
+                                    lineIndex === 0 || !line.isFieldStart
+                                      ? ""
+                                      : "mt-2 border-t border-black/10 pt-2"
+                                  }
+                                >
+                                  {line.label && (
+                                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                                  )}
+                                  <p className={line.className}>{line.value}</p>
+                                </div>
+                              ))}
                             </div>
                           )}
                           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
@@ -12700,27 +13287,58 @@ function ScripturesContent() {
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        {sourceLanguage === "english"
-                          ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
-                          : `${translationLanguageLabel(sourceLanguage)} Translation`}
-                      </label>
-                      <div className="group relative mt-1">
-                        <textarea
-                          value={formData.contentEnglish}
-                          onChange={(e) =>
-                            setFormData({ ...formData, contentEnglish: e.target.value })
-                          }
-                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                          placeholder={contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english}
-                          rows={3}
-                        />
-                        <InlineClearButton
-                          visible={Boolean(formData.contentEnglish)}
-                          onClear={() => setFormData((prev) => ({ ...prev, contentEnglish: "" }))}
-                          ariaLabel="Clear translation"
-                          position="top"
-                        />
+                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                        {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                          <label key={`modal-translation-select-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                            <input
+                              type="checkbox"
+                              checked={modalSelectedTranslationLanguages.includes(language)}
+                              onChange={(event) => {
+                                const nextValues = event.target.checked
+                                  ? [...modalSelectedTranslationLanguages, language]
+                                  : modalSelectedTranslationLanguages.filter((value) => value !== language);
+                                setModalSelectedTranslationLanguages(
+                                  normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                );
+                              }}
+                            />
+                            {translationLanguageLabel(language)}
+                          </label>
+                        ))}
+                      </div>
+                      <div className="mt-2 flex flex-col gap-2">
+                        {modalSelectedTranslationLanguages.map((language) => (
+                          <div key={`modal-translation-input-${language}`}>
+                            <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                              {translationLanguageLabel(language)} Translation
+                            </label>
+                            <div className="group relative mt-1">
+                              <textarea
+                                value={modalTranslationDrafts[language] || ""}
+                                onChange={(e) =>
+                                  setModalTranslationDrafts((prev) => ({
+                                    ...prev,
+                                    [language]: e.target.value,
+                                  }))
+                                }
+                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                rows={3}
+                              />
+                              <InlineClearButton
+                                visible={Boolean((modalTranslationDrafts[language] || "").trim())}
+                                onClear={() =>
+                                  setModalTranslationDrafts((prev) => ({
+                                    ...prev,
+                                    [language]: "",
+                                  }))
+                                }
+                                ariaLabel={`Clear ${translationLanguageLabel(language)} translation`}
+                                position="top"
+                              />
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                     <div>

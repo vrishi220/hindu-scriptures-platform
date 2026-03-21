@@ -1,0 +1,944 @@
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+
+const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
+const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
+const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
+const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
+
+type BookPreviewRenderLine = {
+  field?: string;
+  label?: string;
+  value?: string;
+};
+
+type BookPreviewWordMeaningRow = {
+  resolved_source?: {
+    text?: string;
+  };
+  resolved_meaning?: {
+    text?: string;
+  };
+};
+
+type BookPreviewBlock = {
+  order: number;
+  title: string;
+  template_key: string;
+  source_node_id: number | null;
+  content: {
+    translations?: Record<string, string>;
+    rendered_lines?: BookPreviewRenderLine[];
+    word_meanings_rows?: BookPreviewWordMeaningRow[];
+  };
+};
+
+type BookPreviewArtifact = {
+  book_id: number;
+  book_name: string;
+  book_media_items?: Array<{
+    media_type?: string;
+    url?: string;
+    metadata?: Record<string, unknown>;
+  }>;
+  preview_scope?: "book" | "node";
+  root_node_id?: number | null;
+  root_title?: string | null;
+  sections: {
+    body: BookPreviewBlock[];
+  };
+  render_settings?: {
+    show_sanskrit: boolean;
+    show_transliteration: boolean;
+    show_english: boolean;
+    show_metadata: boolean;
+    show_media?: boolean;
+    text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
+  };
+};
+
+const TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL: Record<string, string> = {
+  en: "english",
+  eng: "english",
+  english: "english",
+  hi: "hindi",
+  hindi: "hindi",
+  te: "telugu",
+  telugu: "telugu",
+  kn: "kannada",
+  kannada: "kannada",
+  ta: "tamil",
+  tamil: "tamil",
+  ml: "malayalam",
+  malayalam: "malayalam",
+  sa: "sanskrit",
+  sanskrit: "sanskrit",
+};
+
+const TRANSLATION_CANONICAL_TO_CODE: Record<string, string> = {
+  english: "en",
+  hindi: "hi",
+  telugu: "te",
+  kannada: "kn",
+  tamil: "ta",
+  malayalam: "ml",
+  sanskrit: "sa",
+};
+
+const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
+  english: "English",
+  hindi: "Hindi",
+  telugu: "Telugu",
+  kannada: "Kannada",
+  tamil: "Tamil",
+  malayalam: "Malayalam",
+  sanskrit: "Sanskrit",
+};
+
+const normalizeTranslationLanguage = (value?: string | null): string => {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) {
+    return "english";
+  }
+  return TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL[normalized] || normalized;
+};
+
+const translationLanguageToCode = (value?: string | null): string => {
+  const canonical = normalizeTranslationLanguage(value);
+  return TRANSLATION_CANONICAL_TO_CODE[canonical] || canonical;
+};
+
+const translationLanguageLabel = (value?: string | null): string => {
+  const canonical = normalizeTranslationLanguage(value);
+  return TRANSLATION_LANGUAGE_LABELS[canonical] || canonical.toUpperCase();
+};
+
+const getTranslationLookupKeys = (language: string): string[] => {
+  const canonical = normalizeTranslationLanguage(language);
+  const code = translationLanguageToCode(canonical);
+  const keys = [canonical, code];
+  if (canonical === "english") {
+    keys.push("english", "en");
+  }
+  return Array.from(new Set(keys.filter(Boolean)));
+};
+
+const pickTranslationTextForLanguageOnly = (
+  translations: Record<string, string>,
+  language: string
+): string => {
+  for (const key of getTranslationLookupKeys(language)) {
+    const value = translations[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+};
+
+const normalizeSelectedTranslationLanguages = (value: unknown): string[] => {
+  const rawValues = Array.isArray(value) ? value : [];
+  const normalized = rawValues
+    .map((entry) => normalizeTranslationLanguage(typeof entry === "string" ? entry : ""))
+    .filter(Boolean);
+  if (!normalized.includes("english")) {
+    normalized.unshift("english");
+  }
+  return Array.from(new Set(normalized));
+};
+
+const buildAuthHeader = (token?: string): Record<string, string> =>
+  token ? { Authorization: `Bearer ${token}` } : {};
+
+const refreshAccessToken = async (refreshToken: string) => {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json().catch(() => null)) as
+    | { access_token: string; refresh_token: string }
+    | null;
+};
+
+const tryReadErrorPayload = async (response: Response) => {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  }
+
+  const text = await response.text().catch(() => "");
+  const detail = text.trim();
+  return detail ? { detail } : null;
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const isLikelyImageUrl = (url: string): boolean => {
+  const normalized = (url || "").trim().toLowerCase();
+  return /(\.png|\.jpe?g|\.webp|\.gif|\.bmp|\.svg)(\?|$)/.test(normalized);
+};
+
+const normalizeCoverImageUrl = (rawUrl: string): string => {
+  const value = (rawUrl || "").trim();
+  if (!value) {
+    return "";
+  }
+
+  if (value.startsWith("data:")) {
+    return value;
+  }
+
+  if (value.startsWith("/api/media/")) {
+    return value;
+  }
+
+  if (value.startsWith("api/media/")) {
+    return `/${value}`;
+  }
+
+  if (value.startsWith("/media/")) {
+    return `/api/media/${value.slice("/media/".length)}`;
+  }
+
+  if (value.startsWith("media/")) {
+    return `/api/media/${value.slice("media/".length)}`;
+  }
+
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.pathname.startsWith("/media/")) {
+        const suffix = parsed.pathname.slice("/media/".length);
+        return `/api/media/${suffix}${parsed.search || ""}${parsed.hash || ""}`;
+      }
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+};
+
+const pickPrimaryCoverImage = (
+  items: Array<{ media_type?: string; url?: string; metadata?: Record<string, unknown> }>
+): string | null => {
+  const normalized = items
+    .map((item) => {
+      const url = typeof item.url === "string" ? item.url.trim() : "";
+      const mediaType = typeof item.media_type === "string" ? item.media_type.trim().toLowerCase() : "";
+      const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+      if (!url) {
+        return null;
+      }
+      const primaryFlag =
+        metadata["is_primary"] === true ||
+        metadata["primary"] === true ||
+        metadata["isPrimary"] === true ||
+        String(metadata["role"] || "").toLowerCase() === "cover" ||
+        String(metadata["role"] || "").toLowerCase() === "primary" ||
+        String(metadata["display_name"] || "").toLowerCase().includes("cover");
+      const imageLike = mediaType.includes("image") || isLikelyImageUrl(url);
+      return {
+        url,
+        primaryFlag,
+        imageLike,
+      };
+    })
+    .filter(
+      (entry): entry is { url: string; primaryFlag: boolean; imageLike: boolean } => Boolean(entry)
+    );
+
+  const primaryImage = normalized.find((entry) => entry.imageLike && entry.primaryFlag);
+  if (primaryImage) {
+    return primaryImage.url;
+  }
+
+  const firstImage = normalized.find((entry) => entry.imageLike);
+  return firstImage?.url || null;
+};
+
+const pickCoverImageFromBookPayload = (bookPayload: Record<string, unknown> | null): string | null => {
+  const metadata =
+    bookPayload && typeof bookPayload.metadata_json === "object" && bookPayload.metadata_json
+      ? (bookPayload.metadata_json as Record<string, unknown>)
+      : {};
+
+  const candidates = [
+    metadata.thumbnail_url,
+    metadata.thumbnailUrl,
+    metadata.cover_image_url,
+    metadata.coverImageUrl,
+    metadata.primary_image_url,
+    metadata.primaryImageUrl,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+};
+
+const resolveAbsoluteUrl = (rawUrl: string, requestUrl: string): string => {
+  try {
+    return new URL(rawUrl).toString();
+  } catch {
+    return new URL(rawUrl, requestUrl).toString();
+  }
+};
+
+const fetchImageAsDataUri = async (
+  imageUrl: string,
+  requestUrl: string,
+  token?: string,
+  requestCookieHeader?: string | null
+): Promise<string | null> => {
+  const normalizedImageUrl = normalizeCoverImageUrl(imageUrl);
+  if (!normalizedImageUrl.trim()) {
+    return null;
+  }
+
+  if (normalizedImageUrl.startsWith("data:")) {
+    return normalizedImageUrl;
+  }
+
+  const absoluteUrl = resolveAbsoluteUrl(normalizedImageUrl, requestUrl);
+  const isBackendUrl = absoluteUrl.startsWith(API_BASE_URL);
+  const requestOrigin = new URL(requestUrl).origin;
+  const isSameOrigin = absoluteUrl.startsWith(requestOrigin);
+  const headers: HeadersInit = isBackendUrl && token ? buildAuthHeader(token) : {};
+
+  if (isSameOrigin && requestCookieHeader) {
+    headers["Cookie"] = requestCookieHeader;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(absoluteUrl, {
+      headers,
+      cache: "no-store",
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().startsWith("image/")) {
+    return null;
+  }
+
+  const bytes = await response.arrayBuffer();
+  const base64 = Buffer.from(bytes).toString("base64");
+  return `data:${contentType};base64,${base64}`;
+};
+
+const pickAuthor = (bookPayload: Record<string, unknown> | null): string => {
+  const metadata =
+    bookPayload && typeof bookPayload.metadata_json === "object" && bookPayload.metadata_json
+      ? (bookPayload.metadata_json as Record<string, unknown>)
+      : {};
+  const candidates = [
+    metadata.author,
+    metadata.authors,
+    metadata.author_name,
+    metadata.source_attribution,
+    metadata.composer,
+    metadata.writer,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "Unknown Author";
+};
+
+const buildBookPreviewHtml = (
+  artifact: BookPreviewArtifact,
+  selectedTranslationLanguages: string[],
+  options?: { author?: string | null; coverImageSrc?: string | null }
+) => {
+  const renderSettings = artifact.render_settings || {
+    show_sanskrit: true,
+    show_transliteration: true,
+    show_english: true,
+    show_metadata: false,
+    text_order: ["sanskrit", "transliteration", "english", "text"] as Array<
+      "sanskrit" | "transliteration" | "english" | "text"
+    >,
+  };
+
+  const labelForField = (field: string): string => {
+    if (field === "sanskrit") return "Sanskrit";
+    if (field === "transliteration") return "Transliteration";
+    if (field === "english") return "Translation";
+    return "Text";
+  };
+
+  const shouldShowField = (field: string): boolean => {
+    if (field === "sanskrit") return Boolean(renderSettings.show_sanskrit);
+    if (field === "transliteration") return Boolean(renderSettings.show_transliteration);
+    if (field === "english") return Boolean(renderSettings.show_english);
+    return true;
+  };
+
+  const bodyBlocks = artifact.sections?.body || [];
+  const coverAuthor = (options?.author || "").trim() || "Unknown Author";
+  const coverImageSrc = (options?.coverImageSrc || "").trim();
+  const blocksHtml = bodyBlocks
+    .map((block) => {
+      const renderedLines = Array.isArray(block.content?.rendered_lines)
+        ? block.content.rendered_lines
+        : [];
+
+      const renderedEntries = renderedLines
+        .map((line) => {
+          const field = (line.field || "text").toLowerCase();
+          const value = typeof line.value === "string" ? line.value.trim() : "";
+          if (!value || !shouldShowField(field)) {
+            return null;
+          }
+
+          const hasSemanticLabel =
+            typeof line.label === "string" && /[A-Za-z0-9\u0900-\u097F]/.test(line.label);
+          const label = hasSemanticLabel ? line.label!.trim() : labelForField(field);
+          return { field, label, value };
+        })
+        .filter((entry): entry is { field: string; label: string; value: string } => Boolean(entry));
+
+      const translationMapRaw =
+        block.content?.translations && typeof block.content.translations === "object"
+          ? block.content.translations
+          : {};
+      const translationMap: Record<string, string> = {};
+      for (const [key, rawValue] of Object.entries(translationMapRaw)) {
+        const normalizedKey = (key || "").trim().toLowerCase();
+        if (!normalizedKey || typeof rawValue !== "string" || !rawValue.trim()) {
+          continue;
+        }
+        translationMap[normalizedKey] = rawValue.trim();
+      }
+
+      const groupAdjacentEntries = (entries: Array<{ field: string; label: string; value: string }>) => {
+        return entries.reduce<Array<{ field: string; label: string; value: string }>>((acc, entry) => {
+          const previous = acc[acc.length - 1];
+          if (previous && previous.field === entry.field && previous.label === entry.label) {
+            previous.value = `${previous.value}\n${entry.value}`;
+          } else {
+            acc.push({ ...entry });
+          }
+          return acc;
+        }, []);
+      };
+
+      const nonTranslationEntries = groupAdjacentEntries(
+        renderedEntries.filter((entry) => entry.field !== "english")
+      );
+      const translationEntries = groupAdjacentEntries(
+        renderedEntries.filter((entry) => entry.field === "english")
+      );
+
+      const primarySelectedTranslationLanguage = selectedTranslationLanguages[0] || "english";
+      const existingTranslationValues = new Set(
+        translationEntries.map((entry) => entry.value.trim()).filter(Boolean)
+      );
+      for (const language of selectedTranslationLanguages) {
+        if (language === primarySelectedTranslationLanguage) {
+          continue;
+        }
+        const value = pickTranslationTextForLanguageOnly(translationMap, language);
+        if (!value || existingTranslationValues.has(value)) {
+          continue;
+        }
+        translationEntries.push({
+          field: "english",
+          label: `${translationLanguageLabel(language)} Translation`,
+          value,
+        });
+        existingTranslationValues.add(value);
+      }
+
+      const wordMeaningRows = Array.isArray(block.content?.word_meanings_rows)
+        ? block.content.word_meanings_rows
+        : [];
+      const wordMeaningEntries = wordMeaningRows
+        .map((row) => {
+          const source = typeof row.resolved_source?.text === "string" ? row.resolved_source.text.trim() : "";
+          const meaning = typeof row.resolved_meaning?.text === "string" ? row.resolved_meaning.text.trim() : "";
+          if (!source && !meaning) {
+            return null;
+          }
+          return {
+            field: "word_meaning",
+            label: "Word Meanings",
+            value: [source, meaning].filter(Boolean).join(" — "),
+          };
+        })
+        .filter(
+          (entry): entry is { field: string; label: string; value: string } => Boolean(entry)
+        );
+
+      const nonTranslationHtml = nonTranslationEntries
+        .map((entry) => {
+          const isSanskrit = entry.field === "sanskrit";
+          const lineClass = isSanskrit ? "line sanskrit" : "line";
+          if (entry.field === "sanskrit") {
+            return `<div class=\"${lineClass}\">${escapeHtml(entry.value)}</div>`;
+          }
+          const label = escapeHtml(entry.label);
+          const value = escapeHtml(entry.value);
+          return `<div class=\"${lineClass}\"><strong>${label}:</strong> ${value}</div>`;
+        })
+        .join("");
+
+      const wordMeaningsHtml =
+        wordMeaningEntries.length > 0
+          ? `<div class=\"line\"><strong>Word Meanings:</strong></div>${wordMeaningEntries
+              .map((entry) => `<div class=\"line indented\">${escapeHtml(entry.value)}</div>`)
+              .join("")}`
+          : "";
+
+      const translationHtml = translationEntries
+        .map((entry) => {
+          const label = escapeHtml(entry.label);
+          const value = escapeHtml(entry.value);
+          return `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${value}</div>`;
+        })
+        .join("");
+
+      const linesHtml = `${nonTranslationHtml}${wordMeaningsHtml}${translationHtml}`;
+
+      const metadataSourceNode =
+        typeof block.source_node_id === "number" ? ` • source_node=${block.source_node_id}` : "";
+      const metadata = renderSettings.show_metadata
+        ? `<div class=\"meta\">template=${escapeHtml(block.template_key)}${metadataSourceNode}</div>`
+        : "";
+
+      return `
+        <div class=\"block\">
+          <h3>${block.order}. ${escapeHtml(block.title)}</h3>
+          ${linesHtml || '<p class=\"muted\">No visible content for current settings.</p>'}
+          ${metadata}
+        </div>
+      `;
+    })
+    .join("");
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset=\"utf-8\" />
+        <style>
+          @page { size: A4; margin: 22mm 16mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", "Devanagari Sangam MN", sans-serif; color: #111; }
+          .cover-page { min-height: calc(100vh - 44mm); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+          .cover-title { font-size: 36px; margin: 0 0 8px 0; line-height: 1.2; }
+          .cover-author { font-size: 20px; margin: 0 0 22px 0; color: #444; }
+          .cover-image-wrap { width: 100%; display: flex; justify-content: center; }
+          .cover-image { max-width: 72%; max-height: 62vh; object-fit: contain; border-radius: 10px; }
+          .page-break { page-break-after: always; break-after: page; }
+          h1 { font-size: 24px; margin: 0 0 6px 0; }
+          h3 { font-size: 16px; margin: 0 0 8px; }
+          .block { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; break-inside: avoid; }
+          .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
+          .line.indented { margin-left: 14px; }
+          .line.sanskrit { font-family: "Noto Sans Devanagari", "Devanagari Sangam MN", "Devanagari MT", sans-serif; font-size: 18px; line-height: 1.75; }
+          .meta { margin-top: 8px; color: #555; font-size: 12px; }
+          .muted { color: #666; }
+        </style>
+      </head>
+      <body>
+        <section class=\"cover-page\">
+          <h1 class=\"cover-title\">${escapeHtml(artifact.book_name)}</h1>
+          <p class=\"cover-author\">${escapeHtml(coverAuthor)}</p>
+          ${
+            coverImageSrc
+              ? `<div class=\"cover-image-wrap\"><img class=\"cover-image\" src=\"${escapeHtml(coverImageSrc)}\" alt=\"Book cover\" /></div>`
+              : ""
+          }
+        </section>
+        <div class=\"page-break\"></div>
+        ${blocksHtml || '<p class=\"muted\">No items in this section.</p>'}
+      </body>
+    </html>
+  `;
+};
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ bookId: string }> }
+) {
+  const { bookId } = await params;
+  const store = await cookies();
+  const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
+  const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
+  const requestCookieHeader = request.headers.get("cookie");
+  const body = {};
+  const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(undefined);
+  let activeAccessToken = accessToken;
+
+  const doPostPreview = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/books/${bookId}/preview/render`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...buildAuthHeader(token),
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+  const doGetPdf = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/books/${bookId}/export/pdf`, {
+      headers: {
+        Accept: "application/pdf",
+        ...buildAuthHeader(token),
+      },
+      cache: "no-store",
+    });
+
+  const doGetBook = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/content/books/${bookId}`, {
+      headers: {
+        Accept: "application/json",
+        ...buildAuthHeader(token),
+      },
+      cache: "no-store",
+    });
+
+  // Prefer browser-based PDF from preview artifact for better Indic script shaping.
+  try {
+    let previewResponse = await doPostPreview(activeAccessToken);
+    if (previewResponse.status === 401 && refreshToken) {
+      const newTokens = await refreshAccessToken(refreshToken);
+      if (newTokens) {
+        const { access_token, refresh_token } = newTokens;
+        activeAccessToken = access_token;
+        store.set(ACCESS_TOKEN_COOKIE, access_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+        });
+        store.set(REFRESH_TOKEN_COOKIE, refresh_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+        });
+        previewResponse = await doPostPreview(activeAccessToken);
+      }
+    }
+
+    if (previewResponse.ok) {
+      const artifact = (await previewResponse.json()) as BookPreviewArtifact;
+      let bookPayload: Record<string, unknown> | null = null;
+      try {
+        const bookResponse = await doGetBook(activeAccessToken);
+        if (bookResponse.ok) {
+          bookPayload = (await bookResponse.json().catch(() => null)) as Record<string, unknown> | null;
+        }
+      } catch {
+        bookPayload = null;
+      }
+      const author = pickAuthor(bookPayload);
+      const coverImageUrl =
+        pickPrimaryCoverImage(artifact.book_media_items || []) ||
+        pickCoverImageFromBookPayload(bookPayload);
+      const coverImageSrc = coverImageUrl
+        ?
+            (await fetchImageAsDataUri(
+              coverImageUrl,
+              request.url,
+              activeAccessToken,
+              requestCookieHeader
+            )) || resolveAbsoluteUrl(normalizeCoverImageUrl(coverImageUrl), request.url)
+        : null;
+      const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
+        author,
+        coverImageSrc,
+      });
+      const pw = await import("@playwright/test");
+      const browser = await pw.chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        const pdfBytes = new Uint8Array(pdfBuffer);
+        const safeBookName = (artifact.book_name || `book-${bookId}`)
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+        const fileName = `${safeBookName || `book-${bookId}`}.pdf`;
+
+        return new NextResponse(new Uint8Array(pdfBytes), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename=\"${fileName}\"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      } finally {
+        await browser.close();
+      }
+    }
+  } catch {
+    // Fall through to backend PDF fallback.
+  }
+
+  let response: Response;
+  try {
+    response = await doGetPdf(activeAccessToken);
+  } catch {
+    return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
+  }
+
+  if (response.status === 401 && refreshToken) {
+    const newTokens = await refreshAccessToken(refreshToken);
+    if (newTokens) {
+      const { access_token, refresh_token } = newTokens;
+      store.set(ACCESS_TOKEN_COOKIE, access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      store.set(REFRESH_TOKEN_COOKIE, refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+
+      try {
+        response = await doGetPdf(access_token);
+      } catch {
+        return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
+      }
+    }
+  }
+
+  if (!response.ok) {
+    const payload = await tryReadErrorPayload(response);
+    return NextResponse.json(payload || { detail: "Failed to export book PDF" }, { status: response.status });
+  }
+
+  const pdfBytes = new Uint8Array(await response.arrayBuffer());
+  const disposition = response.headers.get("Content-Disposition") || `attachment; filename="book-${bookId}.pdf"`;
+
+  return new NextResponse(pdfBytes, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": disposition,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ bookId: string }> }
+) {
+  const { bookId } = await params;
+  const store = await cookies();
+  const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
+  const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
+  const requestCookieHeader = request.headers.get("cookie");
+  const body = await request.json().catch(() => ({}));
+  const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(
+    (body as { selected_translation_languages?: unknown }).selected_translation_languages
+  );
+  let activeAccessToken = accessToken;
+
+  const doPostPdf = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/books/${bookId}/export/pdf`, {
+      method: "POST",
+      headers: {
+        Accept: "application/pdf",
+        "Content-Type": "application/json",
+        ...buildAuthHeader(token),
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+  const doPostPreview = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/books/${bookId}/preview/render`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...buildAuthHeader(token),
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+  const doGetBook = (token?: string) =>
+    fetch(`${API_BASE_URL}/api/content/books/${bookId}`, {
+      headers: {
+        Accept: "application/json",
+        ...buildAuthHeader(token),
+      },
+      cache: "no-store",
+    });
+
+  // Prefer browser-based PDF from preview artifact for better Indic script shaping.
+  try {
+    let previewResponse = await doPostPreview(activeAccessToken);
+    if (previewResponse.status === 401 && refreshToken) {
+      const newTokens = await refreshAccessToken(refreshToken);
+      if (newTokens) {
+        const { access_token, refresh_token } = newTokens;
+        activeAccessToken = access_token;
+        store.set(ACCESS_TOKEN_COOKIE, access_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+        });
+        store.set(REFRESH_TOKEN_COOKIE, refresh_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+        });
+        previewResponse = await doPostPreview(activeAccessToken);
+      }
+    }
+
+    if (previewResponse.ok) {
+      const artifact = (await previewResponse.json()) as BookPreviewArtifact;
+      let bookPayload: Record<string, unknown> | null = null;
+      try {
+        const bookResponse = await doGetBook(activeAccessToken);
+        if (bookResponse.ok) {
+          bookPayload = (await bookResponse.json().catch(() => null)) as Record<string, unknown> | null;
+        }
+      } catch {
+        bookPayload = null;
+      }
+      const author = pickAuthor(bookPayload);
+      const coverImageUrl =
+        pickPrimaryCoverImage(artifact.book_media_items || []) ||
+        pickCoverImageFromBookPayload(bookPayload);
+      const coverImageSrc = coverImageUrl
+        ?
+            (await fetchImageAsDataUri(
+              coverImageUrl,
+              request.url,
+              activeAccessToken,
+              requestCookieHeader
+            )) || resolveAbsoluteUrl(normalizeCoverImageUrl(coverImageUrl), request.url)
+        : null;
+      const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
+        author,
+        coverImageSrc,
+      });
+      const pw = await import("@playwright/test");
+      const browser = await pw.chromium.launch({ headless: true });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: "networkidle" });
+        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        const pdfBytes = new Uint8Array(pdfBuffer);
+        const safeBookName = (artifact.book_name || `book-${bookId}`)
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+        const fileName = `${safeBookName || `book-${bookId}`}.pdf`;
+
+        return new NextResponse(new Uint8Array(pdfBytes), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": `attachment; filename=\"${fileName}\"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      } finally {
+        await browser.close();
+      }
+    }
+  } catch {
+    // Fall through to backend PDF fallback.
+  }
+
+  let response: Response;
+  try {
+    response = await doPostPdf(activeAccessToken);
+  } catch {
+    return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
+  }
+
+  if (response.status === 401 && refreshToken) {
+    const newTokens = await refreshAccessToken(refreshToken);
+    if (newTokens) {
+      const { access_token, refresh_token } = newTokens;
+      store.set(ACCESS_TOKEN_COOKIE, access_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      store.set(REFRESH_TOKEN_COOKIE, refresh_token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+
+      try {
+        response = await doPostPdf(access_token);
+      } catch {
+        return NextResponse.json({ detail: BACKEND_UNAVAILABLE }, { status: 503 });
+      }
+    }
+  }
+
+  if (!response.ok) {
+    const payload = await tryReadErrorPayload(response);
+    return NextResponse.json(payload || { detail: "Failed to export book PDF" }, { status: response.status });
+  }
+
+  const pdfBytes = new Uint8Array(await response.arrayBuffer());
+  const disposition = response.headers.get("Content-Disposition") || `attachment; filename="book-${bookId}.pdf"`;
+
+  return new NextResponse(pdfBytes, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": disposition,
+      "Cache-Control": "no-store",
+    },
+  });
+}
