@@ -43,6 +43,24 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
+      - name: Load Vercel project identifiers
+        run: |
+          if [ ! -f .vercel/project.json ]; then
+            echo "Missing .vercel/project.json"
+            exit 1
+          fi
+
+          VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
+          VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
+
+          if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Invalid .vercel/project.json: orgId/projectId missing"
+            exit 1
+          fi
+
+          echo "VERCEL_ORG_ID=$VERCEL_ORG_ID" >> "$GITHUB_ENV"
+          echo "VERCEL_PROJECT_ID=$VERCEL_PROJECT_ID" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm install --prefix web --no-audit --no-fund
 
@@ -57,7 +75,7 @@ jobs:
           fi
 
       - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Build frontend
         run: |
