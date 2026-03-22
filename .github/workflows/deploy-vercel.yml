@@ -30,6 +30,9 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
+      - name: Clean up any stale Vercel configs
+        run: rm -rf web/.vercel .vercel .vercelignore || true
+
       - name: Validate Vercel secrets
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
@@ -78,6 +81,19 @@ jobs:
             "projectId": "${VERCEL_PROJECT_ID}"
           }
           EOF
+
+      - name: Verify Vercel token and project access
+        run: |
+          echo "Diagnostic: Resolved Vercel IDs"
+          echo "  VERCEL_ORG_ID: ${VERCEL_ORG_ID:0:10}****"
+          echo "  VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:0:10}****"
+          echo "  VERCEL_TOKEN: ${VERCEL_TOKEN:0:10}****"
+          echo ""
+          echo "Contents of web/.vercel/project.json:"
+          cat web/.vercel/project.json
+          echo ""
+          echo "Running vercel whoami to validate token..."
+          vercel whoami --token="$VERCEL_TOKEN" || true
 
       - name: Install dependencies
         run: npm install --prefix web --no-audit --no-fund
