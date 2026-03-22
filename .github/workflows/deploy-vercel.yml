@@ -135,7 +135,14 @@ jobs:
 
       - name: Build frontend
         run: |
-          APP_VERSION=$(node -p "require('./web/package.json').version")
+          if [ -f "web/package.json" ]; then
+            APP_VERSION=$(node -p "require('./web/package.json').version")
+          elif [ -f "package.json" ]; then
+            APP_VERSION=$(node -p "require('./package.json').version")
+          else
+            echo "Unable to locate package.json for frontend version resolution"
+            exit 1
+          fi
           echo "Building with NEXT_PUBLIC_BUILD_NUMBER=${GITHUB_RUN_NUMBER}"
           NEXT_PUBLIC_BUILD_NUMBER="${GITHUB_RUN_NUMBER}" \
           NEXT_PUBLIC_GIT_SHA="${GITHUB_SHA}" \
