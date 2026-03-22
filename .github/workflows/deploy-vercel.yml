@@ -48,12 +48,17 @@ jobs:
 
       - name: Load Vercel project identifiers
         run: |
-          if [ -f .vercel/project.json ]; then
-            VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
-            VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
-          else
-            VERCEL_ORG_ID="$VERCEL_ORG_ID_SECRET"
-            VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_SECRET"
+          VERCEL_ORG_ID="$VERCEL_ORG_ID_SECRET"
+          VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_SECRET"
+
+          if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            if [ -f web/.vercel/project.json ]; then
+              VERCEL_ORG_ID=$(node -p "require('./web/.vercel/project.json').orgId")
+              VERCEL_PROJECT_ID=$(node -p "require('./web/.vercel/project.json').projectId")
+            elif [ -f .vercel/project.json ]; then
+              VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
+              VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
+            fi
           fi
 
           if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
@@ -63,6 +68,16 @@ jobs:
 
           echo "VERCEL_ORG_ID=$VERCEL_ORG_ID" >> "$GITHUB_ENV"
           echo "VERCEL_PROJECT_ID=$VERCEL_PROJECT_ID" >> "$GITHUB_ENV"
+
+      - name: Write Vercel project link (web)
+        run: |
+          mkdir -p web/.vercel
+          cat > web/.vercel/project.json <<EOF
+          {
+            "orgId": "${VERCEL_ORG_ID}",
+            "projectId": "${VERCEL_PROJECT_ID}"
+          }
+          EOF
 
       - name: Install dependencies
         run: npm install --prefix web --no-audit --no-fund
@@ -78,7 +93,7 @@ jobs:
           fi
 
       - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --cwd web
 
       - name: Build frontend
         run: |
@@ -87,12 +102,12 @@ jobs:
           NEXT_PUBLIC_BUILD_NUMBER="${GITHUB_RUN_NUMBER}" \
           NEXT_PUBLIC_GIT_SHA="${GITHUB_SHA}" \
           NEXT_PUBLIC_APP_VERSION="${APP_VERSION}" \
-          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN" --cwd web
 
       - name: Deploy frontend
         run: |
           set +e
-          DEPLOY_OUTPUT=$(vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN" 2>&1)
+          DEPLOY_OUTPUT=$(vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN" --cwd web 2>&1)
           DEPLOY_EXIT=$?
           echo "$DEPLOY_OUTPUT"
 
