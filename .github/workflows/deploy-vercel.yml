@@ -84,19 +84,6 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Verify Vercel token and project access
-        run: |
-          echo "Diagnostic: Resolved Vercel IDs"
-          echo "  VERCEL_ORG_ID: ${VERCEL_ORG_ID:0:10}****"
-          echo "  VERCEL_PROJECT_ID: ${VERCEL_PROJECT_ID:0:10}****"
-          echo "  VERCEL_TOKEN: ${VERCEL_TOKEN:0:10}****"
-          echo ""
-          echo "Contents of .vercel/project.json:"
-          cat .vercel/project.json
-          echo ""
-          echo "Running vercel whoami to validate token..."
-          vercel whoami --token="$VERCEL_TOKEN" || true
-
       - name: Preflight Vercel API authorization
         run: |
           TEAM_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
@@ -131,7 +118,7 @@ jobs:
         run: |
           VERCEL_ORG_ID="$VERCEL_ORG_ID" \
           VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
-          vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --debug
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build frontend
         run: |
