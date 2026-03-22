@@ -1520,23 +1520,23 @@ class TestHierarchyInsertionRegression:
             assert invalid_root_exc.value.status_code == status.HTTP_400_BAD_REQUEST
             assert "Root level items must be at" in invalid_root_exc.value.detail
 
-            with pytest.raises(HTTPException) as invalid_nonleaf_content_exc:
-                create_node(
-                    payload=ContentNodeCreate(
-                        book_id=book.id,
-                        parent_node_id=kanda_id,
-                        level_name="Sarga",
-                        level_order=2,
-                        sequence_number="1",
-                        title_english="Sarga with content should fail",
-                        has_content=True,
-                        content_data={"basic": {"translation": "invalid"}},
-                    ),
-                    db=db,
-                    current_user=test_user,
-                )
-            assert invalid_nonleaf_content_exc.value.status_code == status.HTTP_400_BAD_REQUEST
-            assert "Content items can only be placed" in invalid_nonleaf_content_exc.value.detail
+            sarga_with_content = create_node(
+                payload=ContentNodeCreate(
+                    book_id=book.id,
+                    parent_node_id=kanda_id,
+                    level_name="Sarga",
+                    level_order=2,
+                    sequence_number="1",
+                    title_english="Sarga with content should pass",
+                    has_content=True,
+                    content_data={"basic": {"translation": "valid non-leaf content"}},
+                ),
+                db=db,
+                current_user=test_user,
+            )
+            assert sarga_with_content.level_name == "Sarga"
+            assert sarga_with_content.has_content is True
+            sarga_id = sarga_with_content.id
 
             with pytest.raises(HTTPException) as invalid_direct_leaf_exc:
                 create_node(
@@ -1555,22 +1555,6 @@ class TestHierarchyInsertionRegression:
                 )
             assert invalid_direct_leaf_exc.value.status_code == status.HTTP_400_BAD_REQUEST
             assert "Expected child level" in invalid_direct_leaf_exc.value.detail
-
-            sarga = ContentNode(
-                book_id=book.id,
-                parent_node_id=kanda_id,
-                level_name="Sarga",
-                level_order=2,
-                sequence_number=1,
-                title_english="Sarga 1",
-                has_content=False,
-                created_by=test_user.id,
-                last_modified_by=test_user.id,
-            )
-            db.add(sarga)
-            db.commit()
-            db.refresh(sarga)
-            sarga_id = sarga.id
 
             shloka = ContentNode(
                 book_id=book.id,

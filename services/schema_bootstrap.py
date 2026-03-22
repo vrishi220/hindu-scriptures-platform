@@ -73,6 +73,53 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS level_template_defaults JSONB NOT NULL DEFAULT '{}'::jsonb;
         """,
         """
+        ALTER TABLE IF EXISTS books
+            ADD COLUMN IF NOT EXISTS level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb;
+        """,
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('public.scripture_schemas') IS NOT NULL THEN
+                INSERT INTO scripture_schemas (name, description, levels, level_template_defaults)
+                SELECT seed.name, seed.description, seed.levels, '{}'::jsonb
+                FROM (
+                    VALUES
+                        (
+                            'Flat',
+                            'Single-level structure for standalone entries.',
+                            '["Entry"]'::jsonb
+                        ),
+                        (
+                            '2-Level',
+                            'Two-level structure with container and leaf.',
+                            '["Book", "Entry"]'::jsonb
+                        ),
+                        (
+                            '3-Level',
+                            'Three-level reusable structure.',
+                            '["Book", "Section", "Entry"]'::jsonb
+                        ),
+                        (
+                            '4-Level',
+                            'Four-level reusable structure.',
+                            '["Book", "Part", "Section", "Entry"]'::jsonb
+                        ),
+                        (
+                            '5-Level',
+                            'Five-level reusable structure.',
+                            '["Book", "Part", "Chapter", "Section", "Entry"]'::jsonb
+                        )
+                ) AS seed(name, description, levels)
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM scripture_schemas existing
+                    WHERE lower(existing.name) = lower(seed.name)
+                );
+            END IF;
+        END
+        $$;
+        """,
+        """
         ALTER TABLE IF EXISTS user_preferences
             ADD COLUMN IF NOT EXISTS preview_show_titles BOOLEAN NOT NULL DEFAULT false,
             ADD COLUMN IF NOT EXISTS preview_show_labels BOOLEAN NOT NULL DEFAULT false,

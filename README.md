@@ -351,6 +351,15 @@ Define hierarchical structure:
 }
 ```
 
+Reusable structural schemas are seeded by default (idempotent bootstrap):
+- `Flat` → `["Entry"]`
+- `2-Level` → `["Book", "Entry"]`
+- `3-Level` → `["Book", "Section", "Entry"]`
+- `4-Level` → `["Book", "Part", "Section", "Entry"]`
+- `5-Level` → `["Book", "Part", "Chapter", "Section", "Entry"]`
+
+Use these as canonical structure templates, then customize per-book labels via `level_name_overrides`.
+
 ### Content Nodes
 Tree structure:
 - **Root**: Book itself
@@ -370,6 +379,40 @@ Tree structure:
 - `GET /api/books` - List books
 - `POST /api/books` - Create book
 - `DELETE /api/books/{book_id}` - Delete book (admin)
+
+### Book Level Name Overrides (API Example)
+
+Create a book with schema-level label overrides:
+```json
+POST /api/books
+{
+  "schema_id": 3,
+  "book_name": "Sample Text",
+  "book_code": "sample-text",
+  "language_primary": "sanskrit",
+  "level_name_overrides": {
+    "Book": "Book",
+    "Section": "Chapter",
+    "Entry": "Section"
+  }
+}
+```
+
+Update overrides later (affects rendering for the entire book):
+```json
+PATCH /api/books/{book_id}
+{
+  "level_name_overrides": {
+    "Book": "Book",
+    "Section": "Adhyaya",
+    "Entry": "Shloka"
+  }
+}
+```
+
+Notes:
+- Keys must match canonical schema levels for the selected schema.
+- Values are display labels used for that book’s rendering/UI.
 
 **References:**
 - `POST /api/books/{book_id}/insert-references` - Create references

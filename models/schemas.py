@@ -302,6 +302,7 @@ class BookBase(BaseModel):
     book_code: str | None = None
     language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = Field(default=None, alias="metadata_json")
+    level_name_overrides: dict[str, str] = Field(default_factory=dict)
     status: Literal["draft", "published"] = "draft"
     visibility: Literal["private", "public"] = "private"
 
@@ -316,6 +317,7 @@ class BookUpdate(BaseModel):
     book_code: str | None = None
     language_primary: PrimaryLanguage | None = None
     metadata: dict | None = None
+    level_name_overrides: dict[str, str] | None = None
     status: Literal["draft", "published"] | None = None
     visibility: Literal["private", "public"] | None = None
 
@@ -431,6 +433,7 @@ class BookExchangeSchemaV1(BaseModel):
     name: str | None = None
     description: str | None = None
     levels: list[str] = Field(default_factory=list)
+    level_name_overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class BookExchangeMediaItemV1(BaseModel):

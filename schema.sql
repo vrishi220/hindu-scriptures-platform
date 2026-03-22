@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS books (
   book_code VARCHAR(100) UNIQUE,
   language_primary VARCHAR(50) DEFAULT 'sanskrit',
   metadata JSONB DEFAULT '{}'::jsonb,
+  level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

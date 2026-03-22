@@ -417,6 +417,75 @@ def _ensure_book_view_access(db: Session, book: Book, current_user: User | None)
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
 
+def _book_level_name_overrides(book: Book | None) -> dict[str, str]:
+    if book is None:
+        return {}
+    raw = getattr(book, "level_name_overrides", None)
+    if not isinstance(raw, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        canonical_level = key.strip()
+        display_level = value.strip()
+        if canonical_level and display_level:
+            normalized[canonical_level] = display_level
+    return normalized
+
+
+def _validate_level_name_overrides(
+    level_name_overrides: object,
+    schema_levels: list[str],
+) -> dict[str, str]:
+    if level_name_overrides is None:
+        return {}
+    if not isinstance(level_name_overrides, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="level_name_overrides must be an object",
+        )
+
+    canonical_levels = [level for level in schema_levels if isinstance(level, str) and level.strip()]
+    canonical_lookup = {level.lower(): level for level in canonical_levels}
+
+    normalized: dict[str, str] = {}
+    for key, value in level_name_overrides.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="level_name_overrides keys and values must be strings",
+            )
+
+        requested_key = key.strip()
+        requested_value = value.strip()
+        if not requested_key or not requested_value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="level_name_overrides keys and values must be non-empty",
+            )
+
+        canonical_key = canonical_lookup.get(requested_key.lower())
+        if canonical_key is None:
+            valid_levels = ", ".join(canonical_levels)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid override level '{requested_key}'. Valid levels: {valid_levels}",
+            )
+
+        normalized[canonical_key] = requested_value
+
+    return normalized
+
+
+def _display_level_name_for_book(book: Book | None, level_name: str | None) -> str | None:
+    if not isinstance(level_name, str):
+        return level_name
+    overrides = _book_level_name_overrides(book)
+    return overrides.get(level_name, level_name)
+
+
 def _book_public_model(book: Book) -> BookPublic:
     existing_metadata = book.metadata_json or {}
     if not isinstance(existing_metadata, dict):
@@ -434,6 +503,7 @@ def _book_public_model(book: Book) -> BookPublic:
         "book_code": book.book_code,
         "language_primary": book.language_primary,
         "metadata_json": metadata_out,
+        "level_name_overrides": _book_level_name_overrides(book),
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
         "schema": book.schema,
@@ -739,6 +809,7 @@ def create_book(
 ) -> BookPublic:
     _ensure_can_contribute(current_user)
 
+    schema_levels: list[str] = []
     if payload.schema_id is not None:
         schema = (
             db.query(ScriptureSchema)
@@ -750,6 +821,12 @@ def create_book(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid schema_id",
             )
+        schema_levels = schema.levels if isinstance(schema.levels, list) else []
+
+    level_name_overrides = _validate_level_name_overrides(
+        payload.level_name_overrides,
+        schema_levels,
+    )
 
     metadata_json = payload.metadata or {}
     if not isinstance(metadata_json, dict):
@@ -768,6 +845,7 @@ def create_book(
         book_code=book_code,
         language_primary=payload.language_primary,
         metadata_json=metadata_json,
+        level_name_overrides=level_name_overrides,
     )
     db.add(book)
     try:
@@ -862,6 +940,32 @@ def update_book(
         )
 
     updates = payload.model_dump(exclude_unset=True)
+    schema_update_requested = "schema_id" in updates
+    level_overrides_update_requested = "level_name_overrides" in updates
+
+    next_schema_id = updates.get("schema_id", book.schema_id)
+    next_schema_levels: list[str] = []
+    if next_schema_id is not None:
+        schema = db.query(ScriptureSchema).filter(ScriptureSchema.id == next_schema_id).first()
+        if not schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid schema_id",
+            )
+        next_schema_levels = schema.levels if isinstance(schema.levels, list) else []
+
+    if schema_update_requested or level_overrides_update_requested:
+        requested_overrides = (
+            updates.get("level_name_overrides")
+            if level_overrides_update_requested
+            else book.level_name_overrides
+        )
+        validated_level_overrides = _validate_level_name_overrides(
+            requested_overrides,
+            next_schema_levels,
+        )
+        book.level_name_overrides = validated_level_overrides
+
     metadata = book.metadata_json or {}
     if not isinstance(metadata, dict):
         metadata = {}
@@ -869,6 +973,8 @@ def update_book(
     for key, value in updates.items():
         if key == "metadata":
             metadata = dict(value) if isinstance(value, dict) else {}
+        elif key == "level_name_overrides":
+            continue
         elif key == "status":
             normalized_status = str(value).strip().lower() if value else ""
             if normalized_status not in {BOOK_STATUS_DRAFT, BOOK_STATUS_PUBLISHED}:
@@ -2195,11 +2301,13 @@ def list_nodes(
         )
     
     # Book filter
+    target_book: Book | None = None
     if book_id:
         book = db.query(Book).filter(Book.id == book_id).first()
         if not book:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
         _ensure_book_view_access(db, book, current_user)
+        target_book = book
         query = query.filter(ContentNode.book_id == book_id)
     else:
         visible_book_ids = [
@@ -2212,7 +2320,24 @@ def list_nodes(
         query = query.filter(ContentNode.book_id.in_(visible_book_ids))
     
     nodes = query.order_by(ContentNode.id).limit(limit).all()
-    return [ContentNodePublic.model_validate(item) for item in nodes]
+    if target_book is not None:
+        payloads: list[ContentNodePublic] = []
+        for item in nodes:
+            payload = ContentNodePublic.model_validate(item).model_dump()
+            payload["level_name"] = _display_level_name_for_book(target_book, payload.get("level_name"))
+            payloads.append(ContentNodePublic.model_validate(payload))
+        return payloads
+
+    books_by_id = {
+        item.id: item
+        for item in db.query(Book).filter(Book.id.in_({node.book_id for node in nodes if node.book_id is not None})).all()
+    }
+    payloads: list[ContentNodePublic] = []
+    for item in nodes:
+        payload = ContentNodePublic.model_validate(item).model_dump()
+        payload["level_name"] = _display_level_name_for_book(books_by_id.get(item.book_id), payload.get("level_name"))
+        payloads.append(ContentNodePublic.model_validate(payload))
+    return payloads
 
 
 @router.get("/books/{book_id}/tree", response_model=list[ContentNodePublic])
@@ -2246,7 +2371,12 @@ def list_book_tree(
     
     nodes = sorted(nodes, key=lambda n: (n.level_order, natural_sort_key(n)))
     
-    return [ContentNodePublic.model_validate(item) for item in nodes]
+    payloads: list[ContentNodePublic] = []
+    for item in nodes:
+        payload = ContentNodePublic.model_validate(item).model_dump()
+        payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
+        payloads.append(ContentNodePublic.model_validate(payload))
+    return payloads
 
 
 def _node_sequence_sort_key(node: ContentNode):
@@ -2338,6 +2468,7 @@ def export_book_json(
             "name": book.schema.name if book.schema else None,
             "description": book.schema.description if book.schema else None,
             "levels": book.schema.levels if book.schema and isinstance(book.schema.levels, list) else [],
+            "level_name_overrides": _book_level_name_overrides(book),
         },
         book={
             "book_name": book.book_name,
@@ -2394,7 +2525,9 @@ def list_book_tree_nested(
     node_lookup = {n.id: n for n in nodes}
 
     for node in nodes:
-        tree_node = ContentNodeTree.model_validate(node)
+        payload = ContentNodeTree.model_validate(node).model_dump()
+        payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
+        tree_node = ContentNodeTree.model_validate(payload)
         tree_node.children = []
         node_map[node.id] = tree_node
 
@@ -2426,7 +2559,11 @@ def list_book_tree_nested(
     return roots
 
 
-def _resolve_level_name_for_schema(level_name: str, schema_levels: list[str]) -> str:
+def _resolve_level_name_for_schema(
+    level_name: str,
+    schema_levels: list[str],
+    level_name_overrides: dict[str, str] | None = None,
+) -> str:
     if not schema_levels:
         return level_name
 
@@ -2437,6 +2574,21 @@ def _resolve_level_name_for_schema(level_name: str, schema_levels: list[str]) ->
     if requested in schema_levels:
         return requested
 
+    if isinstance(level_name_overrides, dict) and level_name_overrides:
+        exact_override_match = next(
+            (
+                canonical
+                for canonical, display in level_name_overrides.items()
+                if isinstance(canonical, str)
+                and isinstance(display, str)
+                and display.strip() == requested
+                and canonical in schema_levels
+            ),
+            None,
+        )
+        if exact_override_match:
+            return exact_override_match
+
     requested_lower = requested.lower()
     case_insensitive_match = next(
         (level for level in schema_levels if isinstance(level, str) and level.lower() == requested_lower),
@@ -2444,6 +2596,21 @@ def _resolve_level_name_for_schema(level_name: str, schema_levels: list[str]) ->
     )
     if case_insensitive_match:
         return case_insensitive_match
+
+    if isinstance(level_name_overrides, dict) and level_name_overrides:
+        case_insensitive_override_match = next(
+            (
+                canonical
+                for canonical, display in level_name_overrides.items()
+                if isinstance(canonical, str)
+                and isinstance(display, str)
+                and display.strip().lower() == requested_lower
+                and canonical in schema_levels
+            ),
+            None,
+        )
+        if case_insensitive_override_match:
+            return case_insensitive_override_match
 
     alias_map = {
         "shloka": "verse",
@@ -2485,7 +2652,12 @@ def create_node(
         if book.schema and isinstance(book.schema.levels, list)
         else []
     )
-    resolved_level_name = _resolve_level_name_for_schema(payload.level_name, schema_levels)
+    level_name_overrides = _book_level_name_overrides(book)
+    resolved_level_name = _resolve_level_name_for_schema(
+        payload.level_name,
+        schema_levels,
+        level_name_overrides,
+    )
 
     if (
         not _user_can_edit_any(current_user)
@@ -2526,6 +2698,7 @@ def create_node(
         insert_after_level_name = _resolve_level_name_for_schema(
             insert_after_node.level_name,
             schema_levels,
+            level_name_overrides,
         )
         if insert_after_level_name != resolved_level_name:
             raise HTTPException(
@@ -2555,14 +2728,6 @@ def create_node(
 
             # Get the index of this level in the schema
             level_index = schema_levels.index(resolved_level_name)
-            leaf_level = schema_levels[-1]
-
-            # Content nodes (with content) can only be at leaf level
-            if payload.has_content and resolved_level_name != leaf_level:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Content items can only be placed at the '{leaf_level}' level"
-                )
 
             # Check parent-child relationship in schema
             if resolved_parent_node_id:
@@ -2707,7 +2872,9 @@ def create_node(
     db.add(node)
     db.commit()
     db.refresh(node)
-    return ContentNodePublic.model_validate(node)
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["level_name"] = _display_level_name_for_book(book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
 
 
 @router.get("/nodes/{node_id}", response_model=ContentNodePublic)
@@ -2755,8 +2922,11 @@ def get_node(
                     "original_source_url": source_node.original_source_url,
                 }
             )
+            payload["level_name"] = _display_level_name_for_book(node_book, payload.get("level_name"))
             return ContentNodePublic.model_validate(payload)
-    return ContentNodePublic.model_validate(node)
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
 
 
 @router.patch("/nodes/{node_id}", response_model=ContentNodePublic)
@@ -2793,6 +2963,19 @@ def update_node(
 
     updates = payload.model_dump(exclude_unset=True)
     edit_reason = updates.pop("edit_reason", None)  # Remove from updates dict
+
+    schema_levels = (
+        node_book.schema.levels
+        if node_book.schema and isinstance(node_book.schema.levels, list)
+        else []
+    )
+    level_name_overrides = _book_level_name_overrides(node_book)
+    if "level_name" in updates and isinstance(updates.get("level_name"), str):
+        updates["level_name"] = _resolve_level_name_for_schema(
+            updates["level_name"],
+            schema_levels,
+            level_name_overrides,
+        )
 
     if "title_sanskrit" in updates or "title_transliteration" in updates:
         next_title_sanskrit, next_title_transliteration = _autofill_sanskrit_transliteration_pair(
@@ -2871,9 +3054,12 @@ def update_node(
                 "original_source_url": source_node.original_source_url,
             }
         )
+        response_payload["level_name"] = _display_level_name_for_book(node_book, response_payload.get("level_name"))
         return ContentNodePublic.model_validate(response_payload)
 
-    return ContentNodePublic.model_validate(node)
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
 
 
 @router.delete("/nodes/{node_id}", response_model=dict)

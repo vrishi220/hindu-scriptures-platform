@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
@@ -67,6 +67,7 @@ type BookOption = {
   id: number;
   book_name: string;
   schema_id?: number | null;
+  level_name_overrides?: Record<string, string>;
   status?: "draft" | "published";
   visibility?: "private" | "public";
   metadata_json?: {
@@ -85,6 +86,7 @@ type BookDetails = {
   id: number;
   book_name: string;
   schema_id: number | null;
+  level_name_overrides?: Record<string, string>;
   status?: "draft" | "published";
   visibility?: "private" | "public";
   metadata_json?: {
@@ -1971,6 +1973,10 @@ function ScripturesContent() {
   const [propertiesSaving, setPropertiesSaving] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
   const [propertiesMessage, setPropertiesMessage] = useState<string | null>(null);
+  const [levelNameOverridesDraft, setLevelNameOverridesDraft] = useState<Record<string, string>>({});
+  const [levelNameOverridesSaving, setLevelNameOverridesSaving] = useState(false);
+  const [levelNameOverridesError, setLevelNameOverridesError] = useState<string | null>(null);
+  const [levelNameOverridesMessage, setLevelNameOverridesMessage] = useState<string | null>(null);
   const [propertiesName, setPropertiesName] = useState("");
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
@@ -3312,6 +3318,7 @@ function ScripturesContent() {
                 ? {
                     ...book,
                     book_name: updatedBook.book_name,
+                    level_name_overrides: updatedBook.level_name_overrides,
                     metadata_json: updatedBook.metadata_json,
                     metadata: updatedBook.metadata,
                   }
@@ -5079,6 +5086,70 @@ function ScripturesContent() {
     return inferDisplayNameFromUrl(media.url) || `${media.media_type || "media"}`;
   };
 
+  const handleLevelNameOverrideChange = (canonicalLevelName: string, nextDisplayName: string) => {
+    setLevelNameOverridesDraft((prev) => ({
+      ...prev,
+      [canonicalLevelName]: nextDisplayName,
+    }));
+    setLevelNameOverridesError(null);
+    setLevelNameOverridesMessage(null);
+  };
+
+  const handleSaveLevelNameOverrides = async () => {
+    if (!bookId || !currentBook) {
+      setLevelNameOverridesError("Select a book first.");
+      return;
+    }
+
+    const cleanedOverrides: Record<string, string> = {};
+    currentBookSchemaLevels.forEach((canonicalLevel: string) => {
+      const draftValue = (levelNameOverridesDraft[canonicalLevel] || "").trim();
+      if (!draftValue || draftValue.toLowerCase() === canonicalLevel.toLowerCase()) {
+        return;
+      }
+      cleanedOverrides[canonicalLevel] = draftValue;
+    });
+
+    setLevelNameOverridesSaving(true);
+    setLevelNameOverridesError(null);
+    setLevelNameOverridesMessage(null);
+
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level_name_overrides: cleanedOverrides }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to save level names");
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                level_name_overrides: updatedBook.level_name_overrides,
+              }
+            : book
+        )
+      );
+      setLevelNameOverridesMessage("Level names updated for this book.");
+    } catch (err) {
+      setLevelNameOverridesError(err instanceof Error ? err.message : "Failed to save level names");
+    } finally {
+      setLevelNameOverridesSaving(false);
+    }
+  };
+
   const saveBookMetadata = async (
     nextMetadata: Record<string, unknown>,
     successMessage: string,
@@ -5115,6 +5186,7 @@ function ScripturesContent() {
           book.id === updatedBook.id
             ? {
                 ...book,
+                level_name_overrides: updatedBook.level_name_overrides,
                 metadata_json: updatedBook.metadata_json,
                 metadata: updatedBook.metadata,
               }
@@ -7307,6 +7379,61 @@ function ScripturesContent() {
     }
   }, [nodeContent]);
 
+  const currentBookSchemaLevels = useMemo<string[]>(() => {
+    if (!currentBook?.schema?.levels || !Array.isArray(currentBook.schema.levels)) {
+      return [] as string[];
+    }
+    return currentBook.schema.levels.filter((level): level is string => typeof level === "string" && level.trim().length > 0);
+  }, [currentBook?.schema?.levels]);
+
+  const currentBookLevelNameOverrides = useMemo<Record<string, string>>(() => {
+    const raw = currentBook?.level_name_overrides;
+    if (!raw || typeof raw !== "object") {
+      return {} as Record<string, string>;
+    }
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof key !== "string" || typeof value !== "string") continue;
+      const canonical = key.trim();
+      const display = value.trim();
+      if (canonical && display) {
+        normalized[canonical] = display;
+      }
+    }
+    return normalized;
+  }, [currentBook?.level_name_overrides]);
+
+  useEffect(() => {
+    if (!currentBook || currentBookSchemaLevels.length === 0) {
+      setLevelNameOverridesDraft({});
+      setLevelNameOverridesError(null);
+      setLevelNameOverridesMessage(null);
+      return;
+    }
+    const nextDraft: Record<string, string> = {};
+    currentBookSchemaLevels.forEach((level: string) => {
+      nextDraft[level] = currentBookLevelNameOverrides[level] || level;
+    });
+    setLevelNameOverridesDraft(nextDraft);
+    setLevelNameOverridesError(null);
+    setLevelNameOverridesMessage(null);
+  }, [currentBook?.id, currentBookSchemaLevels, currentBookLevelNameOverrides]);
+
+  const getDisplayLevelName = (levelName: string | null | undefined): string => {
+    if (!levelName) return "";
+    const exact = currentBookLevelNameOverrides[levelName];
+    if (exact) return exact;
+
+    const lowered = levelName.trim().toLowerCase();
+    if (!lowered) return levelName;
+    for (const [canonical, display] of Object.entries(currentBookLevelNameOverrides)) {
+      if (canonical.toLowerCase() === lowered) {
+        return display;
+      }
+    }
+    return levelName;
+  };
+
   const normalizeLevelName = (value: string) => value.trim().toLowerCase();
 
   const isLeafLevelName = (levelName: string): boolean => {
@@ -8171,7 +8298,6 @@ function ScripturesContent() {
               type="button"
               onClick={() => {
                 const nextLevel = getNextLevelName(node);
-                const defaultHasContent = isLeafLevelName(nextLevel);
                 let insertAfterNodeId: number | null = null;
 
                 if (selectedId) {
@@ -8198,7 +8324,7 @@ function ScripturesContent() {
                   titleTransliteration: "",
                   titleEnglish: "",
                   sequenceNumber: "",
-                  hasContent: defaultHasContent,
+                  hasContent: true,
                   contentSanskrit: "",
                   contentTransliteration: "",
                   contentEnglish: "",
@@ -9405,7 +9531,6 @@ function ScripturesContent() {
                                   title_english: books.find((b) => b.id.toString() === bookId)?.book_name,
                                 };
                                 const firstLevel = currentBook.schema?.levels[0] || "";
-                                const defaultHasContent = isLeafLevelName(firstLevel);
                                 setActionNode(virtualBook);
                                 setCreateParentNodeIdOverride(null);
                                 setCreateInsertAfterNodeId(null);
@@ -9415,7 +9540,7 @@ function ScripturesContent() {
                                   titleTransliteration: "",
                                   titleEnglish: "",
                                   sequenceNumber: "",
-                                  hasContent: defaultHasContent,
+                                  hasContent: true,
                                   contentSanskrit: "",
                                   contentTransliteration: "",
                                   contentEnglish: "",
@@ -9431,7 +9556,7 @@ function ScripturesContent() {
                               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                             >
                               <Plus size={14} />
-                              Add {currentBook.schema?.levels[0] || "Node"}
+                              Add {getDisplayLevelName(currentBook.schema?.levels[0]) || "Node"}
                             </button>
                           )}
                           {canEditCurrentBook && (
@@ -9820,12 +9945,10 @@ function ScripturesContent() {
                                         : breadcrumb.length > 1
                                           ? breadcrumb[breadcrumb.length - 2]
                                           : null;
-                                    const defaultHasContent = isLeafLevelName(nodeContent.level_name || "");
                                     const siblingLevelName = getSchemaMatchedLevelName(
                                       nodeContent.level_name || "",
                                       nodeContent.level_order
                                     );
-                                    const siblingHasContent = isLeafLevelName(siblingLevelName);
                                     setActionNode(fallbackNode);
                                     setCreateParentNodeIdOverride(parentNode ? parentNode.id : null);
                                     setCreateInsertAfterNodeId(nodeContent.id);
@@ -9835,7 +9958,7 @@ function ScripturesContent() {
                                       titleTransliteration: "",
                                       titleEnglish: "",
                                       sequenceNumber: "",
-                                      hasContent: siblingHasContent || defaultHasContent,
+                                      hasContent: true,
                                       contentSanskrit: "",
                                       contentTransliteration: "",
                                       contentEnglish: "",
@@ -10122,7 +10245,7 @@ function ScripturesContent() {
                               <option value="">Select level</option>
                               {currentBook?.schema?.levels?.map((level) => (
                                 <option key={level} value={level}>
-                                  {level}
+                                  {getDisplayLevelName(level)}
                                 </option>
                               ))}
                             </select>
@@ -11222,6 +11345,15 @@ function ScripturesContent() {
                   onManageMultimedia={() => {
                     setMediaManagerScope("book");
                     setShowMediaManagerModal(true);
+                  }}
+                  schemaLevels={currentBookSchemaLevels}
+                  levelNameOverridesDraft={levelNameOverridesDraft}
+                  levelNameOverridesSaving={levelNameOverridesSaving}
+                  levelNameOverridesMessage={levelNameOverridesMessage}
+                  levelNameOverridesError={levelNameOverridesError}
+                  onLevelNameOverrideChange={handleLevelNameOverrideChange}
+                  onSaveLevelNameOverrides={() => {
+                    void handleSaveLevelNameOverrides();
                   }}
                 />
               )}
@@ -13112,7 +13244,7 @@ function ScripturesContent() {
                     {action === "add" ? (
                       <input
                         type="text"
-                        value={formData.levelName}
+                        value={getDisplayLevelName(formData.levelName)}
                         className="mt-1 w-full rounded-lg border border-black/10 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed outline-none"
                         placeholder="e.g., Kanda, Sarga, Shloka"
                         required
@@ -13130,7 +13262,7 @@ function ScripturesContent() {
                         <option value="">Select level</option>
                         {currentBook?.schema?.levels?.map((level) => (
                           <option key={level} value={level}>
-                            {level}
+                            {getDisplayLevelName(level)}
                           </option>
                         ))}
                       </select>
