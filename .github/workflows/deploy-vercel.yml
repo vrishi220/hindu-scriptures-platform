@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID_SECRET: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID_SECRET: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -34,7 +36,8 @@ jobs:
             echo "Missing required secret: VERCEL_TOKEN"
             exit 1
           fi
-          # VERCEL_ORG_ID and VERCEL_PROJECT_ID are read from .vercel/project.json (committed to repo)
+          # VERCEL_ORG_ID and VERCEL_PROJECT_ID are loaded from .vercel/project.json when available,
+          # otherwise from VERCEL_ORG_ID / VERCEL_PROJECT_ID GitHub secrets.
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -45,16 +48,16 @@ jobs:
 
       - name: Load Vercel project identifiers
         run: |
-          if [ ! -f .vercel/project.json ]; then
-            echo "Missing .vercel/project.json"
-            exit 1
+          if [ -f .vercel/project.json ]; then
+            VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
+            VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
+          else
+            VERCEL_ORG_ID="$VERCEL_ORG_ID_SECRET"
+            VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_SECRET"
           fi
 
-          VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
-          VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
-
           if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
-            echo "Invalid .vercel/project.json: orgId/projectId missing"
+            echo "Missing Vercel project identifiers. Provide .vercel/project.json or set VERCEL_ORG_ID and VERCEL_PROJECT_ID secrets."
             exit 1
           fi
 
