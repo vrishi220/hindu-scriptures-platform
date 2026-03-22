@@ -97,6 +97,29 @@ jobs:
           echo "Running vercel whoami to validate token..."
           vercel whoami --token="$VERCEL_TOKEN" || true
 
+      - name: Preflight Vercel API authorization
+        run: |
+          TEAM_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/teams/$VERCEL_ORG_ID")
+
+          PROJECT_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID")
+
+          echo "Vercel API auth check: team=$TEAM_STATUS project=$PROJECT_STATUS"
+
+          if [ "$TEAM_STATUS" = "403" ] || [ "$PROJECT_STATUS" = "403" ]; then
+            echo "403 from Vercel API: token lacks access to the configured team/project, or VERCEL_ORG_ID/VERCEL_PROJECT_ID are incorrect."
+            echo "Update GitHub secrets VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID to values from the same Vercel account/team."
+            exit 1
+          fi
+
+          if [ "$TEAM_STATUS" -ge 400 ] || [ "$PROJECT_STATUS" -ge 400 ]; then
+            echo "Unexpected Vercel API response (team=$TEAM_STATUS project=$PROJECT_STATUS)."
+            exit 1
+          fi
+
       - name: Validate run number
         run: |
           if ! [[ "${GITHUB_RUN_NUMBER}" =~ ^[0-9]+$ ]]; then
