@@ -39,8 +39,14 @@ jobs:
             echo "Missing required secret: VERCEL_TOKEN"
             exit 1
           fi
-          # VERCEL_ORG_ID and VERCEL_PROJECT_ID are loaded from .vercel/project.json when available,
-          # otherwise from VERCEL_ORG_ID / VERCEL_PROJECT_ID GitHub secrets.
+          if [ -z "$VERCEL_ORG_ID_SECRET" ]; then
+            echo "Missing required secret: VERCEL_ORG_ID"
+            exit 1
+          fi
+          if [ -z "$VERCEL_PROJECT_ID_SECRET" ]; then
+            echo "Missing required secret: VERCEL_PROJECT_ID"
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -49,28 +55,18 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
-      - name: Load Vercel project identifiers
+      - name: Export Vercel identifiers
         run: |
-          VERCEL_ORG_ID="$VERCEL_ORG_ID_SECRET"
-          VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID_SECRET"
-
-          if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
-            if [ -f web/.vercel/project.json ]; then
-              VERCEL_ORG_ID=$(node -p "require('./web/.vercel/project.json').orgId")
-              VERCEL_PROJECT_ID=$(node -p "require('./web/.vercel/project.json').projectId")
-            elif [ -f .vercel/project.json ]; then
-              VERCEL_ORG_ID=$(node -p "require('./.vercel/project.json').orgId")
-              VERCEL_PROJECT_ID=$(node -p "require('./.vercel/project.json').projectId")
-            fi
-          fi
-
-          if [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
-            echo "Missing Vercel project identifiers. Provide .vercel/project.json or set VERCEL_ORG_ID and VERCEL_PROJECT_ID secrets."
+          if ! [[ "$VERCEL_ORG_ID_SECRET" =~ ^team_[A-Za-z0-9]+$ ]]; then
+            echo "Invalid VERCEL_ORG_ID format; expected value like team_xxx"
             exit 1
           fi
-
-          echo "VERCEL_ORG_ID=$VERCEL_ORG_ID" >> "$GITHUB_ENV"
-          echo "VERCEL_PROJECT_ID=$VERCEL_PROJECT_ID" >> "$GITHUB_ENV"
+          if ! [[ "$VERCEL_PROJECT_ID_SECRET" =~ ^prj_[A-Za-z0-9]+$ ]]; then
+            echo "Invalid VERCEL_PROJECT_ID format; expected value like prj_xxx"
+            exit 1
+          fi
+          echo "VERCEL_ORG_ID=$VERCEL_ORG_ID_SECRET" >> "$GITHUB_ENV"
+          echo "VERCEL_PROJECT_ID=$VERCEL_PROJECT_ID_SECRET" >> "$GITHUB_ENV"
 
       - name: Write Vercel project link (web)
         run: |
@@ -81,6 +77,12 @@ jobs:
             "projectId": "${VERCEL_PROJECT_ID}"
           }
           EOF
+
+      - name: Install dependencies
+        run: npm install --prefix web --no-audit --no-fund
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
 
       - name: Verify Vercel token and project access
         run: |
@@ -95,12 +97,6 @@ jobs:
           echo "Running vercel whoami to validate token..."
           vercel whoami --token="$VERCEL_TOKEN" || true
 
-      - name: Install dependencies
-        run: npm install --prefix web --no-audit --no-fund
-
-      - name: Install Vercel CLI
-        run: npm install -g vercel@latest
-
       - name: Validate run number
         run: |
           if ! [[ "${GITHUB_RUN_NUMBER}" =~ ^[0-9]+$ ]]; then
@@ -109,7 +105,10 @@ jobs:
           fi
 
       - name: Pull Vercel environment
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --cwd web
+        run: |
+          VERCEL_ORG_ID="$VERCEL_ORG_ID" \
+          VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --cwd web --debug
 
       - name: Build frontend
         run: |
@@ -118,12 +117,14 @@ jobs:
           NEXT_PUBLIC_BUILD_NUMBER="${GITHUB_RUN_NUMBER}" \
           NEXT_PUBLIC_GIT_SHA="${GITHUB_SHA}" \
           NEXT_PUBLIC_APP_VERSION="${APP_VERSION}" \
+          VERCEL_ORG_ID="$VERCEL_ORG_ID" \
+          VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
           vercel build --prod --token="$VERCEL_TOKEN" --cwd web
 
       - name: Deploy frontend
         run: |
           set +e
-          DEPLOY_OUTPUT=$(vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN" --cwd web 2>&1)
+          DEPLOY_OUTPUT=$(VERCEL_ORG_ID="$VERCEL_ORG_ID" VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN" --cwd web 2>&1)
           DEPLOY_EXIT=$?
           echo "$DEPLOY_OUTPUT"
 
