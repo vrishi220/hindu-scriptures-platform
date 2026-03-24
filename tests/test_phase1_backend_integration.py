@@ -15,7 +15,7 @@ from models.book import Book
 from models.content_node import ContentNode
 from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
-from models.schemas import ContentNodeCreate
+from models.schemas import ContentNodeCreate, _validate_word_meanings_content_data
 from models.scripture_schema import ScriptureSchema
 from models.user import User
 import pytest
@@ -5487,6 +5487,66 @@ class TestWordMeaningsValidation:
             stored["rows"][0]["source"]["transliteration"]["scheme_future"]
             == "dharmakshetre"
         )
+
+    def test_legacy_word_meanings_are_normalized_to_rows_with_iast_sources(self, client):
+        normalized = _validate_word_meanings_content_data(
+            {
+                "word_meanings": {
+                    "english": (
+                        "1. dharmaj~naH = knower of dharma; "
+                        "2. kR^itaj~naH = grateful; "
+                        "3. tapasvii = ascetic"
+                    )
+                }
+            }
+        )
+
+        assert normalized is not None
+        word_meanings = normalized["word_meanings"]
+        assert word_meanings["version"] == "1.0"
+        rows = word_meanings["rows"]
+        assert len(rows) == 3
+        assert rows[0]["source"]["transliteration"]["iast"] == "dharmajñaḥ"
+        assert rows[0]["source"]["script_text"] == "धर्मज्ञः"
+        assert rows[1]["source"]["transliteration"]["iast"] == "kṛtajñaḥ"
+        assert rows[1]["source"]["script_text"] == "कृतज्ञः"
+        assert rows[2]["source"]["transliteration"]["iast"] == "tapasvī"
+        assert rows[2]["source"]["script_text"] == "तपस्वी"
+        assert rows[2]["meanings"]["en"]["text"] == "ascetic"
+
+    def test_create_node_accepts_legacy_word_meanings_semicolon_payload(self, client):
+        headers = _register_and_login(client)
+        book_id, chapter_id = self._create_leaf_parent(client, headers)
+
+        create_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Legacy WM Verse",
+                "has_content": True,
+                "content_data": {
+                    "word_meanings": {
+                        "english": "1. dharmaj~naH = knower of dharma; 2. tapasvii = ascetic"
+                    }
+                },
+            },
+            headers=headers,
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED
+        node_id = create_response.json()["id"]
+
+        get_response = client.get(f"/api/content/nodes/{node_id}", headers=headers)
+        assert get_response.status_code == status.HTTP_200_OK
+        rows = get_response.json()["content_data"]["word_meanings"]["rows"]
+        assert rows[0]["source"]["transliteration"]["iast"] == "dharmajñaḥ"
+        assert rows[0]["source"]["script_text"] == "धर्मज्ञः"
+        assert rows[1]["source"]["transliteration"]["iast"] == "tapasvī"
+        assert rows[1]["meanings"]["en"]["text"] == "ascetic"
 
     def test_search_matches_word_meanings_source_and_meanings(self, client):
         headers = _register_and_login(client)

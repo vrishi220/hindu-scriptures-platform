@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
@@ -35,6 +35,8 @@ import {
   TRANSLITERATION_SCRIPT_OPTIONS,
   isRomanScript,
   normalizeTransliterationScript,
+  transliterateLatinToDevanagari,
+  transliterateLatinToIast,
   transliterateFromDevanagari,
   transliterateFromIast,
   type TransliterationScriptOption,
@@ -344,7 +346,7 @@ type BookPreviewBlock = {
   title: string;
   content: {
     level_name?: string;
-    sequence_number?: number | null;
+    sequence_number?: string | number | null;
     sanskrit?: string;
     transliteration?: string;
     english?: string;
@@ -909,9 +911,75 @@ const createEmptyWordMeaningRow = (order: number): WordMeaningRow => ({
   activeMeaningLanguage: "en",
 });
 
+const splitLegacyWordMeaningEntries = (value: unknown): string[] => {
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(";")
+    .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
+    .filter(Boolean);
+};
+
+const mapLegacyWordMeaningsRowsFromContent = (wordMeanings: Record<string, unknown>): WordMeaningRow[] => {
+  const entriesByLanguage = Object.entries(wordMeanings).reduce<Record<string, string[]>>((acc, [rawLanguage, rawValue]) => {
+    const normalizedLanguage = rawLanguage.trim().toLowerCase() === "english" ? "en" : rawLanguage.trim().toLowerCase();
+    if (!normalizedLanguage || normalizedLanguage === "version" || normalizedLanguage === "rows") {
+      return acc;
+    }
+    const entries = splitLegacyWordMeaningEntries(rawValue);
+    if (entries.length > 0) {
+      acc[normalizedLanguage] = entries;
+    }
+    return acc;
+  }, {});
+
+  const primaryEntries = entriesByLanguage.en || Object.values(entriesByLanguage)[0] || [];
+  return primaryEntries.map((entry, index) => {
+    const [rawSource, ...meaningParts] = entry.split("=");
+    const sourceText = meaningParts.length > 0 ? rawSource.trim() : "";
+    const fallbackMeaningText = (meaningParts.length > 0 ? meaningParts.join("=") : rawSource).trim();
+    const meanings = Object.entries(entriesByLanguage).reduce<Record<string, string>>((acc, [language, entries]) => {
+      const candidate = entries[index];
+      if (!candidate) {
+        return acc;
+      }
+      const [, ...candidateMeaningParts] = candidate.split("=");
+      acc[language] = (candidateMeaningParts.length > 0 ? candidateMeaningParts.join("=") : candidate).trim();
+      return acc;
+    }, {});
+
+    if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in meanings)) {
+      meanings[WORD_MEANINGS_REQUIRED_LANGUAGE] = fallbackMeaningText;
+    }
+
+    const activeMeaningLanguage =
+      Object.entries(meanings).find(([, text]) => text.trim())?.[0] || WORD_MEANINGS_REQUIRED_LANGUAGE;
+
+    return {
+      id: createWordMeaningRowId(),
+      order: index + 1,
+      sourceLanguage: "sa",
+      sourceScriptText: /[\u0900-\u097F]/.test(sourceText)
+        ? sourceText
+        : transliterateLatinToDevanagari(sourceText),
+      sourceTransliterationIast: /[\u0900-\u097F]/.test(sourceText)
+        ? ""
+        : transliterateLatinToIast(sourceText),
+      meanings,
+      activeMeaningLanguage,
+    };
+  });
+};
+
 const mapWordMeaningsRowsFromContent = (node: NodeContent): WordMeaningRow[] => {
-  const rows = node.content_data?.word_meanings?.rows;
+  const wordMeanings = node.content_data?.word_meanings;
+  const rows = wordMeanings?.rows;
   if (!Array.isArray(rows)) {
+    if (wordMeanings && typeof wordMeanings === "object") {
+      return mapLegacyWordMeaningsRowsFromContent(wordMeanings as Record<string, unknown>);
+    }
     return [];
   }
 
@@ -1244,6 +1312,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   show_commentary: true,
   preview_show_titles: false,
   preview_show_labels: false,
+  preview_show_level_numbers: false,
   preview_show_details: false,
   preview_show_media: true,
   preview_show_sanskrit: true,
@@ -1251,6 +1320,8 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_show_english: true,
   preview_transliteration_script: "iast",
   preview_word_meanings_display_mode: "inline",
+  preview_translation_languages: "english",
+  preview_hidden_levels: "",
   ui_theme: "classic",
   ui_density: "comfortable",
   scriptures_book_browser_view: "list",
@@ -1440,6 +1511,91 @@ const normalizeSelectedEditableTranslationLanguages = (
   return sortEditableTranslationLanguages(["english"]);
 };
 
+const parseStoredPreviewTranslationLanguages = (
+  value: unknown,
+  fallbackLanguage: string
+): EditableTranslationLanguage[] => {
+  if (Array.isArray(value)) {
+    return normalizeSelectedEditableTranslationLanguages(
+      value.filter((item): item is string => typeof item === "string"),
+      fallbackLanguage
+    );
+  }
+
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (!raw) {
+      return normalizeSelectedEditableTranslationLanguages([], fallbackLanguage);
+    }
+
+    if (raw.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return normalizeSelectedEditableTranslationLanguages(
+            parsed.filter((item): item is string => typeof item === "string"),
+            fallbackLanguage
+          );
+        }
+      } catch {
+        // Fall back to CSV parsing below.
+      }
+    }
+
+    return normalizeSelectedEditableTranslationLanguages(
+      raw.split(",").map((item) => item.trim()).filter(Boolean),
+      fallbackLanguage
+    );
+  }
+
+  return normalizeSelectedEditableTranslationLanguages([], fallbackLanguage);
+};
+
+const serializePreviewTranslationLanguages = (
+  values: EditableTranslationLanguage[]
+): string => values.join(",");
+
+const parseStoredHiddenPreviewLevels = (value: unknown): Set<string> => {
+  if (Array.isArray(value)) {
+    return new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+  }
+
+  if (typeof value === "string") {
+    const raw = value.trim();
+    if (!raw) {
+      return new Set<string>();
+    }
+
+    if (raw.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return new Set(
+            parsed
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim())
+              .filter(Boolean)
+          );
+        }
+      } catch {
+        // Fall back to CSV parsing below.
+      }
+    }
+
+    return new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));
+  }
+
+  return new Set<string>();
+};
+
+const serializeHiddenPreviewLevels = (values: Set<string>): string =>
+  [...values].map((item) => item.trim()).filter(Boolean).join(",");
+
 const normalizeTranslationDraftsForCompare = (
   drafts: Record<EditableTranslationLanguage, string>,
   selectedLanguages: EditableTranslationLanguage[]
@@ -1467,6 +1623,18 @@ const areEditableLanguageSelectionsEqual = (
   return normalizedLeft.every((value, index) => value === normalizedRight[index]);
 };
 
+const areStringSetsEqual = (left: Set<string>, right: Set<string>) => {
+  if (left.size !== right.size) {
+    return false;
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+  return true;
+};
+
 type StoredScripturesPreferences = {
   preferences?: Partial<UserPreferences>;
   show_only_preferred_script?: boolean;
@@ -1482,6 +1650,7 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   show_commentary: value?.show_commentary ?? true,
   preview_show_titles: value?.preview_show_titles ?? false,
   preview_show_labels: value?.preview_show_labels ?? false,
+  preview_show_level_numbers: value?.preview_show_level_numbers ?? false,
   preview_show_details: value?.preview_show_details ?? false,
   preview_show_media: value?.preview_show_media ?? true,
   preview_show_sanskrit: value?.preview_show_sanskrit ?? true,
@@ -1493,6 +1662,14 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   preview_word_meanings_display_mode: normalizePreviewWordMeaningsDisplayMode(
     value?.preview_word_meanings_display_mode
   ),
+  preview_translation_languages:
+    typeof value?.preview_translation_languages === "string"
+      ? value.preview_translation_languages
+      : "english",
+  preview_hidden_levels:
+    typeof value?.preview_hidden_levels === "string"
+      ? value.preview_hidden_levels
+      : "",
   ui_theme: normalizeUiTheme(value?.ui_theme),
   ui_density: normalizeUiDensity(value?.ui_density),
   scriptures_book_browser_view: normalizeBrowserView(value?.scriptures_book_browser_view),
@@ -1506,9 +1683,11 @@ const normalizeSourceLanguage = (value?: string | null): string =>
 
 const normalizePreviewWordMeaningsDisplayMode = (
   value?: string | null
-): "inline" | "table" => {
+): "inline" | "table" | "hide" => {
   const normalized = (value || "").trim().toLowerCase();
-  return normalized === "table" ? "table" : "inline";
+  if (normalized === "table") return "table";
+  if (normalized === "hide") return "hide";
+  return "inline";
 };
 
 const isBookScopedCategory = (category: MetadataCategory): boolean => {
@@ -1670,8 +1849,8 @@ const autoFillSanskritTransliterationPair = (
       };
     }
     return {
-      sanskrit: transliterateFromIast(transliteration, "devanagari"),
-      transliteration,
+      sanskrit: transliterateLatinToDevanagari(transliteration),
+      transliteration: transliterateLatinToIast(transliteration),
     };
   }
 
@@ -1683,8 +1862,8 @@ const autoFillSanskritTransliterationPair = (
   }
 
   return {
-    sanskrit: transliterateFromIast(sanskrit, "devanagari"),
-    transliteration: transliterateFromIast(sanskrit, "iast"),
+    sanskrit: transliterateLatinToDevanagari(sanskrit),
+    transliteration: transliterateLatinToIast(sanskrit),
   };
 };
 
@@ -1911,18 +2090,23 @@ function ScripturesContent() {
   const [browseTranslationLanguages, setBrowseTranslationLanguages] =
     useState<EditableTranslationLanguage[]>(["english"]);
   const [showPreviewLabels, setShowPreviewLabels] = useState(false);
+  const [showPreviewLevelNumbers, setShowPreviewLevelNumbers] = useState(false);
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
   const [showPreviewMedia, setShowPreviewMedia] = useState(true);
   const [previewWordMeaningsDisplayMode, setPreviewWordMeaningsDisplayMode] =
-    useState<"inline" | "table">("inline");
+    useState<"inline" | "table" | "hide">("inline");
+  // Level visibility filter (client-side, per-preview session)
+  const [hiddenPreviewLevels, setHiddenPreviewLevels] = useState<Set<string>>(new Set());
+  const [appliedHiddenPreviewLevels, setAppliedHiddenPreviewLevels] = useState<Set<string>>(new Set());
   // Track the last applied preview options
   const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
+  const [appliedShowPreviewLevelNumbers, setAppliedShowPreviewLevelNumbers] = useState(false);
   const [appliedShowPreviewDetails, setAppliedShowPreviewDetails] = useState(false);
   const [appliedShowPreviewTitles, setAppliedShowPreviewTitles] = useState(false);
   const [appliedShowPreviewMedia, setAppliedShowPreviewMedia] = useState(true);
   const [appliedPreviewWordMeaningsDisplayMode, setAppliedPreviewWordMeaningsDisplayMode] =
-    useState<"inline" | "table">("inline");
+    useState<"inline" | "table" | "hide">("inline");
   const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [showPreviewControls, setShowPreviewControls] = useState(false);
@@ -2201,10 +2385,14 @@ function ScripturesContent() {
     actionNode,
   ]);
 
-  const resolvePreviewContentLines = (
+  const resolvePreviewContentLines = useCallback((
     block: BookPreviewBlock,
     settings?: BookPreviewRenderSettings
   ) => {
+    const appliedPreviewTransliterationScript = normalizeTransliterationScript(
+      appliedBookPreviewTransliterationScript
+    );
+    const effectiveSourceLanguage = normalizeSourceLanguage(preferences?.source_language);
     const resolvedSettings: BookPreviewRenderSettings =
       settings || {
         show_sanskrit: true,
@@ -2254,7 +2442,7 @@ function ScripturesContent() {
     const blockTranslations = toTranslationRecord(block.content.translations);
     const primaryPreviewTranslationLanguage =
       appliedPreviewTranslationLanguages[0] ||
-      (normalizeTranslationLanguage(sourceLanguage) as EditableTranslationLanguage);
+      (normalizeTranslationLanguage(effectiveSourceLanguage) as EditableTranslationLanguage);
     const appendSelectedTranslationLines = () => {
       if (!resolvedSettings.show_english) {
         return;
@@ -2295,7 +2483,9 @@ function ScripturesContent() {
 
         const value =
           fieldName === "transliteration"
-            ? renderPreviewTransliteration(rawValue)
+            ? hasDevanagariLetters(rawValue)
+              ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
+              : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
             : rawValue;
 
         const rawLabel = (line?.label || "").trim();
@@ -2329,7 +2519,9 @@ function ScripturesContent() {
       const rawValue = (block.content[key] || "").trim();
       const value =
         key === "transliteration"
-          ? renderPreviewTransliteration(rawValue)
+          ? hasDevanagariLetters(rawValue)
+            ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
+            : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
           : rawValue;
       if (!value || !visibleByKey[key]) {
         continue;
@@ -2367,9 +2559,20 @@ function ScripturesContent() {
     }
 
     return lines;
-  };
+  }, [
+    appliedBookPreviewTransliterationScript,
+    appliedPreviewTranslationLanguages,
+    appliedShowPreviewLabels,
+    contentFieldLabels.english,
+    contentFieldLabels.sanskrit,
+    contentFieldLabels.transliteration,
+    preferences?.source_language,
+  ]);
 
-  const resolvePreviewWordMeanings = (block: BookPreviewBlock) => {
+  const resolvePreviewWordMeanings = useCallback((block: BookPreviewBlock) => {
+    const appliedPreviewTransliterationScript = normalizeTransliterationScript(
+      appliedBookPreviewTransliterationScript
+    );
     const rows = Array.isArray(block.content.word_meanings_rows)
       ? block.content.word_meanings_rows
       : [];
@@ -2415,7 +2618,7 @@ function ScripturesContent() {
         meaningLanguage: string;
         fallbackBadgeVisible: boolean;
       } => Boolean(row));
-  };
+  }, [appliedBookPreviewTransliterationScript]);
 
   const loadMetadataCategories = async (): Promise<MetadataCategory[]> => {
     setMetadataCategoriesLoading(true);
@@ -2522,8 +2725,6 @@ function ScripturesContent() {
     };
 
     const sanskritText = pickFirstNonEmptyString(
-      basic.sanskrit,
-      basic.text_sanskrit,
       contentData.sanskrit,
       contentData.text_sanskrit,
       summaryBasic.sanskrit,
@@ -2942,8 +3143,6 @@ function ScripturesContent() {
         };
 
         const sanskritFallback = pickSnapshotText(
-          "sanskrit",
-          "text_sanskrit",
           "sanskrit_text",
           "verse_sanskrit",
           "shloka",
@@ -4059,6 +4258,7 @@ function ScripturesContent() {
 
     setShowPreviewTitles(preferences.preview_show_titles);
     setShowPreviewLabels(preferences.preview_show_labels);
+    setShowPreviewLevelNumbers(preferences.preview_show_level_numbers);
     setShowPreviewDetails(preferences.preview_show_details);
     setShowPreviewMedia(preferences.preview_show_media);
     setPreviewWordMeaningsDisplayMode(
@@ -4069,6 +4269,7 @@ function ScripturesContent() {
 
     setAppliedShowPreviewTitles(preferences.preview_show_titles);
     setAppliedShowPreviewLabels(preferences.preview_show_labels);
+    setAppliedShowPreviewLevelNumbers(preferences.preview_show_level_numbers);
     setAppliedShowPreviewDetails(preferences.preview_show_details);
     setAppliedShowPreviewMedia(preferences.preview_show_media);
     setAppliedPreviewWordMeaningsDisplayMode(
@@ -4076,6 +4277,20 @@ function ScripturesContent() {
     );
     setAppliedBookPreviewLanguageSettings(previewLanguages);
     setAppliedBookPreviewTransliterationScript(previewScript);
+
+    const preferredSourceLanguage = preferences.source_language || sourceLanguage || "english";
+    const persistedPreviewLanguages = parseStoredPreviewTranslationLanguages(
+      preferences.preview_translation_languages,
+      preferredSourceLanguage
+    );
+    setPreviewTranslationLanguages(persistedPreviewLanguages);
+    setAppliedPreviewTranslationLanguages(persistedPreviewLanguages);
+
+    const persistedHiddenLevels = parseStoredHiddenPreviewLevels(
+      preferences.preview_hidden_levels
+    );
+    setHiddenPreviewLevels(persistedHiddenLevels);
+    setAppliedHiddenPreviewLevels(persistedHiddenLevels);
   }, [preferences]);
 
   useEffect(() => {
@@ -4094,29 +4309,17 @@ function ScripturesContent() {
   }, [bookPreviewLoading]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (typeof window === "undefined" || authEmail) {
       return;
     }
     const raw = window.localStorage.getItem(PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY);
-    let parsed: string[] | undefined;
-    if (raw) {
-      try {
-        const candidate = JSON.parse(raw);
-        if (Array.isArray(candidate)) {
-          parsed = candidate.filter((item): item is string => typeof item === "string");
-        }
-      } catch {
-        parsed = undefined;
-      }
-    }
-
-    const normalized = normalizeSelectedEditableTranslationLanguages(
-      parsed,
+    const normalized = parseStoredPreviewTranslationLanguages(
+      raw,
       preferences?.source_language || sourceLanguage || "english"
     );
     setPreviewTranslationLanguages(normalized);
     setAppliedPreviewTranslationLanguages(normalized);
-  }, [preferences?.source_language, sourceLanguage]);
+  }, [authEmail, preferences?.source_language, sourceLanguage]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4676,7 +4879,7 @@ function ScripturesContent() {
     return haystack.includes(normalized);
   };
 
-  const renderInlineMediaPreview = (
+  const renderInlineMediaPreview = useCallback((
     mediaType: string,
     rawUrl: string,
     label: string,
@@ -4734,7 +4937,7 @@ function ScripturesContent() {
         Open media: {label}
       </a>
     );
-  };
+  }, [resolveMediaUrl]);
 
   const mediaAssetMatchesSearch = (asset: MediaAsset, query: string): boolean => {
     const normalized = query.trim().toLowerCase();
@@ -6174,6 +6377,7 @@ function ScripturesContent() {
       ? { ...appliedBookPreviewLanguageSettings }
       : { ...bookPreviewLanguageSettings };
     const nextShowPreviewLabels = append ? appliedShowPreviewLabels : showPreviewLabels;
+    const nextShowPreviewLevelNumbers = append ? appliedShowPreviewLevelNumbers : showPreviewLevelNumbers;
     const nextShowPreviewDetails = append ? appliedShowPreviewDetails : showPreviewDetails;
     const nextShowPreviewTitles = append ? appliedShowPreviewTitles : showPreviewTitles;
     const nextShowPreviewMedia = append ? appliedShowPreviewMedia : showPreviewMedia;
@@ -6186,12 +6390,13 @@ function ScripturesContent() {
     const nextPreviewTranslationLanguages = append
       ? [...appliedPreviewTranslationLanguages]
       : [...previewTranslationLanguages];
+    const nextHiddenPreviewLevels = append
+      ? new Set(appliedHiddenPreviewLevels)
+      : new Set(hiddenPreviewLevels);
     const resolvedPreviewTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
       nextPreviewTranslationLanguages,
       sourceLanguage
     );
-    nextLanguageSettings.show_english =
-      nextLanguageSettings.show_english || resolvedPreviewTranslationLanguages.length > 0;
 
     setBookPreviewLoadingScope(scope);
     setBookPreviewError(null);
@@ -6309,13 +6514,15 @@ function ScripturesContent() {
       }
       setAppliedBookPreviewLanguageSettings(nextLanguageSettings);
       setAppliedShowPreviewLabels(nextShowPreviewLabels);
+      setAppliedShowPreviewLevelNumbers(nextShowPreviewLevelNumbers);
       setAppliedShowPreviewDetails(nextShowPreviewDetails);
       setAppliedShowPreviewTitles(nextShowPreviewTitles);
       setAppliedShowPreviewMedia(nextShowPreviewMedia);
       setAppliedPreviewWordMeaningsDisplayMode(nextPreviewWordMeaningsDisplayMode);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
       setAppliedPreviewTranslationLanguages(resolvedPreviewTranslationLanguages);
-      if (typeof window !== "undefined") {
+      setAppliedHiddenPreviewLevels(nextHiddenPreviewLevels);
+      if (typeof window !== "undefined" && !authEmail) {
         window.localStorage.setItem(
           PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY,
           JSON.stringify(resolvedPreviewTranslationLanguages)
@@ -6327,6 +6534,7 @@ function ScripturesContent() {
           ...(preferences || DEFAULT_USER_PREFERENCES),
           preview_show_titles: nextShowPreviewTitles,
           preview_show_labels: nextShowPreviewLabels,
+          preview_show_level_numbers: nextShowPreviewLevelNumbers,
           preview_show_details: nextShowPreviewDetails,
           preview_show_media: nextShowPreviewMedia,
           preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
@@ -6334,6 +6542,10 @@ function ScripturesContent() {
           preview_show_english: nextLanguageSettings.show_english,
           preview_transliteration_script: nextPreviewTransliterationScript,
           preview_word_meanings_display_mode: nextPreviewWordMeaningsDisplayMode,
+          preview_translation_languages: serializePreviewTranslationLanguages(
+            resolvedPreviewTranslationLanguages
+          ),
+          preview_hidden_levels: serializeHiddenPreviewLevels(nextHiddenPreviewLevels),
         });
         setPreferences(nextPreferences);
         void savePreferences(nextPreferences);
@@ -6850,7 +7062,7 @@ function ScripturesContent() {
     }
 
     setImportSubmitting(true);
-    setShowImportUrlInput(true);
+    setShowImportUrlInput(Boolean(persistedJob.canonicalJsonUrl));
     if (typeof persistedJob.canonicalJsonUrl === "string" && persistedJob.canonicalJsonUrl) {
       setImportUrl(persistedJob.canonicalJsonUrl);
     }
@@ -6885,50 +7097,73 @@ function ScripturesContent() {
         return;
       }
 
+      const parsedRecord = parsed as Record<string, unknown>;
+      const parsedNodes = Array.isArray(parsedRecord.nodes) ? parsedRecord.nodes : null;
+
       const importPayload = {
-        ...(parsed as Record<string, unknown>),
+        ...parsedRecord,
         import_type: "json",
       };
 
       setImportProgressMessage("Uploading import payload...");
+      setImportProgressCurrent(0);
+      setImportProgressTotal(parsedNodes ? parsedNodes.length : null);
 
-      const response = await fetch("/api/content/import", {
+      const response = await fetch("/api/content/import/jobs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(importPayload),
       });
 
-      const result = (await response.json().catch(() => null)) as
-        | { success?: boolean; book_id?: number | null; nodes_created?: number; error?: string; detail?: string }
-        | null;
+      const rawText = await response.text();
 
-      if (!response.ok || result?.success === false) {
-        alert(result?.detail || result?.error || "Failed to import book");
+      let startResult: ImportJobStart | null = null;
+      if (rawText) {
+        try {
+          const parsedStart = JSON.parse(rawText) as unknown;
+          if (parsedStart && typeof parsedStart === "object") {
+            startResult = parsedStart as ImportJobStart;
+          }
+        } catch {
+          startResult = null;
+        }
+      }
+
+      if (!response.ok) {
+        const fallbackDetail = rawText.trim() || `Import start failed (${response.status} ${response.statusText})`;
+        alert(startResult?.detail || startResult?.error || fallbackDetail);
         return;
       }
 
-      await loadBooksRefresh();
-      const importedBookId =
-        typeof result?.book_id === "number" && Number.isFinite(result.book_id)
-          ? result.book_id
-          : null;
-      if (importedBookId !== null) {
-        setBookId(String(importedBookId));
-        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
-        loadTree(String(importedBookId));
+      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
+      if (!jobId) {
+        alert("Import job did not return a valid job ID");
+        return;
       }
 
-      alert(
-        `Import completed${typeof result?.nodes_created === "number" ? ` (${result.nodes_created} nodes)` : ""}`
-      );
-    } catch {
-      alert("Failed to import JSON file");
+      const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
+      setImportProgressMessage(queuedMessage);
+      writePersistedImportJobState({
+        jobId,
+        status: startResult?.status || "queued",
+        progressMessage: queuedMessage,
+        progressCurrent: 0,
+        progressTotal: parsedNodes ? parsedNodes.length : null,
+        canonicalJsonUrl: null,
+      });
+
+      await pollImportJob(jobId, { canonicalJsonUrl: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to import JSON file";
+      alert(message);
     } finally {
-      setImportSubmitting(false);
-      setImportProgressMessage(null);
-      setImportProgressCurrent(null);
-      setImportProgressTotal(null);
+      if (activeImportJobIdRef.current === null) {
+        setImportSubmitting(false);
+        setImportProgressMessage(null);
+        setImportProgressCurrent(null);
+        setImportProgressTotal(null);
+      }
     }
   };
 
@@ -7406,6 +7641,11 @@ function ScripturesContent() {
     return normalized;
   }, [currentBook?.level_name_overrides]);
 
+  // Keep preview controls independent of preview artifact size.
+  const availablePreviewLevels = useMemo<string[]>(() => {
+    return currentBookSchemaLevels.filter((level, index, levels) => levels.indexOf(level) === index);
+  }, [currentBookSchemaLevels]);
+
   useEffect(() => {
     if (!currentBook || currentBookSchemaLevels.length === 0) {
       setLevelNameOverridesDraft({});
@@ -7422,7 +7662,7 @@ function ScripturesContent() {
     setLevelNameOverridesMessage(null);
   }, [currentBook?.id, currentBookSchemaLevels, currentBookLevelNameOverrides]);
 
-  const getDisplayLevelName = (levelName: string | null | undefined): string => {
+  const getDisplayLevelName = useCallback((levelName: string | null | undefined): string => {
     if (!levelName) return "";
     if (!currentBookLevelNameOverrides || Object.keys(currentBookLevelNameOverrides).length === 0) {
       return levelName;
@@ -7447,7 +7687,7 @@ function ScripturesContent() {
 
     const mapped = currentBookLevelNameOverrides[caseInsensitiveKey];
     return mapped && mapped.trim() !== "" ? mapped.trim() : levelName;
-  };
+  }, [currentBookLevelNameOverrides]);
 
   const normalizeLevelName = (value: string) => value.trim().toLowerCase();
 
@@ -8593,6 +8833,195 @@ function ScripturesContent() {
   const loadedBookCount = filteredBooks.length;
   const isInitialBooksLoad = bookLoadingMore && loadedBookCount === 0;
 
+  const previewBodyBlockElements = useMemo(() => {
+    if (!bookPreviewArtifact) {
+      return [] as ReactElement[];
+    }
+
+    const visibleBlocks = bookPreviewArtifact.sections.body.filter(
+      (block) => !block.content.level_name || !appliedHiddenPreviewLevels.has(block.content.level_name)
+    );
+
+    const elements: ReactElement[] = [];
+    visibleBlocks.forEach((block, blockIndex) => {
+      const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
+      // Deduplicate consecutive lines with the same value to avoid duplicate translations
+      const deduplicatedLines = contentLines.filter((line, index) => {
+        if (index === 0) return true;
+        const prevLine = contentLines[index - 1];
+        return line.value !== prevLine.value;
+      });
+      const nonTranslationLines = deduplicatedLines.filter((line) => line.fieldName !== "english");
+      const translationLines = deduplicatedLines.filter((line) => line.fieldName === "english");
+      const wordMeaningRows = resolvePreviewWordMeanings(block);
+      const wordMeaningInlineText = wordMeaningRows
+        .map((row) => {
+          const source = row.sourceText || "—";
+          const meaning = row.meaningText || "—";
+          const fallbackLabel =
+            row.fallbackBadgeVisible && row.meaningLanguage ? ` (${row.meaningLanguage})` : "";
+          return `${source} : ${meaning}${fallbackLabel}`;
+        })
+        .join("; ");
+      const rawTitle = block.title || "";
+      const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
+      const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
+      if (nonTranslationLines.length === 0 && translationLines.length === 0) {
+        return;
+      }
+
+      elements.push(
+        <article
+          key={`${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`}
+          className="border-b border-black/10 px-1 py-4"
+        >
+          {appliedShowPreviewLevelNumbers && block.content.level_name && block.content.sequence_number != null && block.content.sequence_number !== "" && (
+            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
+              {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
+            </div>
+          )}
+          {displayTitle && (
+            <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
+          )}
+          <div className="mt-1">
+            {nonTranslationLines.map((line, lineIndex) => (
+              <div
+                key={`${line.key}-${line.value.slice(0, 24)}`}
+                className={
+                  lineIndex === 0 || !line.isFieldStart
+                    ? ""
+                    : "mt-2 border-t border-black/10 pt-2"
+                }
+              >
+                {line.label && (
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                )}
+                <p className={line.className}>{line.value}</p>
+              </div>
+            ))}
+          </div>
+          {wordMeaningRows.length > 0 && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
+            <div className="mt-2 border-t border-black/10 pt-2">
+              {appliedPreviewWordMeaningsDisplayMode === "table" ? (
+                <div className="overflow-x-auto rounded-lg border border-black/10 bg-white/80">
+                  <table className="min-w-full border-collapse text-sm text-zinc-700">
+                    <thead className="bg-zinc-50/70 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                      <tr>
+                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                          Source
+                        </th>
+                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                          Meaning
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wordMeaningRows.map((row) => (
+                        <tr key={row.key} className="border-b border-black/5 last:border-b-0">
+                          <td className="px-2 py-1.5 align-top text-zinc-800">
+                            {row.sourceText || "—"}
+                          </td>
+                          <td className="px-2 py-1.5 align-top text-zinc-700">
+                            {row.meaningText || "—"}
+                            {row.fallbackBadgeVisible && row.meaningLanguage ? (
+                              <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                                ({row.meaningLanguage})
+                              </span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                  {wordMeaningInlineText}
+                </p>
+              )}
+            </div>
+          )}
+          {translationLines.length > 0 && (
+            <div className="mt-2 border-t border-black/10 pt-2">
+              {translationLines.map((line, lineIndex) => (
+                <div
+                  key={`${line.key}-translation-${line.value.slice(0, 24)}`}
+                  className={
+                    lineIndex === 0 || !line.isFieldStart
+                      ? ""
+                      : "mt-2 border-t border-black/10 pt-2"
+                  }
+                >
+                  {line.label && (
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                  )}
+                  <p className={line.className}>{line.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
+            <div className="mt-2 border-t border-black/10 pt-2">
+              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
+              <div className="flex flex-col gap-3">
+                {block.content.media_items.map((media, mediaIndex) => {
+                  const mediaType = (media?.media_type || "link").trim().toLowerCase();
+                  const mediaUrl = (media?.url || "").trim();
+                  if (!mediaUrl) {
+                    return null;
+                  }
+                  const metadata =
+                    media?.metadata && typeof media.metadata === "object"
+                      ? media.metadata
+                      : null;
+                  const metadataLabel =
+                    typeof metadata?.display_name === "string" && metadata.display_name.trim()
+                      ? metadata.display_name.trim()
+                      : typeof metadata?.original_filename === "string" && metadata.original_filename.trim()
+                        ? metadata.original_filename.trim()
+                        : `Media ${mediaIndex + 1}`;
+
+                  return (
+                    <div
+                      key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`}
+                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                    >
+                      {renderInlineMediaPreview(mediaType, mediaUrl, metadataLabel)}
+                      <div className="mt-2 text-xs text-zinc-500">{metadataLabel}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
+            <div className="mt-2 text-xs text-zinc-500">
+              template: {block.template_key}
+              {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
+              {typeof block.content.sequence_number === "number"
+                ? ` • seq ${block.content.sequence_number}`
+                : ""}
+            </div>
+          )}
+        </article>
+      );
+    });
+
+    return elements;
+  }, [
+    bookPreviewArtifact,
+    appliedHiddenPreviewLevels,
+    appliedShowPreviewDetails,
+    appliedShowPreviewTitles,
+    appliedShowPreviewLevelNumbers,
+    appliedPreviewWordMeaningsDisplayMode,
+    appliedShowPreviewMedia,
+    resolvePreviewContentLines,
+    resolvePreviewWordMeanings,
+    getDisplayLevelName,
+    renderInlineMediaPreview,
+  ]);
+
   const maybeLoadMoreBooks = useCallback(
     (container: HTMLDivElement | null) => {
       if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
@@ -8761,6 +9190,57 @@ function ScripturesContent() {
       alert("Failed to update visibility");
     } finally {
       setBookVisibilitySubmitting(null);
+    }
+  };
+
+  const handleDeleteBook = async (book: BookOption) => {
+    const normalizedVisibility =
+      book.visibility ?? book.metadata_json?.visibility ?? book.metadata?.visibility ?? "private";
+    const isBookOwner =
+      authUserId !== null &&
+      (book.metadata_json?.owner_id === authUserId || book.metadata?.owner_id === authUserId);
+    const canDeleteBook = normalizedVisibility === "private" && (canAdmin || isBookOwner);
+
+    if (!canDeleteBook) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete private book \"${book.book_name}\"? This cannot be undone.`
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/books/${book.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        alert(result?.detail ?? "Failed to delete book");
+        return;
+      }
+
+      setOpenBookRowActionsId(null);
+      setInlineMessage(`Deleted book: ${book.book_name}`);
+      setTimeout(() => setInlineMessage(null), 2500);
+
+      const deletedId = String(book.id);
+      if (bookId === deletedId) {
+        setBookId("");
+        setSelectedId(null);
+        setBreadcrumb([]);
+        setNodeContent(null);
+        setCurrentBook(null);
+        setTreeData([]);
+        router.push("/scriptures", { scroll: false });
+      }
+
+      await loadBooksRefresh();
+    } catch {
+      alert("Failed to delete book");
     }
   };
 
@@ -9006,18 +9486,46 @@ function ScripturesContent() {
                       </span>
                     )}
                   </div>
-                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                    {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 ? (
                       <div
                         className="h-full rounded-full bg-blue-600 transition-all"
                         style={{
                           width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
                         }}
                       />
-                    </div>
-                  )}
+                    ) : (
+                      <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
+                    )}
+                  </div>
                 </div>
               )}
+            </div>
+          )}
+          {canImport && !showImportUrlInput && (importSubmitting || importProgressMessage) && (
+            <div className="mt-2 rounded-xl border border-black/10 bg-zinc-50 p-2">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{importProgressMessage || "Importing..."}</span>
+                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
+                    <span className="text-xs text-blue-800">
+                      {importProgressCurrent} / {importProgressTotal}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 ? (
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-all"
+                      style={{
+                        width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -9070,7 +9578,9 @@ function ScripturesContent() {
                       (book.metadata_json?.owner_id === authUserId ||
                         book.metadata?.owner_id === authUserId);
                     const canToggleVisibility = canAdmin || isBookOwner;
-                    const showRowMenu = canCopyPreviewBookLink || canToggleVisibility || canImport;
+                    const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
+                    const showRowMenu =
+                      canCopyPreviewBookLink || canToggleVisibility || canImport || canDeletePrivateBook;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =
@@ -9274,6 +9784,19 @@ function ScripturesContent() {
                                             {bookVisibility === "public" ? "Make private" : "Make public"}
                                         </button>
                                       )}
+                                      {canDeletePrivateBook && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setOpenBookRowActionsId(null);
+                                            void handleDeleteBook(book);
+                                          }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                        >
+                                          <Trash2 size={14} />
+                                          Delete book
+                                        </button>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -9434,6 +9957,19 @@ function ScripturesContent() {
                                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                                       >
                                         {bookVisibility === "public" ? "Make private" : "Make public"}
+                                      </button>
+                                    )}
+                                    {canDeletePrivateBook && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOpenBookRowActionsId(null);
+                                          void handleDeleteBook(book);
+                                        }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                      >
+                                        <Trash2 size={14} />
+                                        Delete book
                                       </button>
                                     )}
                                   </div>
@@ -12645,6 +13181,15 @@ function ScripturesContent() {
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
+                              checked={showPreviewLevelNumbers}
+                              onChange={(event) => setShowPreviewLevelNumbers(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            Show level numbers
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
                               checked={showPreviewDetails}
                               onChange={(event) => setShowPreviewDetails(event.target.checked)}
                               disabled={bookPreviewLoading}
@@ -12672,12 +13217,42 @@ function ScripturesContent() {
                               disabled={bookPreviewLoading}
                               className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
+                              <option value="hide">Hide</option>
                               <option value="inline">Inline</option>
                               <option value="table">Table</option>
                             </select>
                           </label>
                         </div>
                       </div>
+
+                      {availablePreviewLevels.length > 1 && (
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Show Levels</div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
+                            {availablePreviewLevels.map((level) => (
+                              <label key={`preview-level-${level}`} className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={!hiddenPreviewLevels.has(level)}
+                                  onChange={(event) => {
+                                    setHiddenPreviewLevels((prev) => {
+                                      const next = new Set(prev);
+                                      if (event.target.checked) {
+                                        next.delete(level);
+                                      } else {
+                                        next.add(level);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  disabled={bookPreviewLoading}
+                                />
+                                {getDisplayLevelName(level)}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
@@ -12783,9 +13358,11 @@ function ScripturesContent() {
                                   appliedPreviewTranslationLanguages
                                 ) &&
                                 showPreviewLabels === appliedShowPreviewLabels &&
+                                showPreviewLevelNumbers === appliedShowPreviewLevelNumbers &&
                                 showPreviewDetails === appliedShowPreviewDetails &&
                                 showPreviewTitles === appliedShowPreviewTitles &&
                                 showPreviewMedia === appliedShowPreviewMedia &&
+                                areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) &&
                                 previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
                                 previewTransliterationScript === appliedBookPreviewTransliterationScript)
                             }
@@ -12868,177 +13445,14 @@ function ScripturesContent() {
                 )}
 
                 <div className="space-y-3">
-                  {bookPreviewArtifact.sections.body.length === 0 ? (
+                  {previewBodyBlockElements.length === 0 ? (
                     <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-sm text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node"
                         ? "No previewable content found under this level."
                         : "No previewable content found for this book."}
                     </p>
                   ) : (
-                    bookPreviewArtifact.sections.body.map((block) => {
-                      const contentLines = resolvePreviewContentLines(block, bookPreviewArtifact.render_settings);
-                      // Deduplicate consecutive lines with the same value to avoid duplicate translations
-                      const deduplicatedLines = contentLines.filter((line, index) => {
-                        if (index === 0) return true;
-                        const prevLine = contentLines[index - 1];
-                        return line.value !== prevLine.value;
-                      });
-                      const nonTranslationLines = deduplicatedLines.filter(
-                        (line) => line.fieldName !== "english"
-                      );
-                      const translationLines = deduplicatedLines.filter(
-                        (line) => line.fieldName === "english"
-                      );
-                      const wordMeaningRows = resolvePreviewWordMeanings(block);
-                      const wordMeaningInlineText = wordMeaningRows
-                        .map((row) => {
-                          const source = row.sourceText || "—";
-                          const meaning = row.meaningText || "—";
-                          const fallbackLabel =
-                            row.fallbackBadgeVisible && row.meaningLanguage
-                              ? ` (${row.meaningLanguage})`
-                              : "";
-                          return `${source} : ${meaning}${fallbackLabel}`;
-                        })
-                        .join("; ");
-                      const rawTitle = block.title || "";
-                      const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
-                      const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
-                      return (
-                        <article
-                          key={`${block.section}-${block.order}-${block.source_node_id ?? block.title}`}
-                          className="border-b border-black/10 px-1 py-4"
-                        >
-                          {displayTitle && (
-                            <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
-                          )}
-                          <div className="mt-1">
-                            {nonTranslationLines.length === 0 && translationLines.length === 0 ? (
-                              <p className="text-sm text-zinc-500">No textual content in this block.</p>
-                            ) : (
-                              nonTranslationLines.map((line, lineIndex) => (
-                                <div
-                                  key={`${line.key}-${line.value.slice(0, 24)}`}
-                                  className={
-                                    lineIndex === 0 || !line.isFieldStart
-                                      ? ""
-                                      : "mt-2 border-t border-black/10 pt-2"
-                                  }
-                                >
-                                  {line.label && (
-                                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
-                                  )}
-                                  <p className={line.className}>{line.value}</p>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                          {wordMeaningRows.length > 0 && (
-                            <div className="mt-2 border-t border-black/10 pt-2">
-                              {appliedPreviewWordMeaningsDisplayMode === "table" ? (
-                                <div className="overflow-x-auto rounded-lg border border-black/10 bg-white/80">
-                                  <table className="min-w-full border-collapse text-sm text-zinc-700">
-                                    <thead className="bg-zinc-50/70 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                                      <tr>
-                                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
-                                          Source
-                                        </th>
-                                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
-                                          Meaning
-                                        </th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {wordMeaningRows.map((row) => (
-                                        <tr key={row.key} className="border-b border-black/5 last:border-b-0">
-                                          <td className="px-2 py-1.5 align-top text-zinc-800">
-                                            {row.sourceText || "—"}
-                                          </td>
-                                          <td className="px-2 py-1.5 align-top text-zinc-700">
-                                            {row.meaningText || "—"}
-                                            {row.fallbackBadgeVisible && row.meaningLanguage ? (
-                                              <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
-                                                ({row.meaningLanguage})
-                                              </span>
-                                            ) : null}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              ) : (
-                                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                                  {wordMeaningInlineText}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                          {translationLines.length > 0 && (
-                            <div className="mt-2 border-t border-black/10 pt-2">
-                              {translationLines.map((line, lineIndex) => (
-                                <div
-                                  key={`${line.key}-translation-${line.value.slice(0, 24)}`}
-                                  className={
-                                    lineIndex === 0 || !line.isFieldStart
-                                      ? ""
-                                      : "mt-2 border-t border-black/10 pt-2"
-                                  }
-                                >
-                                  {line.label && (
-                                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
-                                  )}
-                                  <p className={line.className}>{line.value}</p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
-                            <div className="mt-2 border-t border-black/10 pt-2">
-                              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
-                              <div className="flex flex-col gap-3">
-                                {block.content.media_items.map((media, mediaIndex) => {
-                                  const mediaType = (media?.media_type || "link").trim().toLowerCase();
-                                  const mediaUrl = (media?.url || "").trim();
-                                  if (!mediaUrl) {
-                                    return null;
-                                  }
-                                  const metadata =
-                                    media?.metadata && typeof media.metadata === "object"
-                                      ? media.metadata
-                                      : null;
-                                  const metadataLabel =
-                                    typeof metadata?.display_name === "string" && metadata.display_name.trim()
-                                      ? metadata.display_name.trim()
-                                      : typeof metadata?.original_filename === "string" && metadata.original_filename.trim()
-                                        ? metadata.original_filename.trim()
-                                        : `Media ${mediaIndex + 1}`;
-
-                                  return (
-                                    <div
-                                      key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`}
-                                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
-                                    >
-                                      {renderInlineMediaPreview(mediaType, mediaUrl, metadataLabel)}
-                                      <div className="mt-2 text-xs text-zinc-500">{metadataLabel}</div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
-                            <div className="mt-2 text-xs text-zinc-500">
-                              template: {block.template_key}
-                              {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
-                              {typeof block.content.sequence_number === "number"
-                                ? ` • seq ${block.content.sequence_number}`
-                                : ""}
-                            </div>
-                          )}
-                        </article>
-                      );
-                    })
+                    previewBodyBlockElements
                   )}
 
                   {(bookPreviewLoadingMore || (bookPreviewArtifact.preview_scope === "book" && bookPreviewArtifact.has_more)) && (

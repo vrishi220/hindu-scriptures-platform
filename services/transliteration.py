@@ -8,6 +8,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
+IAST_DIACRITIC_PATTERN = re.compile(r"[āīūṛṝḷḹṅñṭḍṇśṣṃṁḥ]", re.IGNORECASE)
 
 
 def contains_devanagari(text: str) -> bool:
@@ -32,13 +33,23 @@ def get_latin_query_variants(query: str) -> list[str]:
     return variants
 
 
+def _preferred_latin_schemes(text: str) -> list[str]:
+    source = (text or "").strip()
+    if not source or sanscript is None:
+        return []
+
+    if IAST_DIACRITIC_PATTERN.search(source):
+        return [sanscript.IAST, sanscript.ITRANS, sanscript.HK]
+
+    return [sanscript.ITRANS, sanscript.HK, sanscript.IAST]
+
+
 def latin_to_devanagari(query: str) -> str | None:
     text = (query or "").strip()
     if not text or contains_devanagari(text) or sanscript is None:
         return None
 
-    schemes = [sanscript.IAST, sanscript.ITRANS, sanscript.HK]
-    for scheme in schemes:
+    for scheme in _preferred_latin_schemes(text):
         try:
             converted = sanscript.transliterate(text, scheme, sanscript.DEVANAGARI)
             if converted and contains_devanagari(converted):
@@ -47,6 +58,31 @@ def latin_to_devanagari(query: str) -> str | None:
             continue
 
     return None
+
+
+def latin_to_iast(text: str) -> str | None:
+    source = (text or "").strip()
+    if not source:
+        return None
+    if contains_devanagari(source):
+        return devanagari_to_iast(source) or source
+    if sanscript is None:
+        return source
+
+    for scheme in _preferred_latin_schemes(source):
+        try:
+            devanagari = sanscript.transliterate(source, scheme, sanscript.DEVANAGARI)
+            if not devanagari or not contains_devanagari(devanagari):
+                continue
+            normalized = sanscript.transliterate(devanagari, sanscript.DEVANAGARI, sanscript.IAST)
+            if normalized:
+                normalized = normalized.strip()
+                if normalized:
+                    return normalized
+        except Exception:
+            continue
+
+    return source
 
 
 def devanagari_to_iast(text: str) -> str | None:

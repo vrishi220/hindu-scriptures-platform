@@ -24,6 +24,21 @@ def _ensure_preferences_schema(db: Session) -> None:
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline'"
         )
     )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_show_level_numbers BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_translation_languages VARCHAR(255) NOT NULL DEFAULT 'english'"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_hidden_levels VARCHAR(2000) NOT NULL DEFAULT ''"
+        )
+    )
     db.commit()
 
 
@@ -52,6 +67,7 @@ def get_user_preferences(
                 show_commentary=True,
                 preview_show_titles=False,
                 preview_show_labels=False,
+                preview_show_level_numbers=False,
                 preview_show_details=False,
                 preview_show_media=True,
                 preview_show_sanskrit=True,
@@ -59,6 +75,8 @@ def get_user_preferences(
                 preview_show_english=True,
                 preview_transliteration_script="iast",
                 preview_word_meanings_display_mode="inline",
+                preview_translation_languages="english",
+                preview_hidden_levels="",
                 scriptures_book_browser_view="list",
                 scriptures_media_manager_view="list",
                 admin_media_bank_browser_view="list",

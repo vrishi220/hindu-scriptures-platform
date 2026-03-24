@@ -3,6 +3,7 @@ import re
 from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
+from services.transliteration import latin_to_devanagari, latin_to_iast
 
 
 WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = {"sa", "pi", "hi", "ta"}
@@ -11,6 +12,7 @@ WORD_MEANINGS_MAX_ROWS = 400
 WORD_MEANINGS_MAX_SOURCE_CHARS = 120
 WORD_MEANINGS_MAX_MEANING_CHARS = 400
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
 
 
 class HealthResponse(BaseModel):
@@ -46,6 +48,141 @@ def _validate_plain_text(value: object, path: str, max_chars: int) -> str:
     return text
 
 
+def _normalize_word_meanings_language_key(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized == "english":
+        return "en"
+    return normalized
+
+
+def _split_legacy_word_meanings_entries(text: object) -> list[str]:
+    if not isinstance(text, str):
+        return []
+    entries: list[str] = []
+    for raw_part in text.split(";"):
+        cleaned = raw_part.strip()
+        if not cleaned:
+            continue
+        cleaned = re.sub(r"^\d+\.\s*", "", cleaned)
+        if cleaned:
+            entries.append(cleaned)
+    return entries
+
+
+def _word_meanings_is_effectively_empty(word_meanings: dict) -> bool:
+    if not isinstance(word_meanings, dict):
+        return True
+
+    rows = word_meanings.get("rows")
+    if isinstance(rows, list):
+        return len(rows) == 0
+
+    for raw_value in word_meanings.values():
+        if isinstance(raw_value, str) and raw_value.strip():
+            return False
+        if isinstance(raw_value, list) and raw_value:
+            return False
+        if isinstance(raw_value, dict) and raw_value:
+            return False
+    return True
+
+
+def _legacy_word_meanings_source_payload(source_text: str) -> dict:
+    if DEVANAGARI_PATTERN.search(source_text):
+        return {
+            "language": "sa",
+            "script_text": source_text,
+        }
+
+    script_text = latin_to_devanagari(source_text)
+    normalized_iast = latin_to_iast(source_text) or source_text
+    payload = {
+        "language": "sa",
+        "transliteration": {
+            "iast": normalized_iast,
+        },
+    }
+    if script_text:
+        payload["script_text"] = script_text
+    return payload
+
+
+def _normalize_legacy_word_meanings_payload(word_meanings: dict) -> dict:
+    legacy_entries_by_language: dict[str, list[str]] = {}
+    for raw_language, raw_text in word_meanings.items():
+        language = _normalize_word_meanings_language_key(raw_language)
+        if not language:
+            continue
+        entries = _split_legacy_word_meanings_entries(raw_text)
+        if entries:
+            legacy_entries_by_language[language] = entries
+
+    if not legacy_entries_by_language:
+        return word_meanings
+
+    primary_language = "en" if "en" in legacy_entries_by_language else next(iter(legacy_entries_by_language.keys()))
+    primary_entries = legacy_entries_by_language.get(primary_language, [])
+    rows: list[dict] = []
+
+    for index, entry in enumerate(primary_entries):
+        source_text = ""
+        primary_meaning_text = entry
+        if "=" in entry:
+            source_text, primary_meaning_text = entry.split("=", 1)
+            source_text = source_text.strip()
+            primary_meaning_text = primary_meaning_text.strip()
+        else:
+            primary_meaning_text = entry.strip()
+
+        meanings: dict[str, dict[str, str]] = {}
+        for language, entries in legacy_entries_by_language.items():
+            if index >= len(entries):
+                continue
+            language_entry = entries[index]
+            _, _, meaning_text = language_entry.partition("=")
+            normalized_meaning = (meaning_text if meaning_text else language_entry).strip()
+            if normalized_meaning:
+                meanings[language] = {"text": normalized_meaning}
+
+        if "en" not in meanings and primary_meaning_text:
+            meanings["en"] = {"text": primary_meaning_text}
+
+        if not source_text and primary_meaning_text:
+            source_text = f"term_{index + 1}"
+
+        rows.append(
+            {
+                "id": f"legacy_wm_{index + 1}",
+                "order": index + 1,
+                "source": _legacy_word_meanings_source_payload(source_text),
+                "meanings": meanings,
+            }
+        )
+
+    return {
+        "version": "1.0",
+        "rows": rows,
+    }
+
+
+def _normalize_word_meanings_payload(word_meanings: dict) -> dict:
+    rows = word_meanings.get("rows")
+    if rows is not None:
+        # Has a 'rows' key — treat as structured format.
+        # If rows is a valid list, backfill 'version' if missing.
+        # If rows is wrong type, return as-is so validation can reject it.
+        if isinstance(rows, list):
+            if isinstance(word_meanings.get("version"), str):
+                return word_meanings
+            return {"version": "1.0", **word_meanings}
+        return word_meanings
+    return _normalize_legacy_word_meanings_payload(word_meanings)
+
+
 def _validate_word_meanings_content_data(content_data: dict | None) -> dict | None:
     if content_data is None:
         return None
@@ -57,6 +194,19 @@ def _validate_word_meanings_content_data(content_data: dict | None) -> dict | No
         return content_data
     if not isinstance(word_meanings, dict):
         raise ValueError("content_data.word_meanings must be an object")
+
+    if _word_meanings_is_effectively_empty(word_meanings):
+        content_data = dict(content_data)
+        content_data.pop("word_meanings", None)
+        return content_data
+
+    content_data = dict(content_data)
+    word_meanings = _normalize_word_meanings_payload(word_meanings)
+    content_data["word_meanings"] = word_meanings
+
+    if _word_meanings_is_effectively_empty(word_meanings):
+        content_data.pop("word_meanings", None)
+        return content_data
 
     version = word_meanings.get("version")
     if not isinstance(version, str) or not version.strip():
@@ -163,6 +313,8 @@ def _validate_word_meanings_content_data(content_data: dict | None) -> dict | No
             )
             if not required_text:
                 raise ValueError(f"{row_path}.meanings.{required_language}.text is required")
+
+    return content_data
 
     return content_data
 
@@ -654,13 +806,16 @@ class UserPreferenceBase(BaseModel):
     show_commentary: bool = True
     preview_show_titles: bool = False
     preview_show_labels: bool = False
+    preview_show_level_numbers: bool = False
     preview_show_details: bool = False
     preview_show_media: bool = True
     preview_show_sanskrit: bool = True
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
     preview_transliteration_script: str = "iast"
-    preview_word_meanings_display_mode: Literal["inline", "table"] = "inline"
+    preview_word_meanings_display_mode: Literal["inline", "table", "hide"] = "inline"
+    preview_translation_languages: str = "english"
+    preview_hidden_levels: str = ""
     scriptures_book_browser_view: Literal["list", "icon"] = "list"
     scriptures_media_manager_view: Literal["list", "icon"] = "list"
     admin_media_bank_browser_view: Literal["list", "icon"] = "list"
@@ -676,13 +831,16 @@ class UserPreferenceUpdate(BaseModel):
     show_commentary: bool | None = None
     preview_show_titles: bool | None = None
     preview_show_labels: bool | None = None
+    preview_show_level_numbers: bool | None = None
     preview_show_details: bool | None = None
     preview_show_media: bool | None = None
     preview_show_sanskrit: bool | None = None
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
     preview_transliteration_script: str | None = None
-    preview_word_meanings_display_mode: Literal["inline", "table"] | None = None
+    preview_word_meanings_display_mode: Literal["inline", "table", "hide"] | None = None
+    preview_translation_languages: str | None = None
+    preview_hidden_levels: str | None = None
     scriptures_book_browser_view: Literal["list", "icon"] | None = None
     scriptures_media_manager_view: Literal["list", "icon"] | None = None
     admin_media_bank_browser_view: Literal["list", "icon"] | None = None

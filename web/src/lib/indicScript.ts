@@ -37,6 +37,7 @@ const SCHEME_BY_OPTION: Record<TransliterationScriptOption, string> = {
 
 const SCRIPT_SET = new Set<string>(TRANSLITERATION_SCRIPT_OPTIONS);
 const DEVANAGARI_LETTER_PATTERN = /[\u0904-\u0939\u0958-\u0961\u0971-\u097F]/;
+const IAST_DIACRITIC_PATTERN = /[āīūṛṝḷḹṅñṭḍṇśṣṃṁḥ]/i;
 
 export const normalizeTransliterationScript = (
   value?: string | null
@@ -83,6 +84,45 @@ const normalizeLegacyIastInput = (text: string): string => {
     .replace(/ḷi/gi, "ḷ");
 };
 
+const getPreferredLatinSourceSchemes = (text: string): string[] => {
+  if (IAST_DIACRITIC_PATTERN.test(text)) {
+    return ["iast", "itrans", "hk"];
+  }
+  return ["itrans", "hk", "iast"];
+};
+
+const transliterateLatinToScript = (
+  text: string,
+  script: TransliterationScriptOption
+): string => {
+  const source = text.trim();
+  if (!source) {
+    return "";
+  }
+
+  const targetScheme = SCHEME_BY_OPTION[script];
+  if (!targetScheme) {
+    return source;
+  }
+
+  for (const sourceScheme of getPreferredLatinSourceSchemes(source)) {
+    try {
+      const devanagari = Sanscript.t(source, sourceScheme, "devanagari");
+      if (!hasDevanagariLetters(devanagari)) {
+        continue;
+      }
+      if (targetScheme === "devanagari") {
+        return devanagari;
+      }
+      return Sanscript.t(devanagari, "devanagari", targetScheme);
+    } catch {
+      continue;
+    }
+  }
+
+  return script === "iast" ? normalizeLegacyIastInput(source) : source;
+};
+
 export const transliterateFromIast = (
   text: string,
   script: TransliterationScriptOption
@@ -94,6 +134,12 @@ export const transliterateFromIast = (
   }
   return transliterate(normalizedInput, "iast", targetScheme);
 };
+
+export const transliterateLatinToIast = (text: string): string =>
+  transliterateLatinToScript(text, "iast");
+
+export const transliterateLatinToDevanagari = (text: string): string =>
+  transliterateLatinToScript(text, "devanagari");
 
 export const transliterateFromDevanagari = (
   text: string,

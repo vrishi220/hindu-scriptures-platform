@@ -64,6 +64,7 @@ from models.schemas import (
     ScriptureSchemaCreate,
     ScriptureSchemaPublic,
     ScriptureSchemaUpdate,
+    _validate_word_meanings_content_data,
 )
 from models.scripture_schema import ScriptureSchema
 from models.user import User
@@ -132,6 +133,34 @@ def _is_bank_media_path(relative_path: Path | None) -> bool:
     if relative_path is None:
         return False
     return len(relative_path.parts) > 0 and relative_path.parts[0] == "bank"
+
+
+def _sanitize_content_data_for_response(content_data: object) -> dict:
+    """Ensure content_data is safe for public response validation.
+
+    Older imports may contain malformed `word_meanings` payloads.
+    Those should not crash tree browsing for an entire book.
+    """
+    if not isinstance(content_data, dict):
+        return {}
+
+    sanitized = dict(content_data)
+    try:
+        normalized = _validate_word_meanings_content_data(sanitized)
+        return normalized if isinstance(normalized, dict) else sanitized
+    except Exception:
+        sanitized.pop("word_meanings", None)
+        try:
+            normalized = _validate_word_meanings_content_data(sanitized)
+            return normalized if isinstance(normalized, dict) else sanitized
+        except Exception:
+            return {}
+
+
+def _node_response_payload(node: ContentNode) -> dict:
+    payload = {key: value for key, value in vars(node).items() if not key.startswith("_")}
+    payload["content_data"] = _sanitize_content_data_for_response(payload.get("content_data"))
+    return payload
 
 
 def _media_metadata(media: MediaFile) -> dict:
@@ -707,7 +736,15 @@ def _autofill_content_data_pair(content_data: dict | None) -> dict | None:
 
     next_content_data = dict(content_data)
     next_content_data["basic"] = basic
-    return next_content_data
+    try:
+        normalized = _validate_word_meanings_content_data(next_content_data)
+        return normalized if isinstance(normalized, dict) else next_content_data
+    except Exception:
+        # Canonical/legacy imports may contain malformed word_meanings payloads.
+        # Preserve the rest of the content instead of failing the entire import.
+        next_content_data.pop("word_meanings", None)
+        normalized = _validate_word_meanings_content_data(next_content_data)
+        return normalized if isinstance(normalized, dict) else next_content_data
 
 
 @router.get("/schemas", response_model=list[ScriptureSchemaPublic])
@@ -1972,11 +2009,14 @@ def _import_json(
     
     if not success:
         db.rollback()
+        detailed_error = "Failed to import JSON content"
+        if import_warnings:
+            detailed_error = f"Failed to import JSON content: {'; '.join(import_warnings)}"
         return ImportResponse(
             success=False,
             book_id=book.id if book.id else None,
             warnings=warnings,
-            error="Failed to import JSON content"
+            error=detailed_error
         )
     
     # Extract nodes tree for database insertion
@@ -2169,6 +2209,14 @@ def _import_canonical_json_v1(
                 source_attribution = node.metadata_json.get("source_attribution")
                 original_source_url = node.metadata_json.get("original_source_url")
 
+            node_title_sanskrit, node_title_transliteration = _autofill_sanskrit_transliteration_pair(
+                node.title_sanskrit,
+                node.title_transliteration,
+            )
+            node_content_data = _autofill_content_data_pair(
+                node.content_data if isinstance(node.content_data, dict) else {}
+            )
+
             content_node = ContentNode(
                 book_id=book.id,
                 parent_node_id=old_to_new_node_ids.get(parent_id) if isinstance(parent_id, int) else None,
@@ -2176,13 +2224,13 @@ def _import_canonical_json_v1(
                 level_name=node.level_name,
                 level_order=resolved_level_order,
                 sequence_number=node.sequence_number,
-                title_sanskrit=node.title_sanskrit,
-                title_transliteration=node.title_transliteration,
+                title_sanskrit=node_title_sanskrit,
+                title_transliteration=node_title_transliteration,
                 title_english=node.title_english,
                 title_hindi=node.title_hindi,
                 title_tamil=node.title_tamil,
                 has_content=bool(node.has_content),
-                content_data=node.content_data if isinstance(node.content_data, dict) else {},
+                content_data=node_content_data if isinstance(node_content_data, dict) else {},
                 summary_data=node.summary_data if isinstance(node.summary_data, dict) else {},
                 metadata_json=node.metadata_json if isinstance(node.metadata_json, dict) else {},
                 source_attribution=node.source_attribution or source_attribution,
@@ -2428,7 +2476,7 @@ def list_book_tree(
     
     payloads: list[ContentNodePublic] = []
     for item in nodes:
-        payload = ContentNodePublic.model_validate(item).model_dump()
+        payload = _node_response_payload(item)
         payload["level_order"] = _effective_level_order(item)
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
         payloads.append(ContentNodePublic.model_validate(payload))
@@ -2581,7 +2629,7 @@ def list_book_tree_nested(
     node_lookup = {n.id: n for n in nodes}
 
     for node in nodes:
-        payload = ContentNodeTree.model_validate(node).model_dump()
+        payload = _node_response_payload(node)
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
         tree_node = ContentNodeTree.model_validate(payload)
         tree_node.children = []
@@ -2975,10 +3023,10 @@ def get_node(
             source_node = next_source
 
         if source_node and source_node.id != node.id:
-            payload = ContentNodePublic.model_validate(node).model_dump()
+            payload = _node_response_payload(node)
             payload.update(
                 {
-                    "content_data": source_node.content_data,
+                    "content_data": _sanitize_content_data_for_response(source_node.content_data),
                     "summary_data": source_node.summary_data,
                     "has_content": source_node.has_content,
                     "source_attribution": source_node.source_attribution,
@@ -2988,7 +3036,7 @@ def get_node(
             )
             payload["level_name"] = _display_level_name_for_book(node_book, payload.get("level_name"))
             return ContentNodePublic.model_validate(payload)
-    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out = _node_response_payload(node)
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
 

@@ -27,6 +27,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   show_only_preferred_script: false,
   preview_show_titles: false,
   preview_show_labels: false,
+  preview_show_level_numbers: false,
   preview_show_details: false,
   preview_show_media: true,
   preview_show_sanskrit: true,
@@ -34,6 +35,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   preview_show_english: true,
   preview_transliteration_script: "iast",
   preview_word_meanings_display_mode: "inline",
+  preview_translation_languages: "english",
+  preview_hidden_levels: "",
   ui_theme: "classic",
   ui_density: "comfortable",
 };

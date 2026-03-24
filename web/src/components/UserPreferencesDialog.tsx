@@ -21,13 +21,16 @@ export type UserPreferences = {
   show_commentary: boolean;
   preview_show_titles: boolean;
   preview_show_labels: boolean;
+  preview_show_level_numbers: boolean;
   preview_show_details: boolean;
   preview_show_media: boolean;
   preview_show_sanskrit: boolean;
   preview_show_transliteration: boolean;
   preview_show_english: boolean;
   preview_transliteration_script: string;
-  preview_word_meanings_display_mode: "inline" | "table";
+  preview_word_meanings_display_mode: "inline" | "table" | "hide";
+  preview_translation_languages: string;
+  preview_hidden_levels: string;
   ui_theme: UiThemePreference;
   ui_density: UiDensityPreference;
   scriptures_book_browser_view?: "list" | "icon";
@@ -328,6 +331,19 @@ export function UserPreferencesForm({
           }
         />
         Show labels
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_level_numbers}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_level_numbers: event.target.checked,
+            })
+          }
+        />
+        Show level numbers
       </label>
       <label className="flex items-center gap-2 text-sm text-zinc-700">
         <input
