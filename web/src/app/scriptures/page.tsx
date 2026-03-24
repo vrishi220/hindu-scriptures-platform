@@ -131,6 +131,7 @@ type SchemaOption = {
 
 type TreeNode = {
   id: number;
+  parent_node_id?: number | null;
   level_name: string;
   level_order?: number;
   sequence_number?: string | null;
@@ -3347,7 +3348,8 @@ function ScripturesContent() {
               credentials: "include",
             });
             if (treeResponse.ok) {
-              const data = (await treeResponse.json()) as TreeNode[];
+              const flatData = (await treeResponse.json()) as TreeNode[];
+              const data = nestFlatTreeNodes(flatData);
               setTreeData(data);
               const path = findPath(data, propertiesNodeId);
               if (path) {
@@ -4467,7 +4469,8 @@ function ScripturesContent() {
         } | null;
         throw new Error(payload?.detail || "Tree fetch failed");
       }
-      const data = (await response.json()) as TreeNode[];
+      const flatData = (await response.json()) as TreeNode[];
+      const data = nestFlatTreeNodes(flatData);
         if (requestId !== activeTreeRequestId.current) return;
       setTreeData(data);
       setExpandedIds(new Set());
@@ -7412,7 +7415,7 @@ function ScripturesContent() {
     }
     const nextDraft: Record<string, string> = {};
     currentBookSchemaLevels.forEach((level: string) => {
-      nextDraft[level] = currentBookLevelNameOverrides[level] || level;
+      nextDraft[level] = getDisplayLevelName(level) || level;
     });
     setLevelNameOverridesDraft(nextDraft);
     setLevelNameOverridesError(null);
@@ -7421,20 +7424,74 @@ function ScripturesContent() {
 
   const getDisplayLevelName = (levelName: string | null | undefined): string => {
     if (!levelName) return "";
-    const exact = currentBookLevelNameOverrides[levelName];
-    if (exact) return exact;
-
-    const lowered = levelName.trim().toLowerCase();
-    if (!lowered) return levelName;
-    for (const [canonical, display] of Object.entries(currentBookLevelNameOverrides)) {
-      if (canonical.toLowerCase() === lowered) {
-        return display;
-      }
+    if (!currentBookLevelNameOverrides || Object.keys(currentBookLevelNameOverrides).length === 0) {
+      return levelName;
     }
-    return levelName;
+
+    const exact = currentBookLevelNameOverrides[levelName];
+    if (exact && exact.trim() !== "") {
+      return exact.trim();
+    }
+
+    const loweredLookup = levelName.trim().toLowerCase();
+    if (!loweredLookup) {
+      return levelName;
+    }
+
+    const caseInsensitiveKey = Object.keys(currentBookLevelNameOverrides).find(
+      (canonical) => canonical.toLowerCase() === loweredLookup
+    );
+    if (!caseInsensitiveKey) {
+      return levelName;
+    }
+
+    const mapped = currentBookLevelNameOverrides[caseInsensitiveKey];
+    return mapped && mapped.trim() !== "" ? mapped.trim() : levelName;
   };
 
   const normalizeLevelName = (value: string) => value.trim().toLowerCase();
+
+  const nestFlatTreeNodes = (nodes: TreeNode[]): TreeNode[] => {
+    // Check if data is already nested (has children arrays)
+    const isAlreadyNested = nodes.length > 0 && nodes.some(node => 
+      Array.isArray(node.children) && node.children.length > 0
+    );
+
+    if (isAlreadyNested) {
+      return nodes;
+    }
+
+    // Handle flat data (with parent_node_id references)
+    const nodeMap = new Map<number, TreeNode>();
+    const roots: TreeNode[] = [];
+
+    nodes.forEach((node) => {
+      nodeMap.set(node.id, {
+        ...node,
+        children: [],
+      });
+    });
+
+    nodes.forEach((node) => {
+      const current = nodeMap.get(node.id);
+      if (!current) {
+        return;
+      }
+
+      const parentId = node.parent_node_id;
+      if (typeof parentId === "number") {
+        const parent = nodeMap.get(parentId);
+        if (parent) {
+          parent.children = [...(parent.children || []), current];
+          return;
+        }
+      }
+
+      roots.push(current);
+    });
+
+    return roots;
+  };
 
   const isLeafLevelName = (levelName: string): boolean => {
     const schemaLevels = currentBook?.schema?.levels;
@@ -7448,9 +7505,53 @@ function ScripturesContent() {
   const getLevelIndexFromName = (levelName: string, schemaLevels: string[]) => {
     if (!levelName) return -1;
     const normalized = normalizeLevelName(levelName);
-    return schemaLevels.findIndex(
+    const exactMatch = schemaLevels.findIndex(
       (level) => normalizeLevelName(level) === normalized
     );
+    if (exactMatch >= 0) {
+      return exactMatch;
+    }
+
+    for (let i = 0; i < schemaLevels.length; i += 1) {
+      const canonical = schemaLevels[i];
+      const display = currentBookLevelNameOverrides[canonical];
+      if (display && normalizeLevelName(display) === normalized) {
+        return i;
+      }
+    }
+
+    for (const [canonical, display] of Object.entries(currentBookLevelNameOverrides)) {
+      const canonicalNormalized = normalizeLevelName(canonical);
+      const displayNormalized = normalizeLevelName(display);
+      if (normalized !== canonicalNormalized && normalized !== displayNormalized) {
+        continue;
+      }
+
+      const mappedIndex = schemaLevels.findIndex((level) => {
+        const levelNormalized = normalizeLevelName(level);
+        return levelNormalized === canonicalNormalized || levelNormalized === displayNormalized;
+      });
+      if (mappedIndex >= 0) {
+        return mappedIndex;
+      }
+    }
+
+    return -1;
+  };
+
+  const getLevelIndexForNode = (
+    node: Pick<TreeNode, "level_name" | "level_order">,
+    schemaLevels: string[]
+  ) => {
+    if (
+      typeof node.level_order === "number" &&
+      node.level_order > 0 &&
+      node.level_order <= schemaLevels.length
+    ) {
+      return node.level_order - 1;
+    }
+
+    return getLevelIndexFromName(node.level_name, schemaLevels);
   };
 
   const getNextLevelName = (parentNode: TreeNode): string => {
@@ -7466,7 +7567,7 @@ function ScripturesContent() {
     }
 
     // Prefer level_name to locate next level; fall back to level_order
-    const levelIndex = getLevelIndexFromName(parentNode.level_name, schemaLevels);
+    const levelIndex = getLevelIndexForNode(parentNode, schemaLevels);
     if (levelIndex >= 0 && levelIndex + 1 < schemaLevels.length) {
       return schemaLevels[levelIndex + 1];
     }
@@ -7498,6 +7599,33 @@ function ScripturesContent() {
       if (exact) {
         return exact;
       }
+
+      const overrideMatched = schemaLevels.find((level) => {
+        const display = currentBookLevelNameOverrides[level];
+        return display && normalizeLevelName(display) === normalized;
+      });
+      if (overrideMatched) {
+        return overrideMatched;
+      }
+
+      const overrideEntry = Object.entries(currentBookLevelNameOverrides).find(
+        ([canonical, display]) =>
+          normalizeLevelName(canonical) === normalized ||
+          normalizeLevelName(display) === normalized
+      );
+      if (overrideEntry) {
+        const [canonical, display] = overrideEntry;
+        const mapped = schemaLevels.find((level) => {
+          const levelNormalized = normalizeLevelName(level);
+          return (
+            levelNormalized === normalizeLevelName(canonical) ||
+            levelNormalized === normalizeLevelName(display)
+          );
+        });
+        if (mapped) {
+          return mapped;
+        }
+      }
     }
 
     if (
@@ -7523,14 +7651,14 @@ function ScripturesContent() {
       return schemaLevels.length > 0;
     }
 
-    const levelIndex = getLevelIndexFromName(node.level_name, schemaLevels);
+    const levelIndex = getLevelIndexForNode(node, schemaLevels);
     if (levelIndex >= 0) {
       return levelIndex + 1 < schemaLevels.length;
     }
 
     // Fall back to level_order check
     const parentLevelOrder = node.level_order || 0;
-    const nextLevelIndex = parentLevelOrder + 1;
+    const nextLevelIndex = parentLevelOrder;
 
     return nextLevelIndex < schemaLevels.length;
   };
@@ -7686,7 +7814,7 @@ function ScripturesContent() {
           resolvedLevelName = matchedLevel;
         } else if (isAddAction && createInsertAfterNodeId !== null) {
           resolvedLevelName = getSchemaMatchedLevelName(
-            actionNode?.level_name || formData.levelName,
+            formData.levelName || getNextLevelName(actionNode),
             actionNode?.level_order
           );
         } else if (isAddAction && resolvedParentNodeId === null) {
@@ -7710,7 +7838,8 @@ function ScripturesContent() {
       let levelOrder = 1;
       if (isAddAction && actionNode) {
         if (createInsertAfterNodeId !== null) {
-          levelOrder = actionNode.level_order || 1;
+          const insertAfterNode = findNodeById(treeData, createInsertAfterNodeId);
+          levelOrder = insertAfterNode?.level_order || actionNode.level_order || 1;
         } else {
           // When adding a child node
           if (actionNode.level_name?.toUpperCase() === "BOOK") {
@@ -7731,7 +7860,6 @@ function ScripturesContent() {
       }
 
       const basePayload = {
-        level_name: resolvedLevelName,
         sequence_number: formData.sequenceNumber ? formData.sequenceNumber.trim() : null,
         title_sanskrit: titlePair.sanskrit || null,
         title_transliteration: titlePair.transliteration || null,
@@ -7745,6 +7873,7 @@ function ScripturesContent() {
         isAddAction
           ? {
               ...basePayload,
+              level_name: resolvedLevelName,
               book_id: parseInt(bookId, 10),
               parent_node_id: resolvedParentNodeId,
               level_order: levelOrder,
@@ -7832,9 +7961,18 @@ function ScripturesContent() {
               credentials: "include",
             });
             if (response.ok) {
-              const data = (await response.json()) as TreeNode[];
+              const flatData = (await response.json()) as TreeNode[];
+              const data = nestFlatTreeNodes(flatData);
               setTreeData(data);
-              setExpandedIds((prev) => new Set(prev));
+              // When adding a child, always expand the parent so the new node is visible
+              console.log("[Tree Refresh] isAddAction:", isAddAction, "resolvedParentNodeId:", resolvedParentNodeId);
+              setExpandedIds((prev) => {
+                const next = new Set(prev);
+                if (isAddAction && resolvedParentNodeId !== null) {
+                  next.add(resolvedParentNodeId);
+                }
+                return next;
+              });
               if (preservedNodeId) {
                 const path = findPath(data, preservedNodeId);
                 if (path) {
@@ -7956,13 +8094,7 @@ function ScripturesContent() {
         }
       }
 
-      const normalizedInlineLevelName = getSchemaMatchedLevelName(
-        inlineFormData.levelName || nodeContent.level_name || "",
-        nodeContent.level_order
-      );
-
       const payload = {
-        level_name: normalizedInlineLevelName,
         sequence_number: inlineFormData.sequenceNumber
           ? inlineFormData.sequenceNumber.trim()
           : null,
@@ -8007,7 +8139,8 @@ function ScripturesContent() {
           credentials: "include",
         });
         if (treeResponse.ok) {
-          const data = (await treeResponse.json()) as TreeNode[];
+          const flatData = (await treeResponse.json()) as TreeNode[];
+          const data = nestFlatTreeNodes(flatData);
           setTreeData(data);
           const path = findPath(data, selectedId);
           if (path) {
@@ -8287,13 +8420,13 @@ function ScripturesContent() {
                   return `${displaySeq}. ${titleText}`;
                 }
                 if (node.children && node.children.length > 0) {
-                  return `${displaySeq}. Untitled`;
+                  return `${displaySeq}. ${formatValue(node.level_name) || "Untitled"}`;
                 }
                 return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
               })()}
             </span>
           </button>
-          {canContribute && canAddChild(node) && (
+          {(canContribute || canEditCurrentBook) && canAddChild(node) && (
             <button
               type="button"
               onClick={() => {
@@ -8307,8 +8440,15 @@ function ScripturesContent() {
                     selectedPath && selectedPath.length > 1
                       ? selectedPath[selectedPath.length - 2].id
                       : null;
-                  const selectedLevelName = (selectedNode?.level_name || "").trim().toLowerCase();
-                  const nextLevelName = nextLevel.trim().toLowerCase();
+                  const selectedLevelName = normalizeLevelName(
+                    getSchemaMatchedLevelName(
+                      selectedNode?.level_name || "",
+                      selectedNode?.level_order
+                    )
+                  );
+                  const nextLevelName = normalizeLevelName(
+                    getSchemaMatchedLevelName(nextLevel)
+                  );
 
                   if (selectedParentId === node.id && selectedLevelName === nextLevelName) {
                     insertAfterNodeId = selectedId;
@@ -8337,7 +8477,7 @@ function ScripturesContent() {
                 );
                 setAction("add");
               }}
-              title={`Add ${getNextLevelName(node)}`}
+              title={`Add ${getDisplayLevelName(getNextLevelName(node))}`}
               className="flex h-7 w-7 items-center justify-center rounded-lg border border-green-500/30 bg-green-50 text-sm text-green-700 transition hover:border-green-500/60 hover:shadow-md"
             >
               +
@@ -10060,6 +10200,51 @@ function ScripturesContent() {
                                 >
                                   <Pencil size={14} />
                                   {activeNodeEditLabel}
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    setShowNodeActionsMenu(false);
+                                    if (!selectedId || !nodeContent) return;
+                                    const currentLevel = formatValue(nodeContent.level_name) || "";
+                                    const requestedLevel = window.prompt(
+                                      "Repair node level name",
+                                      currentLevel
+                                    );
+                                    if (!requestedLevel || !requestedLevel.trim()) return;
+                                    try {
+                                      const response = await fetch(
+                                        `/api/content/nodes/${selectedId}/repair-level`,
+                                        {
+                                          method: "POST",
+                                          credentials: "include",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ level_name: requestedLevel.trim() }),
+                                        }
+                                      );
+                                      const result = await response.json().catch(() => null);
+                                      if (!response.ok) {
+                                        alert(
+                                          typeof result?.detail === "string"
+                                            ? result.detail
+                                            : "Failed to repair node level"
+                                        );
+                                        return;
+                                      }
+                                      if (bookId) {
+                                        await loadTree(bookId, selectedId);
+                                      }
+                                      await loadNodeContent(selectedId, true);
+                                    } catch {
+                                      alert("Failed to repair node level");
+                                    }
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <SlidersHorizontal size={14} />
+                                  Repair level name
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -13214,8 +13399,8 @@ function ScripturesContent() {
                 <div className="flex items-center justify-between">
                   <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     {action === "add" 
-                      ? `Add ${formData.levelName || "New Node"}` 
-                      : `Edit ${formatValue(formData.levelName || actionNode?.level_name) || "Node"}`}
+                      ? `Add ${getDisplayLevelName(formData.levelName) || "New Node"}` 
+                      : `Edit ${getDisplayLevelName(formatValue(formData.levelName || actionNode?.level_name)) || "Node"}`}
                   </h2>
                   <button
                     type="button"

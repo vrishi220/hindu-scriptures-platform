@@ -264,6 +264,8 @@ class MediaAssetCreateLinkPayload(BaseModel):
 
 class MediaBankAttachNodePayload(BaseModel):
     is_default: bool = False
+class NodeLevelRepairPayload(BaseModel):
+    level_name: str
 
 
 def _build_license_policy_report_for_node_ids(
@@ -482,8 +484,34 @@ def _validate_level_name_overrides(
 def _display_level_name_for_book(book: Book | None, level_name: str | None) -> str | None:
     if not isinstance(level_name, str):
         return level_name
+
     overrides = _book_level_name_overrides(book)
-    return overrides.get(level_name, level_name)
+    if not overrides:
+        return level_name
+
+    exact = overrides.get(level_name)
+    if isinstance(exact, str) and exact.strip():
+        return exact.strip()
+
+    lowered_level = level_name.strip().lower()
+    if not lowered_level:
+        return level_name
+
+    case_insensitive_key = next(
+        (
+            canonical
+            for canonical in overrides.keys()
+            if isinstance(canonical, str) and canonical.lower() == lowered_level
+        ),
+        None,
+    )
+    if not case_insensitive_key:
+        return level_name
+
+    mapped = overrides.get(case_insensitive_key)
+    if isinstance(mapped, str) and mapped.strip():
+        return mapped.strip()
+    return level_name
 
 
 def _book_public_model(book: Book) -> BookPublic:
@@ -2037,11 +2065,18 @@ def _import_canonical_json_v1(
             error=f"Schema not found: {schema_id}",
         )
 
+    schema_levels = schema.levels if isinstance(schema.levels, list) else []
+    canonical_level_name_overrides = _validate_level_name_overrides(
+        canonical.schema_.level_name_overrides,
+        schema_levels,
+    )
+
     book_code = canonical.book.book_code or _default_book_code_from_name(canonical.book.book_name)
     warnings: list[str] = []
     book = db.query(Book).filter(Book.book_code == book_code).first()
     if book:
         warnings.append(f"Book already exists: {book.book_name}")
+        book.level_name_overrides = canonical_level_name_overrides
         existing_content_query = db.query(ContentNode).filter(ContentNode.book_id == book.id)
         existing_node = existing_content_query.with_entities(ContentNode.id).first()
         if existing_node:
@@ -2077,11 +2112,12 @@ def _import_canonical_json_v1(
             book_code=book_code,
             language_primary=canonical.book.language_primary,
             metadata_json=metadata_out,
+            level_name_overrides=canonical_level_name_overrides,
         )
         db.add(book)
         db.flush()
 
-    level_lookup = {level: idx for idx, level in enumerate(schema.levels or [])}
+    level_lookup = {level: idx + 1 for idx, level in enumerate(schema.levels or [])}
     old_to_new_node_ids: dict[int, int] = {}
     pending_nodes = list(canonical.nodes)
     nodes_created = 0
@@ -2125,6 +2161,8 @@ def _import_canonical_json_v1(
             )
 
             resolved_level_order = level_lookup.get(node.level_name, node.level_order)
+            if not isinstance(resolved_level_order, int) or resolved_level_order <= 0:
+                resolved_level_order = 1
             source_attribution = None
             original_source_url = None
             if isinstance(node.metadata_json, dict):
@@ -2229,7 +2267,7 @@ def _insert_content_nodes(
 ) -> int:
     """Insert content nodes recursively into database."""
     nodes_created = 0
-    level_lookup = {level: idx for idx, level in enumerate(schema.levels)}
+    level_lookup = {level: idx + 1 for idx, level in enumerate(schema.levels)}
 
     _sync_content_nodes_id_sequence(db)
     
@@ -2238,7 +2276,7 @@ def _insert_content_nodes(
         for node_data in nodes:
             try:
                 level_name = node_data.get("level_name", "")
-                level_order = level_lookup.get(level_name, 0)
+                level_order = level_lookup.get(level_name, 1)
                 
                 content_node = ContentNode(
                     book_id=book.id,
@@ -2357,6 +2395,23 @@ def list_book_tree(
         .order_by(ContentNode.level_order)
         .all()
     )
+
+    nodes_by_id: dict[int, ContentNode] = {node.id: node for node in nodes}
+
+    def _effective_level_order(node: ContentNode) -> int:
+        depth = 1
+        current_parent_id = node.parent_node_id
+        visited: set[int] = set()
+
+        while isinstance(current_parent_id, int) and current_parent_id in nodes_by_id:
+            if current_parent_id in visited:
+                break
+            visited.add(current_parent_id)
+            depth += 1
+            parent_node = nodes_by_id[current_parent_id]
+            current_parent_id = parent_node.parent_node_id
+
+        return depth
     
     # Natural sort function for sequence numbers
     def natural_sort_key(node):
@@ -2374,6 +2429,7 @@ def list_book_tree(
     payloads: list[ContentNodePublic] = []
     for item in nodes:
         payload = ContentNodePublic.model_validate(item).model_dump()
+        payload["level_order"] = _effective_level_order(item)
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
         payloads.append(ContentNodePublic.model_validate(payload))
     return payloads
@@ -2555,6 +2611,14 @@ def list_book_tree_nested(
                 roots.append(tree_node)
         else:
             roots.append(tree_node)
+
+    def _assign_depth_level_order(tree_nodes: list[ContentNodeTree], depth: int = 1) -> None:
+        for item in tree_nodes:
+            item.level_order = depth
+            if item.children:
+                _assign_depth_level_order(item.children, depth + 1)
+
+    _assign_depth_level_order(roots)
 
     return roots
 
@@ -2964,19 +3028,23 @@ def update_node(
     updates = payload.model_dump(exclude_unset=True)
     edit_reason = updates.pop("edit_reason", None)  # Remove from updates dict
 
+    immutable_hierarchy_fields = {"level_name", "level_order", "parent_node_id"}
+    attempted_hierarchy_updates = sorted(immutable_hierarchy_fields.intersection(updates.keys()))
+    if attempted_hierarchy_updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Hierarchy fields cannot be edited via this endpoint: "
+                + ", ".join(attempted_hierarchy_updates)
+            ),
+        )
+
     schema_levels = (
         node_book.schema.levels
         if node_book.schema and isinstance(node_book.schema.levels, list)
         else []
     )
     level_name_overrides = _book_level_name_overrides(node_book)
-    if "level_name" in updates and isinstance(updates.get("level_name"), str):
-        updates["level_name"] = _resolve_level_name_for_schema(
-            updates["level_name"],
-            schema_levels,
-            level_name_overrides,
-        )
-
     if "title_sanskrit" in updates or "title_transliteration" in updates:
         next_title_sanskrit, next_title_transliteration = _autofill_sanskrit_transliteration_pair(
             updates.get("title_sanskrit", node.title_sanskrit),
@@ -3059,6 +3127,66 @@ def update_node(
 
     payload_out = ContentNodePublic.model_validate(node).model_dump()
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
+@router.post("/nodes/{node_id}/repair-level", response_model=ContentNodePublic)
+def repair_node_level(
+    node_id: int,
+    payload: NodeLevelRepairPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentNodePublic:
+    if not _user_can_edit_any(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can repair node hierarchy fields",
+        )
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    schema_levels = (
+        node_book.schema.levels
+        if node_book.schema and isinstance(node_book.schema.levels, list)
+        else []
+    )
+    level_name_overrides = _book_level_name_overrides(node_book)
+    requested_level_name = (payload.level_name or "").strip()
+    resolved_level_name = _resolve_level_name_for_schema(
+        requested_level_name,
+        schema_levels,
+        level_name_overrides,
+    )
+
+    if requested_level_name and isinstance(level_name_overrides, dict) and level_name_overrides:
+        requested_lower = requested_level_name.lower()
+        display_match = next(
+            (
+                canonical
+                for canonical, display in level_name_overrides.items()
+                if isinstance(canonical, str)
+                and isinstance(display, str)
+                and display.strip().lower() == requested_lower
+                and canonical in schema_levels
+            ),
+            None,
+        )
+        if display_match:
+            resolved_level_name = display_match
+
+    node.level_name = resolved_level_name
+    node.last_modified_by = current_user.id
+
+    db.commit()
+    db.refresh(node)
+
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
     return ContentNodePublic.model_validate(payload_out)
 
 
