@@ -5,6 +5,7 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
+const ENABLE_BROWSER_RENDERED_PDF = false;
 
 type BookPreviewRenderLine = {
   field?: string;
@@ -631,8 +632,10 @@ export async function GET(
       cache: "no-store",
     });
 
-  // Prefer browser-based PDF from preview artifact for better Indic script shaping.
-  try {
+  // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
+  // Prefer backend-generated PDF bytes by default.
+  if (ENABLE_BROWSER_RENDERED_PDF) {
+    try {
     let previewResponse = await doPostPreview(activeAccessToken);
     if (previewResponse.status === 401 && refreshToken) {
       const newTokens = await refreshAccessToken(refreshToken);
@@ -709,8 +712,9 @@ export async function GET(
         await browser.close();
       }
     }
-  } catch {
-    // Fall through to backend PDF fallback.
+    } catch {
+      // Fall through to backend PDF fallback.
+    }
   }
 
   let response: Response;
@@ -811,8 +815,10 @@ export async function POST(
       cache: "no-store",
     });
 
-  // Prefer browser-based PDF from preview artifact for better Indic script shaping.
-  try {
+  // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
+  // Prefer backend-generated PDF bytes by default.
+  if (ENABLE_BROWSER_RENDERED_PDF) {
+    try {
     let previewResponse = await doPostPreview(activeAccessToken);
     if (previewResponse.status === 401 && refreshToken) {
       const newTokens = await refreshAccessToken(refreshToken);
@@ -889,8 +895,9 @@ export async function POST(
         await browser.close();
       }
     }
-  } catch {
-    // Fall through to backend PDF fallback.
+    } catch {
+      // Fall through to backend PDF fallback.
+    }
   }
 
   let response: Response;

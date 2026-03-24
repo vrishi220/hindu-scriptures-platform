@@ -2809,6 +2809,11 @@ def _generate_rendered_pdf(
     sections: SnapshotRenderSections,
     render_settings: SnapshotRenderSettings,
     appendix_entries: list[dict] | None = None,
+    cover_title: str | None = None,
+    cover_author: str | None = None,
+    show_heading_metadata: bool = True,
+    start_content_on_new_page: bool = False,
+    show_section_labels: bool = True,
 ) -> bytes:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
@@ -2836,20 +2841,54 @@ def _generate_rendered_pdf(
         pdf.drawString(left_margin, y, text)
         y -= devanagari_line_height if use_devanagari else line_height
 
-    write_line(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
-    for metadata_line in heading_metadata_lines:
-        write_line(metadata_line, "Helvetica", 10)
-    write_line("", "Helvetica", 10)
+    normalized_cover_title = (cover_title or "").strip()
+    normalized_cover_author = (cover_author or "").strip()
+    if normalized_cover_title or normalized_cover_author:
+        center_x = page_width / 2
+        cover_title_text = normalized_cover_title or effective_title
+        title_line_1 = cover_title_text
+        title_line_2 = ""
+        if len(cover_title_text) > 42:
+            title_parts = textwrap.wrap(cover_title_text, width=42)
+            title_line_1 = title_parts[0]
+            title_line_2 = title_parts[1] if len(title_parts) > 1 else ""
 
-    write_line("Rendered Content", "Helvetica-Bold", 12)
+        cover_y = page_height - 200
+        pdf.setFont(pdf_font_name, 30)
+        pdf.drawCentredString(center_x, cover_y, title_line_1)
+        if title_line_2:
+            cover_y -= 42
+            pdf.drawCentredString(center_x, cover_y, title_line_2)
+
+        if normalized_cover_author:
+            cover_y -= 70
+            pdf.setFont(pdf_font_name, 18)
+            pdf.drawCentredString(center_x, cover_y, normalized_cover_author)
+
+        pdf.showPage()
+        y = page_height - top_margin
+    elif start_content_on_new_page:
+        pdf.showPage()
+        y = page_height - top_margin
+
+    if show_heading_metadata:
+        write_line(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
+        for metadata_line in heading_metadata_lines:
+            write_line(metadata_line, "Helvetica", 10)
+        write_line("", "Helvetica", 10)
+
+    if show_section_labels:
+        write_line("Rendered Content", "Helvetica-Bold", 12)
     for section_name in ("front", "body", "back"):
         blocks = getattr(sections, section_name, [])
-        section_label = section_name.title()
-        write_line(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
+        if show_section_labels:
+            section_label = section_name.title()
+            write_line(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
 
         if not blocks:
-            write_line("No items in this section.")
-            write_line("", "Helvetica", 10)
+            if show_section_labels:
+                write_line("No items in this section.")
+                write_line("", "Helvetica", 10)
             continue
 
         for block in blocks:
@@ -3592,19 +3631,38 @@ def _export_book_pdf_with_options(
     _apply_template_metadata(preview_payload)
     sections = _materialize_snapshot_render_sections(preview_payload, db)
     render_settings = _extract_render_settings(preview_payload)
-    exported_at = datetime.now(timezone.utc).isoformat()
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    author_candidates = [
+        metadata.get("author"),
+        metadata.get("source_author"),
+        metadata.get("compiler"),
+        metadata.get("curator"),
+    ]
+    for node in ordered_nodes:
+        if isinstance(node.source_attribution, str) and node.source_attribution.strip():
+            author_candidates.append(node.source_attribution)
+            break
+    cover_author = next(
+        (
+            str(candidate).strip()
+            for candidate in author_candidates
+            if isinstance(candidate, str) and candidate.strip()
+        ),
+        "",
+    )
 
     pdf_bytes = _generate_rendered_pdf(
-        document_heading="Book Export",
+        document_heading="",
         effective_title=book.book_name,
-        heading_metadata_lines=[
-            f"Book ID: {book.id}",
-            f"Scope: {'node' if root_node else 'book'}",
-            f"Exported At: {exported_at}",
-        ],
+        heading_metadata_lines=[],
         sections=sections,
         render_settings=render_settings,
         appendix_entries=None,
+        cover_title=book.book_name,
+        cover_author=cover_author,
+        show_heading_metadata=False,
+        start_content_on_new_page=True,
+        show_section_labels=False,
     )
 
     safe_book_name = re.sub(r"[^a-z0-9]+", "-", (book.book_name or "book").strip().lower()).strip("-")

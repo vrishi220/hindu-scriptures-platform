@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
+const ENABLE_BROWSER_RENDERED_PDF = false;
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
 const SNAPSHOT_PDF_CACHE = new Map<string, Uint8Array>();
 
@@ -261,8 +262,10 @@ export async function GET(
     });
   }
 
-  // Prefer browser-based PDF for better Indic script shaping. Fallback to backend PDF on any failure.
-  try {
+  // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
+  // Prefer backend-generated PDF bytes by default.
+  if (ENABLE_BROWSER_RENDERED_PDF) {
+    try {
     const tokenForJson = store.get(ACCESS_TOKEN_COOKIE)?.value || accessToken;
     const [snapshotResp, artifactResp] = await Promise.all([
       doGetJson(`/api/edition-snapshots/${id}`, tokenForJson),
@@ -295,8 +298,9 @@ export async function GET(
         await browser.close();
       }
     }
-  } catch {
-    // Fall through to backend-generated PDF.
+    } catch {
+      // Fall through to backend-generated PDF.
+    }
   }
 
   const arrayBuffer = await response.arrayBuffer();

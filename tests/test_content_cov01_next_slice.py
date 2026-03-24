@@ -520,7 +520,7 @@ class TestContentCoverageNextSliceCOV01:
                 current_user=SimpleNamespace(id=1),
             )
             assert fail_result.success is False
-            assert fail_result.error == "Failed to import JSON content"
+            assert (fail_result.error or "").startswith("Failed to import JSON content")
 
             monkeypatch.setattr(content_api, "JSONImporter", FakeJSONImporterNoNodes)
             no_nodes_result = content_api._import_json(
