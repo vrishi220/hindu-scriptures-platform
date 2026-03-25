@@ -1373,6 +1373,7 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
 };
 
 const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
+const PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY = "scriptures.preview.showBookSummary";
 const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
 
 const EDITABLE_TRANSLATION_LANGUAGES = [
@@ -2098,6 +2099,7 @@ function ScripturesContent() {
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
   const [showPreviewMedia, setShowPreviewMedia] = useState(true);
+  const [showPreviewBookSummary, setShowPreviewBookSummary] = useState(true);
   const [previewWordMeaningsDisplayMode, setPreviewWordMeaningsDisplayMode] =
     useState<"inline" | "table" | "hide">("inline");
   // Level visibility filter (client-side, per-preview session)
@@ -4410,6 +4412,28 @@ function ScripturesContent() {
     setPreviewTranslationLanguages(normalized);
     setAppliedPreviewTranslationLanguages(normalized);
   }, [authEmail, preferences?.source_language, sourceLanguage]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const raw = window.localStorage.getItem(PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY);
+    if (raw === "true") {
+      setShowPreviewBookSummary(true);
+    } else if (raw === "false") {
+      setShowPreviewBookSummary(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY,
+      showPreviewBookSummary ? "true" : "false"
+    );
+  }, [showPreviewBookSummary]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -13513,6 +13537,17 @@ function ScripturesContent() {
                             <BookOpen className="h-4 w-4" />
                           </button>
                         )}
+                        {previewScope === "book" && (
+                          <label className="ml-1 flex items-center gap-1.5 rounded-full border border-black/10 bg-[color:var(--paper)] px-2.5 py-1 text-xs text-zinc-700">
+                            <input
+                              type="checkbox"
+                              checked={showPreviewBookSummary}
+                              onChange={(event) => setShowPreviewBookSummary(event.target.checked)}
+                              disabled={bookPreviewLoading}
+                            />
+                            <span>Summary</span>
+                          </label>
+                        )}
                       </>
                     );
                   })()}
@@ -13803,6 +13838,15 @@ function ScripturesContent() {
                     {bookPreviewArtifact.warnings.join(" ")}
                   </div>
                 )}
+
+                {showPreviewBookSummary && bookPreviewArtifact.preview_scope === "book" &&
+                  bookPreviewArtifact.book_template?.rendered_text?.trim() && (
+                    <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
+                      <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700">
+                        {bookPreviewArtifact.book_template.rendered_text.trim()}
+                      </p>
+                    </div>
+                  )}
 
                 {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">

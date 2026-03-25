@@ -117,10 +117,14 @@ def _metadata_liquid_template(fields: list[str]) -> str:
 _BOOK_VISIBILITY_PUBLIC = "public"
 
 _DEFAULT_LIQUID_TEMPLATES = {
+    "default.book.summary.v1": (
+        "{% if summary_primary %}{{ summary_primary }}\n{% endif %}"
+        "{% if summary_transliteration %}\n{{ summary_transliteration }}\n{% endif %}"
+        "{% if summary_english %}\n{{ summary_english }}\n{% endif %}"
+    ),
     "default.book.content_item.v1": (
-        "{% if title %}Book: {{ title }}\n{% endif %}"
-        "{% if child_count %}Child Count: {{ child_count }}\n{% endif %}"
-        "{% if children %}Children: {{ children }}\n{% endif %}"
+        "{% if title %}{{ title }}\n{% endif %}"
+        "{% if child_count %}{{ child_count }} sections\n{% endif %}"
     ),
     "default.front.content_item.v1": _metadata_liquid_template(["english", "text"]),
     "default.front.chapter.content_item.v1": _metadata_liquid_template(["english", "text"]),
@@ -493,6 +497,24 @@ def _resolve_node_binding_metadata_for_template(
         .filter(
             MetadataBinding.entity_type == "book",
             MetadataBinding.entity_id == source_book_id,
+            MetadataBinding.scope_type == "book",
+        )
+        .first()
+    )
+    if book_binding is None:
+        return {}
+    return _flatten_binding_metadata_for_template(book_binding, db)
+
+
+def _resolve_book_binding_metadata_for_template(db: Session, book_id: int | None) -> dict:
+    if not isinstance(book_id, int) or book_id <= 0:
+        return {}
+
+    book_binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "book",
+            MetadataBinding.entity_id == book_id,
             MetadataBinding.scope_type == "book",
         )
         .first()
@@ -1804,10 +1826,11 @@ def _build_template_context(
             else:
                 metadata_context[key.strip()] = _as_clean_string(value)
 
+    # Keep core display fields anchored to the resolved block content.
+    # This prevents book-level metadata keys (for example, english) from
+    # overriding each referenced node's actual text in preview rendering.
     for field_name in ("title", "level_name", "sequence_number", "sanskrit", "transliteration", "english", "text"):
-        value = base_context.get(field_name)
-        if value not in (None, ""):
-            metadata_context.setdefault(field_name, value)
+        metadata_context[field_name] = _as_clean_string(base_context.get(field_name))
 
     base_context["metadata"] = metadata_context
     return base_context
@@ -2282,12 +2305,18 @@ def _render_book_preview_template(
     preview_payload: dict,
     display_title: str,
     sections: SnapshotRenderSections,
+    render_settings: SnapshotRenderSettings,
+    book_summary_fields: dict | None = None,
+    include_book_summary: bool = False,
     custom_template_sources: dict[str, str] | None = None,
     system_template_sources: dict[str, str] | None = None,
 ) -> BookPreviewTemplatePublic:
     template_bindings = _extract_template_bindings(preview_payload)
     configured_template = _read_template_key(template_bindings.get("book_template_key"))
-    template_key = configured_template or "default.book.content_item.v1"
+    default_template_key = "default.book.summary.v1" if include_book_summary else "default.book.content_item.v1"
+    if include_book_summary and configured_template == "default.book.content_item.v1":
+        configured_template = "default.book.summary.v1"
+    template_key = configured_template or default_template_key
     template_source = _resolve_liquid_template_source(
         template_key=template_key,
         section_name="body",
@@ -2314,8 +2343,54 @@ def _render_book_preview_template(
     if hidden_count > 0:
         children_summary = f"{children_summary} (+{hidden_count} more)" if children_summary else f"(+{hidden_count} more)"
 
+    summary_sanskrit = ""
+    summary_transliteration = ""
+    summary_english = ""
+    if include_book_summary and isinstance(book_summary_fields, dict):
+        summary_sanskrit = _normalize_devanagari_text(_as_clean_string(book_summary_fields.get("sanskrit")))
+        summary_transliteration = _as_clean_string(book_summary_fields.get("transliteration"))
+        summary_english = _as_clean_string(book_summary_fields.get("english"))
+
+    candidate_summary_values: dict[str, str] = {
+        "sanskrit": summary_sanskrit,
+        "transliteration": summary_transliteration,
+        "english": summary_english,
+    }
+    visible_by_field = {
+        "sanskrit": render_settings.show_sanskrit,
+        "transliteration": render_settings.show_transliteration,
+        "english": render_settings.show_english,
+    }
+
+    primary_summary = ""
+    for field_name in render_settings.text_order:
+        if field_name not in candidate_summary_values:
+            continue
+        if not visible_by_field.get(field_name, False):
+            continue
+        candidate = candidate_summary_values.get(field_name, "")
+        if candidate:
+            primary_summary = candidate
+            break
+
+    if not primary_summary:
+        primary_summary = summary_sanskrit or summary_transliteration or summary_english
+
+    rendered_transliteration = ""
+    if summary_transliteration and summary_transliteration != primary_summary:
+        if render_settings.show_transliteration:
+            rendered_transliteration = summary_transliteration
+
+    rendered_english = ""
+    if summary_english and summary_english != primary_summary:
+        if render_settings.show_english or not primary_summary:
+            rendered_english = summary_english
+
     context = {
         "title": _as_clean_string(display_title),
+        "summary_primary": primary_summary,
+        "summary_transliteration": rendered_transliteration,
+        "summary_english": rendered_english,
         "child_count": str(len(sections.body)),
         "children": children_summary,
     }
@@ -3494,6 +3569,17 @@ def preview_book_render(
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
     display_title = _book_title_for_preview(root_node) if root_node else book.book_name
+    resolved_book_binding_metadata = _resolve_book_binding_metadata_for_template(db, book.id)
+    book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    book_summary_fields = {
+        "sanskrit": _as_clean_string(resolved_book_binding_metadata.get("sanskrit"))
+        or _as_clean_string(book_metadata.get("title_sanskrit")),
+        "transliteration": _as_clean_string(resolved_book_binding_metadata.get("transliteration"))
+        or _as_clean_string(book_metadata.get("title_transliteration")),
+        "english": _as_clean_string(resolved_book_binding_metadata.get("english"))
+        or _as_clean_string(resolved_book_binding_metadata.get("text"))
+        or _as_clean_string(book_metadata.get("title_english")),
+    }
     custom_template_sources = _extract_custom_template_sources(preview_payload)
     system_template_sources = _load_system_template_sources(db)
 
@@ -3502,6 +3588,9 @@ def preview_book_render(
         preview_payload,
         display_title,
         sections,
+        render_settings=render_settings,
+        book_summary_fields=book_summary_fields,
+        include_book_summary=root_node is None,
         custom_template_sources=custom_template_sources,
         system_template_sources=system_template_sources,
     )
