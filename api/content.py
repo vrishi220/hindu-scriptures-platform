@@ -2674,6 +2674,7 @@ def list_book_tree(
         .options(
             load_only(
                 ContentNode.id,
+                ContentNode.book_id,
                 ContentNode.parent_node_id,
                 ContentNode.referenced_node_id,
                 ContentNode.level_name,
@@ -2812,6 +2813,7 @@ def export_book_json(
         .options(
             load_only(
                 ContentNode.id,
+                ContentNode.book_id,
                 ContentNode.parent_node_id,
                 ContentNode.referenced_node_id,
                 ContentNode.level_name,
