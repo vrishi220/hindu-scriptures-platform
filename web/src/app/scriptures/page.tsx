@@ -4,8 +4,11 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   ChevronsDown,
   ChevronsUp,
+  Download,
   Eye,
   LayoutGrid,
   List,
@@ -17,6 +20,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
 import BasketPanel from "../../components/BasketPanel";
@@ -2163,6 +2167,9 @@ function ScripturesContent() {
   const [levelNameOverridesError, setLevelNameOverridesError] = useState<string | null>(null);
   const [levelNameOverridesMessage, setLevelNameOverridesMessage] = useState<string | null>(null);
   const [propertiesName, setPropertiesName] = useState("");
+  const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
+  const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
+  const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -3016,6 +3023,24 @@ function ScripturesContent() {
             nodeContent?.title_transliteration ||
             `Node ${nodeId || ""}`
     );
+    if (scope === "book") {
+      const metadata = getBookMetadataObject(currentBook) || {};
+      setPropertiesBookTitleEnglish(
+        typeof metadata.title_english === "string" ? metadata.title_english : ""
+      );
+      setPropertiesBookTitleSanskrit(
+        typeof metadata.title_sanskrit === "string" ? metadata.title_sanskrit : ""
+      );
+      setPropertiesBookTitleTransliteration(
+        typeof metadata.title_transliteration === "string"
+          ? metadata.title_transliteration
+          : ""
+      );
+    } else {
+      setPropertiesBookTitleEnglish("");
+      setPropertiesBookTitleSanskrit("");
+      setPropertiesBookTitleTransliteration("");
+    }
     setPropertiesLoading(true);
     setPropertiesSaving(false);
     setPropertiesError(null);
@@ -3469,8 +3494,33 @@ function ScripturesContent() {
           ).trim();
     const shouldUpdateName = nextName !== currentName;
     const shouldSaveMetadata = Boolean(propertiesCategoryId);
+    const existingBookMetadata = getBookMetadataObject(currentBook) || {};
+    const currentBookTitleEnglish =
+      typeof existingBookMetadata.title_english === "string"
+        ? existingBookMetadata.title_english.trim()
+        : "";
+    const currentBookTitleSanskrit =
+      typeof existingBookMetadata.title_sanskrit === "string"
+        ? existingBookMetadata.title_sanskrit.trim()
+        : "";
+    const currentBookTitleTransliteration =
+      typeof existingBookMetadata.title_transliteration === "string"
+        ? existingBookMetadata.title_transliteration.trim()
+        : "";
+    const nextBookTitleEnglish = propertiesBookTitleEnglish.trim();
+    const bookTitlePair = autoFillSanskritTransliterationPair(
+      propertiesBookTitleSanskrit,
+      propertiesBookTitleTransliteration
+    );
+    const nextBookTitleSanskrit = bookTitlePair.sanskrit;
+    const nextBookTitleTransliteration = bookTitlePair.transliteration;
+    const shouldSaveBookTitles =
+      propertiesScope === "book" &&
+      (nextBookTitleEnglish !== currentBookTitleEnglish ||
+        nextBookTitleSanskrit !== currentBookTitleSanskrit ||
+        nextBookTitleTransliteration !== currentBookTitleTransliteration);
 
-    if (!shouldUpdateName && !shouldSaveMetadata) {
+    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookTitles) {
       setPropertiesError("No changes to save");
       return;
     }
@@ -3490,6 +3540,7 @@ function ScripturesContent() {
 
     try {
       let didUpdateName = false;
+      let didSaveBookTitles = false;
       let didSaveMetadata = false;
 
       if (shouldUpdateName) {
@@ -3566,6 +3617,37 @@ function ScripturesContent() {
         }
       }
 
+      if (shouldSaveBookTitles) {
+        const nextMetadata: Record<string, unknown> = {
+          ...existingBookMetadata,
+        };
+        if (nextBookTitleEnglish) {
+          nextMetadata.title_english = nextBookTitleEnglish;
+        } else {
+          delete nextMetadata.title_english;
+        }
+        if (nextBookTitleSanskrit) {
+          nextMetadata.title_sanskrit = nextBookTitleSanskrit;
+        } else {
+          delete nextMetadata.title_sanskrit;
+        }
+        if (nextBookTitleTransliteration) {
+          nextMetadata.title_transliteration = nextBookTitleTransliteration;
+        } else {
+          delete nextMetadata.title_transliteration;
+        }
+
+        const saved = await saveBookMetadata(
+          nextMetadata,
+          "Book titles saved",
+          "Failed to save book titles"
+        );
+        if (!saved) {
+          throw new Error("Failed to save book titles");
+        }
+        didSaveBookTitles = true;
+      }
+
       if (shouldSaveMetadata) {
         const endpoint = propertiesEndpoint(propertiesScope, propertiesNodeId);
         const response = await fetch(endpoint, {
@@ -3586,11 +3668,19 @@ function ScripturesContent() {
       }
 
       setPropertiesMessage(
-        didUpdateName && didSaveMetadata
-          ? "Properties and name saved"
-          : didUpdateName
-            ? "Name saved"
-            : "Properties saved"
+        didUpdateName && didSaveBookTitles && didSaveMetadata
+          ? "Name, titles, and properties saved"
+          : didUpdateName && didSaveBookTitles
+            ? "Name and titles saved"
+            : didSaveBookTitles && didSaveMetadata
+              ? "Titles and properties saved"
+              : didUpdateName && didSaveMetadata
+                ? "Properties and name saved"
+                : didUpdateName
+                  ? "Name saved"
+                  : didSaveBookTitles
+                    ? "Book titles saved"
+                    : "Properties saved"
       );
       await openPropertiesModal(propertiesScope, propertiesNodeId);
     } catch (err) {
@@ -4205,7 +4295,7 @@ function ScripturesContent() {
   const showTransliteration =
     transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
   const previewLoadingMessage =
-    bookPreviewLoadingScope === "node" ? "Building level preview..." : "Building book preview...";
+    bookPreviewLoadingScope === "node" ? "Building reader view..." : "Building book preview...";
   const previewLoadingElapsedSeconds = Math.floor(bookPreviewLoadingElapsedMs / 1000);
   const previewLoadingMessageWithElapsed = `${previewLoadingMessage} ${previewLoadingElapsedSeconds}s`;
   const previewParam = searchParams.get("preview");
@@ -4401,6 +4491,181 @@ function ScripturesContent() {
       formatValue(node.title_hindi) ||
       sanskritTitle
     );
+  };
+
+  const getNodeBreadcrumbLabel = (node: TreeNode | NodeContent): string => {
+    const preferredTitle = getPreferredTitle(node);
+    if (preferredTitle) {
+      return preferredTitle;
+    }
+
+    const isLeafNode = !("children" in node) || !node.children || node.children.length === 0;
+    const displaySeq =
+      formatSequenceDisplay(node.sequence_number || node.id, isLeafNode) || node.id;
+
+    return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
+  };
+
+  const resolvePreviewTitleBySettings = (
+    titleSanskrit: string,
+    titleTransliteration: string,
+    titleEnglish: string,
+    titleHindi: string
+  ): string => {
+    const transliterationTitle = titleTransliteration
+      ? renderPreviewTransliteration(titleTransliteration)
+      : titleSanskrit
+        ? transliterateFromDevanagari(titleSanskrit, appliedPreviewTransliterationScript)
+        : "";
+    const englishOrHindi = sourceLanguage === "hindi"
+      ? titleHindi || titleEnglish
+      : titleEnglish || titleHindi;
+
+    if (appliedBookPreviewLanguageSettings.show_transliteration && transliterationTitle) {
+      return transliterationTitle;
+    }
+    if (appliedBookPreviewLanguageSettings.show_sanskrit && titleSanskrit) {
+      return titleSanskrit;
+    }
+    if (appliedBookPreviewLanguageSettings.show_english && englishOrHindi) {
+      return englishOrHindi;
+    }
+
+    return transliterationTitle || titleSanskrit || englishOrHindi;
+  };
+
+  const getNodeTransliterationBreadcrumbLabel = (node: TreeNode | NodeContent): string => {
+    const resolvedTitle = resolvePreviewTitleBySettings(
+      formatValue("title_sanskrit" in node ? node.title_sanskrit : null),
+      formatValue("title_transliteration" in node ? node.title_transliteration : null),
+      formatValue("title_english" in node ? node.title_english : null),
+      formatValue("title_hindi" in node ? node.title_hindi : null)
+    );
+    if (resolvedTitle) {
+      return resolvedTitle;
+    }
+
+    // Final fallback to level_name + sequence_number
+    const isLeafNode = !("children" in node) || !node.children || node.children.length === 0;
+    const displaySeq =
+      formatSequenceDisplay(node.sequence_number || node.id, isLeafNode) || node.id;
+
+    return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
+  };
+
+  const getPreferredBookTitle = (fallbackBookName?: string | null): string => {
+    const metadata = getBookMetadataObject(currentBook);
+
+    const titleEnglish = formatValue(
+      metadata?.title_english || metadata?.book_name_english || metadata?.title
+    );
+    const titleHindi = formatValue(metadata?.title_hindi || metadata?.book_name_hindi);
+    const titleSanskrit = formatValue(
+      metadata?.title_sanskrit || metadata?.book_name_sanskrit || metadata?.primary_title_sanskrit
+    );
+    const titleTransliteration = formatValue(
+      metadata?.title_transliteration ||
+        metadata?.book_name_transliteration ||
+        metadata?.primary_title_transliteration
+    );
+    const resolvedBookTitle = resolvePreviewTitleBySettings(
+      titleSanskrit,
+      titleTransliteration,
+      titleEnglish,
+      titleHindi
+    );
+    const defaultBookName = formatValue(currentBook?.book_name) || formatValue(fallbackBookName);
+
+    return resolvedBookTitle || defaultBookName;
+  };
+
+  const getPreviewBreadcrumbTitle = (artifact: BookPreviewArtifact): string => {
+    if (artifact.preview_scope !== "node") {
+      return getPreferredBookTitle(artifact.book_name);
+    }
+
+    const segments: string[] = [];
+    const bookTitle = getPreferredBookTitle(artifact.book_name);
+    if (bookTitle) {
+      segments.push(bookTitle);
+    }
+
+    const rootNodeId =
+      artifact.preview_scope === "node" && typeof artifact.root_node_id === "number"
+        ? artifact.root_node_id
+        : null;
+    const pathNodes = rootNodeId !== null ? findPath(treeData, rootNodeId) || [] : [];
+
+    if (pathNodes.length > 0) {
+      segments.push(...pathNodes.map((node) => getNodeTransliterationBreadcrumbLabel(node)));
+    } else {
+      const fallbackRootTitle = formatValue(artifact.root_title);
+      if (fallbackRootTitle) {
+        segments.push(fallbackRootTitle);
+      }
+    }
+
+    return segments.join(". ") || getPreferredBookTitle(artifact.book_name);
+  };
+
+  const getPreviewHierarchicalPath = (artifact: BookPreviewArtifact): string => {
+    if (artifact.preview_scope !== "node") {
+      return "";
+    }
+
+    const rootNodeId =
+      artifact.preview_scope === "node" && typeof artifact.root_node_id === "number"
+        ? artifact.root_node_id
+        : null;
+    const pathNodes = rootNodeId !== null ? findPath(treeData, rootNodeId) || [] : [];
+
+    if (pathNodes.length === 0) {
+      return "";
+    }
+
+    const sequenceParts = pathNodes
+      .map((node) => node.sequence_number || node.level_order?.toString() || "–")
+      .filter(Boolean);
+
+    return sequenceParts.length > 0 ? sequenceParts.join(".") : "";
+  };
+
+  const getPreviewSiblingNavigation = (artifact: BookPreviewArtifact) => {
+    if (artifact.preview_scope !== "node" || typeof artifact.root_node_id !== "number") {
+      return {
+        previousSiblingId: null as number | null,
+        nextSiblingId: null as number | null,
+      };
+    }
+
+    const pathNodes = findPath(treeData, artifact.root_node_id) || [];
+    if (pathNodes.length === 0) {
+      return {
+        previousSiblingId: null as number | null,
+        nextSiblingId: null as number | null,
+      };
+    }
+
+    const currentNode = pathNodes[pathNodes.length - 1];
+    const parentNode = pathNodes.length > 1 ? pathNodes[pathNodes.length - 2] : null;
+    const siblingNodes = parentNode?.children || treeData;
+    const currentIndex = siblingNodes.findIndex((node) => node.id === currentNode.id);
+
+    if (currentIndex < 0) {
+      return {
+        previousSiblingId: null as number | null,
+        nextSiblingId: null as number | null,
+      };
+    }
+
+    const previousSiblingId = currentIndex > 0 ? siblingNodes[currentIndex - 1].id : null;
+    const nextSiblingId =
+      currentIndex < siblingNodes.length - 1 ? siblingNodes[currentIndex + 1].id : null;
+
+    return {
+      previousSiblingId,
+      nextSiblingId,
+    };
   };
 
   // Sync state from URL parameters (supports back/forward navigation)
@@ -6364,11 +6629,13 @@ function ScripturesContent() {
     targetBookId?: string,
     historyMode: "push" | "replace" = "push",
     pageOffset: number = 0,
-    append: boolean = false
+    append: boolean = false,
+    targetNodeId?: number | null
   ) => {
     const previewBookId = targetBookId ?? bookId;
     if (!previewBookId) return;
-    const previewNodeId = scope === "node" ? selectedId : null;
+    const previewNodeId =
+      scope === "node" ? (typeof targetNodeId === "number" ? targetNodeId : selectedId) : null;
     if (scope === "node" && !previewNodeId) {
       return;
     }
@@ -6412,7 +6679,7 @@ function ScripturesContent() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          node_id: scope === "node" ? selectedId ?? undefined : undefined,
+          node_id: scope === "node" ? previewNodeId ?? undefined : undefined,
           metadata_bindings: {
             global: {
               word_meanings: {
@@ -6569,6 +6836,28 @@ function ScripturesContent() {
         setBookPreviewLoading(false);
       }
     }
+  };
+
+  const handlePreviewSiblingNavigation = async (direction: "previous" | "next") => {
+    if (!bookPreviewArtifact || bookPreviewArtifact.preview_scope !== "node") {
+      return;
+    }
+
+    const { previousSiblingId, nextSiblingId } = getPreviewSiblingNavigation(bookPreviewArtifact);
+    const targetSiblingId = direction === "previous" ? previousSiblingId : nextSiblingId;
+
+    if (!targetSiblingId || !bookId) {
+      return;
+    }
+
+    const targetPath = findPath(treeData, targetSiblingId);
+    if (targetPath) {
+      applySelection(targetSiblingId, targetPath, false, false, true);
+    } else {
+      setSelectedId(targetSiblingId);
+    }
+
+    await handlePreviewBook("node", bookId, "replace", 0, false, targetSiblingId);
   };
 
   const loadMoreBookPreview = async () => {
@@ -8786,6 +9075,16 @@ function ScripturesContent() {
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
   );
   const canBrowseCurrentNode = authUserId !== null && canView;
+  const canPreviewCurrentNode = Boolean(selectedId) && (Boolean(authEmail) || currentBook?.visibility === "public");
+  const canCopyPreviewLink = Boolean(selectedId) && canPreviewCurrentNode;
+  const canAddSelectedNodeToBasket = Boolean(selectedId && nodeContent) && isLeafSelected && Boolean(authEmail);
+  const canCopyBrowseLink = Boolean(selectedId) && canBrowseCurrentNode;
+  const canShowNodeActions =
+    canPreviewCurrentNode ||
+    canCopyPreviewLink ||
+    canAddSelectedNodeToBasket ||
+    canCopyBrowseLink ||
+    canEditCurrentBook;
   const isCopyMessage = authMessage === "Link copied.";
   const isBooksGridView = bookBrowserDensity > 0;
   const booksGridColumns =
@@ -10409,7 +10708,7 @@ function ScripturesContent() {
                   <div
                     className="flex items-center justify-between mb-4"
                     onContextMenu={(event) => {
-                      if (!(isLeafSelected || canEditCurrentBook)) {
+                      if (!canShowNodeActions) {
                         return;
                       }
                       event.preventDefault();
@@ -10495,7 +10794,7 @@ function ScripturesContent() {
                           →
                         </button>
                       </div>
-                      {(isLeafSelected || canEditCurrentBook) && (
+                      {canShowNodeActions && (
                         <div ref={nodeActionsMenuRef} className="relative">
                           <button
                             type="button"
@@ -10508,7 +10807,7 @@ function ScripturesContent() {
                           </button>
                           {showNodeActionsMenu && (
                             <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                              {(Boolean(authEmail) || currentBook?.visibility === "public") && (
+                              {canPreviewCurrentNode && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -10521,7 +10820,7 @@ function ScripturesContent() {
                                   {activeNodePreviewLabel}
                                 </button>
                               )}
-                              {(Boolean(authEmail) || currentBook?.visibility === "public") && selectedId && (
+                              {canCopyPreviewLink && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -10541,7 +10840,7 @@ function ScripturesContent() {
                                   Copy preview link
                                 </button>
                               )}
-                              {isLeafSelected && authEmail && (
+                              {canAddSelectedNodeToBasket && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -10557,7 +10856,7 @@ function ScripturesContent() {
                                     : "Add to basket"}
                                 </button>
                               )}
-                              {isLeafSelected && canBrowseCurrentNode && (
+                              {isLeafSelected && canCopyBrowseLink && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -10577,7 +10876,7 @@ function ScripturesContent() {
                                   Copy browse link
                                 </button>
                               )}
-                              {!isLeafSelected && canBrowseCurrentNode && (
+                              {!isLeafSelected && canCopyBrowseLink && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -12007,6 +12306,7 @@ function ScripturesContent() {
             propertiesSaving ||
             propertiesLoading ||
             (!propertiesCategoryId &&
+              propertiesScope !== "book" &&
               propertiesName.trim() ===
                 (
                   propertiesScope === "book"
@@ -12037,6 +12337,60 @@ function ScripturesContent() {
           isTemplateField={isTemplateMetadataField}
           extraSections={
             <>
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Book Titles
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 sm:col-span-2">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Primary / Sanskrit
+                      </span>
+                      <input
+                        type="text"
+                        value={propertiesBookTitleSanskrit}
+                        onChange={(event) => {
+                          setPropertiesBookTitleSanskrit(event.target.value);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. योगवासिष्ठ"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Transliteration (IAST)</span>
+                      <input
+                        type="text"
+                        value={propertiesBookTitleTransliteration}
+                        onChange={(event) => {
+                          setPropertiesBookTitleTransliteration(event.target.value);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. Yoga Vasiṣṭha"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">English</span>
+                      <input
+                        type="text"
+                        value={propertiesBookTitleEnglish}
+                        onChange={(event) => {
+                          setPropertiesBookTitleEnglish(event.target.value);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. Yoga Vasistha"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+
               {propertiesScope === "node" && (
                 <NodeLevelTemplateSection
                   levelDefaultTemplateKey={levelDefaultTemplateKey}
@@ -13083,29 +13437,70 @@ function ScripturesContent() {
               <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div>
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
-                    {bookPreviewArtifact.preview_scope === "node" ? "Level Preview" : "Book Preview"}
+                    {bookPreviewArtifact.preview_scope === "node"
+                      ? (() => {
+                          const hierarchicalPath = getPreviewHierarchicalPath(bookPreviewArtifact);
+                          return hierarchicalPath ? `Reader View (${hierarchicalPath})` : "Reader View";
+                        })()
+                      : "Book Preview"}
                   </h2>
                   <p className="text-xs text-zinc-600 sm:text-sm">
-                    {bookPreviewArtifact.preview_scope === "node"
-                      ? `${bookPreviewArtifact.root_title || "Selected level"} • ${bookPreviewArtifact.book_name}`
-                      : bookPreviewArtifact.book_name}
+                    {getPreviewBreadcrumbTitle(bookPreviewArtifact)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {(() => {
                     const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
-                    const targetNodeId = previewScope === "node" ? selectedId : null;
+                    const targetNodeId =
+                      previewScope === "node" && typeof bookPreviewArtifact.root_node_id === "number"
+                        ? bookPreviewArtifact.root_node_id
+                        : previewScope === "node"
+                          ? selectedId
+                          : null;
                     const previewPath = buildScripturesPreviewPath(previewScope, bookId, targetNodeId);
+                    const { previousSiblingId, nextSiblingId } = getPreviewSiblingNavigation(
+                      bookPreviewArtifact
+                    );
                     return (
                       <>
+                        {previewScope === "node" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handlePreviewSiblingNavigation("previous");
+                              }}
+                              disabled={!previousSiblingId}
+                              title="Previous sibling"
+                              aria-label="Previous sibling"
+                              className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronLeft className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void handlePreviewSiblingNavigation("next");
+                              }}
+                              disabled={!nextSiblingId}
+                              title="Next sibling"
+                              aria-label="Next sibling"
+                              className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <ChevronRight className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
                             void handleCopyPreviewPath(previewPath);
                           }}
-                          className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                          title="Copy link"
+                          aria-label="Copy link"
+                          className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
                         >
-                          Copy Link
+                          <Link2 className="h-4 w-4" />
                         </button>
                         {canBrowseCurrentNode && (
                           <button
@@ -13113,9 +13508,11 @@ function ScripturesContent() {
                             onClick={() => {
                               handleBrowseFromPreview(bookId, targetNodeId);
                             }}
-                            className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                            title="Browse"
+                            aria-label="Browse"
+                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
                           >
-                            Browse
+                            <BookOpen className="h-4 w-4" />
                           </button>
                         )}
                       </>
@@ -13124,13 +13521,15 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => setShowPreviewControls((prev) => !prev)}
-                    className={`rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition sm:text-xs ${
+                    title={showPreviewControls ? "Hide controls" : "Show controls"}
+                    aria-label={showPreviewControls ? "Hide controls" : "Show controls"}
+                    className={`rounded-full border p-2 transition ${
                       showPreviewControls
                         ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white shadow-sm"
                         : "border-black/10 text-zinc-600 hover:border-black/20"
                     }`}
                   >
-                    {showPreviewControls ? "Hide Controls" : "Show Controls"}
+                    <SlidersHorizontal className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
@@ -13139,16 +13538,20 @@ function ScripturesContent() {
                         respectCurrentPreviewScope: true,
                       });
                     }}
-                    className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                    title="Download PDF"
+                    aria-label="Download PDF"
+                    className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
                   >
-                    Download PDF
+                    <Download className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={handleClosePreview}
-                    className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
+                    title="Close preview"
+                    aria-label="Close preview"
+                    className="rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600"
                   >
-                    ✕
+                    <X className="h-6 w-6 sm:h-7 sm:w-7" />
                   </button>
                 </div>
               </div>
