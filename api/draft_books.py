@@ -3499,13 +3499,13 @@ def preview_book_render(
     if not _book_is_visible_to_user(db, book, current_user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
-    source_nodes = (
-        db.query(ContentNode)
-        .filter(ContentNode.book_id == book.id)
-        .all()
-    )
-
     root_node: ContentNode | None = None
+    source_nodes: list[ContentNode] = []
+    total_nodes = 0
+    page_offset = max(payload.offset, 0)
+    page_limit = max(payload.limit, 1)
+    paged_source_nodes: list[ContentNode] = []
+
     if payload.node_id is not None:
         root_node = (
             db.query(ContentNode)
@@ -3515,14 +3515,34 @@ def preview_book_render(
         if not root_node:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
 
-    source_nodes = _ordered_nodes_for_preview_scope(
-        source_nodes,
-        root_node.id if root_node else None,
-    )
-    total_nodes = len(source_nodes)
-    page_offset = max(payload.offset, 0)
-    page_limit = max(payload.limit, 1)
-    paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
+        # Fast path for leaf nodes: no need to load/order the full book tree.
+        has_children = (
+            db.query(ContentNode.id)
+            .filter(ContentNode.parent_node_id == root_node.id)
+            .first()
+            is not None
+        )
+        if not has_children:
+            total_nodes = 1
+            paged_source_nodes = [root_node] if page_offset == 0 else []
+        else:
+            source_nodes = (
+                db.query(ContentNode)
+                .filter(ContentNode.book_id == book.id)
+                .all()
+            )
+            source_nodes = _ordered_nodes_for_preview_scope(source_nodes, root_node.id)
+            total_nodes = len(source_nodes)
+            paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
+    else:
+        source_nodes = (
+            db.query(ContentNode)
+            .filter(ContentNode.book_id == book.id)
+            .all()
+        )
+        source_nodes = _ordered_nodes_for_preview_scope(source_nodes, None)
+        total_nodes = len(source_nodes)
+        paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
 
     node_media_by_id = _build_node_preview_media_map(db, [node.id for node in paged_source_nodes])
     book_media_items = _extract_book_preview_media_items(book)

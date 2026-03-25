@@ -4952,23 +4952,26 @@ function ScripturesContent() {
     setTreeLoading(true);
     setTreeError(null);
     try {
-        const detailsResponse = await fetch(`/api/books/${selectedId}`, {
-          credentials: "include",
-          signal: abortController.signal,
-        });
-        if (requestId !== activeTreeRequestId.current) return;
-        if (detailsResponse.ok) {
-          const detailsData = (await detailsResponse.json()) as BookDetails;
-          if (requestId !== activeTreeRequestId.current) return;
-          setCurrentBook(detailsData);
-        } else {
-          setCurrentBook(null);
-        }
-
-      const response = await fetch(`/api/books/${selectedId}/tree`, {
+      const detailsPromise = fetch(`/api/books/${selectedId}`, {
         credentials: "include",
-          signal: abortController.signal,
+        signal: abortController.signal,
       });
+      const treePromise = fetch(`/api/books/${selectedId}/tree`, {
+        credentials: "include",
+        signal: abortController.signal,
+      });
+
+      const [detailsResponse, response] = await Promise.all([detailsPromise, treePromise]);
+
+      if (requestId !== activeTreeRequestId.current) return;
+      if (detailsResponse.ok) {
+        const detailsData = (await detailsResponse.json()) as BookDetails;
+        if (requestId !== activeTreeRequestId.current) return;
+        setCurrentBook(detailsData);
+      } else {
+        setCurrentBook(null);
+      }
+
         if (requestId !== activeTreeRequestId.current) return;
       if (!response.ok) {
         if (!authEmail && (response.status === 401 || response.status === 403)) {

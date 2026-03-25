@@ -13,7 +13,7 @@ from pydantic import BaseModel
 import requests
 from sqlalchemy import Integer, cast, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.sql import func
 
@@ -2671,27 +2671,51 @@ def list_book_tree(
 
     nodes = (
         db.query(ContentNode)
+        .options(
+            load_only(
+                ContentNode.id,
+                ContentNode.parent_node_id,
+                ContentNode.referenced_node_id,
+                ContentNode.level_name,
+                ContentNode.level_order,
+                ContentNode.sequence_number,
+                ContentNode.title_sanskrit,
+                ContentNode.title_transliteration,
+                ContentNode.title_english,
+                ContentNode.title_hindi,
+                ContentNode.title_tamil,
+                ContentNode.has_content,
+                ContentNode.created_by,
+                ContentNode.last_modified_by,
+            )
+        )
         .filter(ContentNode.book_id == book_id)
         .order_by(ContentNode.level_order)
         .all()
     )
 
     nodes_by_id: dict[int, ContentNode] = {node.id: node for node in nodes}
+    children_by_parent: dict[int | None, list[ContentNode]] = {}
+    for node in nodes:
+        parent_id = node.parent_node_id if isinstance(node.parent_node_id, int) else None
+        children_by_parent.setdefault(parent_id, []).append(node)
 
-    def _effective_level_order(node: ContentNode) -> int:
-        depth = 1
-        current_parent_id = node.parent_node_id
-        visited: set[int] = set()
+    depth_by_id: dict[int, int] = {}
 
-        while isinstance(current_parent_id, int) and current_parent_id in nodes_by_id:
-            if current_parent_id in visited:
-                break
-            visited.add(current_parent_id)
-            depth += 1
-            parent_node = nodes_by_id[current_parent_id]
-            current_parent_id = parent_node.parent_node_id
+    def _assign_depth(node: ContentNode, depth: int) -> None:
+        if node.id in depth_by_id:
+            return
+        depth_by_id[node.id] = depth
+        for child in children_by_parent.get(node.id, []):
+            _assign_depth(child, depth + 1)
 
-        return depth
+    for root in children_by_parent.get(None, []):
+        _assign_depth(root, 1)
+
+    # If there are cycles/orphans, ensure all nodes still receive a depth.
+    for node in nodes:
+        if node.id not in depth_by_id:
+            _assign_depth(node, 1)
     
     # Natural sort function for sequence numbers
     def natural_sort_key(node):
@@ -2709,7 +2733,7 @@ def list_book_tree(
     payloads: list[ContentNodePublic] = []
     for item in nodes:
         payload = _node_response_payload(item)
-        payload["level_order"] = _effective_level_order(item)
+        payload["level_order"] = depth_by_id.get(item.id, 1)
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
         payloads.append(ContentNodePublic.model_validate(payload))
     return payloads
@@ -2785,6 +2809,24 @@ def export_book_json(
 
     nodes = (
         db.query(ContentNode)
+        .options(
+            load_only(
+                ContentNode.id,
+                ContentNode.parent_node_id,
+                ContentNode.referenced_node_id,
+                ContentNode.level_name,
+                ContentNode.level_order,
+                ContentNode.sequence_number,
+                ContentNode.title_sanskrit,
+                ContentNode.title_transliteration,
+                ContentNode.title_english,
+                ContentNode.title_hindi,
+                ContentNode.title_tamil,
+                ContentNode.has_content,
+                ContentNode.created_by,
+                ContentNode.last_modified_by,
+            )
+        )
         .filter(ContentNode.book_id == book_id)
         .order_by(ContentNode.level_order)
         .all()
