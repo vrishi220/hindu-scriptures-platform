@@ -31,6 +31,7 @@ from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
 from models.import_job import ImportJob
+from models.property_system import MetadataBinding
 from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
@@ -2724,6 +2725,53 @@ def _node_sequence_sort_key(node: ContentNode):
         return (float("inf"), str(sequence))
 
 
+def _book_summary_binding_metadata_for_export(db: Session, book_id: int) -> dict[str, str]:
+    """Return portable book-summary fields resolved from book metadata binding overrides."""
+    binding = (
+        db.query(MetadataBinding)
+        .filter(
+            MetadataBinding.entity_type == "book",
+            MetadataBinding.entity_id == book_id,
+            MetadataBinding.scope_type == "book",
+        )
+        .order_by(MetadataBinding.id.asc())
+        .first()
+    )
+    if not binding:
+        return {}
+
+    overrides = binding.property_overrides if isinstance(binding.property_overrides, dict) else {}
+    summary_fields: dict[str, str] = {}
+
+    def _read_text(key: str) -> str | None:
+        value = overrides.get(key)
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+        return None
+
+    sanskrit = _read_text("sanskrit")
+    transliteration = _read_text("transliteration")
+    english = _read_text("english")
+    text_value = _read_text("text")
+
+    if sanskrit:
+        summary_fields["sanskrit"] = sanskrit
+        summary_fields["summary_sanskrit"] = sanskrit
+    if transliteration:
+        summary_fields["transliteration"] = transliteration
+        summary_fields["summary_transliteration"] = transliteration
+    if english:
+        summary_fields["english"] = english
+        summary_fields["summary_english"] = english
+    if text_value:
+        summary_fields["text"] = text_value
+        summary_fields["summary_text"] = text_value
+
+    return summary_fields
+
+
 @router.get("/books/{book_id}/export/json", response_model=BookExchangePayloadV1)
 def export_book_json(
     book_id: int,
@@ -2808,6 +2856,14 @@ def export_book_json(
     metadata_out.pop("owner_id", None)
     metadata_out["status"] = _book_status(book)
     metadata_out["visibility"] = _book_visibility(book)
+
+    # Preserve book-level preview summary fields (often stored via metadata bindings)
+    # so export/import round-trips keep English/Sanskrit/transliteration summaries.
+    summary_binding_fields = _book_summary_binding_metadata_for_export(db, book.id)
+    for field_name, field_value in summary_binding_fields.items():
+        existing = metadata_out.get(field_name)
+        if not isinstance(existing, str) or not existing.strip():
+            metadata_out[field_name] = field_value
 
     exported_nodes: list[dict] = []
     for node in nodes:

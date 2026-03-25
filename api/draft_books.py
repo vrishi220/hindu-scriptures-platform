@@ -3573,11 +3573,19 @@ def preview_book_render(
     book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     book_summary_fields = {
         "sanskrit": _as_clean_string(resolved_book_binding_metadata.get("sanskrit"))
+        or _as_clean_string(book_metadata.get("summary_sanskrit"))
+        or _as_clean_string(book_metadata.get("sanskrit"))
         or _as_clean_string(book_metadata.get("title_sanskrit")),
         "transliteration": _as_clean_string(resolved_book_binding_metadata.get("transliteration"))
+        or _as_clean_string(book_metadata.get("summary_transliteration"))
+        or _as_clean_string(book_metadata.get("transliteration"))
         or _as_clean_string(book_metadata.get("title_transliteration")),
         "english": _as_clean_string(resolved_book_binding_metadata.get("english"))
         or _as_clean_string(resolved_book_binding_metadata.get("text"))
+        or _as_clean_string(book_metadata.get("summary_english"))
+        or _as_clean_string(book_metadata.get("english"))
+        or _as_clean_string(book_metadata.get("summary_text"))
+        or _as_clean_string(book_metadata.get("text"))
         or _as_clean_string(book_metadata.get("title_english")),
     }
     custom_template_sources = _extract_custom_template_sources(preview_payload)

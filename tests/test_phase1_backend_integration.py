@@ -14,6 +14,7 @@ from fastapi import status
 from models.book import Book
 from models.content_node import ContentNode
 from models.database import SessionLocal
+from models.property_system import MetadataBinding
 from models.provenance_record import ProvenanceRecord
 from models.schemas import ContentNodeCreate, _validate_word_meanings_content_data
 from models.scripture_schema import ScriptureSchema
@@ -5878,3 +5879,56 @@ class TestBookJsonExport:
         assert exported_node["referenced_node_id"] is None, (
             "Export should clear referenced_node_id so round-trip import works"
         )
+
+    def test_export_includes_book_summary_from_metadata_binding(self, client):
+        """Book-level preview summary text stored in metadata bindings should be exported."""
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Summary Book {uuid4().hex[:6]}",
+                "book_code": f"summary-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_resp.status_code == status.HTTP_201_CREATED
+        book_id = book_resp.json()["id"]
+
+        db = SessionLocal()
+        try:
+            binding = MetadataBinding(
+                entity_type="book",
+                entity_id=book_id,
+                scope_type="book",
+                category_id=None,
+                property_overrides={
+                    "english": "Seven stages of knowledge summary",
+                    "sanskrit": "सप्त ज्ञानभूमिकाः",
+                    "transliteration": "sapta jnanabhumikah",
+                },
+                unset_overrides=[],
+            )
+            db.add(binding)
+            db.commit()
+        finally:
+            db.close()
+
+        export_resp = client.get(f"/api/content/books/{book_id}/export/json", headers=headers)
+        assert export_resp.status_code == status.HTTP_200_OK
+
+        metadata = export_resp.json()["book"]["metadata"]
+        assert metadata.get("summary_english") == "Seven stages of knowledge summary"
+        assert metadata.get("summary_sanskrit") == "सप्त ज्ञानभूमिकाः"
+        assert metadata.get("summary_transliteration") == "sapta jnanabhumikah"
+        assert metadata.get("english") == "Seven stages of knowledge summary"
