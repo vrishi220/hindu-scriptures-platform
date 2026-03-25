@@ -14,7 +14,8 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.orm import Session, load_only
 
 from api.metadata import _resolve_binding_metadata, validate_draft_metadata_bindings_on_publish
 from api.users import get_current_user, get_current_user_optional, require_permission
@@ -1148,6 +1149,69 @@ def _ordered_nodes_for_preview_scope(
 
     _walk(root)
     return ordered
+
+
+def _load_preview_scope_nodes(
+    db: Session,
+    book_id: int,
+    root_node_id: int | None,
+) -> list[ContentNode]:
+    base_query = db.query(ContentNode).options(
+        load_only(
+            ContentNode.id,
+            ContentNode.book_id,
+            ContentNode.parent_node_id,
+            ContentNode.level_name,
+            ContentNode.level_order,
+            ContentNode.sequence_number,
+            ContentNode.title_sanskrit,
+            ContentNode.title_transliteration,
+            ContentNode.title_english,
+            ContentNode.title_hindi,
+            ContentNode.title_tamil,
+            ContentNode.has_content,
+        )
+    )
+
+    if root_node_id is None:
+        nodes = (
+            base_query
+            .filter(ContentNode.book_id == book_id)
+            .order_by(ContentNode.level_order.asc(), ContentNode.id.asc())
+            .all()
+        )
+        return _ordered_nodes_by_hierarchy(nodes)
+
+    descendant_rows = db.execute(
+        text(
+            """
+            WITH RECURSIVE subtree AS (
+                SELECT id
+                FROM content_nodes
+                WHERE id = :root_node_id AND book_id = :book_id
+                UNION ALL
+                SELECT cn.id
+                FROM content_nodes cn
+                INNER JOIN subtree s ON cn.parent_node_id = s.id
+                WHERE cn.book_id = :book_id
+            )
+            SELECT id FROM subtree
+            """
+        ),
+        {"root_node_id": root_node_id, "book_id": book_id},
+    ).fetchall()
+
+    descendant_ids = [int(row[0]) for row in descendant_rows if row and row[0] is not None]
+    if not descendant_ids:
+        return []
+
+    nodes = (
+        base_query
+        .filter(ContentNode.book_id == book_id, ContentNode.id.in_(descendant_ids))
+        .order_by(ContentNode.level_order.asc(), ContentNode.id.asc())
+        .all()
+    )
+    return _ordered_nodes_for_preview_scope(nodes, root_node_id)
 
 
 def _as_clean_string(value: object) -> str:
@@ -3500,7 +3564,6 @@ def preview_book_render(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
     root_node: ContentNode | None = None
-    source_nodes: list[ContentNode] = []
     total_nodes = 0
     page_offset = max(payload.offset, 0)
     page_limit = max(payload.limit, 1)
@@ -3526,21 +3589,11 @@ def preview_book_render(
             total_nodes = 1
             paged_source_nodes = [root_node] if page_offset == 0 else []
         else:
-            source_nodes = (
-                db.query(ContentNode)
-                .filter(ContentNode.book_id == book.id)
-                .all()
-            )
-            source_nodes = _ordered_nodes_for_preview_scope(source_nodes, root_node.id)
+            source_nodes = _load_preview_scope_nodes(db, book.id, root_node.id)
             total_nodes = len(source_nodes)
             paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
     else:
-        source_nodes = (
-            db.query(ContentNode)
-            .filter(ContentNode.book_id == book.id)
-            .all()
-        )
-        source_nodes = _ordered_nodes_for_preview_scope(source_nodes, None)
+        source_nodes = _load_preview_scope_nodes(db, book.id, None)
         total_nodes = len(source_nodes)
         paged_source_nodes = source_nodes[page_offset : page_offset + page_limit]
 

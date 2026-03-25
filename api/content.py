@@ -2976,6 +2976,25 @@ def list_book_tree_nested(
 
     nodes = (
         db.query(ContentNode)
+        .options(
+            load_only(
+                ContentNode.id,
+                ContentNode.book_id,
+                ContentNode.parent_node_id,
+                ContentNode.referenced_node_id,
+                ContentNode.level_name,
+                ContentNode.level_order,
+                ContentNode.sequence_number,
+                ContentNode.title_sanskrit,
+                ContentNode.title_transliteration,
+                ContentNode.title_english,
+                ContentNode.title_hindi,
+                ContentNode.title_tamil,
+                ContentNode.has_content,
+                ContentNode.created_by,
+                ContentNode.last_modified_by,
+            )
+        )
         .filter(ContentNode.book_id == book_id)
         .order_by(ContentNode.level_order)
         .all()
@@ -2985,15 +3004,19 @@ def list_book_tree_nested(
     def natural_sort_key(node):
         seq = node.sequence_number
         if not seq:
-            return (float('inf'),)  # Put nulls at the end
-        
-        # Split by dots and convert each part to integer for proper sorting
+            return (1, (10**9,), "")
+
+        if isinstance(seq, int):
+            return (0, (seq,), "")
+
         try:
-            parts = seq.split('.')
-            return tuple(int(p) for p in parts)
+            seq_text = str(seq).strip()
+            if not seq_text:
+                return (1, (10**9,), "")
+            parts = seq_text.split('.')
+            return (0, tuple(int(p) for p in parts), "")
         except (ValueError, AttributeError):
-            # Fallback to string sorting if conversion fails
-            return (float('inf'), str(seq))
+            return (1, (10**9,), str(seq))
     
     # Sort nodes by natural order within each level
     nodes = sorted(nodes, key=lambda n: (n.level_order, natural_sort_key(n)))
@@ -3001,6 +3024,7 @@ def list_book_tree_nested(
     node_map: dict[int, ContentNodeTree] = {}
     roots: list[ContentNodeTree] = []
     node_lookup = {n.id: n for n in nodes}
+    children_by_parent: dict[int | None, list[int]] = {}
 
     for node in nodes:
         payload = _node_response_payload(node)
@@ -3009,38 +3033,67 @@ def list_book_tree_nested(
         tree_node.children = []
         node_map[node.id] = tree_node
 
+        parent_id = node.parent_node_id if isinstance(node.parent_node_id, int) else None
+        children_by_parent.setdefault(parent_id, []).append(node.id)
+
+    def node_sort_key(node_id: int):
+        node = node_lookup[node_id]
+        return (
+            node.level_order if isinstance(node.level_order, int) else 10**9,
+            natural_sort_key(node),
+            node.id,
+        )
+
+    for child_ids in children_by_parent.values():
+        child_ids.sort(key=node_sort_key)
+
+    visited_ids: set[int] = set()
+
+    def _attach(node_id: int, depth: int, path_ids: set[int]) -> None:
+        if node_id in path_ids:
+            return
+        if node_id not in node_map:
+            return
+
+        tree_node = node_map[node_id]
+        if node_id not in visited_ids:
+            visited_ids.add(node_id)
+            tree_node.level_order = depth
+
+        next_path = set(path_ids)
+        next_path.add(node_id)
+        for child_id in children_by_parent.get(node_id, []):
+            if child_id in next_path:
+                continue
+            child_node = node_map.get(child_id)
+            if child_node is None:
+                continue
+            if child_node not in tree_node.children:
+                tree_node.children.append(child_node)
+            _attach(child_id, depth + 1, next_path)
+
+    root_ids: list[int] = []
     for node in nodes:
+        parent_id = node.parent_node_id if isinstance(node.parent_node_id, int) else None
+        if parent_id is None or parent_id not in node_map:
+            root_ids.append(node.id)
+
+    root_ids.sort(key=node_sort_key)
+
+    for root_id in root_ids:
+        if root_id not in node_map:
+            continue
+        roots.append(node_map[root_id])
+        _attach(root_id, 1, set())
+
+    # Ensure orphaned/cycle-only components are still returned.
+    for node in nodes:
+        if node.id in visited_ids:
+            continue
         tree_node = node_map[node.id]
-        if node.parent_node_id and node.parent_node_id in node_map:
-            # Check for cycles by tracing up max 100 levels
-            current = node.parent_node_id
-            path_set = {node.id}  # Track visited ids in this path
-            cycle_detected = False
-            for _ in range(100):
-                if current is None:
-                    break
-                if current in path_set:
-                    cycle_detected = True
-                    break
-                path_set.add(current)
-                parent = node_lookup.get(current)
-                current = parent.parent_node_id if parent else None
-            
-            # Only add child if no cycle detected
-            if not cycle_detected:
-                node_map[node.parent_node_id].children.append(tree_node)
-            else:
-                roots.append(tree_node)
-        else:
-            roots.append(tree_node)
-
-    def _assign_depth_level_order(tree_nodes: list[ContentNodeTree], depth: int = 1) -> None:
-        for item in tree_nodes:
-            item.level_order = depth
-            if item.children:
-                _assign_depth_level_order(item.children, depth + 1)
-
-    _assign_depth_level_order(roots)
+        tree_node.level_order = 1
+        roots.append(tree_node)
+        _attach(node.id, 1, set())
 
     return roots
 
