@@ -1777,11 +1777,13 @@ def _build_template_context(
         )
 
         title_value = _as_clean_string(source_node.title_english) or _as_clean_string(item.get("title"))
+        item_sequence_number = _as_clean_string(item.get("sequence_number"))
+        item_level_name = _as_clean_string(item.get("level_name"))
 
         base_context = {
             "title": title_value,
-            "level_name": _as_clean_string(source_node.level_name),
-            "sequence_number": _as_clean_string(source_node.sequence_number),
+            "level_name": item_level_name or _as_clean_string(source_node.level_name),
+            "sequence_number": item_sequence_number or _as_clean_string(source_node.sequence_number),
             "sanskrit": _normalize_devanagari_text(_as_clean_string(sanskrit_text)),
             "transliteration": _as_clean_string(transliteration_text),
             "english": _as_clean_string(english_text),
@@ -2427,6 +2429,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                         "source_node_id": source_node_id,
                         "source_book_id": source_book_id,
                         "level_name": raw_item.get("level_name") if isinstance(raw_item.get("level_name"), str) else None,
+                        "sequence_number": raw_item.get("sequence_number") if isinstance(raw_item.get("sequence_number"), str) else None,
                         "metadata": raw_item.get("metadata") if isinstance(raw_item.get("metadata"), dict) else None,
                         "metadata_overrides": raw_item.get("metadata_overrides") if isinstance(raw_item.get("metadata_overrides"), dict) else None,
                         "title": title,
@@ -3454,6 +3457,7 @@ def preview_book_render(
             "node_id": node.id,
             "source_book_id": book.id,
             "level_name": node.level_name,
+            "sequence_number": _as_clean_string(node.sequence_number),
             "title": _book_title_for_preview(node),
             "order": page_offset + index,
           "media_items": node_media_by_id.get(node.id, []),
