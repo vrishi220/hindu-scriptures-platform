@@ -12309,12 +12309,10 @@ function ScripturesContent() {
               propertiesScope !== "book" &&
               propertiesName.trim() ===
                 (
-                  propertiesScope === "book"
-                    ? currentBook?.book_name || ""
-                    : nodeContent?.title_english ||
-                      nodeContent?.title_sanskrit ||
-                      nodeContent?.title_transliteration ||
-                      `Node ${propertiesNodeId || ""}`
+                  nodeContent?.title_english ||
+                  nodeContent?.title_sanskrit ||
+                  nodeContent?.title_transliteration ||
+                  `Node ${propertiesNodeId || ""}`
                 ).trim())
           }
           effectiveFields={propertiesEffectiveFields}
