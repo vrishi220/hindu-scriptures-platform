@@ -241,6 +241,30 @@ type ImportJobStatus = {
   result?: ImportResult | null;
 };
 
+type CanonicalUploadInit = {
+  upload_id?: string;
+  chunk_size_bytes?: number;
+  max_size_bytes?: number;
+  detail?: string;
+  error?: string;
+};
+
+type CanonicalUploadChunk = {
+  upload_id?: string;
+  received_bytes?: number;
+  next_index?: number;
+  detail?: string;
+  error?: string;
+};
+
+type CanonicalUploadComplete = {
+  upload_id?: string;
+  canonical_json_url?: string;
+  size_bytes?: number;
+  detail?: string;
+  error?: string;
+};
+
 type PersistedImportJobState = {
   jobId: string;
   status?: ImportJobLifecycleStatus;
@@ -1375,6 +1399,7 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
 const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
 const PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY = "scriptures.preview.showBookSummary";
 const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
+const IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES = 512 * 1024;
 
 const EDITABLE_TRANSLATION_LANGUAGES = [
   "english",
@@ -7399,34 +7424,151 @@ function ScripturesContent() {
     if (!file || !canImport) return;
 
     setImportSubmitting(true);
-    setImportProgressMessage("Reading JSON file...");
+    setImportProgressMessage("Preparing canonical upload...");
     setImportProgressCurrent(null);
     setImportProgressTotal(null);
     try {
-      const raw = await file.text();
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object") {
-        alert("Invalid JSON payload");
+      const initResponse = await fetch("/api/content/import/canonical-uploads/init", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          size_bytes: file.size,
+        }),
+      });
+
+      const initRawText = await initResponse.text();
+      let initResult: CanonicalUploadInit | null = null;
+      if (initRawText) {
+        try {
+          initResult = JSON.parse(initRawText) as CanonicalUploadInit;
+        } catch {
+          initResult = null;
+        }
+      }
+
+      if (!initResponse.ok) {
+        const fallbackDetail =
+          initRawText.trim() || `Canonical upload init failed (${initResponse.status} ${initResponse.statusText})`;
+        alert(initResult?.detail || initResult?.error || fallbackDetail);
         return;
       }
 
-      const parsedRecord = parsed as Record<string, unknown>;
-      const parsedNodes = Array.isArray(parsedRecord.nodes) ? parsedRecord.nodes : null;
+      const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
+      if (!uploadId) {
+        alert("Canonical upload did not return a valid upload ID");
+        return;
+      }
 
-      const importPayload = {
-        ...parsedRecord,
-        import_type: "json",
-      };
+      const maxSizeBytes =
+        typeof initResult?.max_size_bytes === "number" && initResult.max_size_bytes > 0
+          ? initResult.max_size_bytes
+          : null;
+      if (typeof maxSizeBytes === "number" && file.size > maxSizeBytes) {
+        alert(
+          `This file is too large (${Math.ceil(file.size / (1024 * 1024))} MB). Max supported size is ${Math.floor(maxSizeBytes / (1024 * 1024))} MB.`
+        );
+        return;
+      }
 
-      setImportProgressMessage("Uploading import payload...");
+      const chunkSizeBytes =
+        typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
+          ? initResult.chunk_size_bytes
+          : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
+
+      const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
+      setImportProgressMessage("Uploading canonical JSON...");
       setImportProgressCurrent(0);
-      setImportProgressTotal(parsedNodes ? parsedNodes.length : null);
+      setImportProgressTotal(totalChunks);
 
+      for (let index = 0; index < totalChunks; index += 1) {
+        const start = index * chunkSizeBytes;
+        const end = Math.min(start + chunkSizeBytes, file.size);
+        const chunkBlob = file.slice(start, end);
+        const formData = new FormData();
+        formData.append("index", String(index));
+        formData.append(
+          "chunk",
+          new File([chunkBlob], `${file.name || "canonical"}.part`, {
+            type: "application/octet-stream",
+          })
+        );
+
+        const chunkResponse = await fetch(
+          `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
+          {
+            method: "POST",
+            credentials: "include",
+            body: formData,
+          }
+        );
+
+        const chunkRawText = await chunkResponse.text();
+        let chunkResult: CanonicalUploadChunk | null = null;
+        if (chunkRawText) {
+          try {
+            chunkResult = JSON.parse(chunkRawText) as CanonicalUploadChunk;
+          } catch {
+            chunkResult = null;
+          }
+        }
+
+        if (!chunkResponse.ok) {
+          const fallbackDetail =
+            chunkRawText.trim() || `Chunk upload failed (${chunkResponse.status} ${chunkResponse.statusText})`;
+          alert(chunkResult?.detail || chunkResult?.error || fallbackDetail);
+          return;
+        }
+
+        setImportProgressMessage(`Uploading canonical JSON... (${index + 1}/${totalChunks})`);
+        setImportProgressCurrent(index + 1);
+      }
+
+      setImportProgressMessage("Finalizing canonical upload...");
+      const completeResponse = await fetch(
+        `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+
+      const completeRawText = await completeResponse.text();
+      let completeResult: CanonicalUploadComplete | null = null;
+      if (completeRawText) {
+        try {
+          completeResult = JSON.parse(completeRawText) as CanonicalUploadComplete;
+        } catch {
+          completeResult = null;
+        }
+      }
+
+      if (!completeResponse.ok) {
+        const fallbackDetail =
+          completeRawText.trim() ||
+          `Canonical upload completion failed (${completeResponse.status} ${completeResponse.statusText})`;
+        alert(completeResult?.detail || completeResult?.error || fallbackDetail);
+        return;
+      }
+
+      const canonicalJsonUrl =
+        typeof completeResult?.canonical_json_url === "string" ? completeResult.canonical_json_url.trim() : "";
+      if (!canonicalJsonUrl) {
+        alert("Canonical upload did not return a valid URL");
+        return;
+      }
+
+      setImportProgressMessage("Starting import...");
       const response = await fetch("/api/content/import/jobs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(importPayload),
+        body: JSON.stringify({
+        import_type: "json",
+          schema_version: "hsp-book-json-v1",
+          canonical_json_url: canonicalJsonUrl,
+        }),
       });
 
       const rawText = await response.text();
@@ -7462,11 +7604,11 @@ function ScripturesContent() {
         status: startResult?.status || "queued",
         progressMessage: queuedMessage,
         progressCurrent: 0,
-        progressTotal: parsedNodes ? parsedNodes.length : null,
-        canonicalJsonUrl: null,
+        progressTotal: null,
+        canonicalJsonUrl,
       });
 
-      await pollImportJob(jobId, { canonicalJsonUrl: null });
+      await pollImportJob(jobId, { canonicalJsonUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON file";
       alert(message);

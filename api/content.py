@@ -1,13 +1,14 @@
 import os
 import random
 import re
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel
 import requests
 from sqlalchemy import Integer, cast, text
@@ -100,6 +101,9 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
 IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "300"))
+IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB", "200"))
+IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
+IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(1024 * 1024)))
 
 
 def require_import_permission(current_user: User = Depends(get_current_user)) -> User:
@@ -260,6 +264,24 @@ class ImportJobStatusResponse(BaseModel):
     progress_total: int | None = None
     error: str | None = None
     result: ImportResponse | None = None
+
+
+class CanonicalUploadInitResponse(BaseModel):
+    upload_id: str
+    chunk_size_bytes: int
+    max_size_bytes: int
+
+
+class CanonicalUploadChunkResponse(BaseModel):
+    upload_id: str
+    received_bytes: int
+    next_index: int
+
+
+class CanonicalUploadCompleteResponse(BaseModel):
+    upload_id: str
+    canonical_json_url: str
+    size_bytes: int
 
 
 class InsertReferencesPayload(BaseModel):
@@ -1431,6 +1453,54 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _canonical_upload_relative_paths(upload_id: str) -> tuple[Path, Path]:
+    meta_relative = Path("imports") / "canonical-tmp" / f"{upload_id}.meta.json"
+    part_relative = Path("imports") / "canonical-tmp" / f"{upload_id}.part"
+    return meta_relative, part_relative
+
+
+def _canonical_upload_absolute_path(relative_path: Path) -> Path:
+    return (MEDIA_STORAGE.root_dir / relative_path).resolve()
+
+
+def _read_canonical_upload_state(upload_id: str) -> dict | None:
+    meta_relative, _ = _canonical_upload_relative_paths(upload_id)
+    meta_path = _canonical_upload_absolute_path(meta_relative)
+    if not meta_path.exists() or not meta_path.is_file():
+        return None
+    try:
+        with open(meta_path, "r", encoding="utf-8") as meta_file:
+            payload = json.load(meta_file)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_canonical_upload_state(upload_id: str, state: dict) -> None:
+    meta_relative, _ = _canonical_upload_relative_paths(upload_id)
+    meta_path = _canonical_upload_absolute_path(meta_relative)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(meta_path, "w", encoding="utf-8") as meta_file:
+        json.dump(state, meta_file)
+
+
+def _delete_canonical_upload_state(upload_id: str) -> None:
+    meta_relative, part_relative = _canonical_upload_relative_paths(upload_id)
+    for relative_path in (meta_relative, part_relative):
+        absolute = _canonical_upload_absolute_path(relative_path)
+        if absolute.exists() and absolute.is_file():
+            absolute.unlink()
+
+
+def _absolute_media_url(request: Request, relative_path: Path) -> str:
+    raw_url = MEDIA_STORAGE.public_url(relative_path)
+    if raw_url.startswith("http://") or raw_url.startswith("https://"):
+        return raw_url
+    base = str(request.base_url).rstrip("/")
+    path = raw_url if raw_url.startswith("/") else f"/{raw_url}"
+    return f"{base}{path}"
+
+
 def _dispatch_import(
     payload: dict,
     db: Session,
@@ -1742,6 +1812,164 @@ def get_import_job_status(
         progress_total=job.progress_total,
         error=job.error,
         result=_job_result_to_import_response(job),
+    )
+
+
+@router.post(
+    "/import/canonical-uploads/init",
+    response_model=CanonicalUploadInitResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def init_canonical_upload(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_import_permission),
+) -> CanonicalUploadInitResponse:
+    _ = db
+    _ = payload
+
+    upload_id = uuid4().hex
+    _, part_relative = _canonical_upload_relative_paths(upload_id)
+    part_path = _canonical_upload_absolute_path(part_relative)
+    part_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(part_path, "wb") as part_file:
+        part_file.write(b"")
+
+    state = {
+        "upload_id": upload_id,
+        "requested_by": current_user.id,
+        "created_at": _utc_now_iso(),
+        "next_index": 0,
+        "received_bytes": 0,
+    }
+    _write_canonical_upload_state(upload_id, state)
+
+    return CanonicalUploadInitResponse(
+        upload_id=upload_id,
+        chunk_size_bytes=IMPORT_CANONICAL_CHUNK_MAX_BYTES,
+        max_size_bytes=IMPORT_CANONICAL_UPLOAD_MAX_BYTES,
+    )
+
+
+@router.post(
+    "/import/canonical-uploads/{upload_id}/chunk",
+    response_model=CanonicalUploadChunkResponse,
+)
+def upload_canonical_chunk(
+    upload_id: str,
+    index: int = Form(...),
+    chunk: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_import_permission),
+) -> CanonicalUploadChunkResponse:
+    _ = db
+    state = _read_canonical_upload_state(upload_id)
+    if not state:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canonical upload session not found")
+
+    if state.get("requested_by") != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    next_index = int(state.get("next_index", 0) or 0)
+    if index != next_index:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Unexpected chunk index {index}; expected {next_index}",
+        )
+
+    try:
+        chunk_bytes = chunk.file.read()
+    finally:
+        chunk.file.close()
+
+    if not chunk_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chunk is empty")
+
+    if len(chunk_bytes) > IMPORT_CANONICAL_CHUNK_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Chunk exceeds maximum allowed size",
+        )
+
+    received_bytes = int(state.get("received_bytes", 0) or 0) + len(chunk_bytes)
+    if received_bytes > IMPORT_CANONICAL_UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Canonical JSON exceeds maximum allowed size",
+        )
+
+    _, part_relative = _canonical_upload_relative_paths(upload_id)
+    part_path = _canonical_upload_absolute_path(part_relative)
+    if not part_path.exists() or not part_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canonical upload session not found")
+
+    with open(part_path, "ab") as part_file:
+        part_file.write(chunk_bytes)
+
+    state["next_index"] = next_index + 1
+    state["received_bytes"] = received_bytes
+    _write_canonical_upload_state(upload_id, state)
+
+    return CanonicalUploadChunkResponse(
+        upload_id=upload_id,
+        received_bytes=received_bytes,
+        next_index=next_index + 1,
+    )
+
+
+@router.post(
+    "/import/canonical-uploads/{upload_id}/complete",
+    response_model=CanonicalUploadCompleteResponse,
+)
+def complete_canonical_upload(
+    upload_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_import_permission),
+) -> CanonicalUploadCompleteResponse:
+    _ = db
+    state = _read_canonical_upload_state(upload_id)
+    if not state:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canonical upload session not found")
+
+    if state.get("requested_by") != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    received_bytes = int(state.get("received_bytes", 0) or 0)
+    if received_bytes <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No uploaded data to finalize")
+
+    _, part_relative = _canonical_upload_relative_paths(upload_id)
+    part_path = _canonical_upload_absolute_path(part_relative)
+    if not part_path.exists() or not part_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canonical upload session not found")
+
+    try:
+        with open(part_path, "r", encoding="utf-8") as part_file:
+            parsed_payload = json.load(part_file)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Uploaded file is not valid JSON: {str(exc)}",
+        ) from exc
+
+    if not isinstance(parsed_payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded canonical file must be a JSON object",
+        )
+
+    final_relative = Path("imports") / "canonical" / f"{uuid4().hex}.json"
+    final_path = _canonical_upload_absolute_path(final_relative)
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path.replace(final_path)
+
+    _delete_canonical_upload_state(upload_id)
+
+    return CanonicalUploadCompleteResponse(
+        upload_id=upload_id,
+        canonical_json_url=_absolute_media_url(request, final_relative),
+        size_bytes=received_bytes,
     )
 
 
