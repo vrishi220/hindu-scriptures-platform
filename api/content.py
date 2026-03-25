@@ -2373,6 +2373,9 @@ def _import_canonical_json_v1(
         metadata_out = dict(metadata)
         metadata_out.setdefault("status", BOOK_STATUS_DRAFT)
         metadata_out.setdefault("visibility", BOOK_VISIBILITY_PRIVATE)
+        # Always assign the importing user as owner — the exported owner_id is from
+        # a different system and would produce a dangling/wrong ownership reference.
+        metadata_out["owner_id"] = current_user.id
 
         book = Book(
             schema_id=schema.id,
@@ -2762,18 +2765,61 @@ def export_book_json(
             }
         )
 
+    # Resolve referenced nodes so exported content is self-contained.
+    # Reference chains can span books, so we fetch all transitively referenced nodes.
+    ref_ids_to_resolve: set[int] = {
+        node.referenced_node_id
+        for node in nodes
+        if node.referenced_node_id is not None
+    }
+    resolved_source_nodes: dict[int, ContentNode] = {}
+    while ref_ids_to_resolve:
+        batch = (
+            db.query(ContentNode)
+            .filter(ContentNode.id.in_(ref_ids_to_resolve))
+            .all()
+        )
+        for src in batch:
+            resolved_source_nodes[src.id] = src
+        # Follow any further references within the fetched batch
+        next_refs: set[int] = {
+            src.referenced_node_id
+            for src in batch
+            if src.referenced_node_id is not None
+            and src.referenced_node_id not in resolved_source_nodes
+        }
+        ref_ids_to_resolve = next_refs
+
+    def _resolve_source(node: ContentNode) -> ContentNode:
+        """Walk the reference chain and return the ultimate source node."""
+        visited: set[int] = {node.id}
+        current = node
+        while current.referenced_node_id is not None:
+            next_id = current.referenced_node_id
+            if next_id in visited or next_id not in resolved_source_nodes:
+                break
+            visited.add(next_id)
+            current = resolved_source_nodes[next_id]
+        return current
+
     book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     metadata_out = dict(book_metadata)
+    # owner_id is DB-local — strip it so the export is portable across systems.
+    metadata_out.pop("owner_id", None)
     metadata_out["status"] = _book_status(book)
     metadata_out["visibility"] = _book_visibility(book)
 
     exported_nodes: list[dict] = []
     for node in nodes:
+        # Inline content from the ultimate source node so the export is portable.
+        source = _resolve_source(node) if node.referenced_node_id is not None else node
         exported_nodes.append(
             {
                 "node_id": node.id,
                 "parent_node_id": node.parent_node_id,
-                "referenced_node_id": node.referenced_node_id,
+                # Export without referenced_node_id — the content is inlined above
+                # and the original DB ID would be meaningless in another system.
+                "referenced_node_id": None,
                 "level_name": node.level_name,
                 "level_order": node.level_order if isinstance(node.level_order, int) else 0,
                 "sequence_number": node.sequence_number,
@@ -2782,13 +2828,13 @@ def export_book_json(
                 "title_english": node.title_english,
                 "title_hindi": node.title_hindi,
                 "title_tamil": node.title_tamil,
-                "has_content": bool(node.has_content),
-                "content_data": node.content_data if isinstance(node.content_data, dict) else {},
-                "summary_data": node.summary_data if isinstance(node.summary_data, dict) else {},
+                "has_content": bool(source.has_content),
+                "content_data": source.content_data if isinstance(source.content_data, dict) else {},
+                "summary_data": source.summary_data if isinstance(source.summary_data, dict) else {},
                 "metadata_json": node.metadata_json if isinstance(node.metadata_json, dict) else {},
-                "source_attribution": node.source_attribution,
-                "license_type": node.license_type or "CC-BY-SA-4.0",
-                "original_source_url": node.original_source_url,
+                "source_attribution": source.source_attribution,
+                "license_type": source.license_type or node.license_type or "CC-BY-SA-4.0",
+                "original_source_url": source.original_source_url,
                 "tags": node.tags if isinstance(node.tags, list) else [],
                 "media_items": media_by_node_id.get(node.id, []),
             }

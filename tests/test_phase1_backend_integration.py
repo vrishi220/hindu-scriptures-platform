@@ -5708,3 +5708,173 @@ class TestWordMeaningsValidation:
         )
         assert export_response.status_code == status.HTTP_200_OK
         assert export_response.content.startswith(b"%PDF")
+
+
+class TestBookJsonExport:
+    """Integration tests for GET /api/content/books/{book_id}/export/json."""
+
+    def test_export_plain_book_returns_valid_payload(self, client):
+        """Export a book whose nodes own their content directly (no references)."""
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Export Test Book {uuid4().hex[:6]}",
+                "book_code": f"export-test-{uuid4().hex[:6]}",
+                "language_primary": "english",
+            },
+            headers=headers,
+        )
+        assert book_resp.status_code == status.HTTP_201_CREATED
+        book_id = book_resp.json()["id"]
+
+        node1_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {"en": "First verse content"},
+            },
+            headers=headers,
+        )
+        assert node1_resp.status_code == status.HTTP_201_CREATED
+        node1_id = node1_resp.json()["id"]
+
+        node2_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "2",
+                "has_content": True,
+                "content_data": {"en": "Second verse content"},
+            },
+            headers=headers,
+        )
+        assert node2_resp.status_code == status.HTTP_201_CREATED
+        node2_id = node2_resp.json()["id"]
+
+        export_resp = client.get(f"/api/content/books/{book_id}/export/json", headers=headers)
+        assert export_resp.status_code == status.HTTP_200_OK
+
+        payload = export_resp.json()
+        assert payload["schema_version"] == "hsp-book-json-v1"
+        assert "schema" in payload
+        assert payload["book"]["book_name"] is not None
+
+        nodes = payload["nodes"]
+        assert len(nodes) == 2
+
+        by_id = {n["node_id"]: n for n in nodes}
+        assert by_id[node1_id]["has_content"] is True
+        assert by_id[node1_id]["content_data"].get("en") == "First verse content"
+        assert by_id[node2_id]["content_data"].get("en") == "Second verse content"
+
+    def test_export_inlines_referenced_node_content(self, client):
+        """Nodes that reference content from another book must export the resolved content,
+        not the empty shell stored on the reference node itself."""
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        # Source book — owns the actual content
+        src_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Source Book {uuid4().hex[:6]}",
+                "book_code": f"src-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert src_book_resp.status_code == status.HTTP_201_CREATED
+        src_book_id = src_book_resp.json()["id"]
+
+        src_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": src_book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {"sa": "source sanskrit", "en": "source english"},
+                "source_attribution": "Test Source",
+                "license_type": "CC-BY-SA-4.0",
+            },
+            headers=headers,
+        )
+        assert src_node_resp.status_code == status.HTTP_201_CREATED
+        src_node_id = src_node_resp.json()["id"]
+
+        # Reference book — nodes point at the source book's nodes via referenced_node_id
+        ref_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Reference Book {uuid4().hex[:6]}",
+                "book_code": f"ref-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert ref_book_resp.status_code == status.HTTP_201_CREATED
+        ref_book_id = ref_book_resp.json()["id"]
+
+        # Use the insert-references API which creates reference nodes
+        insert_resp = client.post(
+            f"/api/content/books/{ref_book_id}/insert-references",
+            json={"node_ids": [src_node_id]},
+            headers=headers,
+        )
+        assert insert_resp.status_code == status.HTTP_200_OK
+        ref_node_id = insert_resp.json()["created_ids"][0]
+
+        # Export the reference book
+        export_resp = client.get(f"/api/content/books/{ref_book_id}/export/json", headers=headers)
+        assert export_resp.status_code == status.HTTP_200_OK
+
+        payload = export_resp.json()
+        nodes = payload["nodes"]
+        assert len(nodes) == 1
+
+        exported_node = nodes[0]
+        assert exported_node["node_id"] == ref_node_id
+
+        # The key assertion: content must be inlined from the source node
+        assert exported_node["has_content"] is True, (
+            "Export should inline has_content=True from the referenced source node"
+        )
+        assert exported_node["content_data"].get("en") == "source english", (
+            "Export should inline English content from the referenced source node"
+        )
+        assert exported_node["content_data"].get("sa") == "source sanskrit", (
+            "Export should inline Sanskrit content from the referenced source node"
+        )
+        assert exported_node["source_attribution"] == "Test Source"
+
+        # referenced_node_id must be cleared — DB-local IDs are meaningless on another system
+        assert exported_node["referenced_node_id"] is None, (
+            "Export should clear referenced_node_id so round-trip import works"
+        )
