@@ -3755,9 +3755,9 @@ function ScripturesContent() {
     }
   };
 
-  const loadAuth = async () => {
+  const loadAuth = async (force = false) => {
     try {
-      const data = await getMe();
+      const data = await getMe(force ? { force: true } : undefined);
       if (!data) {
         setAuthEmail(null);
         setAuthUserId(null);
@@ -4679,7 +4679,9 @@ function ScripturesContent() {
       return "";
     }
 
-    const sequenceParts = pathNodes
+    const displayPathNodes = pathNodes.length > 1 ? pathNodes.slice(1) : pathNodes;
+
+    const sequenceParts = displayPathNodes
       .map((node) => node.sequence_number || node.level_order?.toString() || "–")
       .filter(Boolean);
 
@@ -6733,58 +6735,98 @@ function ScripturesContent() {
     }
 
     try {
-      const response = await fetch(`/api/books/${previewBookId}/preview/render`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          node_id: scope === "node" ? previewNodeId ?? undefined : undefined,
-          metadata_bindings: {
-            global: {
-              word_meanings: {
-                source: {
-                  source_display_mode: nextLanguageSettings.show_sanskrit
-                      ? "script"
-                    : "transliteration",
-                  preferred_transliteration_scheme:
-                    nextPreviewTransliterationScript === "harvard_kyoto"
-                      ? "hk"
-                      : nextPreviewTransliterationScript === "itrans"
-                        ? "itrans"
-                        : "iast",
-                  allow_runtime_transliteration_generation: true,
-                },
-                meanings: {
-                  meaning_language: translationLanguageToCode(preferences?.source_language),
-                  fallback_order: ["user_preference", "en", "first_available"],
-                },
-                rendering: {
-                  show_language_badge_when_fallback_used: true,
-                },
+      const requestBody = {
+        node_id: scope === "node" ? previewNodeId ?? undefined : undefined,
+        metadata_bindings: {
+          global: {
+            word_meanings: {
+              source: {
+                source_display_mode: nextLanguageSettings.show_sanskrit
+                    ? "script"
+                  : "transliteration",
+                preferred_transliteration_scheme:
+                  nextPreviewTransliterationScript === "harvard_kyoto"
+                    ? "hk"
+                    : nextPreviewTransliterationScript === "itrans"
+                      ? "itrans"
+                      : "iast",
+                allow_runtime_transliteration_generation: true,
               },
-              translation_language: translationLanguageToCode(
-                resolvedPreviewTranslationLanguages[0] || preferences?.source_language
-              ),
+              meanings: {
+                meaning_language: translationLanguageToCode(preferences?.source_language),
+                fallback_order: ["user_preference", "en", "first_available"],
+              },
+              rendering: {
+                show_language_badge_when_fallback_used: true,
+              },
             },
+            translation_language: translationLanguageToCode(
+              resolvedPreviewTranslationLanguages[0] || preferences?.source_language
+            ),
           },
-          render_settings: {
-            ...nextLanguageSettings,
-            show_metadata: nextShowPreviewDetails,
-            show_media: nextShowPreviewMedia,
-            text_order: ["sanskrit", "transliteration", "english", "text"],
-          },
-          offset: pageOffset,
-          limit: scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookPreviewArtifact
-        | { detail?: string }
-        | null;
+        },
+        render_settings: {
+          ...nextLanguageSettings,
+          show_metadata: nextShowPreviewDetails,
+          show_media: nextShowPreviewMedia,
+          text_order: ["sanskrit", "transliteration", "english", "text"],
+        },
+        offset: pageOffset,
+        limit: scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000,
+      };
+
+      const requestPreviewArtifact = async () => {
+        const response = await fetch(`/api/books/${previewBookId}/preview/render`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | BookPreviewArtifact
+          | { detail?: string }
+          | null;
+        return { response, payload };
+      };
+
+      let { response, payload } = await requestPreviewArtifact();
+
+      const initialFailureDetail = (payload as { detail?: string } | null)?.detail || "";
+      const shouldRetryAfterAuthRefresh =
+        !append &&
+        (response.status === 401 ||
+          response.status === 403 ||
+          (response.status === 404 &&
+            currentBook?.visibility === "private" &&
+            /not found/i.test(initialFailureDetail)));
+
+      if (!response.ok && shouldRetryAfterAuthRefresh) {
+        await loadAuth(true);
+        const retried = await requestPreviewArtifact();
+        response = retried.response;
+        payload = retried.payload;
+      }
 
       if (!response.ok) {
+        const failureDetail = (payload as { detail?: string } | null)?.detail || "";
+        const unrecoverableAuthFailure =
+          response.status === 401 ||
+          response.status === 403 ||
+          (response.status === 404 &&
+            currentBook?.visibility === "private" &&
+            /not found/i.test(failureDetail));
+
+        if (unrecoverableAuthFailure) {
+          setPrivateBookGate(true);
+          setBookPreviewArtifact(null);
+          if (!append) {
+            setShowBookPreview(false);
+          }
+          throw new Error("Session expired. Please sign in to continue.");
+        }
+
         setBookPreviewArtifact(null);
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to render book preview");
+        throw new Error(failureDetail || "Failed to render book preview");
       }
 
       const artifact = payload as BookPreviewArtifact;
