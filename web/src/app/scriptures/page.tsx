@@ -4345,6 +4345,9 @@ function ScripturesContent() {
       treeLoading ||
       contentLoading ||
       !bookId);
+  const hasEffectiveBookPreviewSummary =
+    bookPreviewArtifact?.preview_scope === "book" &&
+    Boolean(bookPreviewArtifact.book_template?.rendered_text?.trim());
 
   const renderTransliterationByPreference = (value: string): string => {
     if (!value) return "";
@@ -13686,7 +13689,7 @@ function ScripturesContent() {
                             <BookOpen className="h-4 w-4" />
                           </button>
                         )}
-                        {previewScope === "book" && (
+                        {previewScope === "book" && hasEffectiveBookPreviewSummary && (
                           <label className="ml-1 flex items-center gap-1.5 rounded-full border border-black/10 bg-[color:var(--paper)] px-2.5 py-1 text-xs text-zinc-700">
                             <input
                               type="checkbox"
@@ -13992,14 +13995,13 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                {showPreviewBookSummary && bookPreviewArtifact.preview_scope === "book" &&
-                  bookPreviewArtifact.book_template?.rendered_text?.trim() && (
-                    <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
-                      <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700">
-                        {bookPreviewArtifact.book_template.rendered_text.trim()}
-                      </p>
-                    </div>
-                  )}
+                {showPreviewBookSummary && hasEffectiveBookPreviewSummary && (
+                  <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
+                    <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700">
+                      {bookPreviewArtifact.book_template.rendered_text.trim()}
+                    </p>
+                  </div>
+                )}
 
                 {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
