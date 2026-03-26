@@ -2041,6 +2041,7 @@ function ScripturesContent() {
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const previewSettingsInitialized = useRef(false);
   const importPollingRunIdRef = useRef(0);
   const activeImportJobIdRef = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
@@ -4363,6 +4364,9 @@ function ScripturesContent() {
 
   useEffect(() => {
     if (!preferences) return;
+
+    if (previewSettingsInitialized.current) return;
+    previewSettingsInitialized.current = true;
 
     const previewScript = normalizeTransliterationScript(
       preferences.preview_transliteration_script
