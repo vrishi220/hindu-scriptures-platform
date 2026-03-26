@@ -13608,8 +13608,8 @@ function ScripturesContent() {
         {showBookPreview && bookPreviewArtifact && (
           <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
-              <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
-                <div>
+              <div className="flex flex-col gap-2 border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-4 sm:py-2.5">
+                <div className="flex-1">
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
                     {bookPreviewArtifact.preview_scope === "node"
                       ? (() => {
@@ -13622,7 +13622,7 @@ function ScripturesContent() {
                     {getPreviewBreadcrumbTitle(bookPreviewArtifact)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {(() => {
                     const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
                     const targetNodeId =
