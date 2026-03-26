@@ -13737,7 +13737,8 @@ function ScripturesContent() {
               {showPreviewControls && (
                 <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                   <div className="mx-auto w-full max-w-5xl rounded-lg border border-black/10 bg-white/90 p-2.5">
-                    <div className="space-y-2">
+                    {/* Scrollable options area — capped on mobile so Apply is never buried */}
+                    <div className="max-h-[40vh] overflow-y-auto sm:max-h-none space-y-2">
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
@@ -13919,40 +13920,43 @@ function ScripturesContent() {
                               </label>
                             ))}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const currentScope =
-                                bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
-                              void handlePreviewBook(currentScope);
-                            }}
-                            disabled={
-                              bookPreviewLoading ||
-                              (!bookPreviewLanguageSettings.show_sanskrit &&
-                                !bookPreviewLanguageSettings.show_transliteration &&
-                                !bookPreviewLanguageSettings.show_english) ||
-                              (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
-                                bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
-                                bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
-                                areEditableLanguageSelectionsEqual(
-                                  previewTranslationLanguages,
-                                  appliedPreviewTranslationLanguages
-                                ) &&
-                                showPreviewLabels === appliedShowPreviewLabels &&
-                                showPreviewLevelNumbers === appliedShowPreviewLevelNumbers &&
-                                showPreviewDetails === appliedShowPreviewDetails &&
-                                showPreviewTitles === appliedShowPreviewTitles &&
-                                showPreviewMedia === appliedShowPreviewMedia &&
-                                areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) &&
-                                previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
-                                previewTransliterationScript === appliedBookPreviewTransliterationScript)
-                            }
-                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {bookPreviewLoading ? "Applying..." : "Apply"}
-                          </button>
                         </div>
                       </div>
+                    </div>
+                    {/* Apply button — always visible outside the scrollable area */}
+                    <div className="mt-2.5 flex justify-end border-t border-black/[0.06] pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentScope =
+                            bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+                          void handlePreviewBook(currentScope);
+                        }}
+                        disabled={
+                          bookPreviewLoading ||
+                          (!bookPreviewLanguageSettings.show_sanskrit &&
+                            !bookPreviewLanguageSettings.show_transliteration &&
+                            !bookPreviewLanguageSettings.show_english) ||
+                          (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
+                            bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
+                            bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
+                            areEditableLanguageSelectionsEqual(
+                              previewTranslationLanguages,
+                              appliedPreviewTranslationLanguages
+                            ) &&
+                            showPreviewLabels === appliedShowPreviewLabels &&
+                            showPreviewLevelNumbers === appliedShowPreviewLevelNumbers &&
+                            showPreviewDetails === appliedShowPreviewDetails &&
+                            showPreviewTitles === appliedShowPreviewTitles &&
+                            showPreviewMedia === appliedShowPreviewMedia &&
+                            areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) &&
+                            previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
+                            previewTransliterationScript === appliedBookPreviewTransliterationScript)
+                        }
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {bookPreviewLoading ? "Applying..." : "Apply"}
+                      </button>
                     </div>
                   </div>
                 </div>
