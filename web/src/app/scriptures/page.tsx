@@ -13998,7 +13998,7 @@ function ScripturesContent() {
                 {showPreviewBookSummary && hasEffectiveBookPreviewSummary && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
                     <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700">
-                      {bookPreviewArtifact.book_template.rendered_text.trim()}
+                      {bookPreviewArtifact.book_template?.rendered_text?.trim() || ""}
                     </p>
                   </div>
                 )}
