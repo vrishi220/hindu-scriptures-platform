@@ -4679,7 +4679,9 @@ function ScripturesContent() {
       return "";
     }
 
-    const sequenceParts = pathNodes
+    const displayPathNodes = pathNodes.length > 1 ? pathNodes.slice(1) : pathNodes;
+
+    const sequenceParts = displayPathNodes
       .map((node) => node.sequence_number || node.level_order?.toString() || "–")
       .filter(Boolean);
 
