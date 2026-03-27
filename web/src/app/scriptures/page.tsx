@@ -434,6 +434,7 @@ type BookPreviewArtifact = {
   preview_scope?: "book" | "node";
   root_node_id?: number | null;
   root_title?: string | null;
+  reader_hierarchy_path?: string | null;
   section_order: Array<"body">;
   sections: {
     body: BookPreviewBlock[];
@@ -4668,65 +4669,7 @@ function ScripturesContent() {
     if (artifact.preview_scope !== "node") {
       return "";
     }
-
-    const rootNodeId =
-      artifact.preview_scope === "node" && typeof artifact.root_node_id === "number"
-        ? artifact.root_node_id
-        : null;
-    const pathNodes = rootNodeId !== null ? findPath(treeData, rootNodeId) || [] : [];
-
-    if (pathNodes.length === 0) {
-      return "";
-    }
-
-    const tokenizeSequence = (value: unknown): string[] => {
-      if (value === null || value === undefined) {
-        return [];
-      }
-      const tokens = String(value).match(/\d+/g);
-      return tokens ? tokens.filter((token) => token.length > 0) : [];
-    };
-
-    const getLocalLevelSequence = (node: TreeNode): string => {
-      const sequenceTokens = tokenizeSequence(node.sequence_number);
-      if (sequenceTokens.length > 0) {
-        return sequenceTokens[sequenceTokens.length - 1];
-      }
-
-      const titleTokens = tokenizeSequence(getPreferredTitle(node));
-      if (titleTokens.length > 0) {
-        return titleTokens[titleTokens.length - 1];
-      }
-
-      return "";
-    };
-
-    const localSequenceParts = pathNodes
-      .filter((node, index) => {
-        // Skip the synthetic root wrapper node based on structure, not level labels.
-        const isRootWrapper = pathNodes.length > 1 && index === 0 && node.parent_node_id == null;
-        if (isRootWrapper) {
-          return false;
-        }
-        if (node.level_name && appliedHiddenPreviewLevels.has(node.level_name)) {
-          return false;
-        }
-        return true;
-      })
-      .map((node) => getLocalLevelSequence(node))
-      .filter((value) => value.length > 0);
-
-    if (localSequenceParts.length > 0) {
-      return localSequenceParts.join(".");
-    }
-
-    // Fallback for unexpected trees: use any available numeric path tokens.
-    const fallbackParts = pathNodes
-      .map((node) => tokenizeSequence(node.sequence_number))
-      .filter((tokens) => tokens.length > 0)
-      .map((tokens) => tokens[tokens.length - 1]);
-
-    return fallbackParts.length > 0 ? fallbackParts.join(".") : "";
+    return formatValue(artifact.reader_hierarchy_path);
   };
 
   const getPreviewSiblingNavigation = (artifact: BookPreviewArtifact) => {

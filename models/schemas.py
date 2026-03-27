@@ -1095,6 +1095,7 @@ class BookPreviewRenderArtifactPublic(BaseModel):
     preview_scope: Literal["book", "node"] = "book"
     root_node_id: int | None = None
     root_title: str | None = None
+    reader_hierarchy_path: str | None = None
     section_order: list[Literal["body"]] = Field(default_factory=lambda: ["body"])
     sections: BookPreviewRenderSections
     book_media_items: list[dict] = Field(default_factory=list)

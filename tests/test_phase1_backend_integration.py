@@ -3740,6 +3740,361 @@ class TestDraftBookAndEditionSnapshotIntegration:
             "Chapter 2 Verse 1",
         ]
 
+    def test_book_preview_render_returns_reader_hierarchy_path_for_schema_root_levels(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Reader Hierarchy Schema {uuid4().hex[:8]}",
+                "description": "Schema for reader hierarchy path",
+                "levels": ["Kanda", "Sarga", "Shloka"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Hierarchy Book {uuid4().hex[:6]}",
+                "book_code": f"reader-hierarchy-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        kanda_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Kanda",
+                "level_order": 1,
+                "sequence_number": "4",
+                "title_english": "Kishkindha Kanda",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert kanda_response.status_code == status.HTTP_201_CREATED
+        kanda_id = kanda_response.json()["id"]
+
+        sarga_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": kanda_id,
+                "level_name": "Sarga",
+                "level_order": 2,
+                "sequence_number": "3",
+                "title_english": "Sarga 3",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert sarga_response.status_code == status.HTTP_201_CREATED
+        sarga_id = sarga_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            sarga_node = db.query(ContentNode).filter(ContentNode.id == sarga_id).first()
+            assert sarga_node is not None
+            # Emulate imported canonical data where child levels can carry composite numbering.
+            sarga_node.sequence_number = "4.3"
+            db.commit()
+        finally:
+            db.close()
+
+        shloka_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": sarga_id,
+                "level_name": "Shloka",
+                "level_order": 3,
+                "sequence_number": "4",
+                "title_english": "Shloka 4",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Verse text"}},
+            },
+            headers=headers,
+        )
+        assert shloka_response.status_code == status.HTTP_201_CREATED
+        shloka_id = shloka_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={"node_id": shloka_id},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["preview_scope"] == "node"
+        assert payload["reader_hierarchy_path"] == "3.4"
+
+    def test_book_preview_render_returns_reader_hierarchy_path_for_non_schema_root_levels(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Reader Hierarchy Mismatch Schema {uuid4().hex[:8]}",
+                "description": "Schema for reader hierarchy path mismatch",
+                "levels": ["Kanda", "Sarga", "Shloka"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Hierarchy Mismatch Book {uuid4().hex[:6]}",
+                "book_code": f"reader-hierarchy-mismatch-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            prakarana = ContentNode(
+                book_id=book_id,
+                parent_node_id=None,
+                level_name="Prakarana",
+                level_order=1,
+                sequence_number=5,
+                title_english="Prakarana 5",
+                has_content=False,
+            )
+            db.add(prakarana)
+            db.flush()
+
+            sarga = ContentNode(
+                book_id=book_id,
+                parent_node_id=prakarana.id,
+                level_name="Sarga",
+                level_order=2,
+                sequence_number=2,
+                title_english="Upadesanuvarnanam",
+                has_content=False,
+            )
+            db.add(sarga)
+            db.flush()
+
+            shloka = ContentNode(
+                book_id=book_id,
+                parent_node_id=sarga.id,
+                level_name="Shloka",
+                level_order=3,
+                sequence_number=3,
+                title_english="Shloka 3",
+                has_content=True,
+                content_data={"basic": {"translation": "Verse text"}},
+            )
+            db.add(shloka)
+            db.commit()
+            shloka_id = shloka.id
+        finally:
+            db.close()
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={"node_id": shloka_id},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["preview_scope"] == "node"
+        assert payload["reader_hierarchy_path"] == "5.2.3"
+
+    def test_book_preview_render_preserves_first_level_for_two_level_composite_leaf_sequence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Reader Hierarchy Two Level Schema {uuid4().hex[:8]}",
+                "description": "Schema for two-level hierarchy path",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Two Level Hierarchy Book {uuid4().hex[:6]}",
+                "book_code": f"two-level-hierarchy-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "9",
+                "title_english": "Chapter 9",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "4",
+                "title_english": "Verse 4",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Verse text"}},
+            },
+            headers=headers,
+        )
+        assert verse_response.status_code == status.HTTP_201_CREATED
+        verse_id = verse_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            verse_node = db.query(ContentNode).filter(ContentNode.id == verse_id).first()
+            assert verse_node is not None
+            # Imported hierarchies may store leaf sequence as Chapter.Verse.
+            verse_node.sequence_number = "9.4"
+            db.commit()
+        finally:
+            db.close()
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={"node_id": verse_id},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["preview_scope"] == "node"
+        assert payload["reader_hierarchy_path"] == "9.4"
+
+    def test_book_preview_render_preserves_full_path_for_mirrored_composite_middle_sequence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Reader Hierarchy Mirrored Composite Schema {uuid4().hex[:8]}",
+                "description": "Schema for mirrored composite middle sequence",
+                "levels": ["Kanda", "Sarga", "Shloka"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Mirrored Composite Book {uuid4().hex[:6]}",
+                "book_code": f"mirrored-composite-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        kanda_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Kanda",
+                "level_order": 1,
+                "sequence_number": "6",
+                "title_english": "Yuddha Kanda",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert kanda_response.status_code == status.HTTP_201_CREATED
+        kanda_id = kanda_response.json()["id"]
+
+        sarga_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": kanda_id,
+                "level_name": "Sarga",
+                "level_order": 2,
+                "sequence_number": "6",
+                "title_english": "Sarga 6",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert sarga_response.status_code == status.HTTP_201_CREATED
+        sarga_id = sarga_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            sarga_node = db.query(ContentNode).filter(ContentNode.id == sarga_id).first()
+            assert sarga_node is not None
+            # Imported canonical data may redundantly encode Kanda and Sarga as 6.6.
+            sarga_node.sequence_number = "6.6"
+            db.commit()
+        finally:
+            db.close()
+
+        shloka_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": sarga_id,
+                "level_name": "Shloka",
+                "level_order": 3,
+                "sequence_number": "4",
+                "title_english": "Shloka 4",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Verse text"}},
+            },
+            headers=headers,
+        )
+        assert shloka_response.status_code == status.HTTP_201_CREATED
+        shloka_id = shloka_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={"node_id": shloka_id},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["preview_scope"] == "node"
+        assert payload["reader_hierarchy_path"] == "6.6.4"
+
     def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
         headers = _register_and_login(client)
 

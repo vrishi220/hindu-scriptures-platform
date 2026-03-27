@@ -1214,10 +1214,106 @@ def _load_preview_scope_nodes(
     return _ordered_nodes_for_preview_scope(nodes, root_node_id)
 
 
+def _load_content_node_path(db: Session, book_id: int, node: ContentNode | None) -> list[ContentNode]:
+    if node is None:
+        return []
+
+    path: list[ContentNode] = []
+    current: ContentNode | None = node
+
+    while current is not None:
+      path.append(current)
+      parent_id = current.parent_node_id if isinstance(current.parent_node_id, int) else None
+      if parent_id is None:
+          break
+      current = (
+          db.query(ContentNode)
+          .options(
+              load_only(
+                  ContentNode.id,
+                  ContentNode.book_id,
+                  ContentNode.parent_node_id,
+                  ContentNode.level_name,
+                  ContentNode.level_order,
+                  ContentNode.sequence_number,
+                  ContentNode.title_sanskrit,
+                  ContentNode.title_transliteration,
+                  ContentNode.title_english,
+                  ContentNode.title_hindi,
+                  ContentNode.title_tamil,
+              )
+          )
+          .filter(ContentNode.id == parent_id, ContentNode.book_id == book_id)
+          .first()
+      )
+
+    path.reverse()
+    return path
+
+
 def _as_clean_string(value: object) -> str:
     if isinstance(value, str):
         return value.strip()
     return ""
+
+
+def _normalize_level_key(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().casefold()
+
+
+def _extract_numeric_tokens(value: object) -> list[str]:
+    if value is None:
+        return []
+    return [token for token in re.findall(r"\d+", str(value)) if token]
+
+
+def _extract_local_reader_sequence(node: ContentNode) -> str:
+    sequence_tokens = _extract_numeric_tokens(node.sequence_number)
+    if sequence_tokens:
+        return sequence_tokens[-1]
+
+    title_tokens = _extract_numeric_tokens(_book_title_for_preview(node))
+    if title_tokens:
+        return title_tokens[-1]
+
+    return ""
+
+
+def _build_reader_hierarchy_path(book: Book, node_path: list[ContentNode]) -> str | None:
+    if not node_path:
+        return None
+
+    schema_levels = book.schema.levels if getattr(book, "schema", None) and isinstance(book.schema.levels, list) else []
+    schema_root_level = _normalize_level_key(schema_levels[0]) if schema_levels else ""
+
+    first_local_sequence = _extract_local_reader_sequence(node_path[0]) if node_path else ""
+    second_local_sequence = _extract_local_reader_sequence(node_path[1]) if len(node_path) > 1 else ""
+    second_sequence_tokens = _extract_numeric_tokens(node_path[1].sequence_number) if len(node_path) > 1 else []
+    should_skip_first_schema_level = (
+        len(node_path) > 2
+        and bool(first_local_sequence)
+        and bool(second_local_sequence)
+        and bool(schema_root_level)
+        and _normalize_level_key(node_path[0].level_name) == schema_root_level
+        and len(second_sequence_tokens) > 1
+        and second_sequence_tokens[0] == first_local_sequence
+        and second_local_sequence != first_local_sequence
+    )
+
+    parts: list[str] = []
+    for index, node in enumerate(node_path):
+        local_sequence = _extract_local_reader_sequence(node)
+        if not local_sequence:
+            continue
+
+        if index == 0 and should_skip_first_schema_level:
+            continue
+
+        parts.append(local_sequence)
+
+    return ".".join(parts) if parts else None
 
 
 _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL = {
@@ -3642,6 +3738,12 @@ def preview_book_render(
     render_settings = _extract_render_settings(preview_payload)
     template_metadata = _extract_template_metadata(preview_payload)
     display_title = _book_title_for_preview(root_node) if root_node else book.book_name
+    reader_hierarchy_path = None
+    if root_node is not None:
+        reader_hierarchy_path = _build_reader_hierarchy_path(
+            book,
+            _load_content_node_path(db, book.id, root_node),
+        )
     resolved_book_binding_metadata = _resolve_book_binding_metadata_for_template(db, book.id)
     book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     book_summary_fields = {
@@ -3697,6 +3799,7 @@ def preview_book_render(
         preview_scope="node" if root_node else "book",
         root_node_id=root_node.id if root_node else None,
         root_title=display_title if root_node else None,
+        reader_hierarchy_path=reader_hierarchy_path,
         sections={"body": sections.body},
         book_media_items=book_media_items,
         book_template=book_template,

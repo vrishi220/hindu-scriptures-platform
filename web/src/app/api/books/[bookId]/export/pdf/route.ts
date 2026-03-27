@@ -45,6 +45,7 @@ type BookPreviewArtifact = {
   preview_scope?: "book" | "node";
   root_node_id?: number | null;
   root_title?: string | null;
+  reader_hierarchy_path?: string | null;
   sections: {
     body: BookPreviewBlock[];
   };
