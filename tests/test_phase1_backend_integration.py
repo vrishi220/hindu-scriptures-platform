@@ -4095,6 +4095,103 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert payload["preview_scope"] == "node"
         assert payload["reader_hierarchy_path"] == "6.6.4"
 
+    def test_book_preview_render_preserves_root_for_non_redundant_composite_middle_sequence(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Reader Hierarchy Non Redundant Composite Schema {uuid4().hex[:8]}",
+                "description": "Schema for non-redundant composite middle sequence",
+                "levels": ["Kanda", "Sarga", "Shloka"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Non Redundant Composite Book {uuid4().hex[:6]}",
+                "book_code": f"non-redundant-composite-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        kanda_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Kanda",
+                "level_order": 1,
+                "sequence_number": "5",
+                "title_english": "Sundara Kanda",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert kanda_response.status_code == status.HTTP_201_CREATED
+        kanda_id = kanda_response.json()["id"]
+
+        sarga_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": kanda_id,
+                "level_name": "Sarga",
+                "level_order": 2,
+                "sequence_number": "6",
+                "title_english": "Sarga 6",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert sarga_response.status_code == status.HTTP_201_CREATED
+        sarga_id = sarga_response.json()["id"]
+
+        db = SessionLocal()
+        try:
+            sarga_node = db.query(ContentNode).filter(ContentNode.id == sarga_id).first()
+            assert sarga_node is not None
+            # Composite sarga sequence preserves kanda and sarga context and should not drop root.
+            sarga_node.sequence_number = "5.6"
+            db.commit()
+        finally:
+            db.close()
+
+        shloka_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": sarga_id,
+                "level_name": "Shloka",
+                "level_order": 3,
+                "sequence_number": "7",
+                "title_english": "Shloka 7",
+                "has_content": True,
+                "content_data": {"basic": {"translation": "Verse text"}},
+            },
+            headers=headers,
+        )
+        assert shloka_response.status_code == status.HTTP_201_CREATED
+        shloka_id = shloka_response.json()["id"]
+
+        preview_response = client.post(
+            f"/api/books/{book_id}/preview/render",
+            json={"node_id": shloka_id},
+            headers=headers,
+        )
+        assert preview_response.status_code == status.HTTP_200_OK
+        payload = preview_response.json()
+        assert payload["preview_scope"] == "node"
+        assert payload["reader_hierarchy_path"] == "5.6.7"
+
     def test_draft_body_can_reference_entire_source_book_for_rendering(self, client):
         headers = _register_and_login(client)
 

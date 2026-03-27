@@ -1290,16 +1290,19 @@ def _build_reader_hierarchy_path(book: Book, node_path: list[ContentNode]) -> st
 
     first_local_sequence = _extract_local_reader_sequence(node_path[0]) if node_path else ""
     second_local_sequence = _extract_local_reader_sequence(node_path[1]) if len(node_path) > 1 else ""
+    leaf_local_sequence = _extract_local_reader_sequence(node_path[-1]) if node_path else ""
     second_sequence_tokens = _extract_numeric_tokens(node_path[1].sequence_number) if len(node_path) > 1 else []
     should_skip_first_schema_level = (
         len(node_path) > 2
         and bool(first_local_sequence)
         and bool(second_local_sequence)
+        and bool(leaf_local_sequence)
         and bool(schema_root_level)
         and _normalize_level_key(node_path[0].level_name) == schema_root_level
         and len(second_sequence_tokens) > 1
         and second_sequence_tokens[0] == first_local_sequence
         and second_local_sequence != first_local_sequence
+        and leaf_local_sequence == first_local_sequence
     )
 
     parts: list[str] = []
