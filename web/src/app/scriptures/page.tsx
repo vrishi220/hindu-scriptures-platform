@@ -4679,13 +4679,54 @@ function ScripturesContent() {
       return "";
     }
 
-    const displayPathNodes = pathNodes.length > 1 ? pathNodes.slice(1) : pathNodes;
+    const tokenizeSequence = (value: unknown): string[] => {
+      if (value === null || value === undefined) {
+        return [];
+      }
+      const tokens = String(value).match(/\d+/g);
+      return tokens ? tokens.filter((token) => token.length > 0) : [];
+    };
 
-    const sequenceParts = displayPathNodes
-      .map((node) => node.sequence_number || node.level_order?.toString() || "–")
-      .filter(Boolean);
+    const getLocalLevelSequence = (node: TreeNode): string => {
+      const sequenceTokens = tokenizeSequence(node.sequence_number);
+      if (sequenceTokens.length > 0) {
+        return sequenceTokens[sequenceTokens.length - 1];
+      }
 
-    return sequenceParts.length > 0 ? sequenceParts.join(".") : "";
+      const titleTokens = tokenizeSequence(getPreferredTitle(node));
+      if (titleTokens.length > 0) {
+        return titleTokens[titleTokens.length - 1];
+      }
+
+      return "";
+    };
+
+    const localSequenceParts = pathNodes
+      .filter((node, index) => {
+        // Skip the synthetic root wrapper node based on structure, not level labels.
+        const isRootWrapper = pathNodes.length > 1 && index === 0 && node.parent_node_id == null;
+        if (isRootWrapper) {
+          return false;
+        }
+        if (node.level_name && appliedHiddenPreviewLevels.has(node.level_name)) {
+          return false;
+        }
+        return true;
+      })
+      .map((node) => getLocalLevelSequence(node))
+      .filter((value) => value.length > 0);
+
+    if (localSequenceParts.length > 0) {
+      return localSequenceParts.join(".");
+    }
+
+    // Fallback for unexpected trees: use any available numeric path tokens.
+    const fallbackParts = pathNodes
+      .map((node) => tokenizeSequence(node.sequence_number))
+      .filter((tokens) => tokens.length > 0)
+      .map((tokens) => tokens[tokens.length - 1]);
+
+    return fallbackParts.length > 0 ? fallbackParts.join(".") : "";
   };
 
   const getPreviewSiblingNavigation = (artifact: BookPreviewArtifact) => {
