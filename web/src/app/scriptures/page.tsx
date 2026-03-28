@@ -611,6 +611,7 @@ const SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY = "scriptures_media_manager_density";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY = "scriptures_media_manager_density_node";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY = "scriptures_media_manager_density_book";
 const SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY = "scriptures_media_manager_density_bank";
+const ANONYMOUS_BOOK_NOT_FOUND_MESSAGE = "Book not found. Sign in and try again.";
 const BOOK_PREVIEW_PAGE_SIZE = 500;
 const BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX = 240;
 const DEFAULT_CONTENT_FIELD_LABELS = {
@@ -4967,6 +4968,16 @@ function ScripturesContent() {
 
         if (requestId !== activeTreeRequestId.current) return;
       if (!response.ok) {
+          if (!authEmail && response.status === 404) {
+            setTreeData([]);
+            setCurrentBook(null);
+            setSelectedId(null);
+            setBreadcrumb([]);
+            setNodeContent(null);
+            setTreeError(ANONYMOUS_BOOK_NOT_FOUND_MESSAGE);
+            setUrlInitialized(true);
+            return;
+          }
         if (!authEmail && (response.status === 401 || response.status === 403)) {
           setPrivateBookGate(true);
           setTreeData([]);
@@ -6793,6 +6804,10 @@ function ScripturesContent() {
 
       if (!response.ok) {
         const failureDetail = (payload as { detail?: string } | null)?.detail || "";
+        const resolvedFailureDetail =
+          !authEmail && response.status === 404
+            ? ANONYMOUS_BOOK_NOT_FOUND_MESSAGE
+            : failureDetail;
         const unrecoverableAuthFailure =
           response.status === 401 ||
           response.status === 403 ||
@@ -6810,7 +6825,7 @@ function ScripturesContent() {
         }
 
         setBookPreviewArtifact(null);
-        throw new Error(failureDetail || "Failed to render book preview");
+        throw new Error(resolvedFailureDetail || "Failed to render book preview");
       }
 
       const artifact = payload as BookPreviewArtifact;
