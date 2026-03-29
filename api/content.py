@@ -43,6 +43,8 @@ from models.schemas import (
     BookSharePublic,
     BookShareUpdate,
     BookUpdate,
+    BulkTreeImportRequest,
+    BulkTreeImportResponse,
     ContentNodeCreate,
     ContentNodePublic,
     ContentNodeTree,
@@ -70,6 +72,7 @@ from models.schemas import (
     ScriptureSchemaCreate,
     ScriptureSchemaPublic,
     ScriptureSchemaUpdate,
+    TreeNodeImportItem,
     _validate_word_meanings_content_data,
 )
 from models.scripture_schema import ScriptureSchema
@@ -4987,6 +4990,181 @@ def delete_node_rendition(
     db.delete(rendition)
     db.commit()
     return {"message": "Deleted"}
+
+
+@router.post("/books/{book_id}/import-tree", response_model=BulkTreeImportResponse, status_code=status.HTTP_201_CREATED)
+def import_tree_nodes(
+    book_id: int,
+    payload: BulkTreeImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BulkTreeImportResponse:
+    """
+    Import hierarchical node tree from scripture importer.
+    Accepts chapters with verse children, creates content_nodes preserving hierarchy.
+    
+    Args:
+        book_id: Target book ID
+        payload: BulkTreeImportRequest with:
+            - nodes: List of top-level nodes (chapters) with children (verses)
+            - clear_existing: Clear all existing nodes before import
+            - language_code: Language for created nodes
+            - license_type: License for imported content
+    
+    Returns:
+        BulkTreeImportResponse with creation counts and any errors/warnings
+    """
+    _ensure_can_contribute(current_user)
+    
+    # Verify book exists and user has edit access
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            errors=["Book not found"]
+        )
+    
+    try:
+        _ensure_book_edit_access(db, current_user, book)
+    except HTTPException as e:
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            errors=[e.detail]
+        )
+    
+    # Optional: Clear existing nodes
+    if payload.clear_existing:
+        try:
+            db.query(ContentNode).filter(ContentNode.book_id == book_id).delete(synchronize_session=False)
+            db.commit()
+        except Exception as e:
+            return BulkTreeImportResponse(
+                success=False,
+                book_id=book_id,
+                errors=[f"Failed to clear existing nodes: {str(e)}"]
+            )
+    
+    # Get schema info for validation
+    schema_levels = (
+        book.schema.levels
+        if book.schema and isinstance(book.schema.levels, list)
+        else []
+    )
+    level_name_overrides = _book_level_name_overrides(book)
+    
+    chapters_created = 0
+    verses_created = 0
+    errors = []
+    warnings = []
+    
+    try:
+        # Process each chapter (top-level node)
+        for chapter_idx, chapter_item in enumerate(payload.nodes, start=1):
+            try:
+                # Convert sequence_number to integer (auto-generate if needed)
+                chapter_seq = chapter_idx
+                if chapter_item.sequence_number:
+                    seq_str = str(chapter_item.sequence_number).strip()
+                    if seq_str.isdigit():
+                        chapter_seq = int(seq_str)
+                
+                # Create chapter node
+                chapter_node = ContentNode(
+                    book_id=book_id,
+                    parent_node_id=None,
+                    level_name=chapter_item.level_name,
+                    level_order=chapter_item.level_order,
+                    sequence_number=chapter_seq,
+                    title_sanskrit=chapter_item.title_sanskrit,
+                    title_transliteration=chapter_item.title_transliteration,
+                    title_english=chapter_item.title_english,
+                    title_hindi=chapter_item.title_hindi,
+                    title_tamil=chapter_item.title_tamil,
+                    has_content=chapter_item.has_content,
+                    content_data=chapter_item.content_data or {},
+                    summary_data=chapter_item.summary_data or {},
+                    metadata_json=chapter_item.metadata_json or {},
+                    source_attribution=chapter_item.source_attribution,
+                    license_type=payload.license_type,
+                    original_source_url=chapter_item.original_source_url,
+                    tags=chapter_item.tags or [],
+                    language_code=payload.language_code,
+                    created_by=current_user.id,
+                    last_modified_by=current_user.id,
+                )
+                db.add(chapter_node)
+                db.flush()  # Get chapter_node.id for child references
+                chapters_created += 1
+                
+                # Process child nodes (verses)
+                for verse_idx, verse_item in enumerate(chapter_item.children, start=1):
+                    try:
+                        # Convert sequence_number to integer (auto-generate if needed)
+                        verse_seq = verse_idx
+                        if verse_item.sequence_number:
+                            seq_str = str(verse_item.sequence_number).strip()
+                            # Extract just the last numeric part (e.g., "1.1" → 1, "1" → 1)
+                            if '.' in seq_str:
+                                seq_str = seq_str.split('.')[-1]
+                            if seq_str.isdigit():
+                                verse_seq = int(seq_str)
+                        
+                        verse_node = ContentNode(
+                            book_id=book_id,
+                            parent_node_id=chapter_node.id,
+                            level_name=verse_item.level_name,
+                            level_order=verse_item.level_order,
+                            sequence_number=verse_seq,
+                            title_sanskrit=verse_item.title_sanskrit,
+                            title_transliteration=verse_item.title_transliteration,
+                            title_english=verse_item.title_english,
+                            title_hindi=verse_item.title_hindi,
+                            title_tamil=verse_item.title_tamil,
+                            has_content=verse_item.has_content,
+                            content_data=verse_item.content_data or {},
+                            summary_data=verse_item.summary_data or {},
+                            metadata_json=verse_item.metadata_json or {},
+                            source_attribution=verse_item.source_attribution,
+                            license_type=payload.license_type,
+                            original_source_url=verse_item.original_source_url,
+                            tags=verse_item.tags or [],
+                            language_code=payload.language_code,
+                            created_by=current_user.id,
+                            last_modified_by=current_user.id,
+                        )
+                        db.add(verse_node)
+                        verses_created += 1
+                    except Exception as e:
+                        errors.append(f"Error creating verse {verse_idx} in chapter {chapter_item.sequence_number}: {str(e)}")
+                
+            except Exception as e:
+                errors.append(f"Error creating chapter {chapter_item.sequence_number}: {str(e)}")
+        
+        # Commit all changes
+        db.commit()
+        
+        return BulkTreeImportResponse(
+            success=len(errors) == 0,
+            book_id=book_id,
+            chapters_created=chapters_created,
+            verses_created=verses_created,
+            total_nodes_created=chapters_created + verses_created,
+            warnings=warnings,
+            errors=errors,
+        )
+        
+    except Exception as e:
+        db.rollback()
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            chapters_created=chapters_created,
+            verses_created=verses_created,
+            total_nodes_created=chapters_created + verses_created,
+            errors=[f"Fatal error during import: {str(e)}"],
+        )
 
 
 @router.get("/nodes/{node_id}/comments", response_model=list[NodeCommentPublic])

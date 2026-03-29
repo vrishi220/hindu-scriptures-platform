@@ -580,6 +580,46 @@ class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
 
 
+class TreeNodeImportItem(BaseModel):
+    """Single node in an import tree (from SchemaAwareJSONImporter)."""
+    level_name: str
+    level_order: int
+    sequence_number: str | None = None
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool = False
+    content_data: dict | None = None
+    summary_data: dict | None = None
+    metadata_json: dict | None = None
+    source_attribution: str | None = None
+    original_source_url: str | None = None
+    tags: list | None = None
+    children: list["TreeNodeImportItem"] = Field(default_factory=list)
+
+
+class BulkTreeImportRequest(BaseModel):
+    """Bulk import tree nodes (e.g., from scripture scraper/importer)."""
+    book_id: int
+    nodes: list[TreeNodeImportItem]  # Top-level nodes (chapters)
+    clear_existing: bool = False  # Clear all existing nodes in book before import
+    language_code: str = "en"
+    license_type: str = "CC-BY-SA-4.0"
+
+
+class BulkTreeImportResponse(BaseModel):
+    """Summary of tree import operation."""
+    success: bool
+    book_id: int
+    chapters_created: int = 0
+    verses_created: int = 0
+    total_nodes_created: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class BookExchangeSchemaV1(BaseModel):
     id: int | None = None
     name: str | None = None
