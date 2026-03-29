@@ -27,6 +27,7 @@ from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
 from models.commentary_entry import CommentaryEntry
+from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
@@ -55,6 +56,9 @@ from models.schemas import (
     CommentaryWorkCreate,
     CommentaryWorkPublic,
     CommentaryWorkUpdate,
+    ContentRenditionCreate,
+    ContentRenditionPublic,
+    ContentRenditionUpdate,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
     MediaAssetPublic,
@@ -4755,6 +4759,232 @@ def delete_node_commentary(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     db.delete(entry)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.get("/renditions/authors", response_model=list[CommentaryAuthorPublic])
+def list_rendition_authors(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryAuthorPublic]:
+    return list_commentary_authors(q=q, limit=limit, offset=offset, db=db, current_user=current_user)
+
+
+@router.get("/renditions/works", response_model=list[CommentaryWorkPublic])
+def list_rendition_works(
+    q: str | None = Query(default=None),
+    author_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryWorkPublic]:
+    return list_commentary_works(
+        q=q,
+        author_id=author_id,
+        limit=limit,
+        offset=offset,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.get("/nodes/{node_id}/renditions", response_model=list[ContentRenditionPublic])
+def list_node_renditions(
+    node_id: int,
+    rendition_type: Literal["translation", "commentary"] | None = Query(default=None),
+    language_code: str | None = Query(default=None),
+    script_code: str | None = Query(default=None),
+    author_id: int | None = Query(default=None),
+    work_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[ContentRenditionPublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
+    query = db.query(ContentRendition).filter(ContentRendition.node_id == node_id)
+    if rendition_type is not None:
+        query = query.filter(ContentRendition.rendition_type == rendition_type)
+    if language_code and language_code.strip():
+        query = query.filter(ContentRendition.language_code == language_code.strip().lower())
+    if script_code and script_code.strip():
+        query = query.filter(ContentRendition.script_code == script_code.strip().lower())
+    if author_id is not None:
+        query = query.filter(ContentRendition.author_id == author_id)
+    if work_id is not None:
+        query = query.filter(ContentRendition.work_id == work_id)
+
+    rows = (
+        query
+        .order_by(ContentRendition.display_order.asc(), ContentRendition.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [ContentRenditionPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/nodes/{node_id}/renditions",
+    response_model=ContentRenditionPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_node_rendition(
+    node_id: int,
+    payload: ContentRenditionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentRenditionPublic:
+    _ensure_can_contribute(current_user)
+    if payload.node_id != node_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id mismatch")
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    text_value = payload.content_text.strip()
+    if not text_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+
+    if payload.author_id is not None:
+        author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == payload.author_id).first()
+        if not author:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+
+    if payload.work_id is not None:
+        work = db.query(CommentaryWork).filter(CommentaryWork.id == payload.work_id).first()
+        if not work:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+
+    language = payload.language_code.strip().lower() if payload.language_code else "en"
+    if not language:
+        language = "en"
+    script = payload.script_code.strip().lower() if payload.script_code else None
+
+    entry = ContentRendition(
+        node_id=node_id,
+        rendition_type=payload.rendition_type,
+        author_id=payload.author_id,
+        work_id=payload.work_id,
+        content_text=text_value,
+        language_code=language,
+        script_code=script,
+        display_order=payload.display_order,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+        last_modified_by=current_user.id,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return ContentRenditionPublic.model_validate(entry)
+
+
+@router.patch("/nodes/{node_id}/renditions/{rendition_id}", response_model=ContentRenditionPublic)
+def update_node_rendition(
+    node_id: int,
+    rendition_id: int,
+    payload: ContentRenditionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentRenditionPublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    rendition = (
+        db.query(ContentRendition)
+        .filter(ContentRendition.id == rendition_id, ContentRendition.node_id == node_id)
+        .first()
+    )
+    if not rendition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "rendition_type" in updates:
+        rendition.rendition_type = updates["rendition_type"]
+
+    if "author_id" in updates:
+        next_author_id = updates.get("author_id")
+        if next_author_id is not None:
+            author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == next_author_id).first()
+            if not author:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+        rendition.author_id = next_author_id
+
+    if "work_id" in updates:
+        next_work_id = updates.get("work_id")
+        if next_work_id is not None:
+            work = db.query(CommentaryWork).filter(CommentaryWork.id == next_work_id).first()
+            if not work:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+        rendition.work_id = next_work_id
+
+    if "content_text" in updates:
+        text_value = (updates.get("content_text") or "").strip()
+        if not text_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+        rendition.content_text = text_value
+
+    if "language_code" in updates:
+        language = (updates.get("language_code") or "").strip().lower()
+        if not language:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="language_code is required")
+        rendition.language_code = language
+
+    if "script_code" in updates:
+        script = updates.get("script_code")
+        script_value = script.strip().lower() if isinstance(script, str) else None
+        rendition.script_code = script_value
+
+    if "display_order" in updates:
+        rendition.display_order = int(updates["display_order"])
+
+    if "metadata" in updates:
+        rendition.metadata_json = updates["metadata"] or {}
+
+    rendition.last_modified_by = current_user.id
+    db.commit()
+    db.refresh(rendition)
+    return ContentRenditionPublic.model_validate(rendition)
+
+
+@router.delete("/nodes/{node_id}/renditions/{rendition_id}", response_model=dict)
+def delete_node_rendition(
+    node_id: int,
+    rendition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    rendition = (
+        db.query(ContentRendition)
+        .filter(ContentRendition.id == rendition_id, ContentRendition.node_id == node_id)
+        .first()
+    )
+    if not rendition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    db.delete(rendition)
     db.commit()
     return {"message": "Deleted"}
 

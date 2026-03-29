@@ -766,6 +766,46 @@ class CommentaryEntryPublic(CommentaryEntryBase):
     updated_at: datetime | None = None
 
 
+RenditionType = Literal["translation", "commentary"]
+
+
+class ContentRenditionBase(BaseModel):
+    node_id: int
+    rendition_type: RenditionType
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str
+    language_code: str = "en"
+    script_code: str | None = None
+    display_order: int = 0
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class ContentRenditionCreate(ContentRenditionBase):
+    pass
+
+
+class ContentRenditionUpdate(BaseModel):
+    rendition_type: RenditionType | None = None
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str | None = None
+    language_code: str | None = None
+    script_code: str | None = None
+    display_order: int | None = None
+    metadata: dict | None = None
+
+
+class ContentRenditionPublic(ContentRenditionBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    last_modified_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class NodeCommentBase(BaseModel):
     node_id: int
     parent_comment_id: int | None = None

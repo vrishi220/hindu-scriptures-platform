@@ -7,6 +7,7 @@ from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
 from models.commentary_entry import CommentaryEntry
+from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
@@ -37,6 +38,7 @@ __all__ = [
 	"CommentaryAuthor",
 	"CommentaryWork",
 	"CommentaryEntry",
+	"ContentRendition",
 	"NodeComment",
 	"Category",
 	"CategoryParent",
