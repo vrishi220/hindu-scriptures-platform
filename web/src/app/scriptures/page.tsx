@@ -13685,7 +13685,7 @@ function ScripturesContent() {
                               onClick={() => {
                                 void handlePreviewSiblingNavigation("previous");
                               }}
-                              disabled={!previousSiblingId}
+                              disabled={showPreviewControls || !previousSiblingId}
                               title="Previous sibling"
                               aria-label="Previous sibling"
                               className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
@@ -13697,7 +13697,7 @@ function ScripturesContent() {
                               onClick={() => {
                                 void handlePreviewSiblingNavigation("next");
                               }}
-                              disabled={!nextSiblingId}
+                              disabled={showPreviewControls || !nextSiblingId}
                               title="Next sibling"
                               aria-label="Next sibling"
                               className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
@@ -13711,9 +13711,10 @@ function ScripturesContent() {
                           onClick={() => {
                             void handleCopyPreviewPath(previewPath);
                           }}
+                          disabled={showPreviewControls}
                           title="Copy link"
                           aria-label="Copy link"
-                          className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
+                          className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Link2 className="h-4 w-4" />
                         </button>
@@ -13723,9 +13724,10 @@ function ScripturesContent() {
                             onClick={() => {
                               handleBrowseFromPreview(bookId, targetNodeId);
                             }}
+                            disabled={showPreviewControls}
                             title="Browse"
                             aria-label="Browse"
-                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
+                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <BookOpen className="h-4 w-4" />
                           </button>
@@ -13736,7 +13738,7 @@ function ScripturesContent() {
                               type="checkbox"
                               checked={showPreviewBookSummary}
                               onChange={(event) => setShowPreviewBookSummary(event.target.checked)}
-                              disabled={bookPreviewLoading}
+                              disabled={bookPreviewLoading || showPreviewControls}
                             />
                             <span>Summary</span>
                           </label>
@@ -13764,18 +13766,20 @@ function ScripturesContent() {
                         respectCurrentPreviewScope: true,
                       });
                     }}
+                    disabled={showPreviewControls}
                     title="Download PDF"
                     aria-label="Download PDF"
-                    className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20"
+                    className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Download className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={handleClosePreview}
+                    disabled={showPreviewControls}
                     title="Close preview"
                     aria-label="Close preview"
-                    className="rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600"
+                    className="rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <X className="h-6 w-6 sm:h-7 sm:w-7" />
                   </button>
