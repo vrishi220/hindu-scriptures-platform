@@ -33,6 +33,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   preview_show_sanskrit: true,
   preview_show_transliteration: true,
   preview_show_english: true,
+  preview_show_commentary: true,
   preview_transliteration_script: "iast",
   preview_word_meanings_display_mode: "inline",
   preview_translation_languages: "english",

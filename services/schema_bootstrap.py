@@ -74,7 +74,8 @@ def ensure_phase1_schema(database_url: str) -> None:
         """,
         """
         ALTER TABLE IF EXISTS books
-            ADD COLUMN IF NOT EXISTS level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ADD COLUMN IF NOT EXISTS level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS variant_authors JSONB NOT NULL DEFAULT '{}'::jsonb;
         """,
         """
         DO $$
@@ -127,6 +128,7 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
             ADD COLUMN IF NOT EXISTS preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline';
         """,
@@ -153,6 +155,7 @@ def ensure_phase1_schema(database_url: str) -> None:
             preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
             preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
             preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
             preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
             preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline',
             scriptures_book_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',

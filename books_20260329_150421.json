@@ -1,0 +1,1013 @@
+[
+  {
+    "id": 1,
+    "book_name": "Upadesa Saram",
+    "book_code": null,
+    "language_primary": "english",
+    "schema_id": 3,
+    "metadata_json": {},
+    "level_name_overrides": {},
+    "created_at": "2026-02-17T00:13:28.001643",
+    "updated_at": "2026-02-17T00:13:28.001643",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 101,
+    "book_name": "111",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:02.282327",
+    "updated_at": "2026-03-06T15:11:02.282327",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "book_name": "Nirvana Shatkam",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "owner_id": 1
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-02-20T13:34:08.014775",
+    "updated_at": "2026-02-20T13:34:08.014775",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 102,
+    "book_name": "222",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:11.520660",
+    "updated_at": "2026-03-06T15:11:11.520660",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 103,
+    "book_name": "333",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:19.502240",
+    "updated_at": "2026-03-06T15:11:19.502240",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 104,
+    "book_name": "444",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:28.016356",
+    "updated_at": "2026-03-06T15:11:28.016356",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 105,
+    "book_name": "555",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:36.770185",
+    "updated_at": "2026-03-06T15:11:36.770185",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 106,
+    "book_name": "666",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:11:50.139763",
+    "updated_at": "2026-03-06T15:11:50.139763",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 107,
+    "book_name": "777",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:12:00.986556",
+    "updated_at": "2026-03-06T15:12:00.986556",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 108,
+    "book_name": "888",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:12:08.745872",
+    "updated_at": "2026-03-06T15:12:08.745872",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 109,
+    "book_name": "999",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:12:17.905807",
+    "updated_at": "2026-03-06T15:12:17.905807",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 244,
+    "book_name": "Sapta Bhumikas",
+    "book_code": "Sapta-Bhumikas",
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-25T10:10:38.911055",
+    "updated_at": "2026-03-25T10:10:38.911055",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 110,
+    "book_name": "000",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:12:29.208039",
+    "updated_at": "2026-03-06T15:12:29.208039",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 111,
+    "book_name": "qqq",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:12:45.021939",
+    "updated_at": "2026-03-06T15:12:45.021939",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 112,
+    "book_name": "aaa",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:13:01.271043",
+    "updated_at": "2026-03-06T15:13:01.271043",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 113,
+    "book_name": "sss",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:13:09.780773",
+    "updated_at": "2026-03-06T15:13:09.780773",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 114,
+    "book_name": "ddd",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:13:17.390599",
+    "updated_at": "2026-03-06T15:13:17.390599",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 115,
+    "book_name": "fff",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:13:49.273638",
+    "updated_at": "2026-03-06T15:13:49.273638",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 116,
+    "book_name": "ggg",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:13:56.853875",
+    "updated_at": "2026-03-06T15:13:56.853875",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 117,
+    "book_name": "hhh",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:04.961230",
+    "updated_at": "2026-03-06T15:14:04.961230",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 118,
+    "book_name": "jjj",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:16.074788",
+    "updated_at": "2026-03-06T15:14:16.074788",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 119,
+    "book_name": "kkk",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:26.021257",
+    "updated_at": "2026-03-06T15:14:26.021257",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 120,
+    "book_name": "lll",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:36.156418",
+    "updated_at": "2026-03-06T15:14:36.156418",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 121,
+    "book_name": "xxx",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:47.258513",
+    "updated_at": "2026-03-06T15:14:47.258513",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 122,
+    "book_name": "ccc",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:14:58.146266",
+    "updated_at": "2026-03-06T15:14:58.146266",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 123,
+    "book_name": "vvv",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:15:06.706395",
+    "updated_at": "2026-03-06T15:15:06.706395",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 124,
+    "book_name": "bbb",
+    "book_code": null,
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-06T15:15:13.040347",
+    "updated_at": "2026-03-06T15:15:13.040347",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 13,
+    "book_name": "Bhagavad Gita - Complete with English Translations",
+    "book_code": "bg-complete-with-translations",
+    "language_primary": "sanskrit",
+    "schema_id": 1,
+    "metadata_json": {
+      "status": "published",
+      "owner_id": 3,
+      "visibility": "public",
+      "thumbnailUrl": "https://www.iskconbangalore.org/wp-content/uploads/2022/05/gita-jayanti-web.jpg",
+      "thumbnail_url": "https://www.iskconbangalore.org/wp-content/uploads/2022/05/gita-jayanti-web.jpg",
+      "word_meanings": {
+        "source": {
+          "source_display_mode": "transliteration",
+          "preferred_transliteration_scheme": "hk",
+          "allow_runtime_transliteration_generation": true
+        },
+        "meanings": {
+          "fallback_order": [
+            "user_preference",
+            "en",
+            "first_available"
+          ],
+          "meaning_language": "en"
+        },
+        "enabled_levels": [
+          "Shloka"
+        ]
+      }
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-02-14T21:38:59.198885",
+    "updated_at": "2026-02-14T21:38:59.198885",
+    "schema": {
+      "id": 1,
+      "name": "Bhagavad Gita",
+      "levels": [
+        "Adhyaya",
+        "Shloka"
+      ]
+    }
+  },
+  {
+    "id": 204,
+    "book_name": "N04 Browser Source Book 1772925070884_23060",
+    "book_code": "n04-browser-source-1772925070884_23060",
+    "language_primary": "sanskrit",
+    "schema_id": 183,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 314,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:11:10.902450",
+    "updated_at": "2026-03-07T18:11:10.902450",
+    "schema": {
+      "id": 183,
+      "name": "N04 Browser Schema 1772925070884_23060",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 205,
+    "book_name": "N04 Browser Source Book 1772925140948_3314",
+    "book_code": "n04-browser-source-1772925140948_3314",
+    "language_primary": "sanskrit",
+    "schema_id": 184,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 315,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:12:20.973326",
+    "updated_at": "2026-03-07T18:12:20.973326",
+    "schema": {
+      "id": 184,
+      "name": "N04 Browser Schema 1772925140948_3314",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 210,
+    "book_name": "N04 Browser Source Book 1772925185062_78734",
+    "book_code": "n04-browser-source-1772925185062_78734",
+    "language_primary": "sanskrit",
+    "schema_id": 189,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 321,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:13:05.084529",
+    "updated_at": "2026-03-07T18:13:05.084529",
+    "schema": {
+      "id": 189,
+      "name": "N04 Browser Schema 1772925185062_78734",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 213,
+    "book_name": "N04 Browser Source Book 1772925289481_87649",
+    "book_code": "n04-browser-source-1772925289481_87649",
+    "language_primary": "sanskrit",
+    "schema_id": 192,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 324,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:14:49.499910",
+    "updated_at": "2026-03-07T18:14:49.499910",
+    "schema": {
+      "id": 192,
+      "name": "N04 Browser Schema 1772925289481_87649",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 169,
+    "book_name": "N04 Browser Source Book 1772924853_61886",
+    "book_code": "n04-browser-source-1772924853_61886",
+    "language_primary": "sanskrit",
+    "schema_id": 147,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 263,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:07:34.574759",
+    "updated_at": "2026-03-07T18:07:34.574759",
+    "schema": {
+      "id": 147,
+      "name": "N04 Browser Schema 1772924853_61886",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 170,
+    "book_name": "N04 Browser Source Book 1772924905980_26709",
+    "book_code": "n04-browser-source-1772924905980_26709",
+    "language_primary": "sanskrit",
+    "schema_id": 150,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 265,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:08:26.002576",
+    "updated_at": "2026-03-07T18:08:26.002576",
+    "schema": {
+      "id": 150,
+      "name": "N04 Browser Schema 1772924905980_26709",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 171,
+    "book_name": "N04 Browser Source Book 1772924905979_85150",
+    "book_code": "n04-browser-source-1772924905979_85150",
+    "language_primary": "sanskrit",
+    "schema_id": 149,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 266,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:08:26.005295",
+    "updated_at": "2026-03-07T18:08:26.005295",
+    "schema": {
+      "id": 149,
+      "name": "N04 Browser Schema 1772924905979_85150",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 172,
+    "book_name": "N04 Browser Source Book 1772924921_84231",
+    "book_code": "n04-browser-source-1772924921_84231",
+    "language_primary": "sanskrit",
+    "schema_id": 151,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 267,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:08:41.944048",
+    "updated_at": "2026-03-07T18:08:41.944048",
+    "schema": {
+      "id": 151,
+      "name": "N04 Browser Schema 1772924921_84231",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 192,
+    "book_name": "N04 Browser Source Book 1772925021181_43944",
+    "book_code": "n04-browser-source-1772925021181_43944",
+    "language_primary": "sanskrit",
+    "schema_id": 171,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 301,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:10:21.222926",
+    "updated_at": "2026-03-07T18:10:21.222926",
+    "schema": {
+      "id": 171,
+      "name": "N04 Browser Schema 1772925021181_43944",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 194,
+    "book_name": "N04 Browser Source Book 1772925021311_9605",
+    "book_code": "n04-browser-source-1772925021311_9605",
+    "language_primary": "sanskrit",
+    "schema_id": 173,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 303,
+      "visibility": "private"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-07T18:10:21.409539",
+    "updated_at": "2026-03-07T18:10:21.409539",
+    "schema": {
+      "id": 173,
+      "name": "N04 Browser Schema 1772925021311_9605",
+      "levels": [
+        "Chapter"
+      ]
+    }
+  },
+  {
+    "id": 217,
+    "book_name": "Nirv\u0101\u1e47a Da\u015bakam",
+    "book_code": "nirvana-dasakam",
+    "language_primary": "sanskrit",
+    "schema_id": 3,
+    "metadata_json": {
+      "meter": "Bhuja\u1e45gapray\u0101ta",
+      "author": "\u0100di \u015aa\u1e45kar\u0101c\u0101rya",
+      "status": "draft",
+      "refrain": "tad eko'va\u015bi\u1e63\u1e6da\u1e25 \u015biva\u1e25 kevalo'ham",
+      "language": "Sanskrit",
+      "owner_id": 3,
+      "tradition": "Advaita Ved\u0101nta",
+      "visibility": "private",
+      "media_items": [
+        {
+          "url": "/media/bank/4b79705aa2c94af0a624534e1e4863ab.png",
+          "asset_id": 14,
+          "is_default": true,
+          "media_type": "image",
+          "display_name": "image #14",
+          "display_order": 0
+        }
+      ],
+      "verse_count": 10,
+      "introduction": "Composed spontaneously by \u015aa\u1e45kara when his future guru Govindap\u0101d\u0101c\u0101rya asked him 'Who are you?' The text is a summation of the non-dual (advaita) vision of Ved\u0101nta. In ten verses, \u015aa\u1e45kara negates every false identification \u2014 elements, body, caste, philosophy, direction, color, states of consciousness \u2014 and repeatedly asserts the sole reality of the pure \u0100tman as \u015aiva, the auspicious, alone.",
+      "thumbnailUrl": "/media/bank/4b79705aa2c94af0a624534e1e4863ab.png",
+      "also_known_as": [
+        "Da\u015ba\u015blok\u012b",
+        "Da\u015ba\u015blok\u012b Nirv\u0101\u1e47ada\u015bakastotra\u1e43",
+        "Kevalo'ham"
+      ],
+      "thumbnail_url": "/media/bank/4b79705aa2c94af0a624534e1e4863ab.png",
+      "word_meanings": {
+        "enabled_levels": [
+          "Verse"
+        ]
+      },
+      "title_sanskrit": "\u0928\u093f\u0930\u094d\u0935\u093e\u0923\u0926\u0936\u0915\u092e\u094d",
+      "refrain_meaning": "That One, the Residue, the Auspicious, the Alone \u2014 am I"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-19T10:52:14.040239",
+    "updated_at": "2026-03-19T10:52:14.040239",
+    "schema": {
+      "id": 3,
+      "name": "Flat",
+      "levels": [
+        "Verse"
+      ]
+    }
+  },
+  {
+    "id": 216,
+    "book_name": "Yoga Vasi\u1e63\u1e6dha",
+    "book_code": "yoga-vasishtha",
+    "language_primary": "sanskrit",
+    "schema_id": 2,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "visibility": "private",
+      "title_english": "Yoga Vasishtha",
+      "title_sanskrit": "\u092f\u094b\u0917 \u0935\u0938\u093f\u0937\u094d\u0920",
+      "title_transliteration": "yoga vasi\u1e63\u1e6dha"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-17T15:56:34.795934",
+    "updated_at": "2026-03-17T15:56:34.795934",
+    "schema": {
+      "id": 2,
+      "name": "Ramayana",
+      "levels": [
+        "Kanda",
+        "Sarga",
+        "Shloka"
+      ]
+    }
+  },
+  {
+    "id": 250,
+    "book_name": "Vishnu Sahasranama",
+    "book_code": "vishnu_sahasranama",
+    "language_primary": "sanskrit",
+    "schema_id": 1,
+    "metadata_json": {
+      "status": "draft",
+      "owner_id": 3,
+      "hierarchy": "Book -> Shloka -> Nama",
+      "visibility": "private",
+      "total_namas": 1000,
+      "total_shlokas": 108,
+      "meanings_source": "namavali_line_4",
+      "namavali_format": "4-line blocks: name+number / om-namah / english transliteration / english meaning",
+      "source_attribution": "Vishnu Sahasranama - Sanskrit canonical text from namavali.txt and shlokas.txt",
+      "original_source_url": "https://github.com/rishivangapalli/hindu-scriptures-platform/tree/main/external/Vishnu-sahasranama",
+      "assistant_update_note": "Appended English \u015aa\u1e45kara Bh\u0101\u1e63ya lines for 222 high-confidence nama matches using sequence-first alignment against Vishnu-Sahasranama-Shankara.json. Telugu translations were not auto-filled to avoid mixing or hallucination because the uploaded \u015aa\u1e45kara source covers only 230 names and several nama segmentations differ."
+    },
+    "level_name_overrides": {
+      "Shloka": "Nama",
+      "Adhyaya": "Shloka"
+    },
+    "created_at": "2026-03-28T01:46:31.123468",
+    "updated_at": "2026-03-28T01:46:31.123468",
+    "schema": {
+      "id": 1,
+      "name": "Bhagavad Gita",
+      "levels": [
+        "Adhyaya",
+        "Shloka"
+      ]
+    }
+  },
+  {
+    "id": 245,
+    "book_name": "Valmiki Ramayana",
+    "book_code": "valmiki-ramayana",
+    "language_primary": "sanskrit",
+    "schema_id": 2,
+    "metadata_json": {
+      "status": "draft",
+      "visibility": "private",
+      "scrape_stats": {
+        "sargas_scraped": 534,
+        "warnings_count": 5,
+        "shlokas_scraped": 20083,
+        "kandas_requested": [
+          "aranya",
+          "ayodhya",
+          "baala",
+          "kish",
+          "sundara",
+          "yuddha"
+        ]
+      },
+      "scrape_warnings": [
+        "No sanskrit page in ayodhya/sarga0",
+        "No sanskrit page in ayodhya/sarga120",
+        "No sanskrit page in kish/sarga68",
+        "No sanskrit page in yuddha/sarga0",
+        "No sanskrit page in yuddha/sarga129"
+      ],
+      "extraction_notes": "Sarga Introduction mapped to English content. Word-to-word retained as provided.",
+      "source_attribution": "ValmikiRamayan.net",
+      "original_source_url": "https://www.valmikiramayan.net/utf8/"
+    },
+    "level_name_overrides": {},
+    "created_at": "2026-03-25T15:50:30.864478",
+    "updated_at": "2026-03-25T15:50:30.864478",
+    "schema": {
+      "id": 2,
+      "name": "Ramayana",
+      "levels": [
+        "Kanda",
+        "Sarga",
+        "Shloka"
+      ]
+    }
+  }
+]

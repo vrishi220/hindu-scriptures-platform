@@ -1383,6 +1383,32 @@ def _normalize_translation_map(value: object) -> dict[str, str]:
     return normalized
 
 
+def _normalize_variant_entries(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+
+    normalized: list[dict[str, str]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+
+        text = _as_clean_string(entry.get("text"))
+        if not text:
+            continue
+
+        normalized.append(
+            {
+                "author_slug": _as_clean_string(entry.get("author_slug")),
+                "author": _as_clean_string(entry.get("author")),
+                "language": _as_clean_string(entry.get("language")).lower(),
+                "field": _as_clean_string(entry.get("field")).lower(),
+                "text": text,
+            }
+        )
+
+    return normalized
+
+
 def _pick_preferred_translation_text(
     translations: dict[str, str],
     preferred_language: object,
@@ -1891,6 +1917,8 @@ def _build_template_context(
             "english": "",
             "text": "",
             "translations": {},
+            "translation_variants": [],
+            "commentary_variants": [],
             "word_meanings_rows": [],
         }
     else:
@@ -1974,6 +2002,8 @@ def _build_template_context(
             "english": _as_clean_string(english_text),
             "text": _as_clean_string(fallback_text),
             "translations": merged_translations,
+            "translation_variants": _normalize_variant_entries(content_data.get("translation_variants")),
+            "commentary_variants": _normalize_variant_entries(content_data.get("commentary_variants")),
             "word_meanings_rows": _resolve_word_meanings_rows(content_data, resolved_metadata),
         }
 
@@ -2214,6 +2244,8 @@ def _render_block_content_with_template(
 
     content["metadata"] = context.get("metadata", {})
     content["translations"] = _normalize_translation_map(context.get("translations"))
+    content["translation_variants"] = _normalize_variant_entries(context.get("translation_variants"))
+    content["commentary_variants"] = _normalize_variant_entries(context.get("commentary_variants"))
     content["word_meanings_rows"] = context.get("word_meanings_rows", [])
     content["media_items"] = item.get("media_items") if isinstance(item.get("media_items"), list) else []
 

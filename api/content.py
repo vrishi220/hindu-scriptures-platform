@@ -591,6 +591,7 @@ def _book_public_model(book: Book) -> BookPublic:
         "language_primary": book.language_primary,
         "metadata_json": metadata_out,
         "level_name_overrides": _book_level_name_overrides(book),
+        "variant_authors": book.variant_authors if isinstance(book.variant_authors, dict) else {},
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
         "schema": book.schema,
@@ -1069,6 +1070,10 @@ def update_book(
         if key == "metadata":
             metadata = dict(value) if isinstance(value, dict) else {}
         elif key == "level_name_overrides":
+            continue
+        elif key == "variant_authors":
+            if isinstance(value, dict):
+                book.variant_authors = {str(k): str(v) for k, v in value.items() if k and v}
             continue
         elif key == "status":
             normalized_status = str(value).strip().lower() if value else ""
@@ -2395,6 +2400,25 @@ def _import_canonical_json_v1(
         )
         db.add(book)
         db.flush()
+
+    canonical_variant_authors = (
+        canonical.book.variant_authors if isinstance(canonical.book.variant_authors, dict) else {}
+    )
+    if _force_reimport(payload):
+        book.variant_authors = {
+            str(slug): str(name)
+            for slug, name in canonical_variant_authors.items()
+            if str(slug).strip() and str(name).strip()
+        }
+    elif canonical_variant_authors:
+        existing_variant_authors = book.variant_authors if isinstance(book.variant_authors, dict) else {}
+        merged_variant_authors = dict(existing_variant_authors)
+        for slug, name in canonical_variant_authors.items():
+            slug_text = str(slug).strip()
+            name_text = str(name).strip()
+            if slug_text and name_text:
+                merged_variant_authors[slug_text] = name_text
+        book.variant_authors = merged_variant_authors
 
     level_lookup = {level: idx + 1 for idx, level in enumerate(schema.levels or [])}
     old_to_new_node_ids: dict[int, int] = {}

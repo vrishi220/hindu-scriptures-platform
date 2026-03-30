@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
   preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
   preview_show_english BOOLEAN NOT NULL DEFAULT true,
+  preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
   preview_transliteration_script VARCHAR(50) NOT NULL DEFAULT 'iast',
   preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline',
   created_at TIMESTAMP DEFAULT NOW(),
@@ -234,6 +235,7 @@ CREATE TABLE IF NOT EXISTS books (
   language_primary VARCHAR(50) DEFAULT 'sanskrit',
   metadata JSONB DEFAULT '{}'::jsonb,
   level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+  variant_authors JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT NOW()
 );
 

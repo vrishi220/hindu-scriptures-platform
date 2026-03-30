@@ -455,6 +455,7 @@ class BookBase(BaseModel):
     language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = Field(default=None, alias="metadata_json")
     level_name_overrides: dict[str, str] = Field(default_factory=dict)
+    variant_authors: dict[str, str] = Field(default_factory=dict)
     status: Literal["draft", "published"] = "draft"
     visibility: Literal["private", "public"] = "private"
 
@@ -470,6 +471,7 @@ class BookUpdate(BaseModel):
     language_primary: PrimaryLanguage | None = None
     metadata: dict | None = None
     level_name_overrides: dict[str, str] | None = None
+    variant_authors: dict[str, str] | None = None
     status: Literal["draft", "published"] | None = None
     visibility: Literal["private", "public"] | None = None
 
@@ -662,6 +664,7 @@ class BookExchangeBookV1(BaseModel):
     book_code: str | None = None
     language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = None
+    variant_authors: dict[str, str] = Field(default_factory=dict)
 
 
 class BookExchangePayloadV1(BaseModel):
@@ -892,6 +895,7 @@ class UserPreferenceBase(BaseModel):
     preview_show_sanskrit: bool = True
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
+    preview_show_commentary: bool = True
     preview_transliteration_script: str = "iast"
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] = "inline"
     preview_translation_languages: str = "english"
@@ -917,6 +921,7 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_sanskrit: bool | None = None
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
+    preview_show_commentary: bool | None = None
     preview_transliteration_script: str | None = None
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] | None = None
     preview_translation_languages: str | None = None

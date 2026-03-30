@@ -13,6 +13,7 @@ import requests
 
 
 CHAPTERS_URL = "https://vedicscriptures.github.io/chapters/"
+CHAPTER_URL_TEMPLATE = "https://vedicscriptures.github.io/chapter/{chapter}/"
 VERSE_URL_TEMPLATE = "https://vedicscriptures.github.io/slok/{chapter}/{verse}/"
 OUTPUT_FILE = Path(__file__).parent / "external" / "bhagavad_gita_vedicscriptures_raw.json"
 
@@ -42,6 +43,19 @@ def fetch_verse(chapter: int, verse: int) -> Optional[dict[str, Any]]:
         return None
 
 
+def fetch_chapter_details(chapter: int) -> Optional[dict[str, Any]]:
+    """Fetch detailed chapter metadata including multilingual meaning/summary."""
+    try:
+        url = CHAPTER_URL_TEMPLATE.format(chapter=chapter)
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else None
+    except Exception as e:
+        print(f"Error fetching chapter details {chapter}: {e}", file=sys.stderr)
+        return None
+
+
 def build_gita_json(chapters_meta: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Build a normalized JSON structure.
@@ -59,12 +73,31 @@ def build_gita_json(chapters_meta: list[dict[str, Any]]) -> dict[str, Any]:
 
         print(f"Fetching chapter {chapter_num} ({verse_count} verses)...", file=sys.stderr)
 
+        chapter_details = fetch_chapter_details(chapter_num) or {}
+
+        chapter_summary_map = chapter_details.get("summary") or chapter_meta.get("summary", {})
+        chapter_summary_en = ""
+        if isinstance(chapter_summary_map, dict):
+            chapter_summary_en = str(chapter_summary_map.get("en") or "").strip()
+        elif isinstance(chapter_summary_map, str):
+            chapter_summary_en = chapter_summary_map.strip()
+            chapter_summary_map = {"en": chapter_summary_en} if chapter_summary_en else {}
+
         chapter_data = {
             "chapter_number": chapter_num,
-            "chapter_summary": chapter_meta.get("chapter_summary", ""),
-            "name": chapter_meta.get("name", f"Chapter {chapter_num}"),
-            "transliterated_name": chapter_meta.get("transliterated_name", f"Adhyaya {chapter_num}"),
-            "name_sanskrit": chapter_meta.get("name_sanskrit", ""),
+            "verses_count": verse_count,
+            # Backward-compatible single-language field; prefer the English summary.
+            "chapter_summary": chapter_summary_en,
+            # Canonical multilingual summary map.
+            "summary": chapter_summary_map,
+            "meaning": chapter_details.get("meaning") or chapter_meta.get("meaning", ""),
+            "name": chapter_details.get("name") or chapter_meta.get("name", f"Chapter {chapter_num}"),
+            "translation": chapter_details.get("translation") or chapter_meta.get("translation", ""),
+            "transliteration": chapter_details.get("transliteration") or chapter_meta.get("transliterated_name", ""),
+            "transliterated_name": chapter_meta.get("transliterated_name")
+            or chapter_details.get("transliteration")
+            or f"Adhyaya {chapter_num}",
+            "name_sanskrit": chapter_meta.get("name_sanskrit") or chapter_details.get("name", ""),
             "verses": [],
         }
 

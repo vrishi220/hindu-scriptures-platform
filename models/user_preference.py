@@ -32,6 +32,7 @@ class UserPreference(Base):
     preview_show_sanskrit = Column(Boolean, default=True, nullable=False)
     preview_show_transliteration = Column(Boolean, default=True, nullable=False)
     preview_show_english = Column(Boolean, default=True, nullable=False)
+    preview_show_commentary = Column(Boolean, default=True, nullable=False)
     preview_transliteration_script = Column(String(20), default="iast", nullable=False)
     preview_word_meanings_display_mode = Column(String(10), default="inline", nullable=False)
     preview_translation_languages = Column(String(255), default="english", nullable=False)
