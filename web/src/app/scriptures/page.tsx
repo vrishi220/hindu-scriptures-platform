@@ -7310,6 +7310,10 @@ function ScripturesContent() {
     if (!urlInitialized || !bookId) {
       return;
     }
+    // Avoid rendering preview with default settings before persisted preview preferences hydrate.
+    if (!previewSettingsInitialized.current) {
+      return;
+    }
     if (showBookPreview || bookPreviewLoading) {
       return;
     }
