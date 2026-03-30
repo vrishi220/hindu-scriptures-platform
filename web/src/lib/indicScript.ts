@@ -105,9 +105,12 @@ const transliterateLatinToScript = (
     return source;
   }
 
-  for (const sourceScheme of getPreferredLatinSourceSchemes(source)) {
+  const normalizedSource = normalizeLegacyIastInput(source);
+  const scriptSource = isRomanScript(script) ? normalizedSource : normalizedSource.toLowerCase();
+
+  for (const sourceScheme of getPreferredLatinSourceSchemes(scriptSource)) {
     try {
-      const devanagari = Sanscript.t(source, sourceScheme, "devanagari");
+      const devanagari = Sanscript.t(scriptSource, sourceScheme, "devanagari");
       if (!hasDevanagariLetters(devanagari)) {
         continue;
       }
@@ -120,7 +123,7 @@ const transliterateLatinToScript = (
     }
   }
 
-  return script === "iast" ? normalizeLegacyIastInput(source) : source;
+  return script === "iast" ? normalizedSource : source;
 };
 
 export const transliterateFromIast = (
@@ -132,7 +135,8 @@ export const transliterateFromIast = (
   if (!targetScheme || targetScheme === "iast") {
     return normalizedInput;
   }
-  return transliterate(normalizedInput, "iast", targetScheme);
+  const scriptInput = isRomanScript(script) ? normalizedInput : normalizedInput.toLowerCase();
+  return transliterate(scriptInput, "iast", targetScheme);
 };
 
 export const transliterateLatinToIast = (text: string): string =>

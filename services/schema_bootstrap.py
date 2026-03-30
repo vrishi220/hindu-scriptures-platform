@@ -74,7 +74,8 @@ def ensure_phase1_schema(database_url: str) -> None:
         """,
         """
         ALTER TABLE IF EXISTS books
-            ADD COLUMN IF NOT EXISTS level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ADD COLUMN IF NOT EXISTS level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ADD COLUMN IF NOT EXISTS variant_authors JSONB NOT NULL DEFAULT '{}'::jsonb;
         """,
         """
         DO $$
@@ -127,6 +128,7 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            ADD COLUMN IF NOT EXISTS preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
             ADD COLUMN IF NOT EXISTS preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
             ADD COLUMN IF NOT EXISTS preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline';
         """,
@@ -153,6 +155,7 @@ def ensure_phase1_schema(database_url: str) -> None:
             preview_show_sanskrit BOOLEAN NOT NULL DEFAULT true,
             preview_show_transliteration BOOLEAN NOT NULL DEFAULT true,
             preview_show_english BOOLEAN NOT NULL DEFAULT true,
+            preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
             preview_transliteration_script VARCHAR(20) NOT NULL DEFAULT 'iast',
             preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline',
             scriptures_book_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
@@ -329,6 +332,41 @@ def ensure_phase1_schema(database_url: str) -> None:
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_commentary_entries_work_id ON commentary_entries(work_id);
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS content_renditions (
+            id SERIAL PRIMARY KEY,
+            node_id INTEGER NOT NULL REFERENCES content_nodes(id) ON DELETE CASCADE,
+            rendition_type TEXT NOT NULL,
+            author_id INTEGER REFERENCES commentary_authors(id) ON DELETE SET NULL,
+            work_id INTEGER REFERENCES commentary_works(id) ON DELETE SET NULL,
+            content_text TEXT NOT NULL,
+            language_code TEXT NOT NULL DEFAULT 'en',
+            script_code TEXT,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            metadata JSONB DEFAULT '{}'::jsonb,
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            last_modified_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            CONSTRAINT content_renditions_type_check
+                CHECK (rendition_type IN ('translation', 'commentary'))
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_content_renditions_node_id ON content_renditions(node_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_content_renditions_type ON content_renditions(rendition_type);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_content_renditions_author_id ON content_renditions(author_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_content_renditions_work_id ON content_renditions(work_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_content_renditions_lang_script ON content_renditions(language_code, script_code);
         """,
         """
         CREATE TABLE IF NOT EXISTS node_comments (

@@ -5,6 +5,7 @@ from uuid import uuid4
 from fastapi import status
 
 import api.content as content_api
+from models.book import Book
 from models.content_node import ContentNode
 from models.database import SessionLocal
 from models.import_job import ImportJob
@@ -319,6 +320,74 @@ class TestContentCoverageNextSliceCOV01:
             )
             assert len(nodes) == 2
             assert [node.title_english for node in nodes] == ["Original Chapter", "Appended Chapter"]
+        finally:
+            db.close()
+
+    def test_import_canonical_json_honors_book_variant_authors_registry(self):
+        db = SessionLocal()
+        try:
+            schema = _create_schema(db, "COV01 Canonical Variant Registry")
+            user = SimpleNamespace(id=1)
+            book_code = f"canonical-registry-{uuid4().hex[:6]}"
+
+            payload = {
+                "schema_version": "hsp-book-json-v1",
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Registry Book",
+                    "book_code": book_code,
+                    "language_primary": "sanskrit",
+                    "variant_authors": {
+                        "sac": "Swami Chinmayananda",
+                        "hic": "Sri Madhavacharya",
+                    },
+                },
+                "nodes": [
+                    {
+                        "node_id": 1,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "1",
+                        "title_english": "Chapter 1",
+                        "has_content": False,
+                    },
+                    {
+                        "node_id": 2,
+                        "parent_node_id": 1,
+                        "level_name": "Verse",
+                        "level_order": 1,
+                        "sequence_number": "1",
+                        "title_english": "Verse 1",
+                        "has_content": True,
+                        "content_data": {
+                            "translation_variants": [
+                                {
+                                    "author_slug": "sac",
+                                    "author": "Swami Chinmayananda",
+                                    "language": "en",
+                                    "field": "et",
+                                    "text": "Translation text",
+                                }
+                            ]
+                        },
+                    },
+                ],
+            }
+
+            result = content_api._import_canonical_json_v1(payload, db, user)
+            assert result.success is True
+            assert result.book_id is not None
+
+            book = db.query(Book).filter(Book.id == result.book_id).first()
+            assert book is not None
+            assert book.variant_authors == {
+                "sac": "Swami Chinmayananda",
+                "hic": "Sri Madhavacharya",
+            }
         finally:
             db.close()
 

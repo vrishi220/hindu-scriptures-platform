@@ -27,6 +27,7 @@ from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
 from models.commentary_entry import CommentaryEntry
+from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
@@ -42,6 +43,8 @@ from models.schemas import (
     BookSharePublic,
     BookShareUpdate,
     BookUpdate,
+    BulkTreeImportRequest,
+    BulkTreeImportResponse,
     ContentNodeCreate,
     ContentNodePublic,
     ContentNodeTree,
@@ -55,6 +58,9 @@ from models.schemas import (
     CommentaryWorkCreate,
     CommentaryWorkPublic,
     CommentaryWorkUpdate,
+    ContentRenditionCreate,
+    ContentRenditionPublic,
+    ContentRenditionUpdate,
     DraftLicensePolicyIssue,
     DraftLicensePolicyReport,
     MediaAssetPublic,
@@ -66,6 +72,7 @@ from models.schemas import (
     ScriptureSchemaCreate,
     ScriptureSchemaPublic,
     ScriptureSchemaUpdate,
+    TreeNodeImportItem,
     _validate_word_meanings_content_data,
 )
 from models.scripture_schema import ScriptureSchema
@@ -584,6 +591,7 @@ def _book_public_model(book: Book) -> BookPublic:
         "language_primary": book.language_primary,
         "metadata_json": metadata_out,
         "level_name_overrides": _book_level_name_overrides(book),
+        "variant_authors": book.variant_authors if isinstance(book.variant_authors, dict) else {},
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
         "schema": book.schema,
@@ -1062,6 +1070,10 @@ def update_book(
         if key == "metadata":
             metadata = dict(value) if isinstance(value, dict) else {}
         elif key == "level_name_overrides":
+            continue
+        elif key == "variant_authors":
+            if isinstance(value, dict):
+                book.variant_authors = {str(k): str(v) for k, v in value.items() if k and v}
             continue
         elif key == "status":
             normalized_status = str(value).strip().lower() if value else ""
@@ -2388,6 +2400,25 @@ def _import_canonical_json_v1(
         )
         db.add(book)
         db.flush()
+
+    canonical_variant_authors = (
+        canonical.book.variant_authors if isinstance(canonical.book.variant_authors, dict) else {}
+    )
+    if _force_reimport(payload):
+        book.variant_authors = {
+            str(slug): str(name)
+            for slug, name in canonical_variant_authors.items()
+            if str(slug).strip() and str(name).strip()
+        }
+    elif canonical_variant_authors:
+        existing_variant_authors = book.variant_authors if isinstance(book.variant_authors, dict) else {}
+        merged_variant_authors = dict(existing_variant_authors)
+        for slug, name in canonical_variant_authors.items():
+            slug_text = str(slug).strip()
+            name_text = str(name).strip()
+            if slug_text and name_text:
+                merged_variant_authors[slug_text] = name_text
+        book.variant_authors = merged_variant_authors
 
     level_lookup = {level: idx + 1 for idx, level in enumerate(schema.levels or [])}
     old_to_new_node_ids: dict[int, int] = {}
@@ -4757,6 +4788,407 @@ def delete_node_commentary(
     db.delete(entry)
     db.commit()
     return {"message": "Deleted"}
+
+
+@router.get("/renditions/authors", response_model=list[CommentaryAuthorPublic])
+def list_rendition_authors(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryAuthorPublic]:
+    return list_commentary_authors(q=q, limit=limit, offset=offset, db=db, current_user=current_user)
+
+
+@router.get("/renditions/works", response_model=list[CommentaryWorkPublic])
+def list_rendition_works(
+    q: str | None = Query(default=None),
+    author_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[CommentaryWorkPublic]:
+    return list_commentary_works(
+        q=q,
+        author_id=author_id,
+        limit=limit,
+        offset=offset,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.get("/nodes/{node_id}/renditions", response_model=list[ContentRenditionPublic])
+def list_node_renditions(
+    node_id: int,
+    rendition_type: Literal["translation", "commentary"] | None = Query(default=None),
+    language_code: str | None = Query(default=None),
+    script_code: str | None = Query(default=None),
+    author_id: int | None = Query(default=None),
+    work_id: int | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=300),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> list[ContentRenditionPublic]:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, node_book, current_user)
+
+    query = db.query(ContentRendition).filter(ContentRendition.node_id == node_id)
+    if rendition_type is not None:
+        query = query.filter(ContentRendition.rendition_type == rendition_type)
+    if language_code and language_code.strip():
+        query = query.filter(ContentRendition.language_code == language_code.strip().lower())
+    if script_code and script_code.strip():
+        query = query.filter(ContentRendition.script_code == script_code.strip().lower())
+    if author_id is not None:
+        query = query.filter(ContentRendition.author_id == author_id)
+    if work_id is not None:
+        query = query.filter(ContentRendition.work_id == work_id)
+
+    rows = (
+        query
+        .order_by(ContentRendition.display_order.asc(), ContentRendition.id.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return [ContentRenditionPublic.model_validate(item) for item in rows]
+
+
+@router.post(
+    "/nodes/{node_id}/renditions",
+    response_model=ContentRenditionPublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_node_rendition(
+    node_id: int,
+    payload: ContentRenditionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentRenditionPublic:
+    _ensure_can_contribute(current_user)
+    if payload.node_id != node_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="node_id mismatch")
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    text_value = payload.content_text.strip()
+    if not text_value:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+
+    if payload.author_id is not None:
+        author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == payload.author_id).first()
+        if not author:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+
+    if payload.work_id is not None:
+        work = db.query(CommentaryWork).filter(CommentaryWork.id == payload.work_id).first()
+        if not work:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+
+    language = payload.language_code.strip().lower() if payload.language_code else "en"
+    if not language:
+        language = "en"
+    script = payload.script_code.strip().lower() if payload.script_code else None
+
+    entry = ContentRendition(
+        node_id=node_id,
+        rendition_type=payload.rendition_type,
+        author_id=payload.author_id,
+        work_id=payload.work_id,
+        content_text=text_value,
+        language_code=language,
+        script_code=script,
+        display_order=payload.display_order,
+        metadata_json=payload.metadata or {},
+        created_by=current_user.id,
+        last_modified_by=current_user.id,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return ContentRenditionPublic.model_validate(entry)
+
+
+@router.patch("/nodes/{node_id}/renditions/{rendition_id}", response_model=ContentRenditionPublic)
+def update_node_rendition(
+    node_id: int,
+    rendition_id: int,
+    payload: ContentRenditionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentRenditionPublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    rendition = (
+        db.query(ContentRendition)
+        .filter(ContentRendition.id == rendition_id, ContentRendition.node_id == node_id)
+        .first()
+    )
+    if not rendition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "rendition_type" in updates:
+        rendition.rendition_type = updates["rendition_type"]
+
+    if "author_id" in updates:
+        next_author_id = updates.get("author_id")
+        if next_author_id is not None:
+            author = db.query(CommentaryAuthor).filter(CommentaryAuthor.id == next_author_id).first()
+            if not author:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid author_id")
+        rendition.author_id = next_author_id
+
+    if "work_id" in updates:
+        next_work_id = updates.get("work_id")
+        if next_work_id is not None:
+            work = db.query(CommentaryWork).filter(CommentaryWork.id == next_work_id).first()
+            if not work:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid work_id")
+        rendition.work_id = next_work_id
+
+    if "content_text" in updates:
+        text_value = (updates.get("content_text") or "").strip()
+        if not text_value:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_text is required")
+        rendition.content_text = text_value
+
+    if "language_code" in updates:
+        language = (updates.get("language_code") or "").strip().lower()
+        if not language:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="language_code is required")
+        rendition.language_code = language
+
+    if "script_code" in updates:
+        script = updates.get("script_code")
+        script_value = script.strip().lower() if isinstance(script, str) else None
+        rendition.script_code = script_value
+
+    if "display_order" in updates:
+        rendition.display_order = int(updates["display_order"])
+
+    if "metadata" in updates:
+        rendition.metadata_json = updates["metadata"] or {}
+
+    rendition.last_modified_by = current_user.id
+    db.commit()
+    db.refresh(rendition)
+    return ContentRenditionPublic.model_validate(rendition)
+
+
+@router.delete("/nodes/{node_id}/renditions/{rendition_id}", response_model=dict)
+def delete_node_rendition(
+    node_id: int,
+    rendition_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_node_edit_access(db, current_user, node)
+
+    rendition = (
+        db.query(ContentRendition)
+        .filter(ContentRendition.id == rendition_id, ContentRendition.node_id == node_id)
+        .first()
+    )
+    if not rendition:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    db.delete(rendition)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+@router.post("/books/{book_id}/import-tree", response_model=BulkTreeImportResponse, status_code=status.HTTP_201_CREATED)
+def import_tree_nodes(
+    book_id: int,
+    payload: BulkTreeImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BulkTreeImportResponse:
+    """
+    Import hierarchical node tree from scripture importer.
+    Accepts chapters with verse children, creates content_nodes preserving hierarchy.
+    
+    Args:
+        book_id: Target book ID
+        payload: BulkTreeImportRequest with:
+            - nodes: List of top-level nodes (chapters) with children (verses)
+            - clear_existing: Clear all existing nodes before import
+            - language_code: Language for created nodes
+            - license_type: License for imported content
+    
+    Returns:
+        BulkTreeImportResponse with creation counts and any errors/warnings
+    """
+    _ensure_can_contribute(current_user)
+    
+    # Verify book exists and user has edit access
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            errors=["Book not found"]
+        )
+    
+    try:
+        _ensure_book_edit_access(db, current_user, book)
+    except HTTPException as e:
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            errors=[e.detail]
+        )
+    
+    # Optional: Clear existing nodes
+    if payload.clear_existing:
+        try:
+            db.query(ContentNode).filter(ContentNode.book_id == book_id).delete(synchronize_session=False)
+            db.commit()
+        except Exception as e:
+            return BulkTreeImportResponse(
+                success=False,
+                book_id=book_id,
+                errors=[f"Failed to clear existing nodes: {str(e)}"]
+            )
+    
+    # Get schema info for validation
+    schema_levels = (
+        book.schema.levels
+        if book.schema and isinstance(book.schema.levels, list)
+        else []
+    )
+    level_name_overrides = _book_level_name_overrides(book)
+    
+    chapters_created = 0
+    verses_created = 0
+    errors = []
+    warnings = []
+    
+    try:
+        # Process each chapter (top-level node)
+        for chapter_idx, chapter_item in enumerate(payload.nodes, start=1):
+            try:
+                # Convert sequence_number to integer (auto-generate if needed)
+                chapter_seq = chapter_idx
+                if chapter_item.sequence_number:
+                    seq_str = str(chapter_item.sequence_number).strip()
+                    if seq_str.isdigit():
+                        chapter_seq = int(seq_str)
+                
+                # Create chapter node
+                chapter_node = ContentNode(
+                    book_id=book_id,
+                    parent_node_id=None,
+                    level_name=chapter_item.level_name,
+                    level_order=chapter_item.level_order,
+                    sequence_number=chapter_seq,
+                    title_sanskrit=chapter_item.title_sanskrit,
+                    title_transliteration=chapter_item.title_transliteration,
+                    title_english=chapter_item.title_english,
+                    title_hindi=chapter_item.title_hindi,
+                    title_tamil=chapter_item.title_tamil,
+                    has_content=chapter_item.has_content,
+                    content_data=chapter_item.content_data or {},
+                    summary_data=chapter_item.summary_data or {},
+                    metadata_json=chapter_item.metadata_json or {},
+                    source_attribution=chapter_item.source_attribution,
+                    license_type=payload.license_type,
+                    original_source_url=chapter_item.original_source_url,
+                    tags=chapter_item.tags or [],
+                    language_code=payload.language_code,
+                    created_by=current_user.id,
+                    last_modified_by=current_user.id,
+                )
+                db.add(chapter_node)
+                db.flush()  # Get chapter_node.id for child references
+                chapters_created += 1
+                
+                # Process child nodes (verses)
+                for verse_idx, verse_item in enumerate(chapter_item.children, start=1):
+                    try:
+                        # Convert sequence_number to integer (auto-generate if needed)
+                        verse_seq = verse_idx
+                        if verse_item.sequence_number:
+                            seq_str = str(verse_item.sequence_number).strip()
+                            # Extract just the last numeric part (e.g., "1.1" → 1, "1" → 1)
+                            if '.' in seq_str:
+                                seq_str = seq_str.split('.')[-1]
+                            if seq_str.isdigit():
+                                verse_seq = int(seq_str)
+                        
+                        verse_node = ContentNode(
+                            book_id=book_id,
+                            parent_node_id=chapter_node.id,
+                            level_name=verse_item.level_name,
+                            level_order=verse_item.level_order,
+                            sequence_number=verse_seq,
+                            title_sanskrit=verse_item.title_sanskrit,
+                            title_transliteration=verse_item.title_transliteration,
+                            title_english=verse_item.title_english,
+                            title_hindi=verse_item.title_hindi,
+                            title_tamil=verse_item.title_tamil,
+                            has_content=verse_item.has_content,
+                            content_data=verse_item.content_data or {},
+                            summary_data=verse_item.summary_data or {},
+                            metadata_json=verse_item.metadata_json or {},
+                            source_attribution=verse_item.source_attribution,
+                            license_type=payload.license_type,
+                            original_source_url=verse_item.original_source_url,
+                            tags=verse_item.tags or [],
+                            language_code=payload.language_code,
+                            created_by=current_user.id,
+                            last_modified_by=current_user.id,
+                        )
+                        db.add(verse_node)
+                        verses_created += 1
+                    except Exception as e:
+                        errors.append(f"Error creating verse {verse_idx} in chapter {chapter_item.sequence_number}: {str(e)}")
+                
+            except Exception as e:
+                errors.append(f"Error creating chapter {chapter_item.sequence_number}: {str(e)}")
+        
+        # Commit all changes
+        db.commit()
+        
+        return BulkTreeImportResponse(
+            success=len(errors) == 0,
+            book_id=book_id,
+            chapters_created=chapters_created,
+            verses_created=verses_created,
+            total_nodes_created=chapters_created + verses_created,
+            warnings=warnings,
+            errors=errors,
+        )
+        
+    except Exception as e:
+        db.rollback()
+        return BulkTreeImportResponse(
+            success=False,
+            book_id=book_id,
+            chapters_created=chapters_created,
+            verses_created=verses_created,
+            total_nodes_created=chapters_created + verses_created,
+            errors=[f"Fatal error during import: {str(e)}"],
+        )
 
 
 @router.get("/nodes/{node_id}/comments", response_model=list[NodeCommentPublic])

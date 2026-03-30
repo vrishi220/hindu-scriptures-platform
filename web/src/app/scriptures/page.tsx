@@ -93,6 +93,7 @@ type BookDetails = {
   book_name: string;
   schema_id: number | null;
   level_name_overrides?: Record<string, string>;
+  variant_authors?: Record<string, string>;
   status?: "draft" | "published";
   visibility?: "private" | "public";
   metadata_json?: {
@@ -175,6 +176,20 @@ type NodeContent = {
       translation?: string;
     };
     translations?: Record<string, string>;
+    translation_variants?: Array<{
+      author_slug?: string;
+      author?: string;
+      language?: string;
+      field?: string;
+      text?: string;
+    }>;
+    commentary_variants?: Array<{
+      author_slug?: string;
+      author?: string;
+      language?: string;
+      field?: string;
+      text?: string;
+    }>;
     word_meanings?: {
       version?: string;
       rows?: Array<{
@@ -351,6 +366,14 @@ type CommentaryDisplayItem = {
   text: string;
 };
 
+type AuthorVariantDraft = {
+  author_slug: string;
+  author: string;
+  language: string;
+  field: string;
+  text: string;
+};
+
 type NodeComment = {
   id: number;
   node_id: number;
@@ -379,6 +402,20 @@ type BookPreviewBlock = {
     transliteration?: string;
     english?: string;
     translations?: Record<string, string>;
+    translation_variants?: Array<{
+      author_slug?: string;
+      author?: string;
+      language?: string;
+      field?: string;
+      text?: string;
+    }>;
+    commentary_variants?: Array<{
+      author_slug?: string;
+      author?: string;
+      language?: string;
+      field?: string;
+      text?: string;
+    }>;
     text?: string;
     rendered_lines?: Array<{
       field?: string;
@@ -426,6 +463,7 @@ type BookPreviewLanguageSettings = {
   show_sanskrit: boolean;
   show_transliteration: boolean;
   show_english: boolean;
+  show_commentary: boolean;
 };
 
 type BookPreviewArtifact = {
@@ -1348,6 +1386,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   preview_show_sanskrit: true,
   preview_show_transliteration: true,
   preview_show_english: true,
+  preview_show_commentary: true,
   preview_transliteration_script: "iast",
   preview_word_meanings_display_mode: "inline",
   preview_translation_languages: "english",
@@ -1400,8 +1439,12 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
 
 const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
 const PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY = "scriptures.preview.showBookSummary";
+const PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY = "scriptures.preview.fontSizePercent";
 const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
 const IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES = 512 * 1024;
+const PREVIEW_FONT_SIZE_PERCENT_MIN = 75;
+const PREVIEW_FONT_SIZE_PERCENT_MAX = 200;
+const PREVIEW_FONT_SIZE_PERCENT_STEP = 5;
 
 const EDITABLE_TRANSLATION_LANGUAGES = [
   "english",
@@ -1414,6 +1457,8 @@ const EDITABLE_TRANSLATION_LANGUAGES = [
 ] as const;
 
 type EditableTranslationLanguage = (typeof EDITABLE_TRANSLATION_LANGUAGES)[number];
+
+type AuthorVariantKind = "translation" | "commentary";
 
 const sortEditableTranslationLanguages = (
   values: EditableTranslationLanguage[]
@@ -1440,6 +1485,47 @@ const translationLanguageLabel = (value?: string | null): string => {
   return TRANSLATION_LANGUAGE_LABELS[canonical] || canonical.toUpperCase();
 };
 
+const SORTED_EDITABLE_TRANSLATION_LANGUAGES: EditableTranslationLanguage[] =
+  sortEditableTranslationLanguages([...EDITABLE_TRANSLATION_LANGUAGES]);
+
+const LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL: Record<string, string> = {
+  e: "english",
+  h: "hindi",
+  k: "kannada",
+  m: "malayalam",
+  s: "sanskrit",
+  t: "tamil",
+};
+
+const getVariantKindSuffix = (kind: AuthorVariantKind): string =>
+  kind === "translation" ? "t" : "c";
+
+const deriveVariantLanguageFromField = (field?: string | null): string => {
+  const normalizedField = (field || "").trim().toLowerCase();
+  if (!normalizedField) {
+    return "";
+  }
+
+  const base = normalizedField.replace(/[tc]$/, "");
+  if (!base) {
+    return "";
+  }
+
+  if (base in LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL) {
+    return LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL[base];
+  }
+
+  return normalizeTranslationLanguage(base);
+};
+
+const buildVariantFieldCode = (language: string, kind: AuthorVariantKind): string => {
+  const normalizedLanguage = normalizeTranslationLanguage(language || "");
+  if (!normalizedLanguage) {
+    return "";
+  }
+  return `${translationLanguageToCode(normalizedLanguage)}${getVariantKindSuffix(kind)}`;
+};
+
 const toTranslationRecord = (value: unknown): Record<string, string> => {
   if (!value || typeof value !== "object") {
     return {};
@@ -1455,6 +1541,96 @@ const toTranslationRecord = (value: unknown): Record<string, string> => {
     record[key.trim().toLowerCase()] = rawValue.trim();
   }
   return record;
+};
+
+const normalizeAuthorVariantDrafts = (
+  value: unknown,
+  kind: AuthorVariantKind,
+): AuthorVariantDraft[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const objectEntry = entry as Record<string, unknown>;
+      const text = typeof objectEntry.text === "string" ? objectEntry.text.trim() : "";
+      if (!text) {
+        return null;
+      }
+      const rawLanguage =
+        typeof objectEntry.language === "string"
+          ? normalizeTranslationLanguage(objectEntry.language)
+          : "";
+      const rawField =
+        typeof objectEntry.field === "string" ? objectEntry.field.trim().toLowerCase() : "";
+      const resolvedLanguage = rawLanguage || deriveVariantLanguageFromField(rawField);
+      return {
+        author_slug:
+          typeof objectEntry.author_slug === "string" ? objectEntry.author_slug.trim() : "",
+        author: typeof objectEntry.author === "string" ? objectEntry.author.trim() : "",
+        language: resolvedLanguage,
+        field: buildVariantFieldCode(resolvedLanguage, kind),
+        text,
+      };
+    })
+    .filter((entry): entry is AuthorVariantDraft => Boolean(entry));
+};
+
+const buildEmptyAuthorVariantDraft = (): AuthorVariantDraft => ({
+  author_slug: "",
+  author: "",
+  language: "",
+  field: "",
+  text: "",
+});
+
+const getVariantAuthorOptions = (
+  book: BookDetails | null | undefined,
+  entry: AuthorVariantDraft,
+): Array<{ slug: string; name: string }> => {
+  const options = Object.entries(book?.variant_authors ?? {})
+    .map(([slug, name]) => ({
+      slug: slug.trim(),
+      name: typeof name === "string" ? name.trim() : "",
+    }))
+    .filter((option) => option.slug && option.name)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  if (entry.author_slug && !options.some((option) => option.slug === entry.author_slug)) {
+    options.unshift({
+      slug: entry.author_slug,
+      name: entry.author || entry.author_slug,
+    });
+  }
+
+  return options;
+};
+
+const applyVariantAuthorSelection = (
+  entry: AuthorVariantDraft,
+  slug: string,
+  book: BookDetails | null | undefined,
+): AuthorVariantDraft => ({
+  ...entry,
+  author_slug: slug,
+  author: slug ? book?.variant_authors?.[slug] || entry.author || "" : "",
+});
+
+const applyVariantLanguageSelection = (
+  entry: AuthorVariantDraft,
+  language: string,
+  kind: AuthorVariantKind,
+): AuthorVariantDraft => {
+  const normalizedLanguage = normalizeTranslationLanguage(language || "");
+  return {
+    ...entry,
+    language: normalizedLanguage,
+    field: buildVariantFieldCode(normalizedLanguage, kind),
+  };
 };
 
 const getTranslationLookupKeys = (language: string): string[] => {
@@ -1625,6 +1801,20 @@ const parseStoredHiddenPreviewLevels = (value: unknown): Set<string> => {
   return new Set<string>();
 };
 
+const normalizePreviewFontSizePercent = (value: unknown): number => {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseInt(value, 10)
+        : NaN;
+  if (!Number.isFinite(parsed)) {
+    return 100;
+  }
+  const stepped = Math.round(parsed / PREVIEW_FONT_SIZE_PERCENT_STEP) * PREVIEW_FONT_SIZE_PERCENT_STEP;
+  return Math.min(PREVIEW_FONT_SIZE_PERCENT_MAX, Math.max(PREVIEW_FONT_SIZE_PERCENT_MIN, stepped));
+};
+
 const serializeHiddenPreviewLevels = (values: Set<string>): string =>
   [...values].map((item) => item.trim()).filter(Boolean).join(",");
 
@@ -1688,6 +1878,7 @@ const normalizePreferences = (value: Partial<UserPreferences> | null | undefined
   preview_show_sanskrit: value?.preview_show_sanskrit ?? true,
   preview_show_transliteration: value?.preview_show_transliteration ?? true,
   preview_show_english: value?.preview_show_english ?? true,
+  preview_show_commentary: value?.preview_show_commentary ?? true,
   preview_transliteration_script: normalizeTransliterationScript(
     value?.preview_transliteration_script
   ),
@@ -2089,6 +2280,10 @@ function ScripturesContent() {
     );
   const [inlineSelectedTranslationLanguages, setInlineSelectedTranslationLanguages] =
     useState<EditableTranslationLanguage[]>(["english"]);
+  const [inlineTranslationVariants, setInlineTranslationVariants] =
+    useState<AuthorVariantDraft[]>([]);
+  const [inlineCommentaryVariants, setInlineCommentaryVariants] =
+    useState<AuthorVariantDraft[]>([]);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showCreateBook, setShowCreateBook] = useState(false);
@@ -2108,6 +2303,7 @@ function ScripturesContent() {
       show_sanskrit: true,
       show_transliteration: true,
       show_english: true,
+      show_commentary: true,
     });
   const [previewTranslationLanguages, setPreviewTranslationLanguages] =
     useState<EditableTranslationLanguage[]>(["english"]);
@@ -2117,6 +2313,7 @@ function ScripturesContent() {
       show_sanskrit: true,
       show_transliteration: true,
       show_english: true,
+      show_commentary: true,
     });
   const [appliedPreviewTranslationLanguages, setAppliedPreviewTranslationLanguages] =
     useState<EditableTranslationLanguage[]>(["english"]);
@@ -2130,9 +2327,13 @@ function ScripturesContent() {
   const [showPreviewBookSummary, setShowPreviewBookSummary] = useState(true);
   const [previewWordMeaningsDisplayMode, setPreviewWordMeaningsDisplayMode] =
     useState<"inline" | "table" | "hide">("inline");
+  const [previewFontSizePercent, setPreviewFontSizePercent] = useState(100);
   // Level visibility filter (client-side, per-preview session)
   const [hiddenPreviewLevels, setHiddenPreviewLevels] = useState<Set<string>>(new Set());
   const [appliedHiddenPreviewLevels, setAppliedHiddenPreviewLevels] = useState<Set<string>>(new Set());
+  // Author filter for variant translations/commentaries (empty = all authors)
+  const [previewVariantAuthorSlugs, setPreviewVariantAuthorSlugs] = useState<string[]>([]);
+  const [appliedPreviewVariantAuthorSlugs, setAppliedPreviewVariantAuthorSlugs] = useState<string[]>([]);
   // Track the last applied preview options
   const [appliedShowPreviewLabels, setAppliedShowPreviewLabels] = useState(false);
   const [appliedShowPreviewLevelNumbers, setAppliedShowPreviewLevelNumbers] = useState(false);
@@ -2141,9 +2342,13 @@ function ScripturesContent() {
   const [appliedShowPreviewMedia, setAppliedShowPreviewMedia] = useState(true);
   const [appliedPreviewWordMeaningsDisplayMode, setAppliedPreviewWordMeaningsDisplayMode] =
     useState<"inline" | "table" | "hide">("inline");
+  const [appliedPreviewFontSizePercent, setAppliedPreviewFontSizePercent] = useState(100);
   const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [showPreviewControls, setShowPreviewControls] = useState(false);
+  const [previewControlsTab, setPreviewControlsTab] = useState<"content" | "translations">(
+    "content"
+  );
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [bookBrowseMediaSearchQuery, setBookBrowseMediaSearchQuery] = useState("");
@@ -2156,6 +2361,10 @@ function ScripturesContent() {
     );
   const [modalSelectedTranslationLanguages, setModalSelectedTranslationLanguages] =
     useState<EditableTranslationLanguage[]>(["english"]);
+  const [modalTranslationVariants, setModalTranslationVariants] =
+    useState<AuthorVariantDraft[]>([]);
+  const [modalCommentaryVariants, setModalCommentaryVariants] =
+    useState<AuthorVariantDraft[]>([]);
   const [createBookStep, setCreateBookStep] = useState<"schema" | "details">("schema");
   const [bookFormData, setBookFormData] = useState({
     bookName: "",
@@ -2197,6 +2406,11 @@ function ScripturesContent() {
   const [levelNameOverridesError, setLevelNameOverridesError] = useState<string | null>(null);
   const [levelNameOverridesMessage, setLevelNameOverridesMessage] = useState<string | null>(null);
   const [propertiesName, setPropertiesName] = useState("");
+  // Variant authors registry editor inside Book Properties panel
+  const [variantAuthorsRegistry, setVariantAuthorsRegistry] = useState<Array<{slug: string; name: string}>>([]);
+  const [variantAuthorsSaving, setVariantAuthorsSaving] = useState(false);
+  const [variantAuthorsError, setVariantAuthorsError] = useState<string | null>(null);
+  const [variantAuthorsMessage, setVariantAuthorsMessage] = useState<string | null>(null);
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
@@ -3066,10 +3280,17 @@ function ScripturesContent() {
           ? metadata.title_transliteration
           : ""
       );
+      const existingRegistry = currentBook?.variant_authors ?? {};
+      setVariantAuthorsRegistry(
+        Object.entries(existingRegistry).map(([slug, name]) => ({ slug, name: name as string }))
+      );
+      setVariantAuthorsError(null);
+      setVariantAuthorsMessage(null);
     } else {
       setPropertiesBookTitleEnglish("");
       setPropertiesBookTitleSanskrit("");
       setPropertiesBookTitleTransliteration("");
+      setVariantAuthorsRegistry([]);
     }
     setPropertiesLoading(true);
     setPropertiesSaving(false);
@@ -3503,6 +3724,53 @@ function ScripturesContent() {
       setLevelTemplateError(err instanceof Error ? err.message : "Failed to assign template");
     } finally {
       setLevelTemplateSaving(false);
+    }
+  };
+
+  const handleSaveVariantAuthors = async () => {
+    if (!bookId) return;
+    // Validate: slugs must be non-empty and unique
+    const seen = new Set<string>();
+    for (const row of variantAuthorsRegistry) {
+      const slug = row.slug.trim();
+      if (!slug) {
+        setVariantAuthorsError("All author slugs must be non-empty");
+        return;
+      }
+      if (seen.has(slug)) {
+        setVariantAuthorsError(`Duplicate slug: "${slug}"`);
+        return;
+      }
+      seen.add(slug);
+    }
+    const registry: Record<string, string> = {};
+    for (const row of variantAuthorsRegistry) {
+      registry[row.slug.trim()] = row.name.trim();
+    }
+    setVariantAuthorsSaving(true);
+    setVariantAuthorsError(null);
+    setVariantAuthorsMessage(null);
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ variant_authors: registry }),
+      });
+      const payload = (await response.json().catch(() => null)) as BookDetails | { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to save author registry");
+      }
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((b) => (b.id === updatedBook.id ? { ...b, variant_authors: updatedBook.variant_authors } : b))
+      );
+      setVariantAuthorsMessage("Saved");
+    } catch (err) {
+      setVariantAuthorsError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setVariantAuthorsSaving(false);
     }
   };
 
@@ -4350,6 +4618,14 @@ function ScripturesContent() {
   const hasEffectiveBookPreviewSummary =
     bookPreviewArtifact?.preview_scope === "book" &&
     Boolean(bookPreviewArtifact.book_template?.rendered_text?.trim());
+  const previewBodyFontSizeRem = (0.875 * appliedPreviewFontSizePercent) / 100;
+  const previewBodyTextStyle = useMemo(
+    () => ({
+      fontSize: `${previewBodyFontSizeRem.toFixed(3)}rem`,
+      lineHeight: 1.75,
+    }),
+    [previewBodyFontSizeRem]
+  );
 
   const renderTransliterationByPreference = (value: string): string => {
     if (!value) return "";
@@ -4380,6 +4656,7 @@ function ScripturesContent() {
       show_sanskrit: preferences.preview_show_sanskrit,
       show_transliteration: preferences.preview_show_transliteration,
       show_english: preferences.preview_show_english,
+      show_commentary: preferences.preview_show_commentary,
     };
 
     setShowPreviewTitles(preferences.preview_show_titles);
@@ -4468,6 +4745,16 @@ function ScripturesContent() {
       showPreviewBookSummary ? "true" : "false"
     );
   }, [showPreviewBookSummary]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const stored = window.localStorage.getItem(PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY);
+    const normalized = normalizePreviewFontSizePercent(stored);
+    setPreviewFontSizePercent(normalized);
+    setAppliedPreviewFontSizePercent(normalized);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -6886,9 +7173,17 @@ function ScripturesContent() {
       setAppliedShowPreviewTitles(nextShowPreviewTitles);
       setAppliedShowPreviewMedia(nextShowPreviewMedia);
       setAppliedPreviewWordMeaningsDisplayMode(nextPreviewWordMeaningsDisplayMode);
+      setAppliedPreviewFontSizePercent(previewFontSizePercent);
       setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
       setAppliedPreviewTranslationLanguages(resolvedPreviewTranslationLanguages);
       setAppliedHiddenPreviewLevels(nextHiddenPreviewLevels);
+      setAppliedPreviewVariantAuthorSlugs(previewVariantAuthorSlugs);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY,
+          String(normalizePreviewFontSizePercent(previewFontSizePercent))
+        );
+      }
       if (typeof window !== "undefined" && !authEmail) {
         window.localStorage.setItem(
           PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY,
@@ -6907,6 +7202,7 @@ function ScripturesContent() {
           preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
           preview_show_transliteration: nextLanguageSettings.show_transliteration,
           preview_show_english: nextLanguageSettings.show_english,
+          preview_show_commentary: nextLanguageSettings.show_commentary,
           preview_transliteration_script: nextPreviewTransliterationScript,
           preview_word_meanings_display_mode: nextPreviewWordMeaningsDisplayMode,
           preview_translation_languages: serializePreviewTranslationLanguages(
@@ -7848,8 +8144,6 @@ function ScripturesContent() {
       );
       const effectivePreviewLanguageSettings = {
         ...activePreviewLanguageSettings,
-        show_english:
-          activePreviewLanguageSettings.show_english || resolvedPreviewTranslationLanguages.length > 0,
       };
       const exportNodeId =
         options?.respectCurrentPreviewScope &&
@@ -7996,6 +8290,21 @@ function ScripturesContent() {
     };
   };
 
+  const buildVariantEditorStateFromNode = (node: NodeContent) => {
+    const translationVariants = normalizeAuthorVariantDrafts(
+      node.content_data?.translation_variants,
+      "translation"
+    );
+    const commentaryVariants = normalizeAuthorVariantDrafts(
+      node.content_data?.commentary_variants,
+      "commentary"
+    );
+    return {
+      translationVariants,
+      commentaryVariants,
+    };
+  };
+
   const normalizeInlineFormForCompare = (value: {
     levelName: string;
     titleSanskrit: string;
@@ -8048,13 +8357,23 @@ function ScripturesContent() {
       baselineTranslationState.drafts,
       baselineTranslationState.selectedLanguages
     );
+    const baselineVariantState = buildVariantEditorStateFromNode(nodeContent);
+    const baselineVariants = {
+      translation: normalizeAuthorVariantDrafts(baselineVariantState.translationVariants, "translation"),
+      commentary: normalizeAuthorVariantDrafts(baselineVariantState.commentaryVariants, "commentary"),
+    };
     const currentTranslations = normalizeTranslationDraftsForCompare(
       inlineTranslationDrafts,
       inlineSelectedTranslationLanguages
     );
+    const currentVariants = {
+      translation: normalizeAuthorVariantDrafts(inlineTranslationVariants, "translation"),
+      commentary: normalizeAuthorVariantDrafts(inlineCommentaryVariants, "commentary"),
+    };
     return (
       JSON.stringify(baseline) !== JSON.stringify(current) ||
-      JSON.stringify(baselineTranslations) !== JSON.stringify(currentTranslations)
+      JSON.stringify(baselineTranslations) !== JSON.stringify(currentTranslations) ||
+      JSON.stringify(baselineVariants) !== JSON.stringify(currentVariants)
     );
   }
 
@@ -8120,6 +8439,9 @@ function ScripturesContent() {
       const translationState = buildTranslationEditorStateFromNode(nodeContent);
       setInlineTranslationDrafts(translationState.drafts);
       setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
+      const variantState = buildVariantEditorStateFromNode(nodeContent);
+      setInlineTranslationVariants(variantState.translationVariants);
+      setInlineCommentaryVariants(variantState.commentaryVariants);
     }
   }, [nodeContent]);
 
@@ -8523,6 +8845,18 @@ function ScripturesContent() {
         contentData.translations = Object.keys(nextTranslations).length > 0
           ? nextTranslations
           : undefined;
+        const normalizedTranslationVariants = normalizeAuthorVariantDrafts(
+          modalTranslationVariants,
+          "translation"
+        );
+        const normalizedCommentaryVariants = normalizeAuthorVariantDrafts(
+          modalCommentaryVariants,
+          "commentary"
+        );
+        contentData.translation_variants =
+          normalizedTranslationVariants.length > 0 ? normalizedTranslationVariants : undefined;
+        contentData.commentary_variants =
+          normalizedCommentaryVariants.length > 0 ? normalizedCommentaryVariants : undefined;
 
         const wordMeaningRows = modalWordMeaningPayloadRows;
         const validationErrors = validateWordMeaningPayloadRows(wordMeaningRows);
@@ -8675,6 +9009,8 @@ function ScripturesContent() {
           setModalSelectedTranslationLanguages(
             normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
           );
+          setModalTranslationVariants([]);
+          setModalCommentaryVariants([]);
         } else {
           // Reset form and close modal
           setAction(null);
@@ -8699,6 +9035,8 @@ function ScripturesContent() {
           setModalSelectedTranslationLanguages(
             normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
           );
+          setModalTranslationVariants([]);
+          setModalCommentaryVariants([]);
         }
         // Refresh tree without losing context
         if (bookId) {
@@ -8823,6 +9161,18 @@ function ScripturesContent() {
         contentData.translations = Object.keys(nextTranslations).length > 0
           ? nextTranslations
           : undefined;
+        const normalizedTranslationVariants = normalizeAuthorVariantDrafts(
+          inlineTranslationVariants,
+          "translation"
+        );
+        const normalizedCommentaryVariants = normalizeAuthorVariantDrafts(
+          inlineCommentaryVariants,
+          "commentary"
+        );
+        contentData.translation_variants =
+          normalizedTranslationVariants.length > 0 ? normalizedTranslationVariants : undefined;
+        contentData.commentary_variants =
+          normalizedCommentaryVariants.length > 0 ? normalizedCommentaryVariants : undefined;
 
         const wordMeaningRows = inlineWordMeaningPayloadRows;
 
@@ -8917,6 +9267,9 @@ function ScripturesContent() {
     const translationState = buildTranslationEditorStateFromNode(nodeContent);
     setInlineTranslationDrafts(translationState.drafts);
     setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
+    const variantState = buildVariantEditorStateFromNode(nodeContent);
+    setInlineTranslationVariants(variantState.translationVariants);
+    setInlineCommentaryVariants(variantState.commentaryVariants);
     setInlineMessage(null);
     setInlineEditMode(true);
   };
@@ -8927,6 +9280,9 @@ function ScripturesContent() {
       const translationState = buildTranslationEditorStateFromNode(nodeContent);
       setInlineTranslationDrafts(translationState.drafts);
       setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
+      const variantState = buildVariantEditorStateFromNode(nodeContent);
+      setInlineTranslationVariants(variantState.translationVariants);
+      setInlineCommentaryVariants(variantState.commentaryVariants);
     }
     setInlineMessage(null);
     setInlineEditMode(false);
@@ -9221,6 +9577,8 @@ function ScripturesContent() {
                 setModalSelectedTranslationLanguages(
                   normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
                 );
+                setModalTranslationVariants([]);
+                setModalCommentaryVariants([]);
                 setAction("add");
               }}
               title={`Add ${getDisplayLevelName(getNextLevelName(node))}`}
@@ -9349,6 +9707,27 @@ function ScripturesContent() {
   const loadedBookCount = filteredBooks.length;
   const isInitialBooksLoad = bookLoadingMore && loadedBookCount === 0;
 
+  // Derive unique variant authors from the current preview artifact, resolved against the book registry
+  const availableVariantAuthors = useMemo<Map<string, string>>(() => {
+    const map = new Map<string, string>();
+    const registry = currentBook?.variant_authors ?? {};
+    for (const block of bookPreviewArtifact?.sections?.body ?? []) {
+      const tv = Array.isArray(block.content?.translation_variants) ? block.content.translation_variants : [];
+      const cv = Array.isArray(block.content?.commentary_variants) ? block.content.commentary_variants : [];
+      for (const v of [...tv, ...cv]) {
+        const slug = (v?.author_slug || "").trim();
+        if (!slug || map.has(slug)) continue;
+        const name = registry[slug] || (v?.author || "").trim() || slug;
+        map.set(slug, name);
+      }
+    }
+    return new Map(
+      [...map.entries()].sort((left, right) =>
+        left[1].localeCompare(right[1], undefined, { sensitivity: "base" })
+      )
+    );
+  }, [bookPreviewArtifact, currentBook?.variant_authors]);
+
   const previewBodyBlockElements = useMemo(() => {
     if (!bookPreviewArtifact) {
       return [] as ReactElement[];
@@ -9369,6 +9748,55 @@ function ScripturesContent() {
       });
       const nonTranslationLines = deduplicatedLines.filter((line) => line.fieldName !== "english");
       const translationLines = deduplicatedLines.filter((line) => line.fieldName === "english");
+      const translationVariants = Array.isArray(block.content.translation_variants)
+        ? block.content.translation_variants
+            .map((entry) => ({
+              author_slug: (entry?.author_slug || "").trim(),
+              author: (entry?.author || "").trim(),
+              language: ((entry?.language || "").trim().toLowerCase() || deriveVariantLanguageFromField(entry?.field)),
+              text: (entry?.text || "").trim(),
+            }))
+            .filter((entry) => entry.text.length > 0)
+        : [];
+      const commentaryVariants = Array.isArray(block.content.commentary_variants)
+        ? block.content.commentary_variants
+            .map((entry) => ({
+              author_slug: (entry?.author_slug || "").trim(),
+              author: (entry?.author || "").trim(),
+              language: ((entry?.language || "").trim().toLowerCase() || deriveVariantLanguageFromField(entry?.field)),
+              text: (entry?.text || "").trim(),
+            }))
+            .filter((entry) => entry.text.length > 0)
+        : [];
+      const selectedTranslationLanguages = new Set(
+        appliedPreviewTranslationLanguages.map((language) => normalizeTranslationLanguage(language))
+      );
+      const visibleTranslationVariants = appliedBookPreviewLanguageSettings.show_english
+        ? translationVariants.filter((entry) => {
+            const normalizedLanguage = normalizeTranslationLanguage(entry.language || "");
+            if (!normalizedLanguage) {
+              return true;
+            }
+            if (!selectedTranslationLanguages.has(normalizedLanguage)) return false;
+            if (appliedPreviewVariantAuthorSlugs.length > 0 && entry.author_slug) {
+              return appliedPreviewVariantAuthorSlugs.includes(entry.author_slug);
+            }
+            return true;
+          })
+        : [];
+      const visibleCommentaryVariants = appliedBookPreviewLanguageSettings.show_commentary
+        ? commentaryVariants.filter((entry) => {
+            const normalizedLanguage = normalizeTranslationLanguage(entry.language || "");
+            if (!normalizedLanguage) {
+              return true;
+            }
+            if (!selectedTranslationLanguages.has(normalizedLanguage)) return false;
+            if (appliedPreviewVariantAuthorSlugs.length > 0 && entry.author_slug) {
+              return appliedPreviewVariantAuthorSlugs.includes(entry.author_slug);
+            }
+            return true;
+          })
+        : [];
       const wordMeaningRows = resolvePreviewWordMeanings(block);
       const wordMeaningInlineText = wordMeaningRows
         .map((row) => {
@@ -9412,7 +9840,7 @@ function ScripturesContent() {
                 {line.label && (
                   <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                 )}
-                <p className={line.className}>{line.value}</p>
+                <p className={line.className} style={previewBodyTextStyle}>{line.value}</p>
               </div>
             ))}
           </div>
@@ -9451,7 +9879,7 @@ function ScripturesContent() {
                   </table>
                 </div>
               ) : (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>
                   {wordMeaningInlineText}
                 </p>
               )}
@@ -9471,10 +9899,46 @@ function ScripturesContent() {
                   {line.label && (
                     <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                   )}
-                  <p className={line.className}>{line.value}</p>
+                  <p className={line.className} style={previewBodyTextStyle}>{line.value}</p>
                 </div>
               ))}
             </div>
+          )}
+          {visibleTranslationVariants.length > 0 && (
+            <details className="mt-2 border-t border-black/10 pt-2">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                Translations By Authors ({visibleTranslationVariants.length})
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
+                {visibleTranslationVariants.map((entry, idx) => (
+                  <div key={`translation-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                      {(entry.author_slug ? (currentBook?.variant_authors?.[entry.author_slug] || entry.author) : entry.author) || "Unknown Author"}
+                      {entry.language ? ` • ${entry.language}` : ""}
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          {visibleCommentaryVariants.length > 0 && (
+            <details className="mt-2 border-t border-black/10 pt-2">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                Commentaries By Authors ({visibleCommentaryVariants.length})
+              </summary>
+              <div className="mt-2 flex flex-col gap-2">
+                {visibleCommentaryVariants.map((entry, idx) => (
+                  <div key={`commentary-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2">
+                    <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                      {(entry.author_slug ? (currentBook?.variant_authors?.[entry.author_slug] || entry.author) : entry.author) || "Unknown Author"}
+                      {entry.language ? ` • ${entry.language}` : ""}
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
             <div className="mt-2 border-t border-black/10 pt-2">
@@ -9527,11 +9991,14 @@ function ScripturesContent() {
   }, [
     bookPreviewArtifact,
     appliedHiddenPreviewLevels,
+    appliedPreviewVariantAuthorSlugs,
     appliedShowPreviewDetails,
     appliedShowPreviewTitles,
     appliedShowPreviewLevelNumbers,
     appliedPreviewWordMeaningsDisplayMode,
     appliedShowPreviewMedia,
+    currentBook,
+    previewBodyTextStyle,
     resolvePreviewContentLines,
     resolvePreviewWordMeanings,
     getDisplayLevelName,
@@ -10743,6 +11210,8 @@ function ScripturesContent() {
                                 setModalSelectedTranslationLanguages(
                                   normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
                                 );
+                                setModalTranslationVariants([]);
+                                setModalCommentaryVariants([]);
                                 setAction("add");
                               }}
                               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -11161,6 +11630,8 @@ function ScripturesContent() {
                                     setModalSelectedTranslationLanguages(
                                       normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
                                     );
+                                    setModalTranslationVariants([]);
+                                    setModalCommentaryVariants([]);
                                     setAction("add");
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -11246,6 +11717,9 @@ function ScripturesContent() {
                                     const translationState = buildTranslationEditorStateFromNode(nodeContent);
                                     setModalTranslationDrafts(translationState.drafts);
                                     setModalSelectedTranslationLanguages(translationState.selectedLanguages);
+                                    const variantState = buildVariantEditorStateFromNode(nodeContent);
+                                    setModalTranslationVariants(variantState.translationVariants);
+                                    setModalCommentaryVariants(variantState.commentaryVariants);
                                     setAction("edit");
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -11359,7 +11833,7 @@ function ScripturesContent() {
                       </div>
                     )}
 
-                    {showMedia && (bookMediaItems.length > 0 || canEditCurrentBook) && (
+                    {nodeContent === null && showMedia && (bookMediaItems.length > 0 || canEditCurrentBook) && (
                       <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -11690,6 +12164,208 @@ function ScripturesContent() {
                                   </div>
                                 ))}
                               </div>
+
+                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                  Translation Variants By Author ({inlineTranslationVariants.length})
+                                </summary>
+                                <div className="mt-2 flex flex-col gap-2">
+                                  {inlineTranslationVariants.map((entry, index) => (
+                                    <div key={`inline-translation-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                      <label className="mb-2 flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                        <select
+                                          value={entry.author_slug}
+                                          onChange={(event) =>
+                                            setInlineTranslationVariants((prev) =>
+                                              prev.map((item, itemIndex) =>
+                                                itemIndex === index
+                                                  ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                        >
+                                          <option value="">
+                                            {getVariantAuthorOptions(currentBook, entry).length > 0
+                                              ? "Select author"
+                                              : "No authors in registry"}
+                                          </option>
+                                          {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                            <option key={option.slug} value={option.slug}>{option.name}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <div>
+                                        <label className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                          <select
+                                            value={entry.language}
+                                            onChange={(event) =>
+                                              setInlineTranslationVariants((prev) =>
+                                                prev.map((item, itemIndex) =>
+                                                  itemIndex === index
+                                                    ? applyVariantLanguageSelection(item, event.target.value, "translation")
+                                                    : item
+                                                )
+                                              )
+                                            }
+                                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                          >
+                                            <option value="">Select language</option>
+                                            {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                              <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      </div>
+                                      <textarea
+                                        value={entry.text}
+                                        onChange={(event) =>
+                                          setInlineTranslationVariants((prev) =>
+                                            prev.map((item, itemIndex) =>
+                                              itemIndex === index
+                                                ? { ...item, text: event.target.value }
+                                                : item
+                                            )
+                                          )
+                                        }
+                                        placeholder="Variant translation text"
+                                        rows={3}
+                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <div className="mt-2 flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setInlineTranslationVariants((prev) =>
+                                              prev.filter((_, itemIndex) => itemIndex !== index)
+                                            )
+                                          }
+                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setInlineTranslationVariants((prev) => [
+                                        ...prev,
+                                        buildEmptyAuthorVariantDraft(),
+                                      ])
+                                    }
+                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                  >
+                                    Add Translation Variant
+                                  </button>
+                                </div>
+                              </details>
+
+                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                  Commentary Variants By Author ({inlineCommentaryVariants.length})
+                                </summary>
+                                <div className="mt-2 flex flex-col gap-2">
+                                  {inlineCommentaryVariants.map((entry, index) => (
+                                    <div key={`inline-commentary-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                      <label className="mb-2 flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                        <select
+                                          value={entry.author_slug}
+                                          onChange={(event) =>
+                                            setInlineCommentaryVariants((prev) =>
+                                              prev.map((item, itemIndex) =>
+                                                itemIndex === index
+                                                  ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                        >
+                                          <option value="">
+                                            {getVariantAuthorOptions(currentBook, entry).length > 0
+                                              ? "Select author"
+                                              : "No authors in registry"}
+                                          </option>
+                                          {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                            <option key={option.slug} value={option.slug}>{option.name}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <div>
+                                        <label className="flex flex-col gap-1">
+                                          <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                          <select
+                                            value={entry.language}
+                                            onChange={(event) =>
+                                              setInlineCommentaryVariants((prev) =>
+                                                prev.map((item, itemIndex) =>
+                                                  itemIndex === index
+                                                    ? applyVariantLanguageSelection(item, event.target.value, "commentary")
+                                                    : item
+                                                )
+                                              )
+                                            }
+                                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                          >
+                                            <option value="">Select language</option>
+                                            {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                              <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      </div>
+                                      <textarea
+                                        value={entry.text}
+                                        onChange={(event) =>
+                                          setInlineCommentaryVariants((prev) =>
+                                            prev.map((item, itemIndex) =>
+                                              itemIndex === index
+                                                ? { ...item, text: event.target.value }
+                                                : item
+                                            )
+                                          )
+                                        }
+                                        placeholder="Variant commentary text"
+                                        rows={3}
+                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <div className="mt-2 flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setInlineCommentaryVariants((prev) =>
+                                              prev.filter((_, itemIndex) => itemIndex !== index)
+                                            )
+                                          }
+                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setInlineCommentaryVariants((prev) => [
+                                        ...prev,
+                                        buildEmptyAuthorVariantDraft(),
+                                      ])
+                                    }
+                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                  >
+                                    Add Commentary Variant
+                                  </button>
+                                </div>
+                              </details>
                             </div>
 
                             {inlineWordMeaningsEnabled && (
@@ -12622,10 +13298,89 @@ function ScripturesContent() {
                     setLevelTemplateError(null);
                     setLevelTemplateMessage(null);
                   }}
-                  onAssignTemplate={() => {
-                    void assignLevelTemplate();
-                  }}
                 />
+              )}
+
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                      Variant Authors Registry
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveVariantAuthors()}
+                      disabled={variantAuthorsSaving}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-white disabled:opacity-50"
+                    >
+                      {variantAuthorsSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  {variantAuthorsError && (
+                    <p className="mb-2 text-xs text-red-600">{variantAuthorsError}</p>
+                  )}
+                  {variantAuthorsMessage && (
+                    <p className="mb-2 text-xs text-emerald-600">{variantAuthorsMessage}</p>
+                  )}
+                  <div className="flex flex-col gap-2">
+                    {variantAuthorsRegistry.map((row, index) => (
+                      <div key={`variant-author-${index}`} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={row.slug}
+                          onChange={(event) => {
+                            setVariantAuthorsRegistry((prev) =>
+                              prev.map((item, i) =>
+                                i === index ? { ...item, slug: event.target.value } : item
+                              )
+                            );
+                            setVariantAuthorsMessage(null);
+                            setVariantAuthorsError(null);
+                          }}
+                          placeholder="Slug (e.g. tej)"
+                          className="w-28 flex-none rounded-lg border border-black/10 bg-white px-2 py-1.5 font-mono text-sm outline-none focus:border-[color:var(--accent)]"
+                        />
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={(event) => {
+                            setVariantAuthorsRegistry((prev) =>
+                              prev.map((item, i) =>
+                                i === index ? { ...item, name: event.target.value } : item
+                              )
+                            );
+                            setVariantAuthorsMessage(null);
+                            setVariantAuthorsError(null);
+                          }}
+                          placeholder="Full name (e.g. Swami Tejomayananda)"
+                          className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVariantAuthorsRegistry((prev) => prev.filter((_, i) => i !== index));
+                            setVariantAuthorsMessage(null);
+                            setVariantAuthorsError(null);
+                          }}
+                          className="flex-none rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 hover:bg-red-100"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVariantAuthorsRegistry((prev) => [...prev, { slug: "", name: "" }]);
+                      setVariantAuthorsMessage(null);
+                      setVariantAuthorsError(null);
+                    }}
+                    className="mt-2 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-600 hover:border-black/20"
+                  >
+                    + Add Author
+                  </button>
+                </div>
               )}
 
               {propertiesScope === "book" && (
@@ -13788,192 +14543,331 @@ function ScripturesContent() {
 
               {showPreviewControls && (
                 <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
-                  <div className="mx-auto w-full max-w-5xl rounded-lg border border-black/10 bg-white/90 p-2.5">
-                    {/* Scrollable options area — capped on mobile so Apply is never buried */}
-                    <div className="max-h-[40vh] overflow-y-auto sm:max-h-none space-y-2">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewTitles}
-                              onChange={(event) => setShowPreviewTitles(event.target.checked)}
-                              disabled={bookPreviewLoading}
-                            />
-                            Show titles
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewLabels}
-                              onChange={(event) => setShowPreviewLabels(event.target.checked)}
-                              disabled={bookPreviewLoading}
-                            />
-                            Show labels
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewLevelNumbers}
-                              onChange={(event) => setShowPreviewLevelNumbers(event.target.checked)}
-                              disabled={bookPreviewLoading}
-                            />
-                            Show level numbers
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewDetails}
-                              onChange={(event) => setShowPreviewDetails(event.target.checked)}
-                              disabled={bookPreviewLoading}
-                            />
-                            Show template details
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewMedia}
-                              onChange={(event) => setShowPreviewMedia(event.target.checked)}
-                              disabled={bookPreviewLoading}
-                            />
-                            Show multimedia
-                          </label>
-                          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                            Word meanings
-                            <select
-                              value={previewWordMeaningsDisplayMode}
-                              onChange={(event) =>
-                                setPreviewWordMeaningsDisplayMode(
-                                  normalizePreviewWordMeaningsDisplayMode(event.target.value)
-                                )
-                              }
-                              disabled={bookPreviewLoading}
-                              className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              <option value="hide">Hide</option>
-                              <option value="inline">Inline</option>
-                              <option value="table">Table</option>
-                            </select>
-                          </label>
-                        </div>
-                      </div>
+                  <div className="w-full rounded-lg border border-black/10 bg-white/90 p-2.5">
+                    <div className="mb-2 flex items-center gap-2 border-b border-black/10 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewControlsTab("content")}
+                        className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] transition ${
+                          previewControlsTab === "content"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "border border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                        }`}
+                      >
+                        Content
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewControlsTab("translations")}
+                        className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] transition ${
+                          previewControlsTab === "translations"
+                            ? "bg-[color:var(--accent)] text-white"
+                            : "border border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                        }`}
+                      >
+                        Translations & Commentaries
+                      </button>
+                    </div>
 
-                      {availablePreviewLevels.length > 1 && (
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Show Levels</div>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                            {availablePreviewLevels.map((level) => (
-                              <label key={`preview-level-${level}`} className="flex items-center gap-2">
+                    {/* Scrollable options area — capped on mobile so Apply is never buried */}
+                    <div className="max-h-[40vh] space-y-2 overflow-y-auto sm:max-h-none">
+                      {previewControlsTab === "content" && (
+                        <>
+                          <div>
+                            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
+                              <label className="flex items-center gap-2">
                                 <input
                                   type="checkbox"
-                                  checked={!hiddenPreviewLevels.has(level)}
-                                  onChange={(event) => {
-                                    setHiddenPreviewLevels((prev) => {
-                                      const next = new Set(prev);
-                                      if (event.target.checked) {
-                                        next.delete(level);
-                                      } else {
-                                        next.add(level);
-                                      }
-                                      return next;
-                                    });
-                                  }}
+                                  checked={showPreviewTitles}
+                                  onChange={(event) => setShowPreviewTitles(event.target.checked)}
                                   disabled={bookPreviewLoading}
                                 />
-                                {getDisplayLevelName(level)}
+                                Show titles
                               </label>
-                            ))}
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={showPreviewLabels}
+                                  onChange={(event) => setShowPreviewLabels(event.target.checked)}
+                                  disabled={bookPreviewLoading}
+                                />
+                                Show labels
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={showPreviewLevelNumbers}
+                                  onChange={(event) => setShowPreviewLevelNumbers(event.target.checked)}
+                                  disabled={bookPreviewLoading}
+                                />
+                                Show level numbers
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={showPreviewDetails}
+                                  onChange={(event) => setShowPreviewDetails(event.target.checked)}
+                                  disabled={bookPreviewLoading}
+                                />
+                                Show template details
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={showPreviewMedia}
+                                  onChange={(event) => setShowPreviewMedia(event.target.checked)}
+                                  disabled={bookPreviewLoading}
+                                />
+                                Show multimedia
+                              </label>
+                              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                                Word meanings
+                                <select
+                                  value={previewWordMeaningsDisplayMode}
+                                  onChange={(event) =>
+                                    setPreviewWordMeaningsDisplayMode(
+                                      normalizePreviewWordMeaningsDisplayMode(event.target.value)
+                                    )
+                                  }
+                                  disabled={bookPreviewLoading}
+                                  className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <option value="hide">Hide</option>
+                                  <option value="inline">Inline</option>
+                                  <option value="table">Table</option>
+                                </select>
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-black/10 bg-white/70 px-2 py-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs uppercase tracking-[0.14em] text-zinc-600">
+                                Reader Font Size
+                              </span>
+                              <span className="text-xs font-semibold text-zinc-700">{previewFontSizePercent}%</span>
+                            </div>
+                            <div className="mt-2 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewFontSizePercent((prev) =>
+                                    normalizePreviewFontSizePercent(prev - PREVIEW_FONT_SIZE_PERCENT_STEP)
+                                  )
+                                }
+                                disabled={bookPreviewLoading}
+                                className="min-h-9 min-w-9 rounded-lg border border-black/10 bg-white px-2 text-sm font-medium text-zinc-700 disabled:opacity-50"
+                                aria-label="Decrease reader font size"
+                              >
+                                A-
+                              </button>
+                              <input
+                                type="range"
+                                min={PREVIEW_FONT_SIZE_PERCENT_MIN}
+                                max={PREVIEW_FONT_SIZE_PERCENT_MAX}
+                                step={PREVIEW_FONT_SIZE_PERCENT_STEP}
+                                value={previewFontSizePercent}
+                                onChange={(event) =>
+                                  setPreviewFontSizePercent(
+                                    normalizePreviewFontSizePercent(event.target.value)
+                                  )
+                                }
+                                disabled={bookPreviewLoading}
+                                className="h-9 w-full"
+                                aria-label="Reader font size"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPreviewFontSizePercent((prev) =>
+                                    normalizePreviewFontSizePercent(prev + PREVIEW_FONT_SIZE_PERCENT_STEP)
+                                  )
+                                }
+                                disabled={bookPreviewLoading}
+                                className="min-h-9 min-w-9 rounded-lg border border-black/10 bg-white px-2 text-sm font-medium text-zinc-700 disabled:opacity-50"
+                                aria-label="Increase reader font size"
+                              >
+                                A+
+                              </button>
+                            </div>
+                          </div>
+
+                          {availablePreviewLevels.length > 1 && (
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Show Levels</div>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
+                                {availablePreviewLevels.map((level) => (
+                                  <label key={`preview-level-${level}`} className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={!hiddenPreviewLevels.has(level)}
+                                      onChange={(event) => {
+                                        setHiddenPreviewLevels((prev) => {
+                                          const next = new Set(prev);
+                                          if (event.target.checked) {
+                                            next.delete(level);
+                                          } else {
+                                            next.add(level);
+                                          }
+                                          return next;
+                                        });
+                                      }}
+                                      disabled={bookPreviewLoading}
+                                    />
+                                    {getDisplayLevelName(level)}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {previewControlsTab === "translations" && (
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={bookPreviewLanguageSettings.show_sanskrit}
+                                onChange={(event) =>
+                                  setBookPreviewLanguageSettings((prev) => ({
+                                    ...prev,
+                                    show_sanskrit: event.target.checked,
+                                  }))
+                                }
+                                disabled={bookPreviewLoading}
+                              />
+                              Sanskrit
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={bookPreviewLanguageSettings.show_transliteration}
+                                onChange={(event) =>
+                                  setBookPreviewLanguageSettings((prev) => ({
+                                    ...prev,
+                                    show_transliteration: event.target.checked,
+                                  }))
+                                }
+                                disabled={bookPreviewLoading}
+                              />
+                              Transliteration
+                            </label>
+                            <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                              Script
+                              <select
+                                value={previewTransliterationScript}
+                                onChange={(event) =>
+                                  setBookPreviewTransliterationScript(
+                                    normalizeTransliterationScript(event.target.value)
+                                  )
+                                }
+                                disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
+                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
+                                  <option key={scriptOption} value={scriptOption}>
+                                    {transliterationScriptLabel(scriptOption)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={bookPreviewLanguageSettings.show_english}
+                                onChange={(event) =>
+                                  setBookPreviewLanguageSettings((prev) => ({
+                                    ...prev,
+                                    show_english: event.target.checked,
+                                  }))
+                                }
+                                disabled={bookPreviewLoading}
+                              />
+                              Translations
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={bookPreviewLanguageSettings.show_commentary}
+                                onChange={(event) =>
+                                  setBookPreviewLanguageSettings((prev) => ({
+                                    ...prev,
+                                    show_commentary: event.target.checked,
+                                  }))
+                                }
+                                disabled={bookPreviewLoading}
+                              />
+                              Commentaries
+                            </label>
+                            <details className="rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.14em] text-zinc-600">
+                                Languages ({previewTranslationLanguages.length} selected)
+                              </summary>
+                              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-zinc-700 sm:grid-cols-3">
+                                {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                  <label key={`preview-translation-${language}`} className="flex items-center gap-1.5">
+                                    <input
+                                      type="checkbox"
+                                      checked={previewTranslationLanguages.includes(language)}
+                                      onChange={(event) => {
+                                        const nextValues = event.target.checked
+                                          ? [...previewTranslationLanguages, language]
+                                          : previewTranslationLanguages.filter((value) => value !== language);
+                                        setPreviewTranslationLanguages(
+                                          normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                        );
+                                      }}
+                                      disabled={bookPreviewLoading}
+                                    />
+                                    {translationLanguageLabel(language)}
+                                  </label>
+                                ))}
+                              </div>
+                            </details>
+                            {availableVariantAuthors.size > 0 && (
+                              <details className="rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                                <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.14em] text-zinc-600">
+                                  Authors ({previewVariantAuthorSlugs.length === 0 ? "all" : `${previewVariantAuthorSlugs.length} selected`})
+                                </summary>
+                                <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-zinc-700">
+                                  {Array.from(availableVariantAuthors.entries()).map(([slug, name]) => {
+                                    const allSlugs = Array.from(availableVariantAuthors.keys());
+                                    const isChecked = previewVariantAuthorSlugs.length === 0 || previewVariantAuthorSlugs.includes(slug);
+                                    return (
+                                      <label key={`author-filter-${slug}`} className="flex items-center gap-1.5">
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={(event) => {
+                                            setPreviewVariantAuthorSlugs((prev) => {
+                                              const currentSet = new Set(prev.length === 0 ? allSlugs : prev);
+                                              if (event.target.checked) {
+                                                currentSet.add(slug);
+                                              } else {
+                                                currentSet.delete(slug);
+                                              }
+                                              // Empty array means "all selected"
+                                              if (currentSet.size >= allSlugs.length) return [];
+                                              return Array.from(currentSet);
+                                            });
+                                          }}
+                                          disabled={bookPreviewLoading}
+                                        />
+                                        {name}
+                                        <span className="text-zinc-400">({slug})</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         </div>
                       )}
-
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={bookPreviewLanguageSettings.show_sanskrit}
-                              onChange={(event) =>
-                                setBookPreviewLanguageSettings((prev) => ({
-                                  ...prev,
-                                  show_sanskrit: event.target.checked,
-                                }))
-                              }
-                              disabled={bookPreviewLoading}
-                            />
-                            Sanskrit
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={bookPreviewLanguageSettings.show_transliteration}
-                              onChange={(event) =>
-                                setBookPreviewLanguageSettings((prev) => ({
-                                  ...prev,
-                                  show_transliteration: event.target.checked,
-                                }))
-                              }
-                              disabled={bookPreviewLoading}
-                            />
-                            Transliteration
-                          </label>
-                          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                            Script
-                            <select
-                              value={previewTransliterationScript}
-                              onChange={(event) =>
-                                setBookPreviewTransliterationScript(
-                                  normalizeTransliterationScript(event.target.value)
-                                )
-                              }
-                              disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
-                              className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
-                                <option key={scriptOption} value={scriptOption}>
-                                  {transliterationScriptLabel(scriptOption)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={bookPreviewLanguageSettings.show_english}
-                              onChange={(event) =>
-                                setBookPreviewLanguageSettings((prev) => ({
-                                  ...prev,
-                                  show_english: event.target.checked,
-                                }))
-                              }
-                              disabled={bookPreviewLoading}
-                            />
-                            Translations
-                          </label>
-                          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
-                            {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                              <label key={`preview-translation-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
-                                <input
-                                  type="checkbox"
-                                  checked={previewTranslationLanguages.includes(language)}
-                                  onChange={(event) => {
-                                    const nextValues = event.target.checked
-                                      ? [...previewTranslationLanguages, language]
-                                      : previewTranslationLanguages.filter((value) => value !== language);
-                                    setPreviewTranslationLanguages(
-                                      normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
-                                    );
-                                  }}
-                                  disabled={bookPreviewLoading}
-                                />
-                                {translationLanguageLabel(language)}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
                     </div>
                     {/* Apply button — always visible outside the scrollable area */}
                     <div className="mt-2.5 flex justify-end border-t border-black/[0.06] pt-2">
@@ -13988,10 +14882,12 @@ function ScripturesContent() {
                           bookPreviewLoading ||
                           (!bookPreviewLanguageSettings.show_sanskrit &&
                             !bookPreviewLanguageSettings.show_transliteration &&
-                            !bookPreviewLanguageSettings.show_english) ||
+                            !bookPreviewLanguageSettings.show_english &&
+                            !bookPreviewLanguageSettings.show_commentary) ||
                           (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
                             bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
                             bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
+                            bookPreviewLanguageSettings.show_commentary === appliedBookPreviewLanguageSettings.show_commentary &&
                             areEditableLanguageSelectionsEqual(
                               previewTranslationLanguages,
                               appliedPreviewTranslationLanguages
@@ -14001,9 +14897,11 @@ function ScripturesContent() {
                             showPreviewDetails === appliedShowPreviewDetails &&
                             showPreviewTitles === appliedShowPreviewTitles &&
                             showPreviewMedia === appliedShowPreviewMedia &&
+                            previewFontSizePercent === appliedPreviewFontSizePercent &&
                             areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) &&
                             previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
-                            previewTransliterationScript === appliedBookPreviewTransliterationScript)
+                            previewTransliterationScript === appliedBookPreviewTransliterationScript &&
+                            JSON.stringify([...previewVariantAuthorSlugs].sort()) === JSON.stringify([...appliedPreviewVariantAuthorSlugs].sort()))
                         }
                         className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -14017,7 +14915,7 @@ function ScripturesContent() {
               <div
                 ref={bookPreviewScrollContainerRef}
                 onScroll={handleBookPreviewScroll}
-                className="mx-auto flex-1 w-full max-w-5xl overflow-y-auto px-3 pb-4 pt-2 sm:px-4"
+                className="flex-1 w-full overflow-y-auto px-4 pb-4 pt-2 sm:px-6"
               >
                 {previewLinkMessage && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs text-zinc-700">
@@ -14042,7 +14940,7 @@ function ScripturesContent() {
 
                 {showPreviewBookSummary && hasEffectiveBookPreviewSummary && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
-                    <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700">
+                    <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700" style={previewBodyTextStyle}>
                       {bookPreviewArtifact.book_template?.rendered_text?.trim() || ""}
                     </p>
                   </div>
@@ -14059,7 +14957,7 @@ function ScripturesContent() {
                     <div className="mt-1 text-xs text-zinc-500">
                       Children rendered: {bookPreviewArtifact.book_template.child_count}
                     </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700" style={previewBodyTextStyle}>
                       {bookPreviewArtifact.book_template.rendered_text ||
                         (bookPreviewArtifact.preview_scope === "node"
                           ? "No rendered level summary."
@@ -14068,7 +14966,7 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                {appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
+                {bookPreviewArtifact.preview_scope === "book" && appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
                   <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Multimedia</div>
                     <div className="mt-2 flex flex-col gap-3">
@@ -14716,6 +15614,208 @@ function ScripturesContent() {
                           </div>
                         ))}
                       </div>
+
+                      <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                        <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                          Translation Variants By Author ({modalTranslationVariants.length})
+                        </summary>
+                        <div className="mt-2 flex flex-col gap-2">
+                          {modalTranslationVariants.map((entry, index) => (
+                            <div key={`modal-translation-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                              <label className="mb-2 flex flex-col gap-1">
+                                <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                <select
+                                  value={entry.author_slug}
+                                  onChange={(event) =>
+                                    setModalTranslationVariants((prev) =>
+                                      prev.map((item, itemIndex) =>
+                                        itemIndex === index
+                                          ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                          : item
+                                      )
+                                    )
+                                  }
+                                  disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                >
+                                  <option value="">
+                                    {getVariantAuthorOptions(currentBook, entry).length > 0
+                                      ? "Select author"
+                                      : "No authors in registry"}
+                                  </option>
+                                  {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                    <option key={option.slug} value={option.slug}>{option.name}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <div>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                  <select
+                                    value={entry.language}
+                                    onChange={(event) =>
+                                      setModalTranslationVariants((prev) =>
+                                        prev.map((item, itemIndex) =>
+                                          itemIndex === index
+                                            ? applyVariantLanguageSelection(item, event.target.value, "translation")
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                  >
+                                    <option value="">Select language</option>
+                                    {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                      <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <textarea
+                                value={entry.text}
+                                onChange={(event) =>
+                                  setModalTranslationVariants((prev) =>
+                                    prev.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? { ...item, text: event.target.value }
+                                        : item
+                                    )
+                                  )
+                                }
+                                placeholder="Variant translation text"
+                                rows={3}
+                                className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                              />
+                              <div className="mt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setModalTranslationVariants((prev) =>
+                                      prev.filter((_, itemIndex) => itemIndex !== index)
+                                    )
+                                  }
+                                  className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setModalTranslationVariants((prev) => [
+                                ...prev,
+                                buildEmptyAuthorVariantDraft(),
+                              ])
+                            }
+                            className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                          >
+                            Add Translation Variant
+                          </button>
+                        </div>
+                      </details>
+
+                      <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                        <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                          Commentary Variants By Author ({modalCommentaryVariants.length})
+                        </summary>
+                        <div className="mt-2 flex flex-col gap-2">
+                          {modalCommentaryVariants.map((entry, index) => (
+                            <div key={`modal-commentary-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                              <label className="mb-2 flex flex-col gap-1">
+                                <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                <select
+                                  value={entry.author_slug}
+                                  onChange={(event) =>
+                                    setModalCommentaryVariants((prev) =>
+                                      prev.map((item, itemIndex) =>
+                                        itemIndex === index
+                                          ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                          : item
+                                      )
+                                    )
+                                  }
+                                  disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                >
+                                  <option value="">
+                                    {getVariantAuthorOptions(currentBook, entry).length > 0
+                                      ? "Select author"
+                                      : "No authors in registry"}
+                                  </option>
+                                  {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                    <option key={option.slug} value={option.slug}>{option.name}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <div>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                  <select
+                                    value={entry.language}
+                                    onChange={(event) =>
+                                      setModalCommentaryVariants((prev) =>
+                                        prev.map((item, itemIndex) =>
+                                          itemIndex === index
+                                            ? applyVariantLanguageSelection(item, event.target.value, "commentary")
+                                            : item
+                                        )
+                                      )
+                                    }
+                                    className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                  >
+                                    <option value="">Select language</option>
+                                    {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                      <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <textarea
+                                value={entry.text}
+                                onChange={(event) =>
+                                  setModalCommentaryVariants((prev) =>
+                                    prev.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? { ...item, text: event.target.value }
+                                        : item
+                                    )
+                                  )
+                                }
+                                placeholder="Variant commentary text"
+                                rows={3}
+                                className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                              />
+                              <div className="mt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setModalCommentaryVariants((prev) =>
+                                      prev.filter((_, itemIndex) => itemIndex !== index)
+                                    )
+                                  }
+                                  className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setModalCommentaryVariants((prev) => [
+                                ...prev,
+                                buildEmptyAuthorVariantDraft(),
+                              ])
+                            }
+                            className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                          >
+                            Add Commentary Variant
+                          </button>
+                        </div>
+                      </details>
                     </div>
                     <div>
                       <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">

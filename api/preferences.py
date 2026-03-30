@@ -21,6 +21,11 @@ def _ensure_preferences_schema(db: Session) -> None:
     )
     db.execute(
         text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_show_commentary BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text(
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline'"
         )
     )
@@ -73,6 +78,7 @@ def get_user_preferences(
                 preview_show_sanskrit=True,
                 preview_show_transliteration=True,
                 preview_show_english=True,
+                preview_show_commentary=True,
                 preview_transliteration_script="iast",
                 preview_word_meanings_display_mode="inline",
                 preview_translation_languages="english",

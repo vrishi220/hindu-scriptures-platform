@@ -455,6 +455,7 @@ class BookBase(BaseModel):
     language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = Field(default=None, alias="metadata_json")
     level_name_overrides: dict[str, str] = Field(default_factory=dict)
+    variant_authors: dict[str, str] = Field(default_factory=dict)
     status: Literal["draft", "published"] = "draft"
     visibility: Literal["private", "public"] = "private"
 
@@ -470,6 +471,7 @@ class BookUpdate(BaseModel):
     language_primary: PrimaryLanguage | None = None
     metadata: dict | None = None
     level_name_overrides: dict[str, str] | None = None
+    variant_authors: dict[str, str] | None = None
     status: Literal["draft", "published"] | None = None
     visibility: Literal["private", "public"] | None = None
 
@@ -580,6 +582,46 @@ class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
 
 
+class TreeNodeImportItem(BaseModel):
+    """Single node in an import tree (from SchemaAwareJSONImporter)."""
+    level_name: str
+    level_order: int
+    sequence_number: str | None = None
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool = False
+    content_data: dict | None = None
+    summary_data: dict | None = None
+    metadata_json: dict | None = None
+    source_attribution: str | None = None
+    original_source_url: str | None = None
+    tags: list | None = None
+    children: list["TreeNodeImportItem"] = Field(default_factory=list)
+
+
+class BulkTreeImportRequest(BaseModel):
+    """Bulk import tree nodes (e.g., from scripture scraper/importer)."""
+    book_id: int
+    nodes: list[TreeNodeImportItem]  # Top-level nodes (chapters)
+    clear_existing: bool = False  # Clear all existing nodes in book before import
+    language_code: str = "en"
+    license_type: str = "CC-BY-SA-4.0"
+
+
+class BulkTreeImportResponse(BaseModel):
+    """Summary of tree import operation."""
+    success: bool
+    book_id: int
+    chapters_created: int = 0
+    verses_created: int = 0
+    total_nodes_created: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
 class BookExchangeSchemaV1(BaseModel):
     id: int | None = None
     name: str | None = None
@@ -622,6 +664,7 @@ class BookExchangeBookV1(BaseModel):
     book_code: str | None = None
     language_primary: PrimaryLanguage = "sanskrit"
     metadata: dict | None = None
+    variant_authors: dict[str, str] = Field(default_factory=dict)
 
 
 class BookExchangePayloadV1(BaseModel):
@@ -766,6 +809,46 @@ class CommentaryEntryPublic(CommentaryEntryBase):
     updated_at: datetime | None = None
 
 
+RenditionType = Literal["translation", "commentary"]
+
+
+class ContentRenditionBase(BaseModel):
+    node_id: int
+    rendition_type: RenditionType
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str
+    language_code: str = "en"
+    script_code: str | None = None
+    display_order: int = 0
+    metadata: dict | None = Field(default=None, alias="metadata_json")
+
+
+class ContentRenditionCreate(ContentRenditionBase):
+    pass
+
+
+class ContentRenditionUpdate(BaseModel):
+    rendition_type: RenditionType | None = None
+    author_id: int | None = None
+    work_id: int | None = None
+    content_text: str | None = None
+    language_code: str | None = None
+    script_code: str | None = None
+    display_order: int | None = None
+    metadata: dict | None = None
+
+
+class ContentRenditionPublic(ContentRenditionBase):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    created_by: int | None = None
+    last_modified_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class NodeCommentBase(BaseModel):
     node_id: int
     parent_comment_id: int | None = None
@@ -812,6 +895,7 @@ class UserPreferenceBase(BaseModel):
     preview_show_sanskrit: bool = True
     preview_show_transliteration: bool = True
     preview_show_english: bool = True
+    preview_show_commentary: bool = True
     preview_transliteration_script: str = "iast"
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] = "inline"
     preview_translation_languages: str = "english"
@@ -837,6 +921,7 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_sanskrit: bool | None = None
     preview_show_transliteration: bool | None = None
     preview_show_english: bool | None = None
+    preview_show_commentary: bool | None = None
     preview_transliteration_script: str | None = None
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] | None = None
     preview_translation_languages: str | None = None

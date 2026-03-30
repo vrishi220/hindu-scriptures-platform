@@ -27,6 +27,7 @@ export type UserPreferences = {
   preview_show_sanskrit: boolean;
   preview_show_transliteration: boolean;
   preview_show_english: boolean;
+  preview_show_commentary: boolean;
   preview_transliteration_script: string;
   preview_word_meanings_display_mode: "inline" | "table" | "hide";
   preview_translation_languages: string;
@@ -443,6 +444,19 @@ export function UserPreferencesForm({
           }
         />
         English
+      </label>
+      <label className="flex items-center gap-2 text-sm text-zinc-700">
+        <input
+          type="checkbox"
+          checked={preferences.preview_show_commentary}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_show_commentary: event.target.checked,
+            })
+          }
+        />
+        Commentaries
       </label>
     </div>
   );

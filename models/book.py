@@ -16,6 +16,7 @@ class Book(Base):
     language_primary = Column(String(50), default="sanskrit")
     metadata_json = Column("metadata", JSONB, default=dict)
     level_name_overrides = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    variant_authors = Column(JSONB, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relationship

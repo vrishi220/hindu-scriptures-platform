@@ -159,6 +159,7 @@ class TestPhase1PreferencesIntegration:
             "preview_show_sanskrit": True,
             "preview_show_transliteration": False,
             "preview_show_english": False,
+            "preview_show_commentary": False,
             "preview_transliteration_script": "iast",
         }
         patch_response = client.patch("/api/preferences", json=patch_payload, headers=headers)
@@ -173,6 +174,7 @@ class TestPhase1PreferencesIntegration:
         assert updated["preview_show_sanskrit"] is True
         assert updated["preview_show_transliteration"] is False
         assert updated["preview_show_english"] is False
+        assert updated["preview_show_commentary"] is False
         assert updated["preview_transliteration_script"] == "iast"
 
 
