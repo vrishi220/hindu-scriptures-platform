@@ -13298,6 +13298,9 @@ function ScripturesContent() {
                     setLevelTemplateError(null);
                     setLevelTemplateMessage(null);
                   }}
+                  onAssignTemplate={() => {
+                    void assignLevelTemplate();
+                  }}
                 />
               )}
 
