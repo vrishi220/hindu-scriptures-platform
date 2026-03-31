@@ -328,6 +328,19 @@ type ResolvedMetadata = {
 
 type PropertiesScope = "book" | "node";
 
+type TreeNode = {
+  id: number;
+  parent_node_id?: number | null;
+  level_name: string;
+  level_order?: number | null;
+  sequence_number?: number | string | null;
+  title_english?: string | null;
+  title_sanskrit?: string | null;
+  title_transliteration?: string | null;
+  has_content?: boolean | null;
+  children?: TreeNode[];
+};
+
 type LevelTemplateOption = {
   id: number;
   name: string;
