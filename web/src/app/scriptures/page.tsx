@@ -58,220 +58,6 @@ import {
   inferMediaTypeFromUrl,
   type ExternalMediaType,
 } from "../../lib/externalMedia";
-import {
-  createMediaBankLinkAsset as createMediaBankLinkAssetRequest,
-  deleteMediaBankAsset,
-  listMediaBankAssets,
-  MediaBankClientError,
-  replaceMediaBankAssetFile,
-  renameMediaBankAsset,
-  uploadMediaBankAsset,
-} from "../../lib/mediaBankClient";
-import { resolveMediaUrl } from "../../lib/mediaUrl";
-
-type BookOption = {
-  id: number;
-  book_name: string;
-  schema_id?: number | null;
-  level_name_overrides?: Record<string, string>;
-  status?: "draft" | "published";
-  visibility?: "private" | "public";
-  metadata_json?: {
-    owner_id?: number;
-    visibility?: "private" | "public";
-    [key: string]: unknown;
-  } | null;
-  metadata?: {
-    owner_id?: number;
-    visibility?: "private" | "public";
-    [key: string]: unknown;
-  } | null;
-};
-
-type BookDetails = {
-  id: number;
-  book_name: string;
-  schema_id: number | null;
-  level_name_overrides?: Record<string, string>;
-  variant_authors?: Record<string, string>;
-  status?: "draft" | "published";
-  visibility?: "private" | "public";
-  metadata_json?: {
-    owner_id?: number;
-    status?: "draft" | "published";
-    visibility?: "private" | "public";
-    [key: string]: unknown;
-  } | null;
-  metadata?: {
-    owner_id?: number;
-    status?: "draft" | "published";
-    visibility?: "private" | "public";
-    [key: string]: unknown;
-  } | null;
-  schema?: {
-    id: number;
-    name: string;
-    levels: string[];
-    level_template_defaults?: Record<string, number>;
-  } | null;
-};
-
-type SharePermission = "viewer" | "contributor" | "editor";
-
-type BookShare = {
-  id: number;
-  book_id: number;
-  shared_with_user_id: number;
-  permission: SharePermission;
-  shared_by_user_id: number | null;
-  shared_with_email: string;
-  shared_with_username: string | null;
-};
-
-type SchemaOption = {
-  id: number;
-  name: string;
-  description: string | null;
-  levels: string[];
-  level_template_defaults?: Record<string, number>;
-};
-
-type TreeNode = {
-  id: number;
-  parent_node_id?: number | null;
-  level_name: string;
-  level_order?: number;
-  sequence_number?: string | null;
-  title_english?: string | null;
-  title_hindi?: string | null;
-  title_sanskrit?: string | null;
-  title_transliteration?: string | null;
-  children?: TreeNode[];
-};
-
-type WordMeaningRow = {
-  id: string;
-  order: number;
-  sourceLanguage: string;
-  sourceScriptText: string;
-  sourceTransliterationIast: string;
-  meanings: Record<string, string>;
-  activeMeaningLanguage: string;
-};
-
-type NodeContent = {
-  id: number;
-  level_name: string;
-  level_order?: number;
-  sequence_number?: string | null;
-  title_english?: string | null;
-  title_hindi?: string | null;
-  title_sanskrit?: string | null;
-  title_transliteration?: string | null;
-  has_content: boolean;
-  content_data?: {
-    basic?: {
-      sanskrit?: string;
-      transliteration?: string;
-      translation?: string;
-    };
-    translations?: Record<string, string>;
-    translation_variants?: Array<{
-      author_slug?: string;
-      author?: string;
-      language?: string;
-      field?: string;
-      text?: string;
-    }>;
-    commentary_variants?: Array<{
-      author_slug?: string;
-      author?: string;
-      language?: string;
-      field?: string;
-      text?: string;
-    }>;
-    word_meanings?: {
-      version?: string;
-      rows?: Array<{
-        id?: string;
-        order?: number;
-        source?: {
-          language?: string;
-          script_text?: string;
-          transliteration?: {
-            iast?: string;
-            [scheme: string]: string | undefined;
-          };
-        };
-        meanings?: {
-          en?: {
-            text?: string;
-          };
-          [language: string]: {
-            text?: string;
-          } | undefined;
-        };
-      }>;
-    };
-  } | null;
-  summary_data?: {
-    basic?: {
-      sanskrit?: string;
-      transliteration?: string;
-      translation?: string;
-    };
-    translations?: Record<string, string>;
-    [key: string]: unknown;
-  } | null;
-  metadata_json?: Record<string, unknown> | null;
-  metadata?: Record<string, unknown> | null;
-  tags?: string[] | null;
-};
-
-type ImportJobLifecycleStatus = "queued" | "running" | "succeeded" | "failed";
-
-type ImportResult = {
-  success?: boolean;
-  book_id?: number | null;
-  nodes_created?: number;
-  error?: string;
-  detail?: string;
-};
-
-type ImportJobStart = {
-  job_id?: string;
-  status?: ImportJobLifecycleStatus;
-  detail?: string;
-  error?: string;
-};
-
-type ImportJobStatus = {
-  job_id?: string;
-  status?: ImportJobLifecycleStatus;
-  progress_message?: string;
-  progress_current?: number;
-  progress_total?: number;
-  error?: string;
-  detail?: string;
-  result?: ImportResult | null;
-};
-
-type CanonicalUploadInit = {
-  upload_id?: string;
-  chunk_size_bytes?: number;
-  max_size_bytes?: number;
-  detail?: string;
-  error?: string;
-};
-
-type CanonicalUploadChunk = {
-  upload_id?: string;
-  received_bytes?: number;
-  next_index?: number;
-  detail?: string;
-  error?: string;
-};
-
 type CanonicalUploadComplete = {
   upload_id?: string;
   canonical_json_url?: string;
@@ -767,6 +553,7 @@ const normalizeBrowserView = (value: unknown): "list" | "icon" =>
   value === "icon" ? "icon" : "list";
 
 const WORD_MEANINGS_VERSION = "1.0";
+const BOOK_ROOT_NODE_ID = 0;
 const WORD_MEANINGS_REQUIRED_LANGUAGE = "en";
 const WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = ["sa", "pi", "hi", "ta"] as const;
 const WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES = ["en", "hi", "ta", "te", "kn", "ml"] as const;
@@ -984,11 +771,90 @@ const splitLegacyWordMeaningEntries = (value: unknown): string[] => {
     return [];
   }
 
-  return value
-    .split(";")
-    .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
-    .filter(Boolean);
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  if (trimmed.includes(";")) {
+    return trimmed
+      .split(";")
+      .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
+      .filter(Boolean);
+  }
+
+  const questionMarkCount = (trimmed.match(/\?/g) || []).length;
+  if (questionMarkCount > 1) {
+    return trimmed
+      .split("?")
+      .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
+      .filter(Boolean);
+  }
+
+  return [trimmed.replace(/^\d+\.\s*/, "")].filter(Boolean);
 };
+
+const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText: string } | null => {
+  const trimmed = entry.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const explicitDelimiterPair = trimmed.match(/^(.*?)\s*(?:=|:|\?)\s*(.+)$/);
+  if (explicitDelimiterPair) {
+    const sourceText = explicitDelimiterPair[1].trim();
+    const meaningText = explicitDelimiterPair[2].trim();
+    if (!sourceText) {
+      return null;
+    }
+    return {
+      sourceText,
+      meaningText,
+    };
+  }
+
+  const whitespaceDelimitedPair = trimmed.match(/^(\S+)\s+(.+)$/);
+  if (whitespaceDelimitedPair) {
+    return {
+      sourceText: whitespaceDelimitedPair[1].trim(),
+      meaningText: whitespaceDelimitedPair[2].trim(),
+    };
+  }
+
+  return {
+    sourceText: trimmed,
+    meaningText: "",
+  };
+};
+
+const mapSemicolonSeparatedWordMeaningsToRows = (
+  value: string,
+  startingOrder = 1
+): WordMeaningRow[] =>
+  splitLegacyWordMeaningEntries(value)
+    .map((entry, index) => {
+      const parsedEntry = parseWordMeaningEntry(entry);
+      const sourceToken = parsedEntry?.sourceText || "";
+      const meaningToken = parsedEntry?.meaningText || "";
+
+      if (!sourceToken) {
+        return null;
+      }
+
+      const sourcePair = autoFillSanskritTransliterationPair(sourceToken, "");
+      return {
+        id: createWordMeaningRowId(),
+        order: startingOrder + index,
+        sourceLanguage: "sa",
+        sourceScriptText: sourcePair.sanskrit,
+        sourceTransliterationIast: sourcePair.transliteration,
+        meanings: {
+          [WORD_MEANINGS_REQUIRED_LANGUAGE]: meaningToken,
+        },
+        activeMeaningLanguage: WORD_MEANINGS_REQUIRED_LANGUAGE,
+      };
+    })
+    .filter((row): row is WordMeaningRow => Boolean(row));
 
 const mapLegacyWordMeaningsRowsFromContent = (wordMeanings: Record<string, unknown>): WordMeaningRow[] => {
   const entriesByLanguage = Object.entries(wordMeanings).reduce<Record<string, string[]>>((acc, [rawLanguage, rawValue]) => {
@@ -1005,16 +871,16 @@ const mapLegacyWordMeaningsRowsFromContent = (wordMeanings: Record<string, unkno
 
   const primaryEntries = entriesByLanguage.en || Object.values(entriesByLanguage)[0] || [];
   return primaryEntries.map((entry, index) => {
-    const [rawSource, ...meaningParts] = entry.split("=");
-    const sourceText = meaningParts.length > 0 ? rawSource.trim() : "";
-    const fallbackMeaningText = (meaningParts.length > 0 ? meaningParts.join("=") : rawSource).trim();
+    const parsedEntry = parseWordMeaningEntry(entry);
+    const sourceText = parsedEntry?.sourceText || "";
+    const fallbackMeaningText = parsedEntry?.meaningText || entry.trim();
     const meanings = Object.entries(entriesByLanguage).reduce<Record<string, string>>((acc, [language, entries]) => {
       const candidate = entries[index];
       if (!candidate) {
         return acc;
       }
-      const [, ...candidateMeaningParts] = candidate.split("=");
-      acc[language] = (candidateMeaningParts.length > 0 ? candidateMeaningParts.join("=") : candidate).trim();
+      const parsedCandidate = parseWordMeaningEntry(candidate);
+      acc[language] = (parsedCandidate?.meaningText || candidate).trim();
       return acc;
     }, {});
 
@@ -1117,6 +983,48 @@ const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<str
       .filter((level): level is string => typeof level === "string" && level.trim().length > 0)
       .map((level) => level.trim().toLowerCase())
   );
+};
+
+const getWordMeaningsMetadataConfig = (
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null => {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const candidate = metadata.word_meanings;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+
+  return candidate as Record<string, unknown>;
+};
+
+const normalizeWordMeaningsEnabledLevels = (levels: string[]): string[] =>
+  Array.from(
+    new Set(
+      levels
+        .map((level) => level.trim())
+        .filter(Boolean)
+        .map((level) => level.toLowerCase())
+    )
+  ).sort();
+
+const resolveMediaUrl = (rawUrl: string): string => {
+  const value = typeof rawUrl === "string" ? rawUrl.trim() : "";
+  if (!value) {
+    return "";
+  }
+
+  if (/^(https?:)?\/\//i.test(value) || /^data:/i.test(value) || /^blob:/i.test(value)) {
+    return value;
+  }
+
+  if (value.startsWith("/")) {
+    return value;
+  }
+
+  return `/${value.replace(/^\.?\/+/, "")}`;
 };
 
 const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | null => {
@@ -2414,6 +2322,7 @@ function ScripturesContent() {
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
+  const [propertiesWordMeaningsEnabledLevels, setPropertiesWordMeaningsEnabledLevels] = useState<string[]>([]);
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -2429,6 +2338,10 @@ function ScripturesContent() {
   const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
   const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
+  const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
+  const [bookInlineEditMode, setBookInlineEditMode] = useState(false);
+  const [bookInlineName, setBookInlineName] = useState("");
+  const [bookInlineSubmitting, setBookInlineSubmitting] = useState(false);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2443,6 +2356,7 @@ function ScripturesContent() {
   const bookLoadingRef = useRef(false);
   const bookTreeActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const bookRootActionsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -2468,6 +2382,9 @@ function ScripturesContent() {
       if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
         setShowNodeActionsMenu(false);
       }
+      if (bookRootActionsMenuRef.current && !bookRootActionsMenuRef.current.contains(target)) {
+        setShowBookRootActionsMenu(false);
+      }
     };
 
     document.addEventListener("mousedown", handleOutsideClick);
@@ -2487,6 +2404,15 @@ function ScripturesContent() {
   useEffect(() => {
     setShowNodeActionsMenu(false);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId !== BOOK_ROOT_NODE_ID) {
+      setShowBookRootActionsMenu(false);
+      setBookInlineEditMode(false);
+      setBookInlineName("");
+      setBookInlineSubmitting(false);
+    }
+  }, [selectedId, bookId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -3280,9 +3206,26 @@ function ScripturesContent() {
           ? metadata.title_transliteration
           : ""
       );
+      const enabledLevels = getWordMeaningsEnabledLevelsFromBook(currentBook);
+      const schemaLevels = Array.isArray(currentBook?.schema?.levels)
+        ? currentBook.schema.levels.filter(
+            (level): level is string => typeof level === "string" && level.trim().length > 0
+          )
+        : [];
+      setPropertiesWordMeaningsEnabledLevels(
+        schemaLevels.filter((level) => enabledLevels.has(level.trim().toLowerCase()))
+      );
       const existingRegistry = currentBook?.variant_authors ?? {};
+      const existingRegistryRows = Object.entries(existingRegistry).map(([slug, name]) => ({
+        slug,
+        name: name as string,
+      }));
+      const derivedRegistryRows = Array.from(availableVariantAuthors.entries()).map(([slug, name]) => ({
+        slug,
+        name,
+      }));
       setVariantAuthorsRegistry(
-        Object.entries(existingRegistry).map(([slug, name]) => ({ slug, name: name as string }))
+        existingRegistryRows.length > 0 ? existingRegistryRows : derivedRegistryRows
       );
       setVariantAuthorsError(null);
       setVariantAuthorsMessage(null);
@@ -3290,6 +3233,7 @@ function ScripturesContent() {
       setPropertiesBookTitleEnglish("");
       setPropertiesBookTitleSanskrit("");
       setPropertiesBookTitleTransliteration("");
+      setPropertiesWordMeaningsEnabledLevels([]);
       setVariantAuthorsRegistry([]);
     }
     setPropertiesLoading(true);
@@ -3818,7 +3762,17 @@ function ScripturesContent() {
         nextBookTitleSanskrit !== currentBookTitleSanskrit ||
         nextBookTitleTransliteration !== currentBookTitleTransliteration);
 
-    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookTitles) {
+    const currentWordMeaningsEnabledLevels = Array.from(getWordMeaningsEnabledLevelsFromBook(currentBook));
+    const nextWordMeaningsEnabledLevels = normalizeWordMeaningsEnabledLevels(
+      propertiesWordMeaningsEnabledLevels
+    );
+    const shouldSaveWordMeanings =
+      propertiesScope === "book" &&
+      JSON.stringify([...currentWordMeaningsEnabledLevels].sort()) !==
+        JSON.stringify(nextWordMeaningsEnabledLevels);
+    const shouldSaveBookMetadata = shouldSaveBookTitles || shouldSaveWordMeanings;
+
+    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookMetadata) {
       setPropertiesError("No changes to save");
       return;
     }
@@ -3838,7 +3792,7 @@ function ScripturesContent() {
 
     try {
       let didUpdateName = false;
-      let didSaveBookTitles = false;
+      let didSaveBookMetadata = false;
       let didSaveMetadata = false;
 
       if (shouldUpdateName) {
@@ -3915,35 +3869,70 @@ function ScripturesContent() {
         }
       }
 
-      if (shouldSaveBookTitles) {
+      if (shouldSaveBookMetadata) {
         const nextMetadata: Record<string, unknown> = {
           ...existingBookMetadata,
         };
-        if (nextBookTitleEnglish) {
-          nextMetadata.title_english = nextBookTitleEnglish;
-        } else {
-          delete nextMetadata.title_english;
+        if (shouldSaveBookTitles) {
+          if (nextBookTitleEnglish) {
+            nextMetadata.title_english = nextBookTitleEnglish;
+          } else {
+            delete nextMetadata.title_english;
+          }
+          if (nextBookTitleSanskrit) {
+            nextMetadata.title_sanskrit = nextBookTitleSanskrit;
+          } else {
+            delete nextMetadata.title_sanskrit;
+          }
+          if (nextBookTitleTransliteration) {
+            nextMetadata.title_transliteration = nextBookTitleTransliteration;
+          } else {
+            delete nextMetadata.title_transliteration;
+          }
         }
-        if (nextBookTitleSanskrit) {
-          nextMetadata.title_sanskrit = nextBookTitleSanskrit;
-        } else {
-          delete nextMetadata.title_sanskrit;
-        }
-        if (nextBookTitleTransliteration) {
-          nextMetadata.title_transliteration = nextBookTitleTransliteration;
-        } else {
-          delete nextMetadata.title_transliteration;
+
+        if (shouldSaveWordMeanings) {
+          const existingWordMeaningsConfig = getWordMeaningsMetadataConfig(existingBookMetadata);
+          if (nextWordMeaningsEnabledLevels.length > 0) {
+            nextMetadata.word_meanings = {
+              ...(existingWordMeaningsConfig || {}),
+              enabled_levels: nextWordMeaningsEnabledLevels,
+            };
+          } else if (existingWordMeaningsConfig) {
+            const { enabled_levels: _enabledLevels, ...restWordMeaningsConfig } = existingWordMeaningsConfig;
+            if (Object.keys(restWordMeaningsConfig).length > 0) {
+              nextMetadata.word_meanings = restWordMeaningsConfig;
+            } else {
+              delete nextMetadata.word_meanings;
+            }
+          } else {
+            delete nextMetadata.word_meanings;
+          }
         }
 
         const saved = await saveBookMetadata(
           nextMetadata,
-          "Book titles saved",
-          "Failed to save book titles"
+          shouldSaveBookTitles && shouldSaveWordMeanings
+            ? "Book titles and word meanings settings saved"
+            : shouldSaveWordMeanings
+              ? "Word meanings settings saved"
+              : "Book titles saved",
+          shouldSaveBookTitles && shouldSaveWordMeanings
+            ? "Failed to save book titles and word meanings settings"
+            : shouldSaveWordMeanings
+              ? "Failed to save word meanings settings"
+              : "Failed to save book titles"
         );
         if (!saved) {
-          throw new Error("Failed to save book titles");
+          throw new Error(
+            shouldSaveBookTitles && shouldSaveWordMeanings
+              ? "Failed to save book titles and word meanings settings"
+              : shouldSaveWordMeanings
+                ? "Failed to save word meanings settings"
+                : "Failed to save book titles"
+          );
         }
-        didSaveBookTitles = true;
+        didSaveBookMetadata = true;
       }
 
       if (shouldSaveMetadata) {
@@ -3966,18 +3955,18 @@ function ScripturesContent() {
       }
 
       setPropertiesMessage(
-        didUpdateName && didSaveBookTitles && didSaveMetadata
-          ? "Name, titles, and properties saved"
-          : didUpdateName && didSaveBookTitles
-            ? "Name and titles saved"
-            : didSaveBookTitles && didSaveMetadata
-              ? "Titles and properties saved"
+        didUpdateName && didSaveBookMetadata && didSaveMetadata
+          ? "Name, book settings, and properties saved"
+          : didUpdateName && didSaveBookMetadata
+            ? "Name and book settings saved"
+            : didSaveBookMetadata && didSaveMetadata
+              ? "Book settings and properties saved"
               : didUpdateName && didSaveMetadata
                 ? "Properties and name saved"
                 : didUpdateName
                   ? "Name saved"
-                  : didSaveBookTitles
-                    ? "Book titles saved"
+                  : didSaveBookMetadata
+                    ? "Book settings saved"
                     : "Properties saved"
       );
       await openPropertiesModal(propertiesScope, propertiesNodeId);
@@ -5293,17 +5282,9 @@ function ScripturesContent() {
           applySelection(autoSelectNodeId, path, true, false, true);
         }
       } else {
-        const firstLeafId = findFirstLeafId(data);
-        if (firstLeafId) {
-          const firstLeafPath = findPath(data, firstLeafId);
-          if (firstLeafPath) {
-            applySelection(firstLeafId, firstLeafPath, false, false, true);
-          }
-        } else {
-          setSelectedId(null);
-          setBreadcrumb([]);
-          setExpandedIds(new Set());
-        }
+        setSelectedId(BOOK_ROOT_NODE_ID);
+        setNodeContent(null);
+        setBreadcrumb([]);
       }
       
       setUrlInitialized(true);
@@ -6720,6 +6701,25 @@ function ScripturesContent() {
     // Update URL with current selection
     if (syncUrl && bookId) {
       syncSelectionUrl(nodeId);
+    }
+  };
+
+  const selectBookRoot = (syncUrl = true) => {
+    if (selectedId !== BOOK_ROOT_NODE_ID && hasUnsavedInlineChanges()) {
+      const shouldDiscard = window.confirm(
+        "You have unsaved changes in Edit details. Discard changes and continue?"
+      );
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+
+    setSelectedId(BOOK_ROOT_NODE_ID);
+    setBreadcrumb([]);
+    setNodeContent(null);
+
+    if (syncUrl && bookId) {
+      syncBrowseUrl(bookId, null, "replace");
     }
   };
 
@@ -8791,6 +8791,11 @@ function ScripturesContent() {
     return allNodes[currentIndex + 1];
   };
 
+  const getFirstNodeInOrder = (): TreeNode | null => {
+    const allNodes = getAllNodesInOrder();
+    return allNodes.length > 0 ? allNodes[0] : null;
+  };
+
   const handleModalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!actionNode || !action) return;
@@ -9292,6 +9297,74 @@ function ScripturesContent() {
     setInlineEditMode(false);
   };
 
+  const handleStartBookInlineEdit = () => {
+    if (!currentBook || !canEditCurrentBook) return;
+    setBookInlineName(currentBook.book_name || "");
+    setInlineMessage(null);
+    setBookInlineEditMode(true);
+    setShowBookRootActionsMenu(false);
+  };
+
+  const handleCancelBookInlineEdit = () => {
+    setBookInlineName(currentBook?.book_name || "");
+    setInlineMessage(null);
+    setBookInlineEditMode(false);
+  };
+
+  const handleSaveBookInlineEdit = async () => {
+    if (!bookId || !currentBook || !canEditCurrentBook) return;
+
+    const nextName = bookInlineName.trim();
+    if (!nextName) {
+      setInlineMessage("Book name is required.");
+      return;
+    }
+
+    if (nextName === (currentBook.book_name || "").trim()) {
+      setInlineMessage("No changes to save.");
+      return;
+    }
+
+    setBookInlineSubmitting(true);
+    setInlineMessage(null);
+
+    try {
+      const response = await fetch(`/api/books/${bookId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ book_name: nextName }),
+      });
+      const payload = (await response.json().catch(() => null)) as BookDetails | { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to update book name");
+      }
+
+      const updatedBook = payload as BookDetails;
+      setCurrentBook(updatedBook);
+      setBooks((prev) =>
+        prev.map((book) =>
+          book.id === updatedBook.id
+            ? {
+                ...book,
+                book_name: updatedBook.book_name,
+                level_name_overrides: updatedBook.level_name_overrides,
+                metadata_json: updatedBook.metadata_json,
+                metadata: updatedBook.metadata,
+              }
+            : book
+        )
+      );
+      setBookInlineEditMode(false);
+      setInlineMessage("Book details saved.");
+      setTimeout(() => setInlineMessage(null), 2000);
+    } catch (err) {
+      setInlineMessage(err instanceof Error ? err.message : "Failed to save book details.");
+    } finally {
+      setBookInlineSubmitting(false);
+    }
+  };
+
   const updateInlineWordMeaningRows = (rows: WordMeaningRow[]) => {
     setInlineFormData((prev) => ({
       ...prev,
@@ -9307,6 +9380,19 @@ function ScripturesContent() {
       ...prev,
       wordMeanings: [...prev.wordMeanings, createEmptyWordMeaningRow(prev.wordMeanings.length + 1)],
     }));
+  };
+
+  const handleImportInlineWordMeanings = (value: string): number => {
+    const importedRows = mapSemicolonSeparatedWordMeaningsToRows(
+      value,
+      inlineFormData.wordMeanings.length + 1
+    );
+    if (importedRows.length === 0) {
+      return 0;
+    }
+
+    updateInlineWordMeaningRows([...inlineFormData.wordMeanings, ...importedRows]);
+    return importedRows.length;
   };
 
   const handleRemoveInlineWordMeaningRow = (rowId: string) => {
@@ -9396,6 +9482,19 @@ function ScripturesContent() {
       ...prev,
       wordMeanings: [...prev.wordMeanings, createEmptyWordMeaningRow(prev.wordMeanings.length + 1)],
     }));
+  };
+
+  const handleImportModalWordMeanings = (value: string): number => {
+    const importedRows = mapSemicolonSeparatedWordMeaningsToRows(
+      value,
+      formData.wordMeanings.length + 1
+    );
+    if (importedRows.length === 0) {
+      return 0;
+    }
+
+    updateModalWordMeaningRows([...formData.wordMeanings, ...importedRows]);
+    return importedRows.length;
   };
 
   const handleRemoveModalWordMeaningRow = (rowId: string) => {
@@ -9649,6 +9748,7 @@ function ScripturesContent() {
   };
 
   const selectedTreeNode = selectedId ? findNodeById(treeData, selectedId) : null;
+  const isBookRootSelected = selectedId === BOOK_ROOT_NODE_ID;
   const hasSelectedChildNode = selectedId !== null;
   const isLeafSelected = Boolean(
     selectedTreeNode && (!selectedTreeNode.children || selectedTreeNode.children.length === 0)
@@ -9658,6 +9758,8 @@ function ScripturesContent() {
   const canCopyPreviewLink = Boolean(selectedId) && canPreviewCurrentNode;
   const canAddSelectedNodeToBasket = Boolean(selectedId && nodeContent) && isLeafSelected && Boolean(authEmail);
   const canCopyBrowseLink = Boolean(selectedId) && canBrowseCurrentNode;
+  const canPreviewCurrentBook = Boolean(bookId) && (Boolean(authEmail) || currentBook?.visibility === "public");
+  const canCopyBookBrowseLink = Boolean(bookId) && canBrowseCurrentNode;
   const canShowNodeActions =
     canPreviewCurrentNode ||
     canCopyPreviewLink ||
@@ -9665,6 +9767,31 @@ function ScripturesContent() {
     canCopyBrowseLink ||
     canEditCurrentBook;
   const isCopyMessage = authMessage === "Link copied.";
+  const selectedBookOption = useMemo(
+    () => books.find((book) => book.id.toString() === bookId) || null,
+    [books, bookId]
+  );
+  const canToggleCurrentBookVisibility = Boolean(
+    selectedBookOption &&
+      (canAdmin ||
+        selectedBookOption.metadata_json?.owner_id === authUserId ||
+        selectedBookOption.metadata?.owner_id === authUserId)
+  );
+  const canDeleteCurrentBook = Boolean(
+    selectedBookOption &&
+      (currentBook?.visibility || "private") === "private" &&
+      (canAdmin ||
+        selectedBookOption.metadata_json?.owner_id === authUserId ||
+        selectedBookOption.metadata?.owner_id === authUserId)
+  );
+  const canShowBookRootActions =
+    canEditCurrentBook ||
+    canContribute ||
+    canPreviewCurrentBook ||
+    canCopyBookBrowseLink ||
+    canImport ||
+    canToggleCurrentBookVisibility ||
+    canDeleteCurrentBook;
   const isBooksGridView = bookBrowserDensity > 0;
   const booksGridColumns =
     bookBrowserDensity === 1
@@ -9711,26 +9838,66 @@ function ScripturesContent() {
   const loadedBookCount = filteredBooks.length;
   const isInitialBooksLoad = bookLoadingMore && loadedBookCount === 0;
 
-  // Derive unique variant authors from the current preview artifact, resolved against the book registry
+  // Derive unique variant authors from preview/node variants, resolved against the book registry.
+  // Some imported variants only carry `author` (no `author_slug`), so infer a stable slug.
   const availableVariantAuthors = useMemo<Map<string, string>>(() => {
     const map = new Map<string, string>();
     const registry = currentBook?.variant_authors ?? {};
+
+    const normalizeAuthorSlug = (value: string): string =>
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/["'`]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+    const registerVariant = (variant: unknown) => {
+      if (!variant || typeof variant !== "object") {
+        return;
+      }
+
+      const v = variant as { author_slug?: unknown; author?: unknown };
+      const rawAuthor = typeof v.author === "string" ? v.author.trim() : "";
+      const explicitSlug = typeof v.author_slug === "string" ? v.author_slug.trim() : "";
+      const baseSlug = explicitSlug || normalizeAuthorSlug(rawAuthor);
+      if (!baseSlug) {
+        return;
+      }
+
+      const resolvedName = (registry[baseSlug] || rawAuthor || baseSlug).trim();
+      if (map.has(baseSlug)) {
+        const existing = (map.get(baseSlug) || "").trim();
+        if (!existing || existing === baseSlug) {
+          map.set(baseSlug, resolvedName);
+        }
+        return;
+      }
+      map.set(baseSlug, resolvedName);
+    };
+
     for (const block of bookPreviewArtifact?.sections?.body ?? []) {
       const tv = Array.isArray(block.content?.translation_variants) ? block.content.translation_variants : [];
       const cv = Array.isArray(block.content?.commentary_variants) ? block.content.commentary_variants : [];
-      for (const v of [...tv, ...cv]) {
-        const slug = (v?.author_slug || "").trim();
-        if (!slug || map.has(slug)) continue;
-        const name = registry[slug] || (v?.author || "").trim() || slug;
-        map.set(slug, name);
-      }
+      [...tv, ...cv].forEach(registerVariant);
+    }
+
+    const nodeVariantsSource = nodeContent?.content_data;
+    if (nodeVariantsSource && typeof nodeVariantsSource === "object") {
+      const tv = Array.isArray((nodeVariantsSource as { translation_variants?: unknown }).translation_variants)
+        ? (nodeVariantsSource as { translation_variants: unknown[] }).translation_variants
+        : [];
+      const cv = Array.isArray((nodeVariantsSource as { commentary_variants?: unknown }).commentary_variants)
+        ? (nodeVariantsSource as { commentary_variants: unknown[] }).commentary_variants
+        : [];
+      [...tv, ...cv].forEach(registerVariant);
     }
     return new Map(
       [...map.entries()].sort((left, right) =>
         left[1].localeCompare(right[1], undefined, { sensitivity: "base" })
       )
     );
-  }, [bookPreviewArtifact, currentBook?.variant_authors]);
+  }, [bookPreviewArtifact, currentBook?.variant_authors, nodeContent?.content_data]);
 
   const previewBodyBlockElements = useMemo(() => {
     if (!bookPreviewArtifact) {
@@ -10102,7 +10269,7 @@ function ScripturesContent() {
     if (value && value === bookId) {
       setShowExploreStructure(false);
       setMobilePanel("content");
-      if (!selectedId && treeData.length > 0) {
+      if (selectedId === null && treeData.length > 0) {
         const firstLeafId = findFirstLeafId(treeData);
         if (firstLeafId) {
           selectNode(firstLeafId, true);
@@ -10125,6 +10292,43 @@ function ScripturesContent() {
     setShowExploreStructure(false);
     setMobilePanel("content");
     return true;
+  };
+
+  const openCreateFirstLevelNode = () => {
+    if (!bookId || !currentBook?.schema || !canContribute) {
+      return;
+    }
+    const firstLevel = currentBook.schema?.levels[0] || "";
+    const virtualBook: TreeNode = {
+      id: parseInt(bookId, 10),
+      level_name: "BOOK",
+      level_order: 0,
+      sequence_number: undefined,
+      title_english: selectedBookOption?.book_name,
+    };
+    setActionNode(virtualBook);
+    setCreateParentNodeIdOverride(null);
+    setCreateInsertAfterNodeId(null);
+    setFormData({
+      levelName: firstLevel,
+      titleSanskrit: "",
+      titleTransliteration: "",
+      titleEnglish: "",
+      sequenceNumber: "",
+      hasContent: true,
+      contentSanskrit: "",
+      contentTransliteration: "",
+      contentEnglish: "",
+      tags: "",
+      wordMeanings: [],
+    });
+    setModalTranslationDrafts(buildEditableTranslationDrafts({}));
+    setModalSelectedTranslationLanguages(
+      normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
+    );
+    setModalTranslationVariants([]);
+    setModalCommentaryVariants([]);
+    setAction("add");
   };
 
   const handlePreviewBookFromRow = async (book: BookOption) => {
@@ -10566,8 +10770,7 @@ function ScripturesContent() {
                         book.metadata?.owner_id === authUserId);
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
-                    const showRowMenu =
-                      canCopyPreviewBookLink || canToggleVisibility || canImport || canDeletePrivateBook;
+                    const showRowMenu = false;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =
@@ -11074,7 +11277,7 @@ function ScripturesContent() {
                       Preview
                     </a>
                   )}
-                  <div className="inline-flex rounded-full border border-black/10 bg-white/90 p-0.5 lg:hidden">
+                  <div className="inline-flex rounded-full border border-black/10 bg-white/90 p-0.5 md:hidden">
                     <button
                       type="button"
                       onClick={() => setMobilePanel("tree")}
@@ -11111,150 +11314,20 @@ function ScripturesContent() {
               </div>
 
                 <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl overflow-hidden px-3 pb-4 pt-2 sm:px-4">
-              <div className="grid h-full min-h-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
+              <div className="flex h-full min-h-0 w-full flex-col gap-3 sm:gap-4 md:flex-row">
             {/* Tree Section */}
             {isExploreVisible && (
             <div
-              className={`lg:col-span-1 min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 flex flex-col ${
-                !hasSelectedChildNode || mobilePanel === "tree" ? "flex" : "hidden"
-              } lg:flex`}
+              className={`min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 flex flex-col md:w-[320px] md:flex-none ${
+                mobilePanel === "tree" ? "flex" : "hidden"
+              } md:flex`}
+              style={{ scrollbarGutter: "stable" }}
             >
-              <div className="sticky top-0 z-10 bg-white/90 pb-3">
-                <div className="flex items-center justify-between text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  <span>
-                    {books.find(b => b.id.toString() === bookId)?.book_name || "Nested tree"}
-                  </span>
-                  <div className="flex items-center gap-2">
+              {(treeLoading || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
+                <div className="sticky top-0 z-10 bg-white/90 pb-1">
+                  <div className="flex items-center justify-end gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                     {treeLoading && <span>Loading</span>}
-                  </div>
-                </div>
-                {bookId && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <div ref={bookTreeActionsMenuRef} className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowBookTreeActionsMenu((prev) => !prev)}
-                        title="Book tree actions"
-                        aria-label="Book tree actions"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                      >
-                        ⋮
-                      </button>
-                      {showBookTreeActionsMenu && (
-                        <div className="absolute left-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                          {(Boolean(authEmail) || currentBook?.visibility === "public") && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                void handlePreviewBook("book");
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              <Eye size={14} />
-                              Preview book
-                            </button>
-                          )}
-                          {canImport && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                const selectedBook = books.find((book) => book.id.toString() === bookId);
-                                void handleExportBookJson(parseInt(bookId, 10), selectedBook?.book_name);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              Export JSON
-                            </button>
-                          )}
-                          {(Boolean(authEmail) || currentBook?.visibility === "public") && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                const selectedBook = books.find((book) => book.id.toString() === bookId);
-                                void handleExportBookPdf(parseInt(bookId, 10), selectedBook?.book_name);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              Download PDF
-                            </button>
-                          )}
-                          {canContribute && currentBook?.schema && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                const virtualBook: TreeNode = {
-                                  id: parseInt(bookId, 10),
-                                  level_name: "BOOK",
-                                  level_order: 0,
-                                  sequence_number: undefined,
-                                  title_english: books.find((b) => b.id.toString() === bookId)?.book_name,
-                                };
-                                const firstLevel = currentBook.schema?.levels[0] || "";
-                                setActionNode(virtualBook);
-                                setCreateParentNodeIdOverride(null);
-                                setCreateInsertAfterNodeId(null);
-                                setFormData({
-                                  levelName: firstLevel,
-                                  titleSanskrit: "",
-                                  titleTransliteration: "",
-                                  titleEnglish: "",
-                                  sequenceNumber: "",
-                                  hasContent: true,
-                                  contentSanskrit: "",
-                                  contentTransliteration: "",
-                                  contentEnglish: "",
-                                  tags: "",
-                                  wordMeanings: [],
-                                });
-                                setModalTranslationDrafts(buildEditableTranslationDrafts({}));
-                                setModalSelectedTranslationLanguages(
-                                  normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
-                                );
-                                setModalTranslationVariants([]);
-                                setModalCommentaryVariants([]);
-                                setAction("add");
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              <Plus size={14} />
-                              Add {getDisplayLevelName(currentBook.schema?.levels[0]) || "Node"}
-                            </button>
-                          )}
-                          {canEditCurrentBook && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                setMediaManagerScope("book");
-                                setShowMediaManagerModal(true);
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              <Plus size={14} />
-                              Manage multimedia
-                            </button>
-                          )}
-                          {canEditCurrentBook && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowBookTreeActionsMenu(false);
-                                void openPropertiesModal("book");
-                              }}
-                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              <SlidersHorizontal size={14} />
-                              Book Properties
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    {currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
+                    {bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
                       <>
                         <button
                           type="button"
@@ -11279,9 +11352,12 @@ function ScripturesContent() {
                       </>
                     )}
                   </div>
-                )}
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                </div>
+              )}
+              <div
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+                style={{ scrollbarGutter: "stable" }}
+              >
                 {privateBookGate ? (
                   <div className="mx-2 mt-6 rounded-2xl border border-black/10 bg-white/80 p-5 text-center">
                     <p className="text-sm font-medium text-zinc-700">🔒 Private book</p>
@@ -11310,7 +11386,20 @@ function ScripturesContent() {
                       <p className="mt-3 text-sm text-zinc-600">No nodes yet.</p>
                     )}
                     {!treeLoading && !treeError && treeData.length > 0 && (
-                      <div className="mt-4">{renderTree(treeData)}</div>
+                      <div className="mt-1 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => selectBookRoot(true)}
+                          className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition ${
+                            isBookRootSelected
+                              ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
+                              : "border-black/10 bg-white/80 text-zinc-700 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                          }`}
+                        >
+                          {selectedBookOption?.book_name || "Book"}
+                        </button>
+                        {renderTree(treeData)}
+                      </div>
                     )}
                   </>
                 )}
@@ -11320,11 +11409,10 @@ function ScripturesContent() {
 
             {/* Content Section */}
             <div
-              className={`${isExploreVisible ? "lg:col-span-2" : "lg:col-span-1"} min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 overflow-y-auto overscroll-contain ${
-                !isExploreVisible || (hasSelectedChildNode && mobilePanel === "content")
-                  ? "block"
-                  : "hidden"
-              } lg:block`}
+              className={`min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 overflow-y-auto overscroll-contain md:min-w-0 md:flex-1 ${
+                mobilePanel === "content" ? "block" : "hidden"
+              } md:block`}
+              style={{ scrollbarGutter: "stable" }}
             >
               {breadcrumb.length > 0 && (
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-600">
@@ -11393,7 +11481,257 @@ function ScripturesContent() {
                   )}
                 </div>
               )}
-              {selectedId && nodeContent ? (
+              {isBookRootSelected && currentBook ? (
+                <>
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      {bookInlineEditMode ? (
+                        <input
+                          type="text"
+                          value={bookInlineName}
+                          onChange={(event) => setBookInlineName(event.target.value)}
+                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-2xl font-[var(--font-display)] text-[color:var(--deep)] outline-none focus:border-[color:var(--accent)]"
+                          aria-label="Book name"
+                        />
+                      ) : (
+                        <h2 className="truncate font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                          {currentBook.book_name}
+                        </h2>
+                      )}
+                    </div>
+                    <div className="ml-3 flex flex-wrap items-center gap-2">
+                      {bookInlineEditMode && canEditCurrentBook && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveBookInlineEdit()}
+                            disabled={bookInlineSubmitting}
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {bookInlineSubmitting ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelBookInlineEdit}
+                            disabled={bookInlineSubmitting}
+                            className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      <div className="flex items-center gap-1 border-l pl-2 border-black/10">
+                        <button
+                          type="button"
+                          disabled
+                          title="Previous item"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          ←
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const first = getFirstNodeInOrder();
+                            if (first) selectNode(first.id);
+                          }}
+                          disabled={bookInlineEditMode || !getFirstNodeInOrder()}
+                          title="Next item"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
+                        >
+                          →
+                        </button>
+                      </div>
+                      {canShowBookRootActions && (
+                        <div ref={bookRootActionsMenuRef} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setShowBookRootActionsMenu((prev) => !prev)}
+                            title="Book actions"
+                            aria-label="Book actions"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+                          {showBookRootActionsMenu && (
+                            <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                              {canEditCurrentBook && !bookInlineEditMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleStartBookInlineEdit();
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Pencil size={14} />
+                                  Edit book name
+                                </button>
+                              )}
+                              {canPreviewCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void handlePreviewBook("book");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Eye size={14} />
+                                  Preview book
+                                </button>
+                              )}
+                              {canCopyBookBrowseLink && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId)}`;
+                                    navigator.clipboard.writeText(url);
+                                    setShowBookRootActionsMenu(false);
+                                    setAuthMessage("Link copied.");
+                                    setCopyTarget("book");
+                                    setTimeout(() => {
+                                      setAuthMessage(null);
+                                      setCopyTarget(null);
+                                    }, 2000);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Link2 size={14} />
+                                  Copy browse link
+                                </button>
+                              )}
+                              {canContribute && currentBook?.schema && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    openCreateFirstLevelNode();
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Plus size={14} />
+                                  Add {getDisplayLevelName(currentBook.schema?.levels[0]) || "Node"}
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    setMediaManagerScope("book");
+                                    setShowMediaManagerModal(true);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Plus size={14} />
+                                  Manage multimedia
+                                </button>
+                              )}
+                              {canEditCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void openPropertiesModal("book");
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <SlidersHorizontal size={14} />
+                                  Book properties
+                                </button>
+                              )}
+                              {canImport && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void handleExportBookJson(currentBook.id, currentBook.book_name);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Download size={14} />
+                                  Export JSON
+                                </button>
+                              )}
+                              {canPreviewCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void handleExportBookPdf(currentBook.id, currentBook.book_name);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Download size={14} />
+                                  Download PDF
+                                </button>
+                              )}
+                              {selectedBookOption && canToggleCurrentBookVisibility && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void handleToggleBookVisibility(selectedBookOption);
+                                  }}
+                                  disabled={bookVisibilitySubmitting === selectedBookOption.id}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Upload size={14} />
+                                  {(currentBook.visibility || "private") === "public" ? "Make private" : "Make public"}
+                                </button>
+                              )}
+                              {selectedBookOption && canDeleteCurrentBook && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowBookRootActionsMenu(false);
+                                    void handleDeleteBook(selectedBookOption);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                >
+                                  <Trash2 size={14} />
+                                  Delete book
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
+                        <div className="mt-1 text-sm text-zinc-700">
+                          {(currentBook.visibility || "private") === "public" ? "Public" : "Private"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
+                        <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
+                      </div>
+                    </div>
+
+                    {currentBook.schema?.levels?.length ? (
+                      <div>
+                        <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Levels</div>
+                        <div className="flex flex-wrap gap-2">
+                          {currentBook.schema.levels.map((level) => (
+                            <span
+                              key={`book-level-${level}`}
+                              className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-zinc-700"
+                            >
+                              {getDisplayLevelName(level) || level}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : selectedId && nodeContent ? (
                 <>
                   <div
                     className="flex items-center justify-between mb-4"
@@ -12380,6 +12718,7 @@ function ScripturesContent() {
                                 requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
                                 allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
                                 onAddRow={handleAddInlineWordMeaningRow}
+                                onImportSemicolonSeparated={handleImportInlineWordMeanings}
                                 onMoveRow={handleMoveInlineWordMeaningRow}
                                 onRemoveRow={handleRemoveInlineWordMeaningRow}
                                 onSourceFieldChange={handleInlineWordMeaningChange}
@@ -13283,6 +13622,51 @@ function ScripturesContent() {
                       />
                     </label>
                   </div>
+                </div>
+              )}
+
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Word Meanings
+                  </div>
+                  <p className="mb-3 text-sm text-zinc-600">
+                    Enable the word-to-word meanings editor for the levels where contributors should be able to edit it.
+                  </p>
+                  {currentBookSchemaLevels.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      {currentBookSchemaLevels.map((level) => {
+                        const checked = propertiesWordMeaningsEnabledLevels.includes(level);
+                        return (
+                          <label
+                            key={level}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700"
+                          >
+                            <span>{level}</span>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                setPropertiesWordMeaningsEnabledLevels((prev) => {
+                                  if (event.target.checked) {
+                                    return prev.includes(level) ? prev : [...prev, level];
+                                  }
+                                  return prev.filter((entry) => entry !== level);
+                                });
+                                setPropertiesMessage(null);
+                                setPropertiesError(null);
+                              }}
+                              className="rounded border-black/20"
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-zinc-500">
+                      This book has no schema levels available yet, so word meanings cannot be enabled from the UI.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -15854,6 +16238,7 @@ function ScripturesContent() {
                         requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
                         allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
                         onAddRow={handleAddModalWordMeaningRow}
+                        onImportSemicolonSeparated={handleImportModalWordMeanings}
                         onMoveRow={handleMoveModalWordMeaningRow}
                         onRemoveRow={handleRemoveModalWordMeaningRow}
                         onSourceFieldChange={handleModalWordMeaningChange}

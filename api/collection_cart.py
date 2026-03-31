@@ -53,7 +53,69 @@ def _to_item_public(item: CollectionCartItem) -> CollectionCartItemPublic:
     )
 
 
-def _compose_cart_items_into_draft_body(items: list[CollectionCartItem], db: Session) -> tuple[list[dict], list[CartDraftBodyReference], int]:
+def _make_book_prefix(book_code: str | None, used_prefixes: set[str]) -> str:
+    """Derive a short unique prefix from book_code, e.g. 'bhagavad-gita' -> 'bg'."""
+    code = (book_code or "book").replace("_", "-").lower()
+    parts = [p for p in code.split("-") if p]
+    base = "".join(p[0] for p in parts)[:4] or "bk"
+    candidate = base
+    i = 2
+    while candidate in used_prefixes:
+        candidate = f"{base[:3]}{i}"
+        i += 1
+    used_prefixes.add(candidate)
+    return candidate
+
+
+def _build_compilation_metadata(books: list[Book]) -> dict:
+    """Merge variant_authors from multiple books, resolving slug collisions with prefixing.
+
+    Returns compilation_metadata containing:
+    - merged_variant_authors: global slug -> author name map
+    - slug_remapping: per-book mapping of original slug -> merged global slug
+    - source_books: list of source book summaries
+    """
+    global_authors: dict[str, str] = {}
+    slug_remapping: dict[str, dict[str, str]] = {}
+    used_prefixes: set[str] = set()
+
+    for book in books:
+        variant_authors: dict = book.variant_authors if isinstance(book.variant_authors, dict) else {}
+        prefix = _make_book_prefix(book.book_code, used_prefixes)
+        remapping: dict[str, str] = {}
+
+        for slug, name in variant_authors.items():
+            if not isinstance(slug, str) or not slug:
+                continue
+            name_str = str(name) if name is not None else slug
+
+            if slug not in global_authors:
+                # No collision — use slug directly
+                global_authors[slug] = name_str
+                remapping[slug] = slug
+            elif global_authors[slug] == name_str:
+                # Same person, same slug in multiple books — share it
+                remapping[slug] = slug
+            else:
+                # Collision: same slug, different person — rename with book prefix
+                new_slug = f"{prefix}_{slug}"
+                global_authors[new_slug] = name_str
+                remapping[slug] = new_slug
+
+        slug_remapping[str(book.id)] = remapping
+
+    return {
+        "is_compilation": True,
+        "source_books": [
+            {"book_id": book.id, "book_name": book.book_name, "book_code": book.book_code}
+            for book in books
+        ],
+        "merged_variant_authors": global_authors,
+        "slug_remapping": slug_remapping,
+    }
+
+
+def _compose_cart_items_into_draft_body(items: list[CollectionCartItem], db: Session) -> tuple[list[dict], list[CartDraftBodyReference], int, dict]:
     ordered_book_ids: list[int] = []
     seen_book_ids: set[int] = set()
     skipped_item_count = 0
@@ -83,7 +145,10 @@ def _compose_cart_items_into_draft_body(items: list[CollectionCartItem], db: Ses
         body_references.append(reference)
         body_items.append(reference.model_dump())
 
-    return body_items, body_references, skipped_item_count
+    ordered_books = [books_by_id[bid] for bid in ordered_book_ids if bid in books_by_id]
+    compilation_metadata = _build_compilation_metadata(ordered_books)
+
+    return body_items, body_references, skipped_item_count, compilation_metadata
 
 
 # === Cart Management ===
@@ -216,7 +281,7 @@ def compose_my_cart_as_draft_body(
     items = db.query(CollectionCartItem).filter(
         CollectionCartItem.cart_id == cart.id
     ).order_by(CollectionCartItem.order.asc(), CollectionCartItem.id.asc()).all()
-    body_items, body_references, skipped_item_count = _compose_cart_items_into_draft_body(items, db)
+    body_items, body_references, skipped_item_count, _ = _compose_cart_items_into_draft_body(items, db)
 
     section_structure = {
         "front": [],
@@ -249,7 +314,7 @@ def create_draft_from_my_cart(
     items = db.query(CollectionCartItem).filter(
         CollectionCartItem.cart_id == cart.id
     ).order_by(CollectionCartItem.order.asc(), CollectionCartItem.id.asc()).all()
-    body_items, _, _ = _compose_cart_items_into_draft_body(items, db)
+    body_items, _, _, compilation_metadata = _compose_cart_items_into_draft_body(items, db)
 
     draft = DraftBook(
         owner_id=current_user.id,
@@ -260,6 +325,7 @@ def create_draft_from_my_cart(
             "body": body_items,
             "back": [],
         },
+        compilation_metadata=compilation_metadata,
         status="draft",
     )
     db.add(draft)

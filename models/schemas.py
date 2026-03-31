@@ -983,6 +983,7 @@ class DraftBookBase(BaseModel):
     section_structure: dict = Field(
         default_factory=lambda: {"front": [], "body": [], "back": []}
     )
+    compilation_metadata: dict = Field(default_factory=dict)
 
 
 class DraftBookCreate(DraftBookBase):

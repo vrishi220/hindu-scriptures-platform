@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 type WordMeaningRow = {
   id: string;
   order: number;
@@ -17,6 +19,7 @@ type WordMeaningsEditorProps = {
   requiredLanguage: string;
   allowedMeaningLanguages: readonly string[];
   onAddRow: () => void;
+  onImportSemicolonSeparated: (value: string) => number;
   onMoveRow: (rowId: string, direction: "up" | "down") => void;
   onRemoveRow: (rowId: string) => void;
   onSourceFieldChange: (
@@ -35,23 +38,76 @@ export default function WordMeaningsEditor({
   requiredLanguage,
   allowedMeaningLanguages,
   onAddRow,
+  onImportSemicolonSeparated,
   onMoveRow,
   onRemoveRow,
   onSourceFieldChange,
   onSelectMeaningLanguage,
   onMeaningTextChange,
 }: WordMeaningsEditorProps) {
+  const [semicolonInput, setSemicolonInput] = useState("");
+  const [semicolonMessage, setSemicolonMessage] = useState<string | null>(null);
+
+  const handleImport = () => {
+    const importedCount = onImportSemicolonSeparated(semicolonInput);
+    if (importedCount > 0) {
+      setSemicolonMessage(
+        importedCount === 1 ? "Added 1 word-meaning row." : `Added ${importedCount} word-meaning rows.`
+      );
+      setSemicolonInput("");
+      return;
+    }
+
+    setSemicolonMessage("No valid semicolon-separated entries found.");
+  };
+
   return (
     <div className="mt-2 rounded-lg border border-black/10 bg-white/80 p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Word Meanings</div>
-        <button
-          type="button"
-          onClick={onAddRow}
-          className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50"
-        >
-          Add row
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onAddRow}
+            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50"
+          >
+            Add row
+          </button>
+        </div>
+      </div>
+      <div className="mb-3 rounded-lg border border-black/10 bg-white p-3">
+        <div className="mb-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
+          Semicolon Import
+        </div>
+        <p className="mb-2 text-xs text-zinc-600">
+          Paste `word=meaning; word2:meaning2; word3?meaning3` or `word1; word2` to create rows, then refine them below.
+        </p>
+        <textarea
+          value={semicolonInput}
+          onChange={(event) => {
+            setSemicolonInput(event.target.value);
+            setSemicolonMessage(null);
+          }}
+          rows={3}
+          placeholder="karma=action; yoga:discipline; buddhi?intellect"
+          className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="text-[11px] text-zinc-500">
+            Existing rows stay editable after import.
+          </div>
+          <button
+            type="button"
+            onClick={handleImport}
+            disabled={!semicolonInput.trim()}
+            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Add tokens
+          </button>
+        </div>
+        {semicolonMessage && (
+          <div className="mt-2 text-[11px] text-zinc-600">{semicolonMessage}</div>
+        )}
       </div>
       {missingRequired && (
         <div className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">

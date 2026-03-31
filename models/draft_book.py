@@ -13,6 +13,7 @@ class DraftBook(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     section_structure = Column(JSONB, nullable=False, default=dict)
+    compilation_metadata = Column(JSONB, nullable=False, default=dict, server_default="{}")
     status = Column(
         Enum("draft", "published", name="draft_book_status"),
         nullable=False,

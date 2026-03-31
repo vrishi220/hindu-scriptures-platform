@@ -1462,6 +1462,325 @@ class TestBookSharesPhase2:
         post_delete_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
         assert post_delete_view.status_code == status.HTTP_200_OK
 
+    def test_create_node_copy_populates_variant_author_registry_from_author_name(self, client):
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Compiled Book {uuid4().hex[:6]}",
+                "book_code": f"compiled-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_resp.status_code == status.HTTP_201_CREATED
+        book_id = book_resp.json()["id"]
+
+        first_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {"author": "Bar Foo", "language": "english", "text": "First translation"}
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert first_node_resp.status_code == status.HTTP_201_CREATED
+        first_node_payload = first_node_resp.json()
+        assert first_node_payload["content_data"]["translation_variants"][0]["author_slug"] == "bar_foo"
+
+        second_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "2",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {"author": "Baz Qux", "language": "english", "text": "Second translation"}
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert second_node_resp.status_code == status.HTTP_201_CREATED
+        second_node_payload = second_node_resp.json()
+        assert second_node_payload["content_data"]["translation_variants"][0]["author_slug"] == "baz_qux"
+
+        book_detail_resp = client.get(f"/api/content/books/{book_id}", headers=headers)
+        assert book_detail_resp.status_code == status.HTTP_200_OK
+        assert book_detail_resp.json()["variant_authors"] == {
+            "bar_foo": "Bar Foo",
+            "baz_qux": "Baz Qux",
+        }
+
+    def test_create_node_copy_rewrites_conflicting_variant_author_slugs(self, client):
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Collision Book {uuid4().hex[:6]}",
+                "book_code": f"collision-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_resp.status_code == status.HTTP_201_CREATED
+        book_id = book_resp.json()["id"]
+
+        first_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {
+                            "author_slug": "bar",
+                            "author": "Bar Foo",
+                            "language": "english",
+                            "text": "First translation",
+                        }
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert first_node_resp.status_code == status.HTTP_201_CREATED
+
+        second_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "2",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {
+                            "author_slug": "bar",
+                            "author": "Baz Foo",
+                            "language": "english",
+                            "text": "Second translation",
+                        }
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert second_node_resp.status_code == status.HTTP_201_CREATED
+        second_variant = second_node_resp.json()["content_data"]["translation_variants"][0]
+        assert second_variant["author_slug"] == "bar_2"
+
+        book_detail_resp = client.get(f"/api/content/books/{book_id}", headers=headers)
+        assert book_detail_resp.status_code == status.HTTP_200_OK
+        assert book_detail_resp.json()["variant_authors"] == {
+            "bar": "Bar Foo",
+            "bar_2": "Baz Foo",
+        }
+
+    def test_create_node_reference_merges_source_book_variant_authors(self, client):
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        source_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Source Book {uuid4().hex[:6]}",
+                "book_code": f"source-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_resp.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_resp.json()["id"]
+
+        update_source_book_resp = client.patch(
+            f"/api/content/books/{source_book_id}",
+            json={"variant_authors": {"bar": "Bar Foo"}},
+            headers=headers,
+        )
+        assert update_source_book_resp.status_code == status.HTTP_200_OK
+
+        source_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {
+                            "author_slug": "bar",
+                            "author": "Bar Foo",
+                            "language": "english",
+                            "text": "Source translation",
+                        }
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert source_node_resp.status_code == status.HTTP_201_CREATED
+        source_node_id = source_node_resp.json()["id"]
+
+        target_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Target Book {uuid4().hex[:6]}",
+                "book_code": f"target-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_book_resp.status_code == status.HTTP_201_CREATED
+        target_book_id = target_book_resp.json()["id"]
+
+        ref_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": target_book_id,
+                "referenced_node_id": source_node_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Referenced Verse",
+                "has_content": False,
+                "content_data": {},
+            },
+            headers=headers,
+        )
+        assert ref_node_resp.status_code == status.HTTP_201_CREATED
+
+        target_book_detail_resp = client.get(f"/api/content/books/{target_book_id}", headers=headers)
+        assert target_book_detail_resp.status_code == status.HTTP_200_OK
+        assert target_book_detail_resp.json()["variant_authors"] == {"bar": "Bar Foo"}
+
+    def test_create_node_reference_merges_variant_authors_from_source_node_when_book_registry_empty(self, client):
+        headers = _register_and_login_as_admin(client)
+
+        schema_resp = client.post(
+            "/api/content/schemas",
+            json={"name": f"Flat {uuid4().hex[:6]}", "description": "flat", "levels": ["Verse"]},
+            headers=headers,
+        )
+        assert schema_resp.status_code == status.HTTP_201_CREATED
+        schema_id = schema_resp.json()["id"]
+
+        source_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Source No Registry {uuid4().hex[:6]}",
+                "book_code": f"src-noreg-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert source_book_resp.status_code == status.HTTP_201_CREATED
+        source_book_id = source_book_resp.json()["id"]
+
+        source_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": source_book_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "has_content": True,
+                "content_data": {
+                    "translation_variants": [
+                        {
+                            "author_slug": "bar",
+                            "author": "Bar Foo",
+                            "language": "english",
+                            "text": "Source translation",
+                        }
+                    ]
+                },
+            },
+            headers=headers,
+        )
+        assert source_node_resp.status_code == status.HTTP_201_CREATED
+        source_node_id = source_node_resp.json()["id"]
+
+        target_book_resp = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Target No Registry {uuid4().hex[:6]}",
+                "book_code": f"tgt-noreg-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert target_book_resp.status_code == status.HTTP_201_CREATED
+        target_book_id = target_book_resp.json()["id"]
+
+        ref_node_resp = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": target_book_id,
+                "referenced_node_id": source_node_id,
+                "level_name": "Verse",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Referenced Verse",
+                "has_content": False,
+                "content_data": {},
+            },
+            headers=headers,
+        )
+        assert ref_node_resp.status_code == status.HTTP_201_CREATED
+
+        target_book_detail_resp = client.get(f"/api/content/books/{target_book_id}", headers=headers)
+        assert target_book_detail_resp.status_code == status.HTTP_200_OK
+        assert target_book_detail_resp.json()["variant_authors"] == {"bar": "Bar Foo"}
+
 
 class TestHierarchyInsertionRegression:
     def test_schema_hierarchy_rules_and_tree_payload(self, client):

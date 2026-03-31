@@ -78,6 +78,10 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS variant_authors JSONB NOT NULL DEFAULT '{}'::jsonb;
         """,
         """
+        ALTER TABLE IF EXISTS draft_books
+            ADD COLUMN IF NOT EXISTS compilation_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+        """,
+        """
         DO $$
         BEGIN
             IF to_regclass('public.scripture_schemas') IS NOT NULL THEN

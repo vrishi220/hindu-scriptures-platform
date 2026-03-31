@@ -599,6 +599,98 @@ def _book_public_model(book: Book) -> BookPublic:
     return BookPublic.model_validate(payload)
 
 
+def _normalize_variant_author_slug(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized
+
+
+def _normalize_content_variant_authors(
+    content_data: dict | None,
+    existing_registry: dict[str, str] | None = None,
+) -> tuple[dict, dict[str, str]]:
+    resolved_content = dict(content_data) if isinstance(content_data, dict) else {}
+    registry = existing_registry if isinstance(existing_registry, dict) else {}
+    discovered_authors: dict[str, str] = {}
+
+    def _allocate_slug(preferred_slug: str, author_name: str) -> str:
+        base_slug = preferred_slug or _normalize_variant_author_slug(author_name)
+        if not base_slug:
+            return ""
+
+        existing_name = registry.get(base_slug) or discovered_authors.get(base_slug)
+        if not existing_name or existing_name == author_name:
+            return base_slug
+
+        suffix = 2
+        candidate = f"{base_slug}_{suffix}"
+        while True:
+            candidate_name = registry.get(candidate) or discovered_authors.get(candidate)
+            if not candidate_name or candidate_name == author_name:
+                return candidate
+            suffix += 1
+            candidate = f"{base_slug}_{suffix}"
+
+    for field_name in ("translation_variants", "commentary_variants"):
+        raw_entries = resolved_content.get(field_name)
+        if not isinstance(raw_entries, list):
+            continue
+
+        normalized_entries: list = []
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                normalized_entries.append(raw_entry)
+                continue
+
+            entry = dict(raw_entry)
+            author_name = entry.get("author") if isinstance(entry.get("author"), str) else ""
+            author_name = author_name.strip()
+            preferred_slug = entry.get("author_slug") if isinstance(entry.get("author_slug"), str) else ""
+            preferred_slug = preferred_slug.strip()
+
+            resolved_slug = _allocate_slug(preferred_slug, author_name)
+            if resolved_slug:
+                entry["author_slug"] = resolved_slug
+
+            if not author_name and resolved_slug:
+                author_name = (registry.get(resolved_slug) or discovered_authors.get(resolved_slug) or "").strip()
+                if author_name:
+                    entry["author"] = author_name
+
+            if resolved_slug and author_name:
+                discovered_authors[resolved_slug] = author_name
+
+            normalized_entries.append(entry)
+
+        resolved_content[field_name] = normalized_entries
+
+    return resolved_content, discovered_authors
+
+
+def _merge_variant_authors(book: Book, incoming_authors: dict[str, str] | None) -> None:
+    if not isinstance(incoming_authors, dict) or not incoming_authors:
+        return
+
+    merged = dict(book.variant_authors) if isinstance(book.variant_authors, dict) else {}
+    changed = False
+    for slug, name in incoming_authors.items():
+        slug_text = str(slug).strip()
+        name_text = str(name).strip()
+        if not slug_text or not name_text:
+            continue
+        if merged.get(slug_text) == name_text:
+            continue
+        if slug_text in merged:
+            continue
+        merged[slug_text] = name_text
+        changed = True
+
+    if changed or not isinstance(book.variant_authors, dict):
+        book.variant_authors = merged
+
+
 def _metadata_string_values(value: object) -> list[str]:
     if isinstance(value, str):
         return [value]
@@ -3415,7 +3507,44 @@ def create_node(
         payload.title_transliteration,
     )
     content_data = _autofill_content_data_pair(payload.content_data or {})
+
+    source_variant_authors: dict[str, str] = {}
+    if payload.referenced_node_id is not None:
+        source_node = db.query(ContentNode).filter(ContentNode.id == payload.referenced_node_id).first()
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+        source_book = db.query(Book).filter(Book.id == source_node.book_id).first()
+        if source_book and isinstance(source_book.variant_authors, dict):
+            source_variant_authors = {
+                str(slug).strip(): str(name).strip()
+                for slug, name in source_book.variant_authors.items()
+                if str(slug).strip() and str(name).strip()
+            }
+
+        # Some source books may have empty variant_authors even when node-level
+        # translation/commentary variants carry author_slug+author data.
+        _, source_node_discovered_authors = _normalize_content_variant_authors(
+            source_node.content_data if isinstance(source_node.content_data, dict) else {},
+            source_variant_authors,
+        )
+        source_variant_authors = {
+            **source_variant_authors,
+            **source_node_discovered_authors,
+        }
+
+    existing_variant_authors = book.variant_authors if isinstance(book.variant_authors, dict) else {}
+    content_data, discovered_variant_authors = _normalize_content_variant_authors(
+        content_data,
+        {**source_variant_authors, **existing_variant_authors},
+    )
+
     _ensure_word_meanings_level_is_enabled(book, resolved_level_name, content_data)
+
+    _merge_variant_authors(book, source_variant_authors)
+    _merge_variant_authors(book, discovered_variant_authors)
 
     node = ContentNode(
         book_id=payload.book_id,

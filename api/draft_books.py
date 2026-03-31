@@ -2188,6 +2188,7 @@ def _render_block_content_with_template(
     resolved_metadata: dict | None = None,
     custom_template_sources: dict[str, str] | None = None,
     system_template_sources: dict[str, str] | None = None,
+    slug_remapping: dict[str, str] | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(source_node, item, resolved_metadata)
     resolved_labels = _resolve_default_template_labels(resolved_metadata)
@@ -2244,7 +2245,13 @@ def _render_block_content_with_template(
 
     content["metadata"] = context.get("metadata", {})
     content["translations"] = _normalize_translation_map(context.get("translations"))
-    content["translation_variants"] = _normalize_variant_entries(context.get("translation_variants"))
+    raw_translation_variants = _normalize_variant_entries(context.get("translation_variants"))
+    if slug_remapping:
+        raw_translation_variants = [
+            {**v, "author_slug": slug_remapping.get(v["author_slug"], v["author_slug"])}
+            for v in raw_translation_variants
+        ]
+    content["translation_variants"] = raw_translation_variants
     content["commentary_variants"] = _normalize_variant_entries(context.get("commentary_variants"))
     content["word_meanings_rows"] = context.get("word_meanings_rows", [])
     content["media_items"] = item.get("media_items") if isinstance(item.get("media_items"), list) else []
@@ -2613,6 +2620,19 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
     system_template_sources = _load_system_template_sources(db)
     extraction_ms = (perf_counter() - extraction_start) * 1000
 
+    # Extract per-book author slug remapping from compilation_metadata if present
+    slug_remapping_by_book: dict[int, dict[str, str]] = {}
+    compilation_meta = resolved_data.get("compilation_metadata")
+    if isinstance(compilation_meta, dict):
+        raw_remapping = compilation_meta.get("slug_remapping")
+        if isinstance(raw_remapping, dict):
+            for book_id_str, mapping in raw_remapping.items():
+                if isinstance(mapping, dict):
+                    try:
+                        slug_remapping_by_book[int(book_id_str)] = mapping
+                    except (TypeError, ValueError):
+                        pass
+
     timing_by_section: dict[str, dict[str, float | int]] = {}
 
     for section_name in section_names:
@@ -2749,6 +2769,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 resolved_metadata=resolved_metadata,
                 custom_template_sources=custom_template_sources,
                 system_template_sources=system_template_sources,
+                slug_remapping=slug_remapping_by_book.get(item["source_book_id"]) if item.get("source_book_id") else None,
             )
             materialized_blocks.append(
                 SnapshotRenderBlock(
@@ -2920,11 +2941,80 @@ def _extract_source_items(section_structure: dict | None) -> list[dict]:
     return items
 
 
+def _extract_and_expand_source_items(section_structure: dict | None, db: Session) -> list[dict]:
+    """Like _extract_source_items but also expands whole-book references into per-node entries.
+
+    Whole-book refs (source_scope='book') are skipped by _extract_source_items. This function
+    queries all ContentNodes for those books so they appear in the provenance appendix.
+    """
+    if not isinstance(section_structure, dict):
+        return []
+
+    items: list[dict] = []
+    for section_name in ("front", "body", "back"):
+        section_items = section_structure.get(section_name)
+        if not isinstance(section_items, list):
+            continue
+
+        for raw_item in section_items:
+            if not isinstance(raw_item, dict):
+                continue
+
+            source_book_id_value = raw_item.get("source_book_id")
+            source_book_id: int | None = None
+            try:
+                parsed = int(source_book_id_value)
+                if parsed > 0:
+                    source_book_id = parsed
+            except (TypeError, ValueError):
+                pass
+
+            source_node_id_value = raw_item.get("node_id")
+            source_node_id: int | None = None
+            try:
+                parsed_node = int(source_node_id_value)
+                if parsed_node > 0:
+                    source_node_id = parsed_node
+            except (TypeError, ValueError):
+                pass
+
+            if _is_book_body_reference_item(section_name, raw_item, source_node_id, source_book_id):
+                # Expand: emit one entry per node in this book
+                nodes = (
+                    db.query(ContentNode.id, ContentNode.book_id, ContentNode.title_english)
+                    .filter(ContentNode.book_id == source_book_id)
+                    .all()
+                )
+                for node in nodes:
+                    title = (node.title_english or "").strip() or f"Node {node.id}"
+                    items.append({
+                        "section": section_name,
+                        "source_node_id": node.id,
+                        "source_book_id": node.book_id,
+                        "title": title,
+                    })
+                continue
+
+            if source_node_id is None:
+                continue
+
+            title_value = raw_item.get("title")
+            title = title_value.strip() if isinstance(title_value, str) and title_value.strip() else f"Node {source_node_id}"
+            items.append({
+                "section": section_name,
+                "source_node_id": source_node_id,
+                "source_book_id": source_book_id,
+                "title": title,
+            })
+
+    return items
+
+
 def _build_draft_provenance_appendix(
     section_structure: dict | None,
     db: Session,
 ) -> DraftProvenanceAppendix:
-    source_items = _extract_source_items(section_structure)
+    source_items = _extract_and_expand_source_items(section_structure, db)
     if not source_items:
         return DraftProvenanceAppendix(entries=[])
 
@@ -3475,6 +3565,8 @@ def create_edition_snapshot(
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
+    if isinstance(draft.compilation_metadata, dict) and draft.compilation_metadata:
+        snapshot_payload.setdefault("compilation_metadata", draft.compilation_metadata)
     _apply_template_metadata(snapshot_payload)
     _apply_snapshot_fingerprint(snapshot_payload)
 
@@ -3553,6 +3645,8 @@ def publish_draft_book(
     provenance_appendix = _build_draft_provenance_appendix(resolved_snapshot_data, db)
     snapshot_payload = dict(resolved_snapshot_data)
     snapshot_payload["provenance_appendix"] = provenance_appendix.model_dump()
+    if isinstance(draft.compilation_metadata, dict) and draft.compilation_metadata:
+        snapshot_payload.setdefault("compilation_metadata", draft.compilation_metadata)
     _apply_template_metadata(snapshot_payload)
     _apply_snapshot_fingerprint(snapshot_payload)
 
