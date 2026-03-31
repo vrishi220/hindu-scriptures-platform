@@ -341,6 +341,49 @@ type TreeNode = {
   children?: TreeNode[];
 };
 
+type NodeContent = {
+  id: number;
+  parent_node_id?: number | null;
+  level_name: string;
+  level_order?: number | null;
+  sequence_number?: number | string | null;
+  title_english?: string | null;
+  title_sanskrit?: string | null;
+  title_transliteration?: string | null;
+  has_content?: boolean | null;
+  tags?: string[] | null;
+  metadata?: Record<string, unknown> | null;
+  metadata_json?: Record<string, unknown> | null;
+  content_data?: {
+    basic?: {
+      sanskrit?: string | null;
+      transliteration?: string | null;
+      translation?: string | null;
+      [key: string]: unknown;
+    } | null;
+    translations?: Record<string, string> | null;
+    word_meanings?: {
+      version?: string;
+      rows?: Array<{
+        id?: string;
+        order?: number;
+        source?: {
+          language?: string;
+          script_text?: string;
+          transliteration?: {
+            iast?: string;
+            [key: string]: string | undefined;
+          };
+        };
+        meanings?: Record<string, { text?: string }>;
+      }>;
+      [key: string]: unknown;
+    } | null;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+};
+
 type LevelTemplateOption = {
   id: number;
   name: string;
