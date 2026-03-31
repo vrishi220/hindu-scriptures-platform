@@ -66,6 +66,8 @@ type CanonicalUploadComplete = {
   error?: string;
 };
 
+type ImportJobLifecycleStatus = "queued" | "running" | "succeeded" | "failed";
+
 type PersistedImportJobState = {
   jobId: string;
   status?: ImportJobLifecycleStatus;
