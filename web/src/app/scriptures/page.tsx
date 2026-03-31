@@ -58,6 +58,15 @@ import {
   inferMediaTypeFromUrl,
   type ExternalMediaType,
 } from "../../lib/externalMedia";
+import {
+  createMediaBankLinkAsset as createMediaBankLinkAssetRequest,
+  deleteMediaBankAsset,
+  listMediaBankAssets,
+  MediaBankClientError,
+  replaceMediaBankAssetFile,
+  renameMediaBankAsset,
+  uploadMediaBankAsset,
+} from "../../lib/mediaBankClient";
 type CanonicalUploadComplete = {
   upload_id?: string;
   canonical_json_url?: string;
@@ -132,6 +141,93 @@ type BookMediaItem = {
   asset_id?: number | string;
   is_default?: boolean;
   display_order?: number | string;
+};
+
+type SharePermission = "viewer" | "contributor" | "editor";
+
+type BookMetadata = Record<string, unknown> & {
+  owner_id?: number | string | null;
+  visibility?: "private" | "public" | string;
+};
+
+type BookSchema = {
+  id: number;
+  name?: string;
+  levels: string[];
+  level_template_defaults?: Record<string, number | string | null>;
+};
+
+type BookOption = {
+  id: number;
+  book_name: string;
+  status?: string;
+  visibility?: "private" | "public" | string;
+  metadata?: BookMetadata | null;
+  metadata_json?: BookMetadata | null;
+  schema?: BookSchema | null;
+  variant_authors?: Record<string, string>;
+  level_name_overrides?: Record<string, string> | null;
+};
+
+type BookDetails = BookOption & {
+  schema: BookSchema;
+};
+
+type SchemaOption = {
+  id: number;
+  name: string;
+  description?: string | null;
+  levels: string[];
+};
+
+type BookShare = {
+  id: number;
+  shared_with_user_id: number;
+  shared_with_email: string;
+  shared_with_username?: string | null;
+  permission: SharePermission;
+};
+
+type ImportResult = {
+  success?: boolean;
+  book_id?: number;
+  nodes_created?: number;
+  detail?: string;
+  error?: string;
+};
+
+type ImportJobStatus = {
+  job_id?: string;
+  status?: ImportJobLifecycleStatus;
+  progress_message?: string | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  detail?: string;
+  error?: string;
+  result?: ImportResult | null;
+};
+
+type CanonicalUploadInit = {
+  upload_id?: string;
+  chunk_size_bytes?: number;
+  max_size_bytes?: number;
+  detail?: string;
+  error?: string;
+};
+
+type CanonicalUploadChunk = {
+  upload_id?: string;
+  received_bytes?: number;
+  next_index?: number;
+  detail?: string;
+  error?: string;
+};
+
+type ImportJobStart = {
+  job_id?: string;
+  status?: ImportJobLifecycleStatus;
+  detail?: string;
+  error?: string;
 };
 
 type CommentaryEntry = {
@@ -335,6 +431,7 @@ type TreeNode = {
   level_order?: number | null;
   sequence_number?: number | string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   has_content?: boolean | null;
@@ -348,6 +445,7 @@ type NodeContent = {
   level_order?: number | null;
   sequence_number?: number | string | null;
   title_english?: string | null;
+  title_hindi?: string | null;
   title_sanskrit?: string | null;
   title_transliteration?: string | null;
   has_content?: boolean | null;
@@ -2933,26 +3031,26 @@ function ScripturesContent() {
 
   const deriveNodeMetadataFallback = (nodePayload: {
     level_name?: string | null;
-    sequence_number?: string | null;
+    sequence_number?: string | number | null;
     title_english?: string | null;
     title_sanskrit?: string | null;
     title_transliteration?: string | null;
     content_data?: {
       basic?: {
-        sanskrit?: string;
-        transliteration?: string;
-        translation?: string;
-      };
-      translations?: Record<string, string>;
+        sanskrit?: string | null;
+        transliteration?: string | null;
+        translation?: string | null;
+      } | null;
+      translations?: Record<string, string> | null;
       [key: string]: unknown;
     } | null;
     summary_data?: {
       basic?: {
-        sanskrit?: string;
-        transliteration?: string;
-        translation?: string;
-      };
-      translations?: Record<string, string>;
+        sanskrit?: string | null;
+        transliteration?: string | null;
+        translation?: string | null;
+      } | null;
+      translations?: Record<string, string> | null;
       [key: string]: unknown;
     } | null;
   }): Record<string, unknown> => {
@@ -3210,7 +3308,7 @@ function ScripturesContent() {
             metadata_json?: unknown;
             metadata?: unknown;
           level_name?: string | null;
-            sequence_number?: string | null;
+            sequence_number?: string | number | null;
             title_english?: string | null;
             title_sanskrit?: string | null;
             title_transliteration?: string | null;
@@ -4904,7 +5002,10 @@ function ScripturesContent() {
       return preferredTitle;
     }
 
-    const isLeafNode = !("children" in node) || !node.children || node.children.length === 0;
+    const children: TreeNode[] = Array.isArray((node as { children?: unknown }).children)
+      ? ((node as { children?: TreeNode[] }).children ?? [])
+      : [];
+    const isLeafNode = children.length === 0;
     const displaySeq =
       formatSequenceDisplay(node.sequence_number || node.id, isLeafNode) || node.id;
 
@@ -4951,7 +5052,10 @@ function ScripturesContent() {
     }
 
     // Final fallback to level_name + sequence_number
-    const isLeafNode = !("children" in node) || !node.children || node.children.length === 0;
+    const children: TreeNode[] = Array.isArray((node as { children?: unknown }).children)
+      ? ((node as { children?: TreeNode[] }).children ?? [])
+      : [];
+    const isLeafNode = children.length === 0;
     const displaySeq =
       formatSequenceDisplay(node.sequence_number || node.id, isLeafNode) || node.id;
 
@@ -9005,7 +9109,7 @@ function ScripturesContent() {
           if (actionNode.level_name?.toUpperCase() === "BOOK") {
             // Adding to book root, this is level 1
             levelOrder = 1;
-          } else if (actionNode.level_order !== undefined) {
+          } else if (typeof actionNode.level_order === "number") {
             // Use parent's level_order + 1
             levelOrder = actionNode.level_order + 1;
           } else {
