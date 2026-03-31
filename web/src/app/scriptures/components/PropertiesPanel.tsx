@@ -20,6 +20,7 @@ type PropertiesPanelProps = {
   nameValue: string;
   onNameChange: (value: string) => void;
   descriptionValue: string;
+  onDescriptionChange: (value: string) => void;
   categoryId: number | null;
   categories: MetadataCategoryOption[];
   loading: boolean;
@@ -48,6 +49,7 @@ export default function PropertiesPanel({
   nameValue,
   onNameChange,
   descriptionValue,
+  onDescriptionChange,
   categoryId,
   categories,
   loading,
@@ -101,10 +103,10 @@ export default function PropertiesPanel({
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Description</span>
             <textarea
-              readOnly
               value={descriptionValue}
+              onChange={(event) => onDescriptionChange(event.target.value)}
               rows={2}
-              className="rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-sm text-zinc-700"
+              className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
             />
           </label>
 
