@@ -855,31 +855,34 @@ const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText
 const mapSemicolonSeparatedWordMeaningsToRows = (
   value: string,
   startingOrder = 1
-): WordMeaningRow[] =>
-  splitLegacyWordMeaningEntries(value)
-    .map((entry, index) => {
-      const parsedEntry = parseWordMeaningEntry(entry);
-      const sourceToken = parsedEntry?.sourceText || "";
-      const meaningToken = parsedEntry?.meaningText || "";
+): WordMeaningRow[] => {
+  const rows: WordMeaningRow[] = [];
 
-      if (!sourceToken) {
-        return null;
-      }
+  splitLegacyWordMeaningEntries(value).forEach((entry, index) => {
+    const parsedEntry = parseWordMeaningEntry(entry);
+    const sourceToken = parsedEntry?.sourceText || "";
+    const meaningToken = parsedEntry?.meaningText || "";
 
-      const sourcePair = autoFillSanskritTransliterationPair(sourceToken, "");
-      return {
-        id: createWordMeaningRowId(),
-        order: startingOrder + index,
-        sourceLanguage: "sa",
-        sourceScriptText: sourcePair.sanskrit,
-        sourceTransliterationIast: sourcePair.transliteration,
-        meanings: {
-          [WORD_MEANINGS_REQUIRED_LANGUAGE]: meaningToken,
-        },
-        activeMeaningLanguage: WORD_MEANINGS_REQUIRED_LANGUAGE,
-      };
-    })
-    .filter((row): row is WordMeaningRow => Boolean(row));
+    if (!sourceToken) {
+      return;
+    }
+
+    const sourcePair = autoFillSanskritTransliterationPair(sourceToken, "");
+    rows.push({
+      id: createWordMeaningRowId(),
+      order: startingOrder + index,
+      sourceLanguage: "sa",
+      sourceScriptText: sourcePair.sanskrit,
+      sourceTransliterationIast: sourcePair.transliteration,
+      meanings: {
+        [WORD_MEANINGS_REQUIRED_LANGUAGE]: meaningToken,
+      },
+      activeMeaningLanguage: WORD_MEANINGS_REQUIRED_LANGUAGE,
+    });
+  });
+
+  return rows;
+};
 
 const mapLegacyWordMeaningsRowsFromContent = (wordMeanings: Record<string, unknown>): WordMeaningRow[] => {
   const entriesByLanguage = Object.entries(wordMeanings).reduce<Record<string, string[]>>((acc, [rawLanguage, rawValue]) => {
