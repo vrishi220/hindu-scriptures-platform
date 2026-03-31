@@ -5448,7 +5448,7 @@ function ScripturesContent() {
       const data = nestFlatTreeNodes(flatData);
         if (requestId !== activeTreeRequestId.current) return;
       setTreeData(data);
-      setExpandedIds(new Set());
+      setExpandedIds(new Set(data.map((node) => node.id)));
       
       // Auto-select node if provided in params
       if (autoSelectNodeId) {
@@ -7539,7 +7539,7 @@ function ScripturesContent() {
       return;
     }
 
-    if (selectedId !== null) {
+    if (selectedId !== null && selectedId !== BOOK_ROOT_NODE_ID) {
       setMobilePanel((prev) => (prev === "content" ? prev : "content"));
       return;
     }
@@ -11669,9 +11669,9 @@ function ScripturesContent() {
                           aria-label="Book name"
                         />
                       ) : (
-                        <h2 className="truncate font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                        <p className="truncate font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                           {currentBook.book_name}
-                        </h2>
+                        </p>
                       )}
                     </div>
                     <div className="ml-3 flex flex-wrap items-center gap-2">
@@ -11722,8 +11722,8 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={() => setShowBookRootActionsMenu((prev) => !prev)}
-                            title="Book actions"
-                            aria-label="Book actions"
+                            title="Book tree actions"
+                            aria-label="Book tree actions"
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                           >
                             <MoreVertical size={16} />
