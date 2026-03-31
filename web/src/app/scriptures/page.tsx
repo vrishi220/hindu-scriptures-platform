@@ -588,6 +588,16 @@ type WordMeaningPayloadRow = {
   meanings: Record<string, { text: string }>;
 };
 
+type WordMeaningRow = {
+  id: string;
+  order: number;
+  sourceLanguage: string;
+  sourceScriptText: string;
+  sourceTransliterationIast: string;
+  meanings: Record<string, string>;
+  activeMeaningLanguage: string;
+};
+
 const validateWordMeaningsPlainText = (value: unknown, path: string, maxChars: number): string[] => {
   if (typeof value !== "string") {
     return [`${path} must be a string`];
