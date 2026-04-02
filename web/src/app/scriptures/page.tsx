@@ -4329,6 +4329,13 @@ function ScripturesContent() {
       }
 
       if (!authEmail) {
+        // Wait until auth is fully resolved before loading preferences.
+        // If we load from localStorage while auth is still pending and then load
+        // from the API once auth resolves, previewSettingsInitialized fires twice —
+        // once from the stale anonymous data (setting previewSettingsInitialized.current = true)
+        // and a second time that bails out early, leaving preview state vars at defaults.
+        if (!authResolved) return;
+
         const storedUiPreferences = readStoredUiPreferences();
         const storedRaw = window.localStorage.getItem(LOCAL_SCRIPTURES_PREFERENCES_KEY);
         if (storedRaw) {
@@ -4448,7 +4455,7 @@ function ScripturesContent() {
     };
 
     loadPreferences();
-  }, [authEmail]);
+  }, [authEmail, authResolved]);
 
   useEffect(() => {
     if (!authResolved || !authEmail) {
