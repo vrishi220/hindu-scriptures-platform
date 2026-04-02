@@ -67,6 +67,7 @@ import {
   renameMediaBankAsset,
   uploadMediaBankAsset,
 } from "../../lib/mediaBankClient";
+import { resolveMediaUrl } from "../../lib/mediaUrl";
 type CanonicalUploadComplete = {
   upload_id?: string;
   canonical_json_url?: string;
@@ -1178,23 +1179,6 @@ const normalizeWordMeaningsEnabledLevels = (levels: string[]): string[] =>
         .map((level) => level.toLowerCase())
     )
   ).sort();
-
-const resolveMediaUrl = (rawUrl: string): string => {
-  const value = typeof rawUrl === "string" ? rawUrl.trim() : "";
-  if (!value) {
-    return "";
-  }
-
-  if (/^(https?:)?\/\//i.test(value) || /^data:/i.test(value) || /^blob:/i.test(value)) {
-    return value;
-  }
-
-  if (value.startsWith("/")) {
-    return value;
-  }
-
-  return `/${value.replace(/^\.?\/+/, "")}`;
-};
 
 const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | null => {
   if (!book) {
@@ -10990,7 +10974,7 @@ function ScripturesContent() {
                         book.metadata?.owner_id === authUserId);
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
-                    const showRowMenu = false;
+                    const showRowMenu = true;
                     const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =

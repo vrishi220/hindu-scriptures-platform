@@ -2,7 +2,7 @@ export const resolveMediaUrl = (rawUrl: string | null | undefined) => {
   const value = (rawUrl || "").trim();
   if (!value) return "";
 
-  if (value.startsWith("data:")) {
+  if (value.startsWith("data:") || value.startsWith("blob:") || value.startsWith("//")) {
     return value;
   }
 
@@ -37,5 +37,9 @@ export const resolveMediaUrl = (rawUrl: string | null | undefined) => {
     return value;
   }
 
-  return value;
+  if (value.startsWith("/")) {
+    return value;
+  }
+
+  return `/${value.replace(/^\.?\/+/, "")}`;
 };
