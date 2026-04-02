@@ -227,7 +227,14 @@ export default function NavBar() {
     window.location.href = "/";
   };
 
+  const profileDirty =
+    profileDraft.fullName.trim() !== (authUser?.fullName || "").trim() ||
+    profileDraft.username.trim() !== (authUser?.username || "").trim();
+
   const handleSaveProfile = async () => {
+    if (!profileDirty) {
+      return;
+    }
     setProfileMessage(null);
     setProfileSaving(true);
     try {
@@ -661,7 +668,7 @@ export default function NavBar() {
                     <button
                       type="button"
                       onClick={handleSaveProfile}
-                      disabled={profileSaving}
+                      disabled={profileSaving || !profileDirty}
                       className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
                     >
                       {profileSaving ? "Saving..." : "Save"}
