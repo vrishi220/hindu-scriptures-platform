@@ -2571,29 +2571,23 @@ function ScripturesContent() {
   }, [selectedId, bookId]);
 
   useEffect(() => {
-    if (!authResolved || authEmail) {
+    if (typeof window === "undefined") {
       return;
     }
+    setBookBrowserView(readStoredBrowserView(SCRIPTURES_BOOK_BROWSER_VIEW_KEY));
+    setBookBrowserDensity(readStoredBookBrowserDensity());
+    setBookBrowserDensityHydrated(true);
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
+      return;
+    }
+    if (!bookBrowserDensityHydrated) {
       return;
     }
     window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_VIEW_KEY, bookBrowserView);
-  }, [authResolved, authEmail, bookBrowserView]);
-
-  useEffect(() => {
-    if (!authResolved) {
-      return;
-    }
-    if (authEmail) {
-      setBookBrowserDensityHydrated(true);
-      return;
-    }
-    if (typeof window === "undefined") {
-      return;
-    }
-    setBookBrowserDensity(readStoredBookBrowserDensity());
-    setBookBrowserDensityHydrated(true);
-  }, [authResolved, authEmail]);
+  }, [bookBrowserView, bookBrowserDensityHydrated]);
 
   useEffect(() => {
     if (!authResolved) {
@@ -2611,9 +2605,6 @@ function ScripturesContent() {
   }, [authResolved, authEmail, mediaManagerScope]);
 
   useEffect(() => {
-    if (!authResolved || authEmail) {
-      return;
-    }
     if (typeof window === "undefined") {
       return;
     }
@@ -2621,7 +2612,7 @@ function ScripturesContent() {
       return;
     }
     window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
-  }, [authResolved, authEmail, bookBrowserDensity, bookBrowserDensityHydrated]);
+  }, [bookBrowserDensity, bookBrowserDensityHydrated]);
 
   useEffect(() => {
     if (!bookBrowserDensityHydrated) {
