@@ -10974,8 +10974,8 @@ function ScripturesContent() {
                         book.metadata?.owner_id === authUserId);
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
-                    const showRowMenu = false;
-                    const showSingleBrowseAction = canBrowseBook && !canToggleVisibility;
+                    const showRowMenu = canToggleVisibility || canDeletePrivateBook || canImport;
+                    const showSingleBrowseAction = canBrowseBook && !showRowMenu;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =
                       isBooksGridView && booksGridColumns > 1
