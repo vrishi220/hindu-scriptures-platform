@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   isRomanScript,
@@ -56,6 +56,40 @@ type UserPreferencesFormProps = {
   preferences: UserPreferences;
   onChange: (next: UserPreferences) => void;
 };
+
+export const serializeUserPreferencesForComparison = (
+  preferences: UserPreferences
+): string =>
+  JSON.stringify({
+    source_language: preferences.source_language,
+    transliteration_enabled: preferences.transliteration_enabled,
+    transliteration_script: normalizeTransliterationScript(preferences.transliteration_script),
+    show_roman_transliteration: preferences.show_roman_transliteration,
+    show_only_preferred_script: preferences.show_only_preferred_script,
+    show_media: preferences.show_media,
+    show_commentary: preferences.show_commentary,
+    preview_show_titles: preferences.preview_show_titles,
+    preview_show_labels: preferences.preview_show_labels,
+    preview_show_level_numbers: preferences.preview_show_level_numbers,
+    preview_show_details: preferences.preview_show_details,
+    preview_show_media: preferences.preview_show_media,
+    preview_show_sanskrit: preferences.preview_show_sanskrit,
+    preview_show_transliteration: preferences.preview_show_transliteration,
+    preview_show_english: preferences.preview_show_english,
+    preview_show_commentary: preferences.preview_show_commentary,
+    preview_transliteration_script: normalizeTransliterationScript(
+      preferences.preview_transliteration_script
+    ),
+    preview_word_meanings_display_mode: preferences.preview_word_meanings_display_mode,
+    preview_translation_languages: preferences.preview_translation_languages,
+    preview_hidden_levels: preferences.preview_hidden_levels,
+    ui_theme: normalizeUiTheme(preferences.ui_theme),
+    ui_density: normalizeUiDensity(preferences.ui_density),
+    scriptures_book_browser_view: preferences.scriptures_book_browser_view ?? null,
+    scriptures_book_browser_density: preferences.scriptures_book_browser_density ?? null,
+    scriptures_media_manager_view: preferences.scriptures_media_manager_view ?? null,
+    admin_media_bank_browser_view: preferences.admin_media_bank_browser_view ?? null,
+  });
 
 const THEME_PREVIEWS: Array<{
   key: UiThemePreference;
@@ -473,6 +507,15 @@ export default function UserPreferencesDialog({
   saving,
   message,
 }: UserPreferencesDialogProps) {
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+
+  const currentSnapshot = useMemo(() => {
+    if (!preferences) {
+      return null;
+    }
+    return serializeUserPreferencesForComparison(preferences);
+  }, [preferences]);
+
   useEffect(() => {
     if (!open) {
       return;
@@ -511,11 +554,29 @@ export default function UserPreferencesDialog({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) {
+      setSavedSnapshot(null);
+      return;
+    }
+    if (!preferences || savedSnapshot !== null) {
+      return;
+    }
+    setSavedSnapshot(serializeUserPreferencesForComparison(preferences));
+  }, [open, preferences, savedSnapshot]);
+
   if (!open || !preferences) return null;
 
+  const isDirty =
+    savedSnapshot !== null && currentSnapshot !== null && savedSnapshot !== currentSnapshot;
+
   const handleSave = async () => {
+    if (!isDirty) {
+      return;
+    }
     const saved = await onSave();
-    if (saved) {
+    if (saved && currentSnapshot) {
+      setSavedSnapshot(currentSnapshot);
       onClose();
     }
   };
@@ -546,7 +607,7 @@ export default function UserPreferencesDialog({
             onClick={() => {
               void handleSave();
             }}
-            disabled={saving}
+            disabled={saving || !isDirty}
             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save prefs"}

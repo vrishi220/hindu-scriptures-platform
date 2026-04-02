@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { getMe, invalidateMeCache } from "@/lib/authClient";
 import {
   UserPreferencesForm,
+  serializeUserPreferencesForComparison,
   type UserPreferences,
 } from "@/components/UserPreferencesDialog";
 import {
@@ -58,6 +59,7 @@ export default function NavBar() {
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
+  const [preferencesSavedSnapshot, setPreferencesSavedSnapshot] = useState<string | null>(null);
   const [profileTab, setProfileTab] = useState<"general" | "preferences">("general");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
@@ -83,12 +85,29 @@ export default function NavBar() {
           ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
           ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
         });
+        const normalizedLoaded = {
+          ...DEFAULT_PREFERENCES,
+          ...data,
+          ui_theme: normalizeUiTheme(storedUi?.ui_theme ?? data.ui_theme),
+          ui_density: normalizeUiDensity(storedUi?.ui_density ?? data.ui_density),
+        };
+        setPreferencesSavedSnapshot(
+          serializeUserPreferencesForComparison(normalizedLoaded)
+        );
       } else {
-        setPreferences({ ...DEFAULT_PREFERENCES, ...(storedUi || {}) });
+        const fallbackPrefs = { ...DEFAULT_PREFERENCES, ...(storedUi || {}) };
+        setPreferences(fallbackPrefs);
+        setPreferencesSavedSnapshot(
+          serializeUserPreferencesForComparison(fallbackPrefs)
+        );
       }
     } catch {
       const storedUi = readStoredUiPreferences();
-      setPreferences({ ...DEFAULT_PREFERENCES, ...(storedUi || {}) });
+      const fallbackPrefs = { ...DEFAULT_PREFERENCES, ...(storedUi || {}) };
+      setPreferences(fallbackPrefs);
+      setPreferencesSavedSnapshot(
+        serializeUserPreferencesForComparison(fallbackPrefs)
+      );
     } finally {
       setPreferencesLoading(false);
     }
@@ -106,6 +125,7 @@ export default function NavBar() {
         setAuthUser(null);
         setCanAdmin(false);
         setPreferences(null);
+        setPreferencesSavedSnapshot(null);
         applyUiPreferencesToDocument(readStoredUiPreferences());
         return;
       }
@@ -248,6 +268,10 @@ export default function NavBar() {
 
   const handleSavePreferences = async () => {
     if (!preferences) return;
+    const currentSnapshot = serializeUserPreferencesForComparison(preferences);
+    if (preferencesSavedSnapshot !== null && currentSnapshot === preferencesSavedSnapshot) {
+      return;
+    }
     setPreferencesMessage(null);
     setPreferencesSaving(true);
     try {
@@ -269,13 +293,28 @@ export default function NavBar() {
         ui_theme: normalizeUiTheme(preferences.ui_theme),
         ui_density: normalizeUiDensity(preferences.ui_density),
       });
+      const persistedPreferences = {
+        ...DEFAULT_PREFERENCES,
+        ...(data || {}),
+        ui_theme: normalizeUiTheme(preferences.ui_theme),
+        ui_density: normalizeUiDensity(preferences.ui_density),
+      };
+      setPreferencesSavedSnapshot(
+        serializeUserPreferencesForComparison(persistedPreferences)
+      );
       setPreferencesMessage("Preferences saved");
+      setProfileOpen(false);
     } catch {
       setPreferencesMessage("Failed to save preferences");
     } finally {
       setPreferencesSaving(false);
     }
   };
+
+  const preferencesDirty =
+    preferences !== null &&
+    preferencesSavedSnapshot !== null &&
+    serializeUserPreferencesForComparison(preferences) !== preferencesSavedSnapshot;
 
   const initials = (authUser?.fullName || authUser?.email || "U").trim().charAt(0).toUpperCase();
   const isActive = (href: string) => pathname === href;
@@ -647,7 +686,7 @@ export default function NavBar() {
                         <button
                           type="button"
                           onClick={handleSavePreferences}
-                          disabled={preferencesSaving}
+                          disabled={preferencesSaving || !preferencesDirty}
                           className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
                         >
                           {preferencesSaving ? "Saving..." : "Save"}
