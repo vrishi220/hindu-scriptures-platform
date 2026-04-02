@@ -150,6 +150,41 @@ export default function NavBar() {
   }, [profileOpen, profileTab, loadPreferences]);
 
   useEffect(() => {
+    if (!profileOpen) return;
+
+    const { body, documentElement } = document;
+    const scrollY = window.scrollY;
+    const previousOverflow = body.style.overflow;
+    const previousPosition = body.style.position;
+    const previousTop = body.style.top;
+    const previousWidth = body.style.width;
+    const previousOverscroll = body.style.overscrollBehavior;
+    const previousHtmlOverscroll = documentElement.style.overscrollBehavior;
+    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overscrollBehavior = "none";
+    documentElement.style.overscrollBehavior = "none";
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      body.style.position = previousPosition;
+      body.style.top = previousTop;
+      body.style.width = previousWidth;
+      body.style.overscrollBehavior = previousOverscroll;
+      documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+      body.style.paddingRight = "";
+      window.scrollTo(0, scrollY);
+    };
+  }, [profileOpen]);
+
+  useEffect(() => {
     applyUiPreferencesToDocument(preferences);
   }, [preferences]);
 
