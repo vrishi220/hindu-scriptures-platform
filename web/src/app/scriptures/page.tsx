@@ -692,12 +692,13 @@ const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 |
 };
 
 const resolveBookBrowserDensity = (
-  storedDensity: 0 | 1 | 2 | 3 | 4 | 5,
+  storedDensity: unknown,
   preferenceDensity: unknown,
   preferenceView: "list" | "icon"
 ): 0 | 1 | 2 | 3 | 4 | 5 => {
-  if (storedDensity !== 0) {
-    return storedDensity;
+  const normalizedStoredDensity = normalizeBookBrowserDensity(storedDensity);
+  if (normalizedStoredDensity !== 0) {
+    return normalizedStoredDensity;
   }
   const normalizedPreferenceDensity = normalizeBookBrowserDensity(preferenceDensity);
   if (preferenceView === "icon" && normalizedPreferenceDensity === 0) {
@@ -2570,29 +2571,49 @@ function ScripturesContent() {
   }, [selectedId, bookId]);
 
   useEffect(() => {
+    if (!authResolved || authEmail) {
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
     window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_VIEW_KEY, bookBrowserView);
-  }, [bookBrowserView]);
+  }, [authResolved, authEmail, bookBrowserView]);
 
   useEffect(() => {
+    if (!authResolved) {
+      return;
+    }
+    if (authEmail) {
+      setBookBrowserDensityHydrated(true);
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
     setBookBrowserDensity(readStoredBookBrowserDensity());
     setBookBrowserDensityHydrated(true);
-  }, []);
+  }, [authResolved, authEmail]);
 
   useEffect(() => {
+    if (!authResolved) {
+      return;
+    }
+    if (authEmail) {
+      setMediaManagerDensityHydrated(true);
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
     setMediaManagerDensity(readStoredMediaManagerDensity(mediaManagerScope));
     setMediaManagerDensityHydrated(true);
-  }, [mediaManagerScope]);
+  }, [authResolved, authEmail, mediaManagerScope]);
 
   useEffect(() => {
+    if (!authResolved || authEmail) {
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
@@ -2600,7 +2621,7 @@ function ScripturesContent() {
       return;
     }
     window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
-  }, [bookBrowserDensity, bookBrowserDensityHydrated]);
+  }, [authResolved, authEmail, bookBrowserDensity, bookBrowserDensityHydrated]);
 
   useEffect(() => {
     if (!bookBrowserDensityHydrated) {
@@ -2613,13 +2634,19 @@ function ScripturesContent() {
   }, [bookBrowserDensity, bookBrowserView, bookBrowserDensityHydrated]);
 
   useEffect(() => {
+    if (!authResolved || authEmail) {
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
     window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY, mediaManagerView);
-  }, [mediaManagerView]);
+  }, [authResolved, authEmail, mediaManagerView]);
 
   useEffect(() => {
+    if (!authResolved || authEmail) {
+      return;
+    }
     if (typeof window === "undefined") {
       return;
     }
@@ -2629,7 +2656,7 @@ function ScripturesContent() {
     const value = String(mediaManagerDensity);
     window.localStorage.setItem(mediaManagerDensityStorageKey(mediaManagerScope), value);
     window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY, value);
-  }, [mediaManagerDensity, mediaManagerDensityHydrated, mediaManagerScope]);
+  }, [authResolved, authEmail, mediaManagerDensity, mediaManagerDensityHydrated, mediaManagerScope]);
 
   useEffect(() => {
     if (!mediaManagerDensityHydrated) {
@@ -4375,57 +4402,44 @@ function ScripturesContent() {
       }
 
       try {
-        const storedUiPreferences = readStoredUiPreferences();
         const response = await fetch("/api/preferences", { credentials: "include" });
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
         const normalized = normalizePreferences(data);
-        if (storedUiPreferences) {
-          normalized.ui_theme = storedUiPreferences.ui_theme;
-          normalized.ui_density = storedUiPreferences.ui_density;
-        }
         setPreferences(normalized);
         setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
-        const storedDensity = readStoredBookBrowserDensity();
         setBookBrowserDensity(
           resolveBookBrowserDensity(
-            storedDensity,
+            undefined,
             normalized.scriptures_book_browser_density,
             normalized.scriptures_book_browser_view ?? "list"
           )
         );
         setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
-        const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
         setMediaManagerDensity(
           resolveBookBrowserDensity(
-            storedMediaDensity,
+            undefined,
             0,
             normalized.scriptures_media_manager_view ?? "list"
           )
         );
       } catch {
-        const storedUiPreferences = readStoredUiPreferences();
         const nextPreferences = {
           ...DEFAULT_USER_PREFERENCES,
-          ...(storedUiPreferences || {}),
-          scriptures_book_browser_view: readStoredBrowserView(SCRIPTURES_BOOK_BROWSER_VIEW_KEY),
-          scriptures_media_manager_view: readStoredBrowserView(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY),
         };
         setPreferences(nextPreferences);
         setBookBrowserView(nextPreferences.scriptures_book_browser_view ?? "list");
-        const storedDensity = readStoredBookBrowserDensity();
         setBookBrowserDensity(
           resolveBookBrowserDensity(
-            storedDensity,
+            undefined,
             nextPreferences.scriptures_book_browser_density,
             nextPreferences.scriptures_book_browser_view ?? "list"
           )
         );
         setMediaManagerView(nextPreferences.scriptures_media_manager_view ?? "list");
-        const storedMediaDensity = readStoredMediaManagerDensity(mediaManagerScope);
         setMediaManagerDensity(
           resolveBookBrowserDensity(
-            storedMediaDensity,
+            undefined,
             0,
             nextPreferences.scriptures_media_manager_view ?? "list"
           )
@@ -4450,17 +4464,19 @@ function ScripturesContent() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               scriptures_book_browser_view: bookBrowserView,
+              scriptures_book_browser_density: bookBrowserDensity,
               scriptures_media_manager_view: mediaManagerView,
+              scriptures_media_manager_density: mediaManagerDensity,
             }),
           });
         } catch {
-          // no-op: local persistence already applied
+          // no-op: best-effort background preference sync
         }
       })();
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [authResolved, authEmail, bookBrowserView, mediaManagerView]);
+  }, [authResolved, authEmail, bookBrowserView, bookBrowserDensity, mediaManagerView, mediaManagerDensity]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -4722,14 +4738,14 @@ function ScripturesContent() {
     })();
   };
 
-  const savePreferences = async (nextPreferences?: UserPreferences | null) => {
+  const savePreferences = async (nextPreferences?: UserPreferences | null): Promise<boolean> => {
     const preferencesToSave = normalizePreferences(nextPreferences ?? preferences);
-    if (!preferencesToSave) return;
+    if (!preferencesToSave) return false;
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
 
-      if (typeof window !== "undefined") {
+      if (!authEmail && typeof window !== "undefined") {
         const toStore: StoredScripturesPreferences = {
           preferences: preferencesToSave,
         };
@@ -4751,8 +4767,10 @@ function ScripturesContent() {
       }
 
       setPreferencesMessage("Preferences saved");
+      return true;
     } catch (err) {
       setPreferencesMessage(err instanceof Error ? err.message : "Failed to save preferences");
+      return false;
     } finally {
       setPreferencesSaving(false);
       setTimeout(() => setPreferencesMessage(null), 2000);
@@ -7370,6 +7388,35 @@ function ScripturesContent() {
       } else {
         setBookPreviewArtifact(normalizedArtifact);
       }
+
+      if (!append) {
+        const nextPreferences = normalizePreferences({
+          ...(preferences || DEFAULT_USER_PREFERENCES),
+          preview_show_titles: nextShowPreviewTitles,
+          preview_show_labels: nextShowPreviewLabels,
+          preview_show_level_numbers: nextShowPreviewLevelNumbers,
+          preview_show_details: nextShowPreviewDetails,
+          preview_show_media: nextShowPreviewMedia,
+          preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
+          preview_show_transliteration: nextLanguageSettings.show_transliteration,
+          preview_show_english: nextLanguageSettings.show_english,
+          preview_show_commentary: nextLanguageSettings.show_commentary,
+          preview_transliteration_script: nextPreviewTransliterationScript,
+          preview_word_meanings_display_mode: nextPreviewWordMeaningsDisplayMode,
+          preview_translation_languages: serializePreviewTranslationLanguages(
+            resolvedPreviewTranslationLanguages
+          ),
+          preview_hidden_levels: serializeHiddenPreviewLevels(nextHiddenPreviewLevels),
+        });
+        setPreferences(nextPreferences);
+        const saveSucceeded = await savePreferences(nextPreferences);
+        if (!saveSucceeded) {
+          setBookPreviewError("Failed to save preview settings. Changes not persisted.");
+          setShowBookPreview(false);
+          return;
+        }
+      }
+
       setAppliedBookPreviewLanguageSettings(nextLanguageSettings);
       setAppliedShowPreviewLabels(nextShowPreviewLabels);
       setAppliedShowPreviewLevelNumbers(nextShowPreviewLevelNumbers);
@@ -7393,29 +7440,6 @@ function ScripturesContent() {
           PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY,
           JSON.stringify(resolvedPreviewTranslationLanguages)
         );
-      }
-
-      if (!append) {
-        const nextPreferences = normalizePreferences({
-          ...(preferences || DEFAULT_USER_PREFERENCES),
-          preview_show_titles: nextShowPreviewTitles,
-          preview_show_labels: nextShowPreviewLabels,
-          preview_show_level_numbers: nextShowPreviewLevelNumbers,
-          preview_show_details: nextShowPreviewDetails,
-          preview_show_media: nextShowPreviewMedia,
-          preview_show_sanskrit: nextLanguageSettings.show_sanskrit,
-          preview_show_transliteration: nextLanguageSettings.show_transliteration,
-          preview_show_english: nextLanguageSettings.show_english,
-          preview_show_commentary: nextLanguageSettings.show_commentary,
-          preview_transliteration_script: nextPreviewTransliterationScript,
-          preview_word_meanings_display_mode: nextPreviewWordMeaningsDisplayMode,
-          preview_translation_languages: serializePreviewTranslationLanguages(
-            resolvedPreviewTranslationLanguages
-          ),
-          preview_hidden_levels: serializeHiddenPreviewLevels(nextHiddenPreviewLevels),
-        });
-        setPreferences(nextPreferences);
-        void savePreferences(nextPreferences);
       }
 
       if (!append) {

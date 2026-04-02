@@ -44,6 +44,16 @@ def _ensure_preferences_schema(db: Session) -> None:
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_hidden_levels VARCHAR(2000) NOT NULL DEFAULT ''"
         )
     )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS scriptures_book_browser_density INTEGER NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS scriptures_media_manager_density INTEGER NOT NULL DEFAULT 0"
+        )
+    )
     db.commit()
 
 
@@ -84,7 +94,9 @@ def get_user_preferences(
                 preview_translation_languages="english",
                 preview_hidden_levels="",
                 scriptures_book_browser_view="list",
+                scriptures_book_browser_density=0,
                 scriptures_media_manager_view="list",
+                scriptures_media_manager_density=0,
                 admin_media_bank_browser_view="list",
             )
             db.add(pref)

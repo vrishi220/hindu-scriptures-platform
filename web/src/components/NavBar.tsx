@@ -503,8 +503,8 @@ export default function NavBar() {
 
       {profileOpen && authUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
-            <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-black/10 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
               <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/10 bg-white text-base font-semibold text-zinc-700">
                 {initials}
@@ -524,7 +524,7 @@ export default function NavBar() {
               </button>
             </div>
 
-            <div className="mb-4 flex rounded-lg border border-black/10 bg-zinc-50 p-1">
+            <div className="mb-4 flex shrink-0 rounded-lg border border-black/10 bg-zinc-50 p-1">
               <button
                 type="button"
                 onClick={() => setProfileTab("general")}
@@ -549,81 +549,83 @@ export default function NavBar() {
               </button>
             </div>
 
-            {profileTab === "general" ? (
-              <div className="space-y-2 text-sm">
-                <div>
-                  <span className="text-xs text-zinc-500">Name</span>
-                  <input
-                    type="text"
-                    value={profileDraft.fullName}
-                    onChange={(event) =>
-                      setProfileDraft((prev) => ({ ...prev, fullName: event.target.value }))
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-800 outline-none focus:border-[color:var(--accent)]"
-                  />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+              {profileTab === "general" ? (
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <span className="text-xs text-zinc-500">Name</span>
+                    <input
+                      type="text"
+                      value={profileDraft.fullName}
+                      onChange={(event) =>
+                        setProfileDraft((prev) => ({ ...prev, fullName: event.target.value }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-800 outline-none focus:border-[color:var(--accent)]"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-xs text-zinc-500">Username</span>
+                    <input
+                      type="text"
+                      value={profileDraft.username}
+                      onChange={(event) =>
+                        setProfileDraft((prev) => ({ ...prev, username: event.target.value }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-800 outline-none focus:border-[color:var(--accent)]"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-xs text-zinc-500">Email</span>
+                    <input
+                      type="email"
+                      value={profileDraft.email}
+                      readOnly
+                      className="mt-1 w-full rounded-lg border border-black/10 bg-zinc-100 px-3 py-2 text-sm text-zinc-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveProfile}
+                      disabled={profileSaving}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
+                    >
+                      {profileSaving ? "Saving..." : "Save"}
+                    </button>
+                    {profileMessage && (
+                      <span className="text-xs text-zinc-600">{profileMessage}</span>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <span className="text-xs text-zinc-500">Username</span>
-                  <input
-                    type="text"
-                    value={profileDraft.username}
-                    onChange={(event) =>
-                      setProfileDraft((prev) => ({ ...prev, username: event.target.value }))
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-800 outline-none focus:border-[color:var(--accent)]"
-                  />
-                </div>
-                <div>
-                  <span className="text-xs text-zinc-500">Email</span>
-                  <input
-                    type="email"
-                    value={profileDraft.email}
-                    readOnly
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-zinc-100 px-3 py-2 text-sm text-zinc-700"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSaveProfile}
-                    disabled={profileSaving}
-                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
-                  >
-                    {profileSaving ? "Saving..." : "Save"}
-                  </button>
-                  {profileMessage && (
-                    <span className="text-xs text-zinc-600">{profileMessage}</span>
+              ) : (
+                <div className="space-y-3 text-sm">
+                  {preferencesLoading && (
+                    <div className="text-xs text-zinc-600">Loading preferences…</div>
+                  )}
+                  {preferences && (
+                    <>
+                      <UserPreferencesForm
+                        preferences={preferences}
+                        onChange={(next) => setPreferences(next)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSavePreferences}
+                          disabled={preferencesSaving}
+                          className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
+                        >
+                          {preferencesSaving ? "Saving..." : "Save"}
+                        </button>
+                        {preferencesMessage && (
+                          <span className="text-xs text-zinc-600">{preferencesMessage}</span>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-3 text-sm">
-                {preferencesLoading && (
-                  <div className="text-xs text-zinc-600">Loading preferences…</div>
-                )}
-                {preferences && (
-                  <>
-                    <UserPreferencesForm
-                      preferences={preferences}
-                      onChange={(next) => setPreferences(next)}
-                    />
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleSavePreferences}
-                        disabled={preferencesSaving}
-                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
-                      >
-                        {preferencesSaving ? "Saving..." : "Save"}
-                      </button>
-                      {preferencesMessage && (
-                        <span className="text-xs text-zinc-600">{preferencesMessage}</span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

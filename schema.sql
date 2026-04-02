@@ -51,6 +51,11 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   preview_show_commentary BOOLEAN NOT NULL DEFAULT true,
   preview_transliteration_script VARCHAR(50) NOT NULL DEFAULT 'iast',
   preview_word_meanings_display_mode VARCHAR(10) NOT NULL DEFAULT 'inline',
+  scriptures_book_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
+  scriptures_book_browser_density INTEGER NOT NULL DEFAULT 0,
+  scriptures_media_manager_view VARCHAR(10) NOT NULL DEFAULT 'list',
+  scriptures_media_manager_density INTEGER NOT NULL DEFAULT 0,
+  admin_media_bank_browser_view VARCHAR(10) NOT NULL DEFAULT 'list',
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   CONSTRAINT uq_user_preferences_user_id UNIQUE (user_id)

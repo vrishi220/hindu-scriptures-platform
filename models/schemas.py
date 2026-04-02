@@ -901,7 +901,9 @@ class UserPreferenceBase(BaseModel):
     preview_translation_languages: str = "english"
     preview_hidden_levels: str = ""
     scriptures_book_browser_view: Literal["list", "icon"] = "list"
+    scriptures_book_browser_density: int = Field(default=0, ge=0, le=5)
     scriptures_media_manager_view: Literal["list", "icon"] = "list"
+    scriptures_media_manager_density: int = Field(default=0, ge=0, le=5)
     admin_media_bank_browser_view: Literal["list", "icon"] = "list"
 
 
@@ -927,7 +929,9 @@ class UserPreferenceUpdate(BaseModel):
     preview_translation_languages: str | None = None
     preview_hidden_levels: str | None = None
     scriptures_book_browser_view: Literal["list", "icon"] | None = None
+    scriptures_book_browser_density: int | None = Field(default=None, ge=0, le=5)
     scriptures_media_manager_view: Literal["list", "icon"] | None = None
+    scriptures_media_manager_density: int | None = Field(default=None, ge=0, le=5)
     admin_media_bank_browser_view: Literal["list", "icon"] | None = None
 
 

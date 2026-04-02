@@ -147,8 +147,8 @@ export default function CompilationsPage() {
     }
   };
 
-  const savePreferences = async () => {
-    if (!preferences) return;
+  const savePreferences = async (): Promise<boolean> => {
+    if (!preferences) return false;
     try {
       setPreferencesSaving(true);
       setPreferencesMessage(null);
@@ -166,10 +166,12 @@ export default function CompilationsPage() {
         throw new Error(payload?.detail || "Failed to save preferences");
       }
       setPreferencesMessage("Preferences saved");
+      return true;
     } catch (err) {
       setPreferencesMessage(
         err instanceof Error ? err.message : "Failed to save preferences"
       );
+      return false;
     } finally {
       setPreferencesSaving(false);
       setTimeout(() => setPreferencesMessage(null), 2000);

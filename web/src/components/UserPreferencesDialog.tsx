@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   isRomanScript,
   normalizeTransliterationScript,
@@ -45,7 +47,7 @@ type UserPreferencesDialogProps = {
   onClose: () => void;
   preferences: UserPreferences | null;
   onChange: (next: UserPreferences) => void;
-  onSave: () => void;
+  onSave: () => boolean | Promise<boolean>;
   saving: boolean;
   message: string | null;
 };
@@ -471,12 +473,35 @@ export default function UserPreferencesDialog({
   saving,
   message,
 }: UserPreferencesDialogProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [open]);
+
   if (!open || !preferences) return null;
+
+  const handleSave = async () => {
+    const saved = await onSave();
+    if (saved) {
+      onClose();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-3xl bg-[color:var(--paper)] p-6 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-3xl bg-[color:var(--paper)] p-6 shadow-2xl">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
             Display Preferences
           </h2>
@@ -489,12 +514,16 @@ export default function UserPreferencesDialog({
           </button>
         </div>
 
-        <UserPreferencesForm preferences={preferences} onChange={onChange} />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+          <UserPreferencesForm preferences={preferences} onChange={onChange} />
+        </div>
 
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-4 flex shrink-0 items-center gap-2 border-t border-black/10 pt-3">
           <button
             type="button"
-            onClick={onSave}
+            onClick={() => {
+              void handleSave();
+            }}
             disabled={saving}
             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white transition disabled:opacity-50"
           >
