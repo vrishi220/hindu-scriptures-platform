@@ -39,6 +39,7 @@ export type UserPreferences = {
   scriptures_book_browser_view?: "list" | "icon";
   scriptures_book_browser_density?: 0 | 1 | 2 | 3 | 4 | 5;
   scriptures_media_manager_view?: "list" | "icon";
+  scriptures_media_manager_density?: 0 | 1 | 2 | 3 | 4 | 5;
   admin_media_bank_browser_view?: "list" | "icon";
 };
 
