@@ -7410,8 +7410,6 @@ function ScripturesContent() {
         const saveSucceeded = await savePreferences(nextPreferences);
         if (!saveSucceeded) {
           setBookPreviewError("Failed to save preview settings. Changes not persisted.");
-          setShowBookPreview(false);
-          return;
         }
       }
 
