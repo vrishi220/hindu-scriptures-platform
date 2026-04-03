@@ -645,9 +645,32 @@ const clearPersistedImportJobState = () => {
   }
 };
 
+type LayoutDeviceBucket = "phone" | "tablet" | "desktop";
+
+const getLayoutDeviceBucket = (): LayoutDeviceBucket => {
+  if (typeof window === "undefined") {
+    return "desktop";
+  }
+  const width = window.innerWidth;
+  if (width < 768) {
+    return "phone";
+  }
+  if (width < 1024) {
+    return "tablet";
+  }
+  return "desktop";
+};
+
+const getDeviceScopedStorageKey = (baseKey: string): string =>
+  `${baseKey}_${getLayoutDeviceBucket()}`;
+
 const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
   if (typeof window === "undefined") {
     return "list";
+  }
+  const scopedValue = window.localStorage.getItem(getDeviceScopedStorageKey(storageKey));
+  if (scopedValue !== null) {
+    return scopedValue === "icon" ? "icon" : "list";
   }
   return window.localStorage.getItem(storageKey) === "icon" ? "icon" : "list";
 };
@@ -671,6 +694,12 @@ const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 | 5 => {
   if (typeof window === "undefined") {
     return 0;
   }
+  const scopedValue = window.localStorage.getItem(
+    getDeviceScopedStorageKey(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY)
+  );
+  if (scopedValue !== null) {
+    return normalizeBookBrowserDensity(scopedValue);
+  }
   return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY));
 };
 
@@ -684,9 +713,15 @@ const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 |
   if (typeof window === "undefined") {
     return 0;
   }
-  const scopedValue = window.localStorage.getItem(mediaManagerDensityStorageKey(scope));
+  const scopedValue = window.localStorage.getItem(
+    getDeviceScopedStorageKey(mediaManagerDensityStorageKey(scope))
+  );
   if (scopedValue !== null) {
     return normalizeBookBrowserDensity(scopedValue);
+  }
+  const legacyScopedValue = window.localStorage.getItem(mediaManagerDensityStorageKey(scope));
+  if (legacyScopedValue !== null) {
+    return normalizeBookBrowserDensity(legacyScopedValue);
   }
   return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY));
 };
@@ -2586,7 +2621,10 @@ function ScripturesContent() {
     if (!bookBrowserDensityHydrated) {
       return;
     }
-    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_VIEW_KEY, bookBrowserView);
+    window.localStorage.setItem(
+      getDeviceScopedStorageKey(SCRIPTURES_BOOK_BROWSER_VIEW_KEY),
+      bookBrowserView
+    );
   }, [bookBrowserView, bookBrowserDensityHydrated]);
 
   useEffect(() => {
@@ -2611,7 +2649,10 @@ function ScripturesContent() {
     if (!bookBrowserDensityHydrated) {
       return;
     }
-    window.localStorage.setItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY, String(bookBrowserDensity));
+    window.localStorage.setItem(
+      getDeviceScopedStorageKey(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY),
+      String(bookBrowserDensity)
+    );
   }, [bookBrowserDensity, bookBrowserDensityHydrated]);
 
   useEffect(() => {
@@ -2631,7 +2672,10 @@ function ScripturesContent() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY, mediaManagerView);
+    window.localStorage.setItem(
+      getDeviceScopedStorageKey(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY),
+      mediaManagerView
+    );
   }, [authResolved, authEmail, mediaManagerView]);
 
   useEffect(() => {
@@ -2645,8 +2689,10 @@ function ScripturesContent() {
       return;
     }
     const value = String(mediaManagerDensity);
-    window.localStorage.setItem(mediaManagerDensityStorageKey(mediaManagerScope), value);
-    window.localStorage.setItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY, value);
+    window.localStorage.setItem(
+      getDeviceScopedStorageKey(mediaManagerDensityStorageKey(mediaManagerScope)),
+      value
+    );
   }, [authResolved, authEmail, mediaManagerDensity, mediaManagerDensityHydrated, mediaManagerScope]);
 
   useEffect(() => {
@@ -4404,20 +4450,24 @@ function ScripturesContent() {
         if (!response.ok) return;
         const data = (await response.json()) as UserPreferences;
         const normalized = normalizePreferences(data);
+        const localBookBrowserView = readStoredBrowserView(SCRIPTURES_BOOK_BROWSER_VIEW_KEY);
+        const localBookBrowserDensity = readStoredBookBrowserDensity();
+        const localMediaManagerView = readStoredBrowserView(SCRIPTURES_MEDIA_MANAGER_VIEW_KEY);
+        const localMediaManagerDensity = readStoredMediaManagerDensity(mediaManagerScope);
         setPreferences(normalized);
-        setBookBrowserView(normalized.scriptures_book_browser_view ?? "list");
+        setBookBrowserView(localBookBrowserView);
         setBookBrowserDensity(
           resolveBookBrowserDensity(
-            undefined,
+            localBookBrowserDensity,
             normalized.scriptures_book_browser_density,
             normalized.scriptures_book_browser_view ?? "list"
           )
         );
-        setMediaManagerView(normalized.scriptures_media_manager_view ?? "list");
+        setMediaManagerView(localMediaManagerView);
         setMediaManagerDensity(
           resolveBookBrowserDensity(
-            undefined,
-            0,
+            localMediaManagerDensity,
+            normalized.scriptures_media_manager_density,
             normalized.scriptures_media_manager_view ?? "list"
           )
         );
