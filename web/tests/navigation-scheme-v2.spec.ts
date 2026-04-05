@@ -343,6 +343,7 @@ test.describe('Navigation Scheme - Core Flows', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    await page.getByRole('button', { name: 'Tree', exact: true }).click();
     await expect(page.locator('text=No nodes yet.')).toBeVisible();
     await expect(page.locator('text=Select an item in the tree')).toBeHidden();
   });
@@ -423,7 +424,18 @@ test.describe('Navigation Scheme - Core Flows', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
-    await page.getByRole('button', { name: 'Verse One' }).click();
+    await page.getByRole('button', { name: 'Tree', exact: true }).click();
+    const verseOneNode = page.getByRole('button', { name: 'Verse One' }).first();
+    const isVerseVisible = await verseOneNode.isVisible().catch(() => false);
+    if (!isVerseVisible) {
+      const expandAllButton = page.getByRole('button', { name: 'Expand all' });
+      if (await expandAllButton.count()) {
+        await expandAllButton.click();
+      } else {
+        await page.getByRole('button', { name: '+' }).first().click();
+      }
+    }
+    await verseOneNode.click();
     await expect(page.locator('text=Display preferences')).toBeVisible();
     await expect(page.locator('text=Select an item in the tree')).toBeHidden();
   });
