@@ -173,9 +173,10 @@ export default function BasketPanel({
   }, [viewport.width, viewport.height, widgetSize.width, widgetSize.height]);
 
   const panelLeft = Math.min(
-    Math.max(VIEWPORT_PADDING, widgetPosition.x + widgetSize.width - PANEL_WIDTH),
-    Math.max(VIEWPORT_PADDING, viewport.width - PANEL_WIDTH - VIEWPORT_PADDING)
+    Math.max(VIEWPORT_PADDING, widgetPosition.x + widgetSize.width - Math.min(PANEL_WIDTH, viewport.width - VIEWPORT_PADDING * 2)),
+    Math.max(VIEWPORT_PADDING, viewport.width - Math.min(PANEL_WIDTH, viewport.width - VIEWPORT_PADDING * 2) - VIEWPORT_PADDING)
   );
+  const panelWidth = Math.min(PANEL_WIDTH, viewport.width - VIEWPORT_PADDING * 2);
   const panelTop = Math.min(
     Math.max(VIEWPORT_PADDING, widgetPosition.y - PANEL_HEIGHT - 12),
     Math.max(VIEWPORT_PADDING, viewport.height - PANEL_HEIGHT - VIEWPORT_PADDING)
@@ -909,8 +910,8 @@ export default function BasketPanel({
       {/* Expanded Panel */}
       {isExpanded && (
         <div
-          className="fixed z-40 w-96 rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-sm"
-          style={{ left: `${panelLeft}px`, top: `${panelTop}px` }}
+          className="fixed z-40 rounded-2xl border border-black/10 bg-white/95 shadow-2xl backdrop-blur-sm"
+          style={{ left: `${panelLeft}px`, top: `${panelTop}px`, width: `${panelWidth}px` }}
         >
           <div
             className="flex items-center justify-between border-b border-black/10 p-4 cursor-grab active:cursor-grabbing"

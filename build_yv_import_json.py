@@ -11,6 +11,12 @@ from indic_transliteration import sanscript
 from indic_transliteration.sanscript import transliterate
 
 DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+ASCII_TO_DEVANAGARI_DIGITS = str.maketrans("0123456789", "०१२३४५६७८९")
+
+VERSE_END_STANDARD_RE = re.compile(r"(?:।।|॥)\s*([०-९0-9]+)\s*(?:।।|॥|\|\|)?\s*$")
+VERSE_END_DOTTED_RE = re.compile(r"(?:।।|॥)\s*([०-९0-9]+(?:\.[०-९0-9]+)+)\s*(?:।।|॥|\|\|)?\s*$")
+VERSE_END_BARE_RE = re.compile(r"([०-९0-9]+)\s*(?:\|\|)?\s*$")
+VERSE_END_UNUSUAL_ORDER_RE = re.compile(r"॥\s*[०-९0-9]+\s*।।\s*$")
 
 
 @dataclass
@@ -61,6 +67,81 @@ def to_int_safe(value: str) -> int:
         return int(value.translate(DEVANAGARI_DIGITS))
     except Exception:
         return 0
+
+
+def int_to_devanagari(value: int) -> str:
+    if value <= 0:
+        return ""
+    return str(value).translate(ASCII_TO_DEVANAGARI_DIGITS)
+
+
+def extract_trailing_verse_number(line: str) -> Optional[int]:
+    """
+    Extract a verse number from common line-ending patterns.
+    Handles:
+      - "... ॥ ५४", "... ॥ ५४ ।।", "... ॥ ५४||"
+      - "... ।। 1.18.१०" (uses last numeric segment as verse)
+      - "... भविष्यति ६१" (bare trailing number in some source files)
+    """
+    text = (line or "").strip()
+    if not text or "सर्गः" in text:
+        return None
+
+    m_std = VERSE_END_STANDARD_RE.search(text)
+    if m_std:
+        val = to_int_safe(m_std.group(1))
+        return val if val > 0 else None
+
+    m_dot = VERSE_END_DOTTED_RE.search(text)
+    if m_dot:
+        parts = [p for p in m_dot.group(1).split(".") if p]
+        if parts:
+            val = to_int_safe(parts[-1])
+            return val if val > 0 else None
+
+    # Bare trailing number fallback for malformed verse closings.
+    m_bare = VERSE_END_BARE_RE.search(text)
+    if m_bare and re.search(r"[\u0900-\u097F]", text):
+        val = to_int_safe(m_bare.group(1))
+        return val if val > 0 else None
+
+    return None
+
+
+def normalize_verse_ending_line(line: str) -> str:
+    """Normalize suspicious verse endings to canonical: ' ॥ <number>' (line-local only)."""
+    text = (line or "").rstrip()
+    if not text:
+        return text
+
+    extracted = extract_trailing_verse_number(text)
+    if not extracted:
+        return text
+
+    has_std = bool(VERSE_END_STANDARD_RE.search(text))
+    has_dotted = bool(VERSE_END_DOTTED_RE.search(text))
+    has_bare = bool(VERSE_END_BARE_RE.search(text)) and not has_std and not has_dotted
+    has_ascii_pipe = "||" in text
+    has_unusual_order = bool(VERSE_END_UNUSUAL_ORDER_RE.search(text))
+
+    # Keep already-normal lines unchanged; only normalize known anomalies.
+    if not (has_dotted or has_bare or has_ascii_pipe or has_unusual_order):
+        return text
+
+    cleaned = text
+    cleaned = VERSE_END_DOTTED_RE.sub("", cleaned).rstrip()
+    cleaned = VERSE_END_STANDARD_RE.sub("", cleaned).rstrip()
+    cleaned = re.sub(r"[0-9०-९]+\s*(?:\|\|)?\s*$", "", cleaned).rstrip()
+    cleaned = re.sub(r"[।॥]+\s*$", "", cleaned).rstrip()
+    return f"{cleaned} ॥ {int_to_devanagari(extracted)}".strip()
+
+
+def normalize_verse_endings_text(text: str) -> str:
+    """Normalize verse-ending punctuation per line while preserving line layout."""
+    out: List[str] = []
+    for ln in text.splitlines():
+        out.append(normalize_verse_ending_line(ln))
+    return "\n".join(out)
 
 
 def parse_filename(name: str) -> Optional[Tuple[int, int]]:
@@ -123,9 +204,8 @@ def parse_sarga_closure(lines: List[str], fallback_sarga_num: int) -> Optional[S
     if not closure_line:
         return None
 
-    number_re = re.compile(r"(?:।।|॥)\s*([०-९0-9]+)\s*(?:।।|॥)?\s*$")
-    num_match = number_re.search(closure_line)
-    sarga_number = to_int_safe(num_match.group(1)) if num_match else fallback_sarga_num
+    extracted = extract_trailing_verse_number(closure_line)
+    sarga_number = extracted if extracted else fallback_sarga_num
     if sarga_number <= 0:
         sarga_number = fallback_sarga_num
 
@@ -156,6 +236,25 @@ def parse_sarga_closure(lines: List[str], fallback_sarga_num: int) -> Optional[S
     )
 
 
+def is_leading_sarga_header_line(line: str) -> bool:
+    """
+    Detect heading-only sarga lines that appear before verse content, e.g.:
+      "एकादशः सर्गः ११"
+      "प्रथमः सर्गः ।। १ ।।"
+    These should not be treated as shloka text.
+    """
+    text = (line or "").strip()
+    if not text or "सर्गः" not in text:
+        return False
+
+    # Header-style line: Devanagari heading tokens + optional punctuation/digits.
+    # Excludes longer prose lines with mixed punctuation.
+    if re.search(r"^[\u0900-\u097F\s]+सर्गः[\s।॥|०-९0-9.]*$", text):
+        return True
+
+    return False
+
+
 def split_shlokas(text: str, closure_line: Optional[str] = None) -> List[Tuple[str, str]]:
     """
     Split by shloka-ending markers like:
@@ -184,14 +283,15 @@ def split_shlokas(text: str, closure_line: Optional[str] = None) -> List[Tuple[s
     buf: List[str] = []
     verse_no = 1
 
-    verse_end_re = re.compile(r"(?:।।|॥)\s*([०-९0-9]+)\s*(?:।।|॥)?\s*$")
-
     for ln in lines:
+        # Ignore heading-only sarga lines in the pre-verse lead-in.
+        if not shlokas and not buf and is_leading_sarga_header_line(ln):
+            continue
+
         buf.append(ln)
-        m = verse_end_re.search(ln)
-        if m:
-            num_raw = m.group(1)
-            num_norm = str(to_int_safe(num_raw)) if to_int_safe(num_raw) > 0 else str(verse_no)
+        extracted = extract_trailing_verse_number(ln)
+        if extracted:
+            num_norm = str(extracted)
             shlokas.append((num_norm, "\n".join(buf).strip()))
             buf = []
             verse_no += 1
@@ -219,6 +319,7 @@ def build_payload(
     book_code: str,
     input_dir: str,
     files: List[SourceFile],
+    normalize_verse_endings: bool = False,
 ) -> dict:
     payload = {
         "schema_version": "hsp-book-json-v1",
@@ -281,6 +382,8 @@ def build_payload(
             })
 
         text = fetch_text(sf.path)
+        if normalize_verse_endings:
+            text = normalize_verse_endings_text(text)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         closure = parse_sarga_closure(lines, sf.sarga_num)
         sarga_title = closure.sarga_name_sanskrit if closure and closure.sarga_name_sanskrit else extract_sarga_title(lines, sf.sarga_num)
@@ -372,6 +475,11 @@ def main() -> None:
     ap.add_argument("--book-name", default="Yoga Vasiṣṭha")
     ap.add_argument("--book-code", default="yoga-vasishtha")
     ap.add_argument("--out", default="specs/yoga_vasishtha.book-json-v1.json")
+    ap.add_argument(
+        "--normalize-verse-endings",
+        action="store_true",
+        help="Normalize verse-ending punctuation in-memory before splitting/export",
+    )
     args = ap.parse_args()
 
     files = list_source_files(args.input_dir)
@@ -384,6 +492,7 @@ def main() -> None:
         book_code=args.book_code,
         input_dir=args.input_dir,
         files=files,
+        normalize_verse_endings=args.normalize_verse_endings,
     )
 
     with open(args.out, "w", encoding="utf-8") as f:

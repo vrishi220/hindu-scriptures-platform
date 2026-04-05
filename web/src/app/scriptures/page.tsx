@@ -2505,6 +2505,7 @@ function ScripturesContent() {
   const [propertiesName, setPropertiesName] = useState("");
   const [propertiesDescription, setPropertiesDescription] = useState("");
   const [propertiesInitialDescription, setPropertiesInitialDescription] = useState("");
+  const [propertiesDirty, setPropertiesDirty] = useState(false);
   // Variant authors registry editor inside Book Properties panel
   const [variantAuthorsRegistry, setVariantAuthorsRegistry] = useState<Array<{slug: string; name: string}>>([]);
   const [variantAuthorsSaving, setVariantAuthorsSaving] = useState(false);
@@ -2533,6 +2534,8 @@ function ScripturesContent() {
   const [bookInlineEditMode, setBookInlineEditMode] = useState(false);
   const [bookInlineName, setBookInlineName] = useState("");
   const [bookInlineSubmitting, setBookInlineSubmitting] = useState(false);
+  const [bookInfoStatsOpen, setBookInfoStatsOpen] = useState(true);
+  const [bookInfoAuthorsOpen, setBookInfoAuthorsOpen] = useState(true);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -3121,13 +3124,13 @@ function ScripturesContent() {
     };
 
     const sanskritText = pickFirstNonEmptyString(
+      basic.sanskrit,
       contentData.sanskrit,
       contentData.text_sanskrit,
       summaryBasic.sanskrit,
       summaryBasic.text_sanskrit,
       summaryData.sanskrit,
-      summaryData.text_sanskrit,
-      nodePayload.title_sanskrit
+      summaryData.text_sanskrit
     );
     const transliterationText = pickFirstNonEmptyString(
       basic.transliteration,
@@ -3139,8 +3142,7 @@ function ScripturesContent() {
       summaryBasic.iast,
       summaryData.transliteration,
       summaryData.iast,
-      summaryData.text_transliteration,
-      nodePayload.title_transliteration
+      summaryData.text_transliteration
     );
     const translationText = pickPreferredTranslationText(
       {
@@ -3159,8 +3161,7 @@ function ScripturesContent() {
       summaryData.english,
       summaryData.en,
       summaryData.translation,
-      summaryData.text_english,
-      nodePayload.title_english
+      summaryData.text_english
     );
     const normalizedLevel = (nodePayload.level_name || "content")
       .toString()
@@ -3459,6 +3460,7 @@ function ScripturesContent() {
     }
     setPropertiesLoading(true);
     setPropertiesSaving(false);
+    setPropertiesDirty(false);
     setPropertiesError(null);
     setPropertiesMessage(null);
     resetLevelTemplateSelection();
@@ -3593,15 +3595,14 @@ function ScripturesContent() {
           "sanskrit_text",
           "verse_sanskrit",
           "shloka",
-          "title_sanskrit"
+          "sanskrit"
         );
         const transliterationFallback = pickSnapshotText(
           "transliteration",
           "iast",
           "text_transliteration",
           "transliteration_text",
-          "verse_transliteration",
-          "title_transliteration"
+          "verse_transliteration"
         );
         const englishFallback = pickSnapshotText(
           "english",
@@ -3609,8 +3610,7 @@ function ScripturesContent() {
           "text_english",
           "english_text",
           "english_translation",
-          "verse_translation",
-          "title_english"
+          "verse_translation"
         );
         const chapterFallback = pickSnapshotText("chapter_number", "chapter");
         const verseFallback = pickSnapshotText("verse_number", "shloka_number", "sequence_number");
@@ -3690,6 +3690,7 @@ function ScripturesContent() {
       return;
     }
 
+    setPropertiesDirty(true);
     setPropertiesLoading(true);
     setPropertiesError(null);
     setPropertiesMessage(null);
@@ -3716,6 +3717,7 @@ function ScripturesContent() {
       ...prev,
       [propertyName]: value,
     }));
+    setPropertiesDirty(true);
     setPropertiesMessage(null);
     setPropertiesError(null);
   };
@@ -6898,15 +6900,18 @@ function ScripturesContent() {
     path: TreeNode[],
     scroll = false,
     skipLoad = false,
-    syncUrl = false
+    syncUrl = false,
+    expandPath = true
   ) => {
     setSelectedId(nodeId);
     setBreadcrumb(path);
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      path.forEach((node) => next.add(node.id));
-      return next;
-    });
+    if (expandPath) {
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        path.forEach((node) => next.add(node.id));
+        return next;
+      });
+    }
     if (!skipLoad) {
       loadNodeContent(nodeId);
     }
@@ -6925,7 +6930,7 @@ function ScripturesContent() {
     }
   };
 
-  const selectNode = (nodeId: number, syncUrl = true) => {
+  const selectNode = (nodeId: number, syncUrl = true, expandPath = true) => {
     if (nodeId !== selectedId && hasUnsavedInlineChanges()) {
       const shouldDiscard = window.confirm(
         "You have unsaved changes in Edit details. Discard changes and continue?"
@@ -6953,6 +6958,7 @@ function ScripturesContent() {
     };
 
     if (selectedId === nodeId && nodeContent?.id === nodeId && !contentLoading) {
+      setMobilePanel("content");
       if (syncUrl && bookId) {
         syncSelectionUrl(nodeId);
       }
@@ -6961,7 +6967,7 @@ function ScripturesContent() {
 
     const path = findPath(treeData, nodeId);
     if (path) {
-      applySelection(nodeId, path, false, false, syncUrl);
+      applySelection(nodeId, path, false, false, syncUrl, expandPath);
     } else {
       setSelectedId(nodeId);
       setBreadcrumb([]);
@@ -6987,6 +6993,7 @@ function ScripturesContent() {
     setSelectedId(BOOK_ROOT_NODE_ID);
     setBreadcrumb([]);
     setNodeContent(null);
+    setMobilePanel("content");
 
     if (syncUrl && bookId) {
       syncBrowseUrl(bookId, null, "replace");
@@ -7638,7 +7645,7 @@ function ScripturesContent() {
       return;
     }
 
-    if (selectedId !== null && selectedId !== BOOK_ROOT_NODE_ID) {
+    if (selectedId !== null) {
       setMobilePanel((prev) => (prev === "content" ? prev : "content"));
       return;
     }
@@ -8751,6 +8758,23 @@ function ScripturesContent() {
   const availablePreviewLevels = useMemo<string[]>(() => {
     return currentBookSchemaLevels.filter((level, index, levels) => levels.indexOf(level) === index);
   }, [currentBookSchemaLevels]);
+
+  const bookNodeLevelCounts = useMemo<Record<string, number>>(() => {
+    if (selectedId !== BOOK_ROOT_NODE_ID || treeData.length === 0) return {};
+    const levels = currentBook?.schema?.levels;
+    if (!levels?.length) return {};
+    const counts: Record<string, number> = {};
+    const traverse = (nodes: TreeNode[], depth: number) => {
+      const levelKey = levels[depth];
+      if (!levelKey) return;
+      for (const node of nodes) {
+        counts[levelKey] = (counts[levelKey] || 0) + 1;
+        if (node.children?.length) traverse(node.children, depth + 1);
+      }
+    };
+    traverse(treeData, 0);
+    return counts;
+  }, [selectedId, treeData, currentBook?.schema?.levels]);
 
   useEffect(() => {
     if (!currentBook || currentBookSchemaLevels.length === 0) {
@@ -9866,7 +9890,7 @@ function ScripturesContent() {
           )}
           <button
             type="button"
-            onClick={() => selectNode(node.id)}
+            onClick={() => selectNode(node.id, true, false)}
             title={`${formatValue(node.level_name) || "Level"} ${
               formatSequenceDisplay(
                 node.sequence_number ?? node.id,
@@ -11974,36 +11998,86 @@ function ScripturesContent() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
-                        <div className="mt-1 text-sm text-zinc-700">
-                          {(currentBook.visibility || "private") === "public" ? "Public" : "Private"}
-                        </div>
+                  {(() => {
+                    const thumbUrl = getBookThumbnailUrl(currentBook);
+                    return thumbUrl ? (
+                      <div className="overflow-hidden rounded-2xl border border-black/10">
+                        <img
+                          src={thumbUrl}
+                          alt={currentBook.book_name}
+                          className="h-48 w-full object-cover"
+                        />
                       </div>
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
-                        <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
-                      </div>
-                    </div>
+                    ) : null;
+                  })()}
 
-                    {currentBook.schema?.levels?.length ? (
-                      <div>
-                        <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Levels</div>
-                        <div className="flex flex-wrap gap-2">
-                          {currentBook.schema.levels.map((level) => (
-                            <span
-                              key={`book-level-${level}`}
-                              className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-zinc-700"
-                            >
-                              {getDisplayLevelName(level) || level}
-                            </span>
-                          ))}
+                  <details
+                    open={bookInfoStatsOpen}
+                    onToggle={(e) => setBookInfoStatsOpen((e.currentTarget as HTMLDetailsElement).open)}
+                    className="rounded-2xl border border-black/10 bg-white/90"
+                  >
+                    <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                      Book Statistics
+                      <span className="text-zinc-400">{bookInfoStatsOpen ? "▾" : "▸"}</span>
+                    </summary>
+                    <div className="flex flex-col gap-4 px-4 pb-4">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
+                          <div className="mt-1 text-sm text-zinc-700">
+                            {(currentBook.visibility || "private") === "public" ? "Public" : "Private"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
+                          <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
                         </div>
                       </div>
-                    ) : null}
-                  </div>
+                      {currentBook.schema?.levels?.length ? (
+                        <div>
+                          <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Level Counts</div>
+                          <div className="flex flex-col gap-1">
+                            {currentBook.schema.levels.map((level) => {
+                              const displayName = getDisplayLevelName(level) || level;
+                              const count = bookNodeLevelCounts[level] ?? 0;
+                              return (
+                                <div
+                                  key={`stat-${level}`}
+                                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1.5 text-sm"
+                                >
+                                  <span className="text-zinc-600">{displayName}</span>
+                                  <span className="font-medium tabular-nums text-zinc-900">
+                                    {count.toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+
+                  {Object.keys(currentBook.variant_authors ?? {}).length > 0 ? (
+                    <details
+                      open={bookInfoAuthorsOpen}
+                      onToggle={(e) => setBookInfoAuthorsOpen((e.currentTarget as HTMLDetailsElement).open)}
+                      className="rounded-2xl border border-black/10 bg-white/90"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                        Author Registry
+                        <span className="text-zinc-400">{bookInfoAuthorsOpen ? "▾" : "▸"}</span>
+                      </summary>
+                      <div className="flex flex-col gap-1 px-4 pb-4">
+                        {Object.entries(currentBook.variant_authors ?? {}).map(([slug, name]) => (
+                          <div key={slug} className="flex items-baseline gap-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm">
+                            <span className="font-medium text-zinc-900">{name}</span>
+                            <span className="font-mono text-xs text-zinc-400">{slug}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                 </>
               ) : selectedId && nodeContent ? (
                 <>
@@ -13792,12 +13866,14 @@ function ScripturesContent() {
           nameValue={propertiesName}
           onNameChange={(value) => {
             setPropertiesName(value);
+            setPropertiesDirty(true);
             setPropertiesMessage(null);
             setPropertiesError(null);
           }}
           descriptionValue={propertiesDescription}
           onDescriptionChange={(value) => {
             setPropertiesDescription(value);
+            setPropertiesDirty(true);
             setPropertiesMessage(null);
             setPropertiesError(null);
           }}
@@ -13808,7 +13884,7 @@ function ScripturesContent() {
           error={propertiesError}
           message={propertiesMessage}
           saving={propertiesSaving}
-          saveDisabled={propertiesSaving || propertiesLoading}
+          saveDisabled={propertiesSaving || propertiesLoading || !propertiesDirty}
           effectiveFields={propertiesEffectiveFields}
           values={propertiesValues}
           onClose={() => {
@@ -13844,6 +13920,7 @@ function ScripturesContent() {
                         value={propertiesBookTitleSanskrit}
                         onChange={(event) => {
                           setPropertiesBookTitleSanskrit(event.target.value);
+                          setPropertiesDirty(true);
                           setPropertiesMessage(null);
                           setPropertiesError(null);
                         }}
@@ -13858,6 +13935,7 @@ function ScripturesContent() {
                         value={propertiesBookTitleTransliteration}
                         onChange={(event) => {
                           setPropertiesBookTitleTransliteration(event.target.value);
+                          setPropertiesDirty(true);
                           setPropertiesMessage(null);
                           setPropertiesError(null);
                         }}
@@ -13872,6 +13950,7 @@ function ScripturesContent() {
                         value={propertiesBookTitleEnglish}
                         onChange={(event) => {
                           setPropertiesBookTitleEnglish(event.target.value);
+                          setPropertiesDirty(true);
                           setPropertiesMessage(null);
                           setPropertiesError(null);
                         }}
@@ -13911,6 +13990,7 @@ function ScripturesContent() {
                                   }
                                   return prev.filter((entry) => entry !== level);
                                 });
+                                setPropertiesDirty(true);
                                 setPropertiesMessage(null);
                                 setPropertiesError(null);
                               }}
