@@ -13,7 +13,8 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
-const ENABLE_BROWSER_RENDERED_PDF = true;
+const ENABLE_BROWSER_RENDERED_PDF =
+  (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
 
 type BookPreviewRenderLine = {
   field?: string;
@@ -799,6 +800,8 @@ export async function GET(
       cache: "no-store",
     });
 
+  let fallbackReason: string | null = null;
+
   // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
   // Prefer backend-generated PDF bytes by default.
   if (ENABLE_BROWSER_RENDERED_PDF) {
@@ -876,13 +879,17 @@ export async function GET(
             "Content-Type": "application/pdf",
             "Content-Disposition": `attachment; filename=\"${fileName}\"`,
             "Cache-Control": "no-store",
+            "X-PDF-Renderer": "browser",
           },
         });
       } finally {
         await browser.close();
       }
+    } else {
+      fallbackReason = `preview_status_${previewResponse.status}`;
     }
-    } catch {
+    } catch (error) {
+      fallbackReason = error instanceof Error ? error.name || "browser_render_error" : "browser_render_error";
       // Fall through to backend PDF fallback.
     }
   }
@@ -933,6 +940,8 @@ export async function GET(
       "Content-Type": "application/pdf",
       "Content-Disposition": disposition,
       "Cache-Control": "no-store",
+      "X-PDF-Renderer": "backend",
+      ...(fallbackReason ? { "X-PDF-Fallback-Reason": fallbackReason } : {}),
     },
   });
 }
@@ -984,6 +993,8 @@ export async function POST(
       },
       cache: "no-store",
     });
+
+  let fallbackReason: string | null = null;
 
   // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
   // Prefer backend-generated PDF bytes by default.
@@ -1063,13 +1074,17 @@ export async function POST(
             "Content-Type": "application/pdf",
             "Content-Disposition": `attachment; filename=\"${fileName}\"`,
             "Cache-Control": "no-store",
+            "X-PDF-Renderer": "browser",
           },
         });
       } finally {
         await browser.close();
       }
+    } else {
+      fallbackReason = `preview_status_${previewResponse.status}`;
     }
-    } catch {
+    } catch (error) {
+      fallbackReason = error instanceof Error ? error.name || "browser_render_error" : "browser_render_error";
       // Fall through to backend PDF fallback.
     }
   }
@@ -1120,6 +1135,8 @@ export async function POST(
       "Content-Type": "application/pdf",
       "Content-Disposition": disposition,
       "Cache-Control": "no-store",
+      "X-PDF-Renderer": "backend",
+      ...(fallbackReason ? { "X-PDF-Fallback-Reason": fallbackReason } : {}),
     },
   });
 }
