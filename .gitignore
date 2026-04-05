@@ -115,3 +115,7 @@ external/
 specs/
 media/
 
+# One-time utility scripts
+scripts/audit_yv_txt_issues.py
+scripts/normalize_yv_txt_endings.py
+
