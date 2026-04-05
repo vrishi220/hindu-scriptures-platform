@@ -1,0 +1,1308 @@
+{
+  "schema_version": "hsp-book-json-v1",
+  "exported_at": "2026-04-05T19:29:19.130Z",
+  "source": {
+    "app": "github-copilot",
+    "format": "canonical-book-json",
+    "source_file": "/Users/rishivangapalli/Downloads/chatusloki-bhagavatam.txt",
+    "parse_notes": "Title from first line; second line ignored; Telugu-script Sanskrit normalized to Devanagari for verses and word-meaning keys; Telugu meanings duplicated into en and te for validation compatibility."
+  },
+  "schema": {
+    "id": 3,
+    "name": "Flat",
+    "description": "Flat structure like stotras",
+    "levels": [
+      "Verse"
+    ]
+  },
+  "book": {
+    "book_name": "చతుశ్శోకి భాగవతము",
+    "book_code": "chatusloki-bhagavatam",
+    "language_primary": "sanskrit",
+    "metadata": {
+      "status": "draft",
+      "visibility": "private",
+      "title_sanskrit": "चतुश्शोकि भागवतमु",
+      "title_transliteration": "catuśśoki bhāgavatamu",
+      "word_meanings": {
+        "enabled_levels": [
+          "Verse"
+        ],
+        "meanings": {
+          "default_language": "te",
+          "fallback_order": [
+            "te",
+            "en",
+            "first_available"
+          ]
+        },
+        "source": {
+          "source_display_mode": "script",
+          "allow_runtime_transliteration_generation": false
+        }
+      }
+    },
+    "variant_authors": {}
+  },
+  "nodes": [
+    {
+      "node_id": 1,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Verse",
+      "level_order": 0,
+      "sequence_number": "1",
+      "title_sanskrit": "श्लोक 1",
+      "title_transliteration": "śloka 1",
+      "title_english": "Verse 1",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": true,
+      "content_data": {
+        "basic": {
+          "sanskrit": "अहमेवासमेवाग्रे नान्यद्यत्सदसत्परम् |\nपश्चादहं यदेतच्च योऽवशिष्येत सोऽस्म्यहम् || 1 ||",
+          "transliteration": "ahamevāsamevāgre nānyadyatsadasatparam |\npaścādahaṃ yadetacca yo'vaśiṣyeta so'smyaham || 1 ||",
+          "translation": "సృష్టికి ముందు నిశ్చయముగా నేను మాత్రమే ఉన్నాను. నేను గాక వేరైనది, వ్యక్తము గాని అవ్యక్తము గాని వాటికి అతీతమైనది గాని లేదు. మరియు సృష్టి తర్వాత ఏది వున్నదో మరియు ప్రళయమున మిగిలినదై వున్నదేదయినా అదీ నేనే అయి వున్నాను."
+        },
+        "translations": {
+          "telugu": "సృష్టికి ముందు నిశ్చయముగా నేను మాత్రమే ఉన్నాను. నేను గాక వేరైనది, వ్యక్తము గాని అవ్యక్తము గాని వాటికి అతీతమైనది గాని లేదు. మరియు సృష్టి తర్వాత ఏది వున్నదో మరియు ప్రళయమున మిగిలినదై వున్నదేదయినా అదీ నేనే అయి వున్నాను.",
+          "te": "సృష్టికి ముందు నిశ్చయముగా నేను మాత్రమే ఉన్నాను. నేను గాక వేరైనది, వ్యక్తము గాని అవ్యక్తము గాని వాటికి అతీతమైనది గాని లేదు. మరియు సృష్టి తర్వాత ఏది వున్నదో మరియు ప్రళయమున మిగిలినదై వున్నదేదయినా అదీ నేనే అయి వున్నాను."
+        },
+        "word_meanings": {
+          "version": "1.0",
+          "rows": [
+            {
+              "id": "wm_1_1",
+              "order": 1,
+              "source": {
+                "language": "sa",
+                "script_text": "अहम्",
+                "transliteration": {
+                  "iast": "aham"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "నేను"
+                },
+                "te": {
+                  "text": "నేను"
+                }
+              }
+            },
+            {
+              "id": "wm_1_2",
+              "order": 2,
+              "source": {
+                "language": "sa",
+                "script_text": "एव",
+                "transliteration": {
+                  "iast": "eva"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మాత్రమే"
+                },
+                "te": {
+                  "text": "మాత్రమే"
+                }
+              }
+            },
+            {
+              "id": "wm_1_3",
+              "order": 3,
+              "source": {
+                "language": "sa",
+                "script_text": "आसम्",
+                "transliteration": {
+                  "iast": "āsam"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఉన్నాను"
+                },
+                "te": {
+                  "text": "ఉన్నాను"
+                }
+              }
+            },
+            {
+              "id": "wm_1_4",
+              "order": 4,
+              "source": {
+                "language": "sa",
+                "script_text": "एव",
+                "transliteration": {
+                  "iast": "eva"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "నిశ్చయముగా"
+                },
+                "te": {
+                  "text": "నిశ్చయముగా"
+                }
+              }
+            },
+            {
+              "id": "wm_1_5",
+              "order": 5,
+              "source": {
+                "language": "sa",
+                "script_text": "अग्रे",
+                "transliteration": {
+                  "iast": "agre"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "పూర్వము (సృష్టికి)"
+                },
+                "te": {
+                  "text": "పూర్వము (సృష్టికి)"
+                }
+              }
+            },
+            {
+              "id": "wm_1_6",
+              "order": 6,
+              "source": {
+                "language": "sa",
+                "script_text": "न (आसम्)",
+                "transliteration": {
+                  "iast": "na (āsam)"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "లేదు"
+                },
+                "te": {
+                  "text": "లేదు"
+                }
+              }
+            },
+            {
+              "id": "wm_1_7",
+              "order": 7,
+              "source": {
+                "language": "sa",
+                "script_text": "अन्यत्",
+                "transliteration": {
+                  "iast": "anyat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "వేరైనది (నేను గాక)"
+                },
+                "te": {
+                  "text": "వేరైనది (నేను గాక)"
+                }
+              }
+            },
+            {
+              "id": "wm_1_8",
+              "order": 8,
+              "source": {
+                "language": "sa",
+                "script_text": "यत्",
+                "transliteration": {
+                  "iast": "yat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఏదైన"
+                },
+                "te": {
+                  "text": "ఏదైన"
+                }
+              }
+            },
+            {
+              "id": "wm_1_9",
+              "order": 9,
+              "source": {
+                "language": "sa",
+                "script_text": "सत्",
+                "transliteration": {
+                  "iast": "sat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "సత్తు (వ్యక్తమైనది) గాని"
+                },
+                "te": {
+                  "text": "సత్తు (వ్యక్తమైనది) గాని"
+                }
+              }
+            },
+            {
+              "id": "wm_1_10",
+              "order": 10,
+              "source": {
+                "language": "sa",
+                "script_text": "असत्",
+                "transliteration": {
+                  "iast": "asat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అసత్తు (అవ్యక్తమైనది) గాని"
+                },
+                "te": {
+                  "text": "అసత్తు (అవ్యక్తమైనది) గాని"
+                }
+              }
+            },
+            {
+              "id": "wm_1_11",
+              "order": 11,
+              "source": {
+                "language": "sa",
+                "script_text": "परम्",
+                "transliteration": {
+                  "iast": "param"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "పరమము"
+                },
+                "te": {
+                  "text": "పరమము"
+                }
+              }
+            },
+            {
+              "id": "wm_1_12",
+              "order": 12,
+              "source": {
+                "language": "sa",
+                "script_text": "पश्चात्",
+                "transliteration": {
+                  "iast": "paścāt"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "తర్వాత (సృష్టి తర్వాత)"
+                },
+                "te": {
+                  "text": "తర్వాత (సృష్టి తర్వాత)"
+                }
+              }
+            },
+            {
+              "id": "wm_1_13",
+              "order": 13,
+              "source": {
+                "language": "sa",
+                "script_text": "अहम्",
+                "transliteration": {
+                  "iast": "aham"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "నేను"
+                },
+                "te": {
+                  "text": "నేను"
+                }
+              }
+            },
+            {
+              "id": "wm_1_14",
+              "order": 14,
+              "source": {
+                "language": "sa",
+                "script_text": "यत्",
+                "transliteration": {
+                  "iast": "yat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఏదైతే"
+                },
+                "te": {
+                  "text": "ఏదైతే"
+                }
+              }
+            },
+            {
+              "id": "wm_1_15",
+              "order": 15,
+              "source": {
+                "language": "sa",
+                "script_text": "एतत्",
+                "transliteration": {
+                  "iast": "etat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఇదంతా (నేనే)"
+                },
+                "te": {
+                  "text": "ఇదంతా (నేనే)"
+                }
+              }
+            },
+            {
+              "id": "wm_1_16",
+              "order": 16,
+              "source": {
+                "language": "sa",
+                "script_text": "च",
+                "transliteration": {
+                  "iast": "ca"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మరియు"
+                },
+                "te": {
+                  "text": "మరియు"
+                }
+              }
+            },
+            {
+              "id": "wm_1_17",
+              "order": 17,
+              "source": {
+                "language": "sa",
+                "script_text": "यः",
+                "transliteration": {
+                  "iast": "yaḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఏదైనా"
+                },
+                "te": {
+                  "text": "ఏదైనా"
+                }
+              }
+            },
+            {
+              "id": "wm_1_18",
+              "order": 18,
+              "source": {
+                "language": "sa",
+                "script_text": "अवशिश्येत",
+                "transliteration": {
+                  "iast": "avaśiśyeta"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మిగిలినది (ప్రళయమున)"
+                },
+                "te": {
+                  "text": "మిగిలినది (ప్రళయమున)"
+                }
+              }
+            },
+            {
+              "id": "wm_1_19",
+              "order": 19,
+              "source": {
+                "language": "sa",
+                "script_text": "सः",
+                "transliteration": {
+                  "iast": "saḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అదియు"
+                },
+                "te": {
+                  "text": "అదియు"
+                }
+              }
+            },
+            {
+              "id": "wm_1_20",
+              "order": 20,
+              "source": {
+                "language": "sa",
+                "script_text": "अस्मि",
+                "transliteration": {
+                  "iast": "asmi"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఉన్నాను"
+                },
+                "te": {
+                  "text": "ఉన్నాను"
+                }
+              }
+            },
+            {
+              "id": "wm_1_21",
+              "order": 21,
+              "source": {
+                "language": "sa",
+                "script_text": "अहम्",
+                "transliteration": {
+                  "iast": "aham"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "నేనే"
+                },
+                "te": {
+                  "text": "నేనే"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "summary_data": {},
+      "metadata_json": {
+        "source_script": "telugu",
+        "source_language": "sa",
+        "verse_number": 1
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [
+        "chatusloki-bhagavatam",
+        "verse"
+      ],
+      "media_items": []
+    },
+    {
+      "node_id": 2,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Verse",
+      "level_order": 0,
+      "sequence_number": "2",
+      "title_sanskrit": "श्लोक 2",
+      "title_transliteration": "śloka 2",
+      "title_english": "Verse 2",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": true,
+      "content_data": {
+        "basic": {
+          "sanskrit": "ऋतेऽर्थं यत्प्रतीयेत न प्रतीयेत चात्मनि |\nतद्विद्यादात्मनो मायां यथाऽऽभासो यथा तमः || 2 ||",
+          "transliteration": "ṛte'rthaṃ yatpratīyeta na pratīyeta cātmani |\ntadvidyādātmano māyāṃ yathā''bhāso yathā tamaḥ || 2 ||",
+          "translation": "వాస్తవికత లేకుండా ఏదైతే నా యందు ప్రతీతము మరియు అప్రతీతమౌతున్నదో తెలిసికొన అది నా మాయా శక్తియే ఎలాగయితే ప్రతిబింబము, చీకటి ప్రతీతములగుచున్నవో."
+        },
+        "translations": {
+          "telugu": "వాస్తవికత లేకుండా ఏదైతే నా యందు ప్రతీతము మరియు అప్రతీతమౌతున్నదో తెలిసికొన అది నా మాయా శక్తియే ఎలాగయితే ప్రతిబింబము, చీకటి ప్రతీతములగుచున్నవో.",
+          "te": "వాస్తవికత లేకుండా ఏదైతే నా యందు ప్రతీతము మరియు అప్రతీతమౌతున్నదో తెలిసికొన అది నా మాయా శక్తియే ఎలాగయితే ప్రతిబింబము, చీకటి ప్రతీతములగుచున్నవో."
+        },
+        "word_meanings": {
+          "version": "1.0",
+          "rows": [
+            {
+              "id": "wm_2_1",
+              "order": 1,
+              "source": {
+                "language": "sa",
+                "script_text": "ऋते",
+                "transliteration": {
+                  "iast": "ṛte"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "లేకుండా"
+                },
+                "te": {
+                  "text": "లేకుండా"
+                }
+              }
+            },
+            {
+              "id": "wm_2_2",
+              "order": 2,
+              "source": {
+                "language": "sa",
+                "script_text": "अर्थम्",
+                "transliteration": {
+                  "iast": "artham"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అర్థము, వాస్తవికత"
+                },
+                "te": {
+                  "text": "అర్థము, వాస్తవికత"
+                }
+              }
+            },
+            {
+              "id": "wm_2_3",
+              "order": 3,
+              "source": {
+                "language": "sa",
+                "script_text": "यत्",
+                "transliteration": {
+                  "iast": "yat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఏదైతే"
+                },
+                "te": {
+                  "text": "ఏదైతే"
+                }
+              }
+            },
+            {
+              "id": "wm_2_4",
+              "order": 4,
+              "source": {
+                "language": "sa",
+                "script_text": "प्रतीयेत",
+                "transliteration": {
+                  "iast": "pratīyeta"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "దృశ్యమైనదో"
+                },
+                "te": {
+                  "text": "దృశ్యమైనదో"
+                }
+              }
+            },
+            {
+              "id": "wm_2_5",
+              "order": 5,
+              "source": {
+                "language": "sa",
+                "script_text": "न प्रतीयेत",
+                "transliteration": {
+                  "iast": "na pratīyeta"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అదృశ్యమై యున్నదో"
+                },
+                "te": {
+                  "text": "అదృశ్యమై యున్నదో"
+                }
+              }
+            },
+            {
+              "id": "wm_2_6",
+              "order": 6,
+              "source": {
+                "language": "sa",
+                "script_text": "च",
+                "transliteration": {
+                  "iast": "ca"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మరియు"
+                },
+                "te": {
+                  "text": "మరియు"
+                }
+              }
+            },
+            {
+              "id": "wm_2_7",
+              "order": 7,
+              "source": {
+                "language": "sa",
+                "script_text": "अत्मनि",
+                "transliteration": {
+                  "iast": "atmani"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఆత్మ యందు, నా యందు"
+                },
+                "te": {
+                  "text": "ఆత్మ యందు, నా యందు"
+                }
+              }
+            },
+            {
+              "id": "wm_2_8",
+              "order": 8,
+              "source": {
+                "language": "sa",
+                "script_text": "तत्",
+                "transliteration": {
+                  "iast": "tat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అది"
+                },
+                "te": {
+                  "text": "అది"
+                }
+              }
+            },
+            {
+              "id": "wm_2_9",
+              "order": 9,
+              "source": {
+                "language": "sa",
+                "script_text": "विद्यात्",
+                "transliteration": {
+                  "iast": "vidyāt"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "తెలుసుకొనిన"
+                },
+                "te": {
+                  "text": "తెలుసుకొనిన"
+                }
+              }
+            },
+            {
+              "id": "wm_2_10",
+              "order": 10,
+              "source": {
+                "language": "sa",
+                "script_text": "आत्मनः",
+                "transliteration": {
+                  "iast": "ātmanaḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఆత్మ యొక్క, నా యొక్క"
+                },
+                "te": {
+                  "text": "ఆత్మ యొక్క, నా యొక్క"
+                }
+              }
+            },
+            {
+              "id": "wm_2_11",
+              "order": 11,
+              "source": {
+                "language": "sa",
+                "script_text": "मायाम्",
+                "transliteration": {
+                  "iast": "māyām"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మాయ"
+                },
+                "te": {
+                  "text": "మాయ"
+                }
+              }
+            },
+            {
+              "id": "wm_2_12",
+              "order": 12,
+              "source": {
+                "language": "sa",
+                "script_text": "यथा",
+                "transliteration": {
+                  "iast": "yathā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "వలె"
+                },
+                "te": {
+                  "text": "వలె"
+                }
+              }
+            },
+            {
+              "id": "wm_2_13",
+              "order": 13,
+              "source": {
+                "language": "sa",
+                "script_text": "आभासः",
+                "transliteration": {
+                  "iast": "ābhāsaḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ప్రతిబింబము"
+                },
+                "te": {
+                  "text": "ప్రతిబింబము"
+                }
+              }
+            },
+            {
+              "id": "wm_2_14",
+              "order": 14,
+              "source": {
+                "language": "sa",
+                "script_text": "यथा",
+                "transliteration": {
+                  "iast": "yathā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "వలె"
+                },
+                "te": {
+                  "text": "వలె"
+                }
+              }
+            },
+            {
+              "id": "wm_2_15",
+              "order": 15,
+              "source": {
+                "language": "sa",
+                "script_text": "तमः",
+                "transliteration": {
+                  "iast": "tamaḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "చీకటి"
+                },
+                "te": {
+                  "text": "చీకటి"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "summary_data": {},
+      "metadata_json": {
+        "source_script": "telugu",
+        "source_language": "sa",
+        "verse_number": 2
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [
+        "chatusloki-bhagavatam",
+        "verse"
+      ],
+      "media_items": []
+    },
+    {
+      "node_id": 3,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Verse",
+      "level_order": 0,
+      "sequence_number": "3",
+      "title_sanskrit": "श्लोक 3",
+      "title_transliteration": "śloka 3",
+      "title_english": "Verse 3",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": true,
+      "content_data": {
+        "basic": {
+          "sanskrit": "यथा महांति भूतानि भूतेषूच्चावचेष्वनु |\nप्रविष्टान्यप्रविष्टानि तथा तेषु न तेष्वहम् || 3 ||",
+          "transliteration": "yathā mahāṃti bhūtāni bhūteṣūccāvaceṣvanu |\npraviṣṭānyapraviṣṭāni tathā teṣu na teṣvaham || 3 ||",
+          "translation": "ఎలాగయితే మహాభూతములు అతి చిన్న అతి పెద్ద స్థూల భూతములలోన ప్రవేశిస్తూ ప్రవేశించకుండా ఉంటాయో అలాగే నేనూ వాటిలో వున్నాను లేను కూడా."
+        },
+        "translations": {
+          "telugu": "ఎలాగయితే మహాభూతములు అతి చిన్న అతి పెద్ద స్థూల భూతములలోన ప్రవేశిస్తూ ప్రవేశించకుండా ఉంటాయో అలాగే నేనూ వాటిలో వున్నాను లేను కూడా.",
+          "te": "ఎలాగయితే మహాభూతములు అతి చిన్న అతి పెద్ద స్థూల భూతములలోన ప్రవేశిస్తూ ప్రవేశించకుండా ఉంటాయో అలాగే నేనూ వాటిలో వున్నాను లేను కూడా."
+        },
+        "word_meanings": {
+          "version": "1.0",
+          "rows": [
+            {
+              "id": "wm_3_1",
+              "order": 1,
+              "source": {
+                "language": "sa",
+                "script_text": "यथा",
+                "transliteration": {
+                  "iast": "yathā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఎలాగయితే"
+                },
+                "te": {
+                  "text": "ఎలాగయితే"
+                }
+              }
+            },
+            {
+              "id": "wm_3_2",
+              "order": 2,
+              "source": {
+                "language": "sa",
+                "script_text": "महांति",
+                "transliteration": {
+                  "iast": "mahāṃti"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మహా (సూక్ష్మ)"
+                },
+                "te": {
+                  "text": "మహా (సూక్ష్మ)"
+                }
+              }
+            },
+            {
+              "id": "wm_3_3",
+              "order": 3,
+              "source": {
+                "language": "sa",
+                "script_text": "भूतानि",
+                "transliteration": {
+                  "iast": "bhūtāni"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "భూతములు"
+                },
+                "te": {
+                  "text": "భూతములు"
+                }
+              }
+            },
+            {
+              "id": "wm_3_4",
+              "order": 4,
+              "source": {
+                "language": "sa",
+                "script_text": "भूतेषु उच्च अवचेषु",
+                "transliteration": {
+                  "iast": "bhūteṣu ucca avaceṣu"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అతి చిన్న అతి పెద్ద భూతముల(స్థూల) యందు"
+                },
+                "te": {
+                  "text": "అతి చిన్న అతి పెద్ద భూతముల(స్థూల) యందు"
+                }
+              }
+            },
+            {
+              "id": "wm_3_5",
+              "order": 5,
+              "source": {
+                "language": "sa",
+                "script_text": "अनु प्रविष्टानि",
+                "transliteration": {
+                  "iast": "anu praviṣṭāni"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ప్రవేశిస్తూ"
+                },
+                "te": {
+                  "text": "ప్రవేశిస్తూ"
+                }
+              }
+            },
+            {
+              "id": "wm_3_6",
+              "order": 6,
+              "source": {
+                "language": "sa",
+                "script_text": "अप्रविष्टानि",
+                "transliteration": {
+                  "iast": "apraviṣṭāni"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ప్రవేశించకుండా ఉంటాయో"
+                },
+                "te": {
+                  "text": "ప్రవేశించకుండా ఉంటాయో"
+                }
+              }
+            },
+            {
+              "id": "wm_3_7",
+              "order": 7,
+              "source": {
+                "language": "sa",
+                "script_text": "तथा",
+                "transliteration": {
+                  "iast": "tathā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అలాగే"
+                },
+                "te": {
+                  "text": "అలాగే"
+                }
+              }
+            },
+            {
+              "id": "wm_3_8",
+              "order": 8,
+              "source": {
+                "language": "sa",
+                "script_text": "तेषु",
+                "transliteration": {
+                  "iast": "teṣu"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "వాటిలో (ఉన్నాను)"
+                },
+                "te": {
+                  "text": "వాటిలో (ఉన్నాను)"
+                }
+              }
+            },
+            {
+              "id": "wm_3_9",
+              "order": 9,
+              "source": {
+                "language": "sa",
+                "script_text": "न तेषु",
+                "transliteration": {
+                  "iast": "na teṣu"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "వాటిలో లేను"
+                },
+                "te": {
+                  "text": "వాటిలో లేను"
+                }
+              }
+            },
+            {
+              "id": "wm_3_10",
+              "order": 10,
+              "source": {
+                "language": "sa",
+                "script_text": "अहम्",
+                "transliteration": {
+                  "iast": "aham"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "నేను"
+                },
+                "te": {
+                  "text": "నేను"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "summary_data": {},
+      "metadata_json": {
+        "source_script": "telugu",
+        "source_language": "sa",
+        "verse_number": 3
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [
+        "chatusloki-bhagavatam",
+        "verse"
+      ],
+      "media_items": []
+    },
+    {
+      "node_id": 4,
+      "parent_node_id": null,
+      "referenced_node_id": null,
+      "level_name": "Verse",
+      "level_order": 0,
+      "sequence_number": "4",
+      "title_sanskrit": "श्लोक 4",
+      "title_transliteration": "śloka 4",
+      "title_english": "Verse 4",
+      "title_hindi": null,
+      "title_tamil": null,
+      "has_content": true,
+      "content_data": {
+        "basic": {
+          "sanskrit": "एतावदेव जिज्ञास्यं तत्त्वजिज्ञासुनाऽऽत्मनः |\nअन्वयव्यतिरेकाभ्यां यत्स्यात्सर्वत्र सर्वदा || 4 ||",
+          "transliteration": "etāvadeva jijñāsyaṃ tattvajijñāsunā''tmanaḥ |\nanvayavyatirekābhyāṃ yatsyātsarvatra sarvadā || 4 ||",
+          "translation": "సర్వ వస్తు, సర్వకాల మరియు సర్వదేశముల యందు వున్నది ఆత్మయే (నేనే). అన్వయ వ్యతిరేక పద్ధతులద్వారా జిజ్ఞాసువు తెలుసుకొనవలసిన పరమ సత్యము ఇంత మాత్రమే."
+        },
+        "translations": {
+          "telugu": "సర్వ వస్తు, సర్వకాల మరియు సర్వదేశముల యందు వున్నది ఆత్మయే (నేనే). అన్వయ వ్యతిరేక పద్ధతులద్వారా జిజ్ఞాసువు తెలుసుకొనవలసిన పరమ సత్యము ఇంత మాత్రమే.",
+          "te": "సర్వ వస్తు, సర్వకాల మరియు సర్వదేశముల యందు వున్నది ఆత్మయే (నేనే). అన్వయ వ్యతిరేక పద్ధతులద్వారా జిజ్ఞాసువు తెలుసుకొనవలసిన పరమ సత్యము ఇంత మాత్రమే."
+        },
+        "word_meanings": {
+          "version": "1.0",
+          "rows": [
+            {
+              "id": "wm_4_1",
+              "order": 1,
+              "source": {
+                "language": "sa",
+                "script_text": "एतावत्",
+                "transliteration": {
+                  "iast": "etāvat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఇంత"
+                },
+                "te": {
+                  "text": "ఇంత"
+                }
+              }
+            },
+            {
+              "id": "wm_4_2",
+              "order": 2,
+              "source": {
+                "language": "sa",
+                "script_text": "एव",
+                "transliteration": {
+                  "iast": "eva"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "మాత్రమే"
+                },
+                "te": {
+                  "text": "మాత్రమే"
+                }
+              }
+            },
+            {
+              "id": "wm_4_3",
+              "order": 3,
+              "source": {
+                "language": "sa",
+                "script_text": "जिज्ञास्यम्",
+                "transliteration": {
+                  "iast": "jijñāsyam"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "తెలుసుకొనవలసిన"
+                },
+                "te": {
+                  "text": "తెలుసుకొనవలసిన"
+                }
+              }
+            },
+            {
+              "id": "wm_4_4",
+              "order": 4,
+              "source": {
+                "language": "sa",
+                "script_text": "तत्त्व",
+                "transliteration": {
+                  "iast": "tattva"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "పరమ సత్యము"
+                },
+                "te": {
+                  "text": "పరమ సత్యము"
+                }
+              }
+            },
+            {
+              "id": "wm_4_5",
+              "order": 5,
+              "source": {
+                "language": "sa",
+                "script_text": "जिज्ञासुना",
+                "transliteration": {
+                  "iast": "jijñāsunā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "జిజ్ఞాసువు చేత"
+                },
+                "te": {
+                  "text": "జిజ్ఞాసువు చేత"
+                }
+              }
+            },
+            {
+              "id": "wm_4_6",
+              "order": 6,
+              "source": {
+                "language": "sa",
+                "script_text": "आत्मनः",
+                "transliteration": {
+                  "iast": "ātmanaḥ"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఆత్మయే, నేనే"
+                },
+                "te": {
+                  "text": "ఆత్మయే, నేనే"
+                }
+              }
+            },
+            {
+              "id": "wm_4_7",
+              "order": 7,
+              "source": {
+                "language": "sa",
+                "script_text": "अन्वय व्यतिरेकाभ्याम्",
+                "transliteration": {
+                  "iast": "anvaya vyatirekābhyām"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "అన్వయ వ్యతిరేకముల (పద్ధతుల) ద్వారా"
+                },
+                "te": {
+                  "text": "అన్వయ వ్యతిరేకముల (పద్ధతుల) ద్వారా"
+                }
+              }
+            },
+            {
+              "id": "wm_4_8",
+              "order": 8,
+              "source": {
+                "language": "sa",
+                "script_text": "यत्",
+                "transliteration": {
+                  "iast": "yat"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఏదైతే"
+                },
+                "te": {
+                  "text": "ఏదైతే"
+                }
+              }
+            },
+            {
+              "id": "wm_4_9",
+              "order": 9,
+              "source": {
+                "language": "sa",
+                "script_text": "स्यात्",
+                "transliteration": {
+                  "iast": "syāt"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "ఉన్నదో"
+                },
+                "te": {
+                  "text": "ఉన్నదో"
+                }
+              }
+            },
+            {
+              "id": "wm_4_10",
+              "order": 10,
+              "source": {
+                "language": "sa",
+                "script_text": "सर्वत्र",
+                "transliteration": {
+                  "iast": "sarvatra"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "సర్వ ప్రదేశముల"
+                },
+                "te": {
+                  "text": "సర్వ ప్రదేశముల"
+                }
+              }
+            },
+            {
+              "id": "wm_4_11",
+              "order": 11,
+              "source": {
+                "language": "sa",
+                "script_text": "सर्वदा",
+                "transliteration": {
+                  "iast": "sarvadā"
+                }
+              },
+              "meanings": {
+                "en": {
+                  "text": "సర్వ కాలముల"
+                },
+                "te": {
+                  "text": "సర్వ కాలముల"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "summary_data": {},
+      "metadata_json": {
+        "source_script": "telugu",
+        "source_language": "sa",
+        "verse_number": 4
+      },
+      "source_attribution": null,
+      "license_type": "CC-BY-SA-4.0",
+      "original_source_url": null,
+      "tags": [
+        "chatusloki-bhagavatam",
+        "verse"
+      ],
+      "media_items": []
+    }
+  ]
+}

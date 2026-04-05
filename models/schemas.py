@@ -1164,6 +1164,7 @@ class BookPreviewRenderRequest(BaseModel):
     session_template_bindings: dict | None = None
     render_settings: dict | None = None
     metadata_bindings: dict | None = None
+    selected_translation_languages: list[str] | None = None
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=500, ge=1, le=5000)
 

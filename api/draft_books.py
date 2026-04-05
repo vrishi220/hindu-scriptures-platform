@@ -164,8 +164,16 @@ def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> st
 
 def _resolve_pdf_font_name() -> str:
     unicode_candidates = [
+        "/app/fonts/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "C:/Windows/Fonts/arialuni.ttf",
+        "C:/Windows/Fonts/arial.ttf",
     ]
 
     resolved = _register_pdf_font_from_candidates(unicode_candidates, "SnapshotUnicode")
@@ -174,14 +182,83 @@ def _resolve_pdf_font_name() -> str:
 
 def _resolve_pdf_devanagari_font_name() -> str:
     devanagari_candidates = [
+        "/app/fonts/NotoSansDevanagari-Regular.ttf",
+        "/app/fonts/NotoSansTelugu-Regular.ttf",
+        "/app/fonts/NotoSansKannada-Regular.ttf",
+        "/app/fonts/NotoSansTamil-Regular.ttf",
+        "/app/fonts/NotoSansMalayalam-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansKannada-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansTamil-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansKannada-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansTamil-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansMalayalam-Regular.ttf",
         "/System/Library/Fonts/Supplemental/DevanagariMT.ttc",
         "/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc",
         "/System/Library/Fonts/Supplemental/ITFDevanagari.ttc",
+        "/System/Library/Fonts/Supplemental/Telugu MN.ttc",
+        "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc",
+        "/System/Library/Fonts/Supplemental/Kannada MN.ttc",
+        "/System/Library/Fonts/Supplemental/Kannada Sangam MN.ttc",
+        "/System/Library/Fonts/Supplemental/Tamil MN.ttc",
+        "/System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc",
+        "/System/Library/Fonts/Supplemental/Malayalam MN.ttc",
+        "/System/Library/Fonts/Supplemental/Malayalam Sangam MN.ttc",
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "C:/Windows/Fonts/arialuni.ttf",
+        "C:/Windows/Fonts/mangal.ttf",
+        "C:/Windows/Fonts/gautami.ttf",
+        "C:/Windows/Fonts/vrinda.ttf",
     ]
     resolved = _register_pdf_font_from_candidates(devanagari_candidates, "SnapshotDevanagari")
     return resolved or _resolve_pdf_font_name()
+
+
+_TRANSLATION_CODE_TO_LABEL = {
+    "en": "English",
+    "hi": "Hindi",
+    "te": "Telugu",
+    "kn": "Kannada",
+    "ta": "Tamil",
+    "ml": "Malayalam",
+    "sa": "Sanskrit",
+}
+
+
+def _translation_language_label(language: object) -> str:
+    code = _normalize_translation_language(language)
+    return _TRANSLATION_CODE_TO_LABEL.get(code, code.upper())
+
+
+def _normalize_selected_translation_languages(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return ["en"]
+
+    normalized: list[str] = []
+    for entry in value:
+        language_code = _normalize_translation_language(entry)
+        if not language_code:
+            continue
+        if language_code not in normalized:
+            normalized.append(language_code)
+
+    if "en" not in normalized:
+        normalized.insert(0, "en")
+    return normalized
+
+
+def _pick_translation_text_for_language_only(translations: dict[str, str], language: object) -> str:
+    for key in _translation_lookup_keys(language):
+        value = _as_clean_string(translations.get(key))
+        if value:
+            return value
+    return ""
 
 
 def _audit_event(event_name: str, actor_user_id: int | None, **fields: object) -> None:
@@ -1413,6 +1490,7 @@ def _pick_preferred_translation_text(
     translations: dict[str, str],
     preferred_language: object,
     *fallback_values: object,
+    allow_any_language_fallback: bool = True,
 ) -> str:
     def _looks_like_label(value: str) -> bool:
         """Check if value looks like a label (e.g., 'Verse 1', 'Chapter 2') rather than actual translation."""
@@ -1435,12 +1513,13 @@ def _pick_preferred_translation_text(
         if fallback_value and not _looks_like_label(fallback_value):
             return fallback_value
 
-    # Last resort: return any available translation (e.g. translations.te when
-    # preferred language is English but only Telugu is stored).
-    for value in translations.values():
-        clean = _as_clean_string(value)
-        if clean and not _looks_like_label(clean):
-            return clean
+    if allow_any_language_fallback:
+        # Optional last resort for callers that want "some" translation even
+        # when the preferred language is missing.
+        for value in translations.values():
+            clean = _as_clean_string(value)
+            if clean and not _looks_like_label(clean):
+                return clean
 
     return ""
 
@@ -1966,18 +2045,15 @@ def _build_template_context(
             merged_translations,
             preferred_translation_language,
             basic_data.get("english"),
-            basic_data.get("translation"),
             content_data.get("text_english"),
             content_data.get("english"),
             content_data.get("en"),
-            content_data.get("translation"),
             summary_basic.get("english"),
-            summary_basic.get("translation"),
             summary_data.get("text_english"),
             summary_data.get("english"),
             summary_data.get("en"),
-            summary_data.get("translation"),
             source_node.title_english,
+            allow_any_language_fallback=False,
         )
         fallback_text = (
             basic_data.get("text")
@@ -2359,9 +2435,17 @@ def _build_node_preview_media_map(db: Session, node_ids: list[int]) -> dict[int,
     return by_node_id
 
 
-def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSettings) -> list[tuple[str, str]]:
+def _resolve_pdf_content_lines(
+    content: dict,
+    render_settings: SnapshotRenderSettings,
+    selected_translation_languages: list[str] | None = None,
+) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
     rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
+    translation_map = _normalize_translation_map(resolved_content.get("translations"))
+    resolved_selected_translation_languages = _normalize_selected_translation_languages(
+        selected_translation_languages
+    )
 
     def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
         raw_rows = (
@@ -2454,6 +2538,26 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
                 for field_name, label, value in rendered_entries
                 if field_name == "english"
             ]
+
+            primary_selected_translation_language = (
+                resolved_selected_translation_languages[0]
+                if resolved_selected_translation_languages
+                else "en"
+            )
+            existing_translation_values = {
+                value.strip() for _, value in translation_lines if isinstance(value, str) and value.strip()
+            }
+            for language in resolved_selected_translation_languages:
+                if language == primary_selected_translation_language:
+                    continue
+
+                value = _pick_translation_text_for_language_only(translation_map, language)
+                if not value or value in existing_translation_values:
+                    continue
+
+                translation_lines.append((f"{_translation_language_label(language)} Translation", value))
+                existing_translation_values.add(value)
+
             return non_translation_lines + word_meaning_lines + translation_lines
 
     visible_by_key: dict[str, bool] = {
@@ -2499,6 +2603,25 @@ def _resolve_pdf_content_lines(content: dict, render_settings: SnapshotRenderSet
         for field_name, label, value in fallback_entries
         if field_name == "english"
     ]
+
+    primary_selected_translation_language = (
+        resolved_selected_translation_languages[0]
+        if resolved_selected_translation_languages
+        else "en"
+    )
+    existing_translation_values = {
+        value.strip() for _, value in translation_lines if isinstance(value, str) and value.strip()
+    }
+    for language in resolved_selected_translation_languages:
+        if language == primary_selected_translation_language:
+            continue
+
+        value = _pick_translation_text_for_language_only(translation_map, language)
+        if not value or value in existing_translation_values:
+            continue
+
+        translation_lines.append((f"{_translation_language_label(language)} Translation", value))
+        existing_translation_values.add(value)
 
     return non_translation_lines + word_meaning_lines + translation_lines
 
@@ -3171,6 +3294,7 @@ def _generate_rendered_pdf(
     heading_metadata_lines: list[str],
     sections: SnapshotRenderSections,
     render_settings: SnapshotRenderSettings,
+    selected_translation_languages: list[str] | None = None,
     appendix_entries: list[dict] | None = None,
     cover_title: str | None = None,
     cover_author: str | None = None,
@@ -3196,7 +3320,10 @@ def _generate_rendered_pdf(
             pdf.showPage()
             y = page_height - top_margin
 
-        resolved_font = font_name or (pdf_devanagari_font_name if use_devanagari else pdf_font_name)
+        contains_indic_script = bool(re.search(r"[\u0900-\u0DFF]", text or ""))
+        resolved_font = font_name or (
+            pdf_devanagari_font_name if use_devanagari or contains_indic_script else pdf_font_name
+        )
         if pdf_font_name != "Helvetica" and resolved_font.startswith("Helvetica"):
             resolved_font = pdf_font_name
 
@@ -3258,7 +3385,11 @@ def _generate_rendered_pdf(
             write_line(f"{block.order}. {block.title}", "Helvetica-Bold", 10)
 
             block_content = block.content if isinstance(block.content, dict) else {}
-            content_lines = _resolve_pdf_content_lines(block_content, render_settings)
+            content_lines = _resolve_pdf_content_lines(
+                block_content,
+                render_settings,
+                selected_translation_languages,
+            )
             for label, value in content_lines:
                 wrapped = textwrap.wrap(value, width=110) or [value]
                 is_sanskrit = label.lower() == "sanskrit"
@@ -3333,6 +3464,7 @@ def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, d
         ],
         sections=sections,
         render_settings=render_settings,
+        selected_translation_languages=None,
         appendix_entries=appendix_entries,
     )
 
@@ -4063,6 +4195,7 @@ def _export_book_pdf_with_options(
         heading_metadata_lines=[],
         sections=sections,
         render_settings=render_settings,
+        selected_translation_languages=payload.selected_translation_languages,
         appendix_entries=None,
         cover_title=book.book_name,
         cover_author=cover_author,

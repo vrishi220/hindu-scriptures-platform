@@ -2511,6 +2511,7 @@ function ScripturesContent() {
   const [variantAuthorsSaving, setVariantAuthorsSaving] = useState(false);
   const [variantAuthorsError, setVariantAuthorsError] = useState<string | null>(null);
   const [variantAuthorsMessage, setVariantAuthorsMessage] = useState<string | null>(null);
+  const [propertiesBookAuthor, setPropertiesBookAuthor] = useState("");
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
@@ -3417,6 +3418,7 @@ function ScripturesContent() {
               setPropertiesInitialDescription("");
     if (scope === "book") {
       const metadata = getBookMetadataObject(currentBook) || {};
+      setPropertiesBookAuthor(typeof metadata.author === "string" ? metadata.author : "");
       setPropertiesBookTitleEnglish(
         typeof metadata.title_english === "string" ? metadata.title_english : ""
       );
@@ -3452,6 +3454,7 @@ function ScripturesContent() {
       setVariantAuthorsError(null);
       setVariantAuthorsMessage(null);
     } else {
+      setPropertiesBookAuthor("");
       setPropertiesBookTitleEnglish("");
       setPropertiesBookTitleSanskrit("");
       setPropertiesBookTitleTransliteration("");
@@ -3974,6 +3977,10 @@ function ScripturesContent() {
       typeof existingBookMetadata.title_english === "string"
         ? existingBookMetadata.title_english.trim()
         : "";
+    const currentBookAuthor =
+      typeof existingBookMetadata.author === "string"
+        ? existingBookMetadata.author.trim()
+        : "";
     const currentBookTitleSanskrit =
       typeof existingBookMetadata.title_sanskrit === "string"
         ? existingBookMetadata.title_sanskrit.trim()
@@ -3983,6 +3990,7 @@ function ScripturesContent() {
         ? existingBookMetadata.title_transliteration.trim()
         : "";
     const nextBookTitleEnglish = propertiesBookTitleEnglish.trim();
+    const nextBookAuthor = propertiesBookAuthor.trim();
     const bookTitlePair = autoFillSanskritTransliterationPair(
       propertiesBookTitleSanskrit,
       propertiesBookTitleTransliteration
@@ -3992,6 +4000,7 @@ function ScripturesContent() {
     const shouldSaveBookTitles =
       propertiesScope === "book" &&
       (nextBookTitleEnglish !== currentBookTitleEnglish ||
+        nextBookAuthor !== currentBookAuthor ||
         nextBookTitleSanskrit !== currentBookTitleSanskrit ||
         nextBookTitleTransliteration !== currentBookTitleTransliteration);
 
@@ -4117,6 +4126,11 @@ function ScripturesContent() {
           }
         }
         if (shouldSaveBookTitles) {
+          if (nextBookAuthor) {
+            nextMetadata.author = nextBookAuthor;
+          } else {
+            delete nextMetadata.author;
+          }
           if (nextBookTitleEnglish) {
             nextMetadata.title_english = nextBookTitleEnglish;
           } else {
@@ -8481,6 +8495,13 @@ function ScripturesContent() {
             show_media: activeShowPreviewMedia,
             text_order: ["sanskrit", "transliteration", "english", "text"],
           },
+          preview_show_titles: useAppliedPreviewSettings
+            ? appliedShowPreviewTitles
+            : showPreviewTitles,
+          preview_show_labels: useAppliedPreviewSettings
+            ? appliedShowPreviewLabels
+            : showPreviewLabels,
+          preview_transliteration_script: activeTransliterationScript,
         }),
       });
 
@@ -10474,6 +10495,71 @@ function ScripturesContent() {
     renderInlineMediaPreview,
   ]);
 
+  const anyPreviewLanguageVisible =
+    bookPreviewLanguageSettings.show_sanskrit ||
+    bookPreviewLanguageSettings.show_transliteration ||
+    bookPreviewLanguageSettings.show_english ||
+    bookPreviewLanguageSettings.show_commentary;
+
+  const previewVariantAuthorSlugsKey = useMemo(
+    () => [...previewVariantAuthorSlugs].sort().join("|"),
+    [previewVariantAuthorSlugs]
+  );
+  const appliedPreviewVariantAuthorSlugsKey = useMemo(
+    () => [...appliedPreviewVariantAuthorSlugs].sort().join("|"),
+    [appliedPreviewVariantAuthorSlugs]
+  );
+
+  const hasPendingPreviewSettingChanges = useMemo(
+    () =>
+      bookPreviewLanguageSettings.show_sanskrit !== appliedBookPreviewLanguageSettings.show_sanskrit ||
+      bookPreviewLanguageSettings.show_transliteration !==
+        appliedBookPreviewLanguageSettings.show_transliteration ||
+      bookPreviewLanguageSettings.show_english !== appliedBookPreviewLanguageSettings.show_english ||
+      bookPreviewLanguageSettings.show_commentary !==
+        appliedBookPreviewLanguageSettings.show_commentary ||
+      !areEditableLanguageSelectionsEqual(
+        previewTranslationLanguages,
+        appliedPreviewTranslationLanguages
+      ) ||
+      showPreviewLabels !== appliedShowPreviewLabels ||
+      showPreviewLevelNumbers !== appliedShowPreviewLevelNumbers ||
+      showPreviewDetails !== appliedShowPreviewDetails ||
+      showPreviewTitles !== appliedShowPreviewTitles ||
+      showPreviewMedia !== appliedShowPreviewMedia ||
+      previewFontSizePercent !== appliedPreviewFontSizePercent ||
+      !areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) ||
+      previewWordMeaningsDisplayMode !== appliedPreviewWordMeaningsDisplayMode ||
+      previewTransliterationScript !== appliedBookPreviewTransliterationScript ||
+      previewVariantAuthorSlugsKey !== appliedPreviewVariantAuthorSlugsKey,
+    [
+      bookPreviewLanguageSettings,
+      appliedBookPreviewLanguageSettings,
+      previewTranslationLanguages,
+      appliedPreviewTranslationLanguages,
+      showPreviewLabels,
+      appliedShowPreviewLabels,
+      showPreviewLevelNumbers,
+      appliedShowPreviewLevelNumbers,
+      showPreviewDetails,
+      appliedShowPreviewDetails,
+      showPreviewTitles,
+      appliedShowPreviewTitles,
+      showPreviewMedia,
+      appliedShowPreviewMedia,
+      previewFontSizePercent,
+      appliedPreviewFontSizePercent,
+      hiddenPreviewLevels,
+      appliedHiddenPreviewLevels,
+      previewWordMeaningsDisplayMode,
+      appliedPreviewWordMeaningsDisplayMode,
+      previewTransliterationScript,
+      appliedBookPreviewTransliterationScript,
+      previewVariantAuthorSlugsKey,
+      appliedPreviewVariantAuthorSlugsKey,
+    ]
+  );
+
   const maybeLoadMoreBooks = useCallback(
     (container: HTMLDivElement | null) => {
       if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
@@ -12423,51 +12509,6 @@ function ScripturesContent() {
                                   type="button"
                                   onClick={async () => {
                                     setShowNodeActionsMenu(false);
-                                    if (!selectedId || !nodeContent) return;
-                                    const currentLevel = formatValue(nodeContent.level_name) || "";
-                                    const requestedLevel = window.prompt(
-                                      "Repair node level name",
-                                      currentLevel
-                                    );
-                                    if (!requestedLevel || !requestedLevel.trim()) return;
-                                    try {
-                                      const response = await fetch(
-                                        `/api/content/nodes/${selectedId}/repair-level`,
-                                        {
-                                          method: "POST",
-                                          credentials: "include",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ level_name: requestedLevel.trim() }),
-                                        }
-                                      );
-                                      const result = await response.json().catch(() => null);
-                                      if (!response.ok) {
-                                        alert(
-                                          typeof result?.detail === "string"
-                                            ? result.detail
-                                            : "Failed to repair node level"
-                                        );
-                                        return;
-                                      }
-                                      if (bookId) {
-                                        await loadTree(bookId, selectedId);
-                                      }
-                                      await loadNodeContent(selectedId, true);
-                                    } catch {
-                                      alert("Failed to repair node level");
-                                    }
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <SlidersHorizontal size={14} />
-                                  Repair level name
-                                </button>
-                              )}
-                              {canEditCurrentBook && (
-                                <button
-                                  type="button"
-                                  onClick={async () => {
-                                    setShowNodeActionsMenu(false);
                                     if (
                                       window.confirm(
                                         `Delete this ${activeNodeLevelLabel}? This cannot be undone.`
@@ -13911,6 +13952,23 @@ function ScripturesContent() {
                     Book Titles
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 sm:col-span-2">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Author
+                      </span>
+                      <input
+                        type="text"
+                        value={propertiesBookAuthor}
+                        onChange={(event) => {
+                          setPropertiesBookAuthor(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. Vedavyasa"
+                      />
+                    </label>
                     <label className="flex flex-col gap-1 sm:col-span-2">
                       <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                         Primary / Sanskrit
@@ -15608,29 +15666,7 @@ function ScripturesContent() {
                           void handlePreviewBook(currentScope);
                         }}
                         disabled={
-                          bookPreviewLoading ||
-                          (!bookPreviewLanguageSettings.show_sanskrit &&
-                            !bookPreviewLanguageSettings.show_transliteration &&
-                            !bookPreviewLanguageSettings.show_english &&
-                            !bookPreviewLanguageSettings.show_commentary) ||
-                          (bookPreviewLanguageSettings.show_sanskrit === appliedBookPreviewLanguageSettings.show_sanskrit &&
-                            bookPreviewLanguageSettings.show_transliteration === appliedBookPreviewLanguageSettings.show_transliteration &&
-                            bookPreviewLanguageSettings.show_english === appliedBookPreviewLanguageSettings.show_english &&
-                            bookPreviewLanguageSettings.show_commentary === appliedBookPreviewLanguageSettings.show_commentary &&
-                            areEditableLanguageSelectionsEqual(
-                              previewTranslationLanguages,
-                              appliedPreviewTranslationLanguages
-                            ) &&
-                            showPreviewLabels === appliedShowPreviewLabels &&
-                            showPreviewLevelNumbers === appliedShowPreviewLevelNumbers &&
-                            showPreviewDetails === appliedShowPreviewDetails &&
-                            showPreviewTitles === appliedShowPreviewTitles &&
-                            showPreviewMedia === appliedShowPreviewMedia &&
-                            previewFontSizePercent === appliedPreviewFontSizePercent &&
-                            areStringSetsEqual(hiddenPreviewLevels, appliedHiddenPreviewLevels) &&
-                            previewWordMeaningsDisplayMode === appliedPreviewWordMeaningsDisplayMode &&
-                            previewTransliterationScript === appliedBookPreviewTransliterationScript &&
-                            JSON.stringify([...previewVariantAuthorSlugs].sort()) === JSON.stringify([...appliedPreviewVariantAuthorSlugs].sort()))
+                          bookPreviewLoading || !anyPreviewLanguageVisible || !hasPendingPreviewSettingChanges
                         }
                         className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                       >

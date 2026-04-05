@@ -1,11 +1,19 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  hasDevanagariLetters,
+  normalizeTransliterationScript,
+  transliterateFromDevanagari,
+  transliterateFromIast,
+  transliterationScriptLabel,
+  type TransliterationScriptOption,
+} from "@/lib/indicScript";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
-const ENABLE_BROWSER_RENDERED_PDF = false;
+const ENABLE_BROWSER_RENDERED_PDF = true;
 
 type BookPreviewRenderLine = {
   field?: string;
@@ -16,9 +24,16 @@ type BookPreviewRenderLine = {
 type BookPreviewWordMeaningRow = {
   resolved_source?: {
     text?: string;
+    mode?: string;
+    scheme?: string;
+  };
+  source?: {
+    language?: string;
   };
   resolved_meaning?: {
     text?: string;
+    language?: string;
+    fallback_badge_visible?: boolean;
   };
 };
 
@@ -113,6 +128,24 @@ const translationLanguageToCode = (value?: string | null): string => {
 const translationLanguageLabel = (value?: string | null): string => {
   const canonical = normalizeTranslationLanguage(value);
   return TRANSLATION_LANGUAGE_LABELS[canonical] || canonical.toUpperCase();
+};
+
+const transliterationScriptToLang = (script: TransliterationScriptOption): string => {
+  if (script === "devanagari") return "sa-Deva";
+  if (script === "telugu") return "te";
+  if (script === "kannada") return "kn";
+  if (script === "tamil") return "ta";
+  if (script === "malayalam") return "ml";
+  return "sa-Latn";
+};
+
+const transliterationScriptClassName = (script: TransliterationScriptOption): string => {
+  if (script === "devanagari") return "script-devanagari";
+  if (script === "telugu") return "script-telugu";
+  if (script === "kannada") return "script-kannada";
+  if (script === "tamil") return "script-tamil";
+  if (script === "malayalam") return "script-malayalam";
+  return "script-iast";
 };
 
 const getTranslationLookupKeys = (language: string): string[] => {
@@ -381,7 +414,13 @@ const pickAuthor = (bookPayload: Record<string, unknown> | null): string => {
 const buildBookPreviewHtml = (
   artifact: BookPreviewArtifact,
   selectedTranslationLanguages: string[],
-  options?: { author?: string | null; coverImageSrc?: string | null }
+  options?: {
+    author?: string | null;
+    coverImageSrc?: string | null;
+    showPreviewTitles?: boolean;
+    showPreviewLabels?: boolean;
+    previewTransliterationScript?: string;
+  }
 ) => {
   const renderSettings = artifact.render_settings || {
     show_sanskrit: true,
@@ -396,7 +435,7 @@ const buildBookPreviewHtml = (
   const labelForField = (field: string): string => {
     if (field === "sanskrit") return "Sanskrit";
     if (field === "transliteration") return "Transliteration";
-    if (field === "english") return "Translation";
+    if (field === "english") return "English";
     return "Text";
   };
 
@@ -408,6 +447,10 @@ const buildBookPreviewHtml = (
   };
 
   const bodyBlocks = artifact.sections?.body || [];
+  const appliedShowPreviewTitles = options?.showPreviewTitles === true;
+  const appliedShowPreviewLabels = options?.showPreviewLabels === true;
+  const appliedPreviewTransliterationScript: TransliterationScriptOption =
+    normalizeTransliterationScript(options?.previewTransliterationScript || "iast");
   const coverAuthor = (options?.author || "").trim() || "Unknown Author";
   const coverImageSrc = (options?.coverImageSrc || "").trim();
   const blocksHtml = bodyBlocks
@@ -419,7 +462,13 @@ const buildBookPreviewHtml = (
       const renderedEntries = renderedLines
         .map((line) => {
           const field = (line.field || "text").toLowerCase();
-          const value = typeof line.value === "string" ? line.value.trim() : "";
+          const rawValue = typeof line.value === "string" ? line.value.trim() : "";
+          const value =
+            field === "transliteration"
+              ? hasDevanagariLetters(rawValue)
+                ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
+                : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
+              : rawValue;
           if (!value || !shouldShowField(field)) {
             return null;
           }
@@ -488,38 +537,119 @@ const buildBookPreviewHtml = (
         : [];
       const wordMeaningEntries = wordMeaningRows
         .map((row) => {
-          const source = typeof row.resolved_source?.text === "string" ? row.resolved_source.text.trim() : "";
+          const source =
+            typeof row.resolved_source?.text === "string" ? row.resolved_source.text.trim() : "";
+          const sourceMode =
+            typeof row.resolved_source?.mode === "string"
+              ? row.resolved_source.mode.trim().toLowerCase()
+              : "";
+          const sourceScheme =
+            typeof row.resolved_source?.scheme === "string"
+              ? row.resolved_source.scheme.trim().toLowerCase()
+              : "";
+          const sourceLanguage =
+            typeof row.source?.language === "string" ? row.source.language.trim().toLowerCase() : "";
           const meaning = typeof row.resolved_meaning?.text === "string" ? row.resolved_meaning.text.trim() : "";
           if (!source && !meaning) {
             return null;
           }
+
+          let renderedSource = source;
+          if (source && sourceLanguage === "sa") {
+            if (hasDevanagariLetters(source)) {
+              renderedSource = transliterateFromDevanagari(source, appliedPreviewTransliterationScript);
+            } else if (sourceMode === "transliteration" && (!sourceScheme || sourceScheme === "iast")) {
+              renderedSource = transliterateFromIast(source, appliedPreviewTransliterationScript);
+            }
+          }
+
+          const fallbackBadgeVisible = Boolean(row.resolved_meaning?.fallback_badge_visible);
+          const meaningLanguage =
+            typeof row.resolved_meaning?.language === "string"
+              ? row.resolved_meaning.language.trim().toLowerCase()
+              : "";
+          const meaningWithBadge =
+            meaning && fallbackBadgeVisible && meaningLanguage ? `${meaning} (${meaningLanguage})` : meaning;
+
+          const sourceScriptClass =
+            source && sourceLanguage === "sa"
+              ? transliterationScriptClassName(appliedPreviewTransliterationScript)
+              : "";
+          const sourceLang =
+            source && sourceLanguage === "sa"
+              ? transliterationScriptToLang(appliedPreviewTransliterationScript)
+              : "";
+
           return {
             field: "word_meaning",
             label: "Word Meanings",
-            value: [source, meaning].filter(Boolean).join(" — "),
+            source: renderedSource,
+            meaning: meaningWithBadge,
+            sourceScriptClass,
+            sourceLang,
           };
         })
-        .filter(
-          (entry): entry is { field: string; label: string; value: string } => Boolean(entry)
-        );
+        .filter((entry): entry is {
+          field: string;
+          label: string;
+          source: string;
+          meaning: string;
+          sourceScriptClass: string;
+          sourceLang: string;
+        } => Boolean(entry));
 
       const nonTranslationHtml = nonTranslationEntries
         .map((entry) => {
           const isSanskrit = entry.field === "sanskrit";
-          const lineClass = isSanskrit ? "line sanskrit" : "line";
+          const lineClass = `line field-${entry.field}${isSanskrit ? " sanskrit" : ""}`;
           if (entry.field === "sanskrit") {
             return `<div class=\"${lineClass}\">${escapeHtml(entry.value)}</div>`;
           }
-          const label = escapeHtml(entry.label);
+          if (entry.field === "transliteration") {
+            const value = escapeHtml(entry.value);
+            const transliterationScriptClass = transliterationScriptClassName(
+              appliedPreviewTransliterationScript
+            );
+            const transliterationLang = transliterationScriptToLang(appliedPreviewTransliterationScript);
+            return `<div class=\"${lineClass}\"><span class=\"script-text ${transliterationScriptClass}\" lang=\"${escapeHtml(
+              transliterationLang
+            )}\">${value}</span></div>`;
+          }
+          const label =
+            entry.field === "transliteration"
+              ? `${escapeHtml(entry.label)} (${escapeHtml(transliterationScriptLabel(appliedPreviewTransliterationScript))})`
+              : escapeHtml(entry.label);
           const value = escapeHtml(entry.value);
-          return `<div class=\"${lineClass}\"><strong>${label}:</strong> ${value}</div>`;
+          const transliterationScriptClass =
+            entry.field === "transliteration"
+              ? transliterationScriptClassName(appliedPreviewTransliterationScript)
+              : "";
+          const transliterationLang =
+            entry.field === "transliteration"
+              ? transliterationScriptToLang(appliedPreviewTransliterationScript)
+              : "";
+          const renderedValue =
+            entry.field === "transliteration"
+              ? `<span class=\"script-text ${transliterationScriptClass}\" lang=\"${escapeHtml(
+                  transliterationLang
+                )}\">${value}</span>`
+              : value;
+          return appliedShowPreviewLabels
+            ? `<div class=\"${lineClass}\"><strong>${label}:</strong> ${renderedValue}</div>`
+            : `<div class=\"${lineClass}\">${renderedValue}</div>`;
         })
         .join("");
 
       const wordMeaningsHtml =
         wordMeaningEntries.length > 0
           ? `<div class=\"line\"><strong>Word Meanings:</strong></div>${wordMeaningEntries
-              .map((entry) => `<div class=\"line indented\">${escapeHtml(entry.value)}</div>`)
+              .map((entry) => {
+                const source = escapeHtml(entry.source);
+                const meaning = escapeHtml(entry.meaning);
+                const sourceClass = entry.sourceScriptClass ? ` ${entry.sourceScriptClass}` : "";
+                const langAttr = entry.sourceLang ? ` lang=\"${escapeHtml(entry.sourceLang)}\"` : "";
+                return `<div class=\"line indented\"><span class=\"word-meaning-source${sourceClass}\"${langAttr}>${source}</span><span class=\"word-meaning-sep\"> — </span><span class=\"word-meaning-target\">${meaning}</span></div>`;
+              })
               .join("")}`
           : "";
 
@@ -527,11 +657,18 @@ const buildBookPreviewHtml = (
         .map((entry) => {
           const label = escapeHtml(entry.label);
           const value = escapeHtml(entry.value);
-          return `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${value}</div>`;
+          return appliedShowPreviewLabels
+            ? `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${value}</div>`
+            : `<div class=\"line\">${value}</div>`;
         })
         .join("");
 
       const linesHtml = `${nonTranslationHtml}${wordMeaningsHtml}${translationHtml}`;
+      const hideNodeFallbackTitle = /^Node\s+\d+$/i.test((block.title || "").trim());
+      const titleHtml =
+        appliedShowPreviewTitles && !hideNodeFallbackTitle
+          ? `<h3>${escapeHtml(block.title)}</h3>`
+          : "";
 
       const metadataSourceNode =
         typeof block.source_node_id === "number" ? ` • source_node=${block.source_node_id}` : "";
@@ -541,7 +678,7 @@ const buildBookPreviewHtml = (
 
       return `
         <div class=\"block\">
-          <h3>${block.order}. ${escapeHtml(block.title)}</h3>
+          ${titleHtml}
           ${linesHtml || '<p class=\"muted\">No visible content for current settings.</p>'}
           ${metadata}
         </div>
@@ -556,7 +693,12 @@ const buildBookPreviewHtml = (
         <meta charset=\"utf-8\" />
         <style>
           @page { size: A4; margin: 22mm 16mm; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", "Devanagari Sangam MN", sans-serif; color: #111; }
+          body {
+            font-family: "Noto Sans", "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            color: #111;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+          }
           .cover-page { min-height: calc(100vh - 44mm); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
           .cover-title { font-size: 36px; margin: 0 0 8px 0; line-height: 1.2; }
           .cover-author { font-size: 20px; margin: 0 0 22px 0; color: #444; }
@@ -568,7 +710,31 @@ const buildBookPreviewHtml = (
           .block { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; break-inside: avoid; }
           .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
           .line.indented { margin-left: 14px; }
-          .line.sanskrit { font-family: "Noto Sans Devanagari", "Devanagari Sangam MN", "Devanagari MT", sans-serif; font-size: 18px; line-height: 1.75; }
+          .line.sanskrit { font-family: "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", serif; font-size: 18px; line-height: 1.75; }
+          .field-sanskrit { margin-bottom: 8px; }
+          .field-transliteration { margin-bottom: 12px; }
+          .field-transliteration .script-text { font-size: 15px; line-height: 1.7; }
+          .script-devanagari {
+            font-family: "Noto Sans Devanagari", "Kohinoor Devanagari", "Devanagari Sangam MN", "Mangal", "Nirmala UI", "Arial Unicode MS", serif;
+          }
+          .script-telugu {
+            font-family: "Noto Sans Telugu", "Noto Serif Telugu", "Kohinoor Telugu", "Telugu Sangam MN", "Gautami", "Vani", "Nirmala UI", "Arial Unicode MS", sans-serif;
+          }
+          .script-kannada {
+            font-family: "Noto Sans Kannada", "Noto Serif Kannada", "Kannada Sangam MN", "Tunga", "Nirmala UI", "Arial Unicode MS", sans-serif;
+          }
+          .script-tamil {
+            font-family: "Noto Sans Tamil", "Noto Serif Tamil", "Tamil Sangam MN", "InaiMathi", "Latha", "Nirmala UI", "Arial Unicode MS", sans-serif;
+          }
+          .script-malayalam {
+            font-family: "Noto Sans Malayalam", "Noto Serif Malayalam", "Malayalam Sangam MN", "Nirmala UI", "Arial Unicode MS", sans-serif;
+          }
+          .script-iast {
+            font-family: "Noto Serif", "Times New Roman", "Georgia", serif;
+            font-variant-ligatures: common-ligatures;
+          }
+          .word-meaning-source { font-weight: 500; }
+          .word-meaning-sep { color: #444; }
           .meta { margin-top: 8px; color: #555; font-size: 12px; }
           .muted { color: #666; }
         </style>
@@ -686,6 +852,9 @@ export async function GET(
       const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
         author,
         coverImageSrc,
+        showPreviewTitles: false,
+        showPreviewLabels: false,
+        previewTransliterationScript: "iast",
       });
       const pw = await import("@playwright/test");
       const browser = await pw.chromium.launch({ headless: true });
@@ -869,6 +1038,10 @@ export async function POST(
       const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
         author,
         coverImageSrc,
+        showPreviewTitles: (body as { preview_show_titles?: boolean }).preview_show_titles === true,
+        showPreviewLabels: (body as { preview_show_labels?: boolean }).preview_show_labels === true,
+        previewTransliterationScript:
+          (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast",
       });
       const pw = await import("@playwright/test");
       const browser = await pw.chromium.launch({ headless: true });

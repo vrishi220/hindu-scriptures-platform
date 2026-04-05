@@ -66,7 +66,7 @@ export const hasDevanagariLetters = (text: string): boolean => {
 const transliterate = (text: string, from: string, to: string): string => {
   if (!text) return "";
   try {
-    return Sanscript.t(text, from, to);
+    return Sanscript.t(text, from, to).normalize("NFC");
   } catch {
     return text;
   }
@@ -115,9 +115,9 @@ const transliterateLatinToScript = (
         continue;
       }
       if (targetScheme === "devanagari") {
-        return devanagari;
+        return devanagari.normalize("NFC");
       }
-      return Sanscript.t(devanagari, "devanagari", targetScheme);
+      return Sanscript.t(devanagari, "devanagari", targetScheme).normalize("NFC");
     } catch {
       continue;
     }
@@ -133,10 +133,10 @@ export const transliterateFromIast = (
   const targetScheme = SCHEME_BY_OPTION[script];
   const normalizedInput = normalizeLegacyIastInput(text);
   if (!targetScheme || targetScheme === "iast") {
-    return normalizedInput;
+    return normalizedInput.normalize("NFC");
   }
   const scriptInput = isRomanScript(script) ? normalizedInput : normalizedInput.toLowerCase();
-  return transliterate(scriptInput, "iast", targetScheme);
+  return transliterate(scriptInput, "iast", targetScheme).normalize("NFC");
 };
 
 export const transliterateLatinToIast = (text: string): string =>
@@ -151,9 +151,9 @@ export const transliterateFromDevanagari = (
 ): string => {
   const targetScheme = SCHEME_BY_OPTION[script];
   if (!targetScheme || targetScheme === "devanagari") {
-    return text;
+    return text.normalize("NFC");
   }
-  return transliterate(text, "devanagari", targetScheme);
+  return transliterate(text, "devanagari", targetScheme).normalize("NFC");
 };
 
 export const transliterationScriptLabel = (script: TransliterationScriptOption): string => {
