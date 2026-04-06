@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from models.database import SessionLocal
 from models.import_job import ImportJob
 from models.scripture_schema import ScriptureSchema
 from models.user import User
+from services.media_storage import LocalMediaStorage
 
 
 def _register_and_login(client):
@@ -84,6 +86,54 @@ def _create_user(db, name_prefix: str = "cov01") -> User:
 
 
 class TestContentCoverageNextSliceCOV01:
+    def test_media_bank_upload_preserves_filename_in_storage_path(self, client, tmp_path, monkeypatch):
+        original_storage = content_api.MEDIA_STORAGE
+        monkeypatch.setattr(content_api, "MEDIA_STORAGE", LocalMediaStorage(root_dir=tmp_path))
+        try:
+            headers = _register_and_login(client)
+
+            db = SessionLocal()
+            try:
+                user = db.query(User).filter(User.email.isnot(None)).order_by(User.id.desc()).first()
+                assert user is not None
+                user.role = "admin"
+                user.permissions = {
+                    "can_view": True,
+                    "can_contribute": True,
+                    "can_edit": True,
+                    "can_moderate": True,
+                    "can_admin": True,
+                }
+                db.commit()
+            finally:
+                db.close()
+
+            response = client.post(
+                "/api/content/media-bank/assets",
+                headers=headers,
+                files={"file": ("Lotus Image 01.png", b"png-data", "image/png")},
+            )
+
+            assert response.status_code == status.HTTP_201_CREATED
+            payload = response.json()
+            assert payload["metadata_json"]["original_filename"] == "Lotus Image 01.png"
+            assert payload["metadata_json"]["display_name"] == "Lotus Image 01.png"
+            assert payload["url"].endswith("/media/bank/Lotus-Image-01.png")
+            assert (tmp_path / Path("bank/Lotus-Image-01.png")).exists()
+
+            second_response = client.post(
+                "/api/content/media-bank/assets",
+                headers=headers,
+                files={"file": ("Lotus Image 01.png", b"png-data-2", "image/png")},
+            )
+
+            assert second_response.status_code == status.HTTP_201_CREATED
+            second_payload = second_response.json()
+            assert second_payload["url"].endswith("/media/bank/Lotus-Image-01-2.png")
+            assert (tmp_path / Path("bank/Lotus-Image-01-2.png")).exists()
+        finally:
+            monkeypatch.setattr(content_api, "MEDIA_STORAGE", original_storage)
+
     def test_find_inflight_duplicate_import_job_ignores_stale_running_job(self):
         db = SessionLocal()
         try:

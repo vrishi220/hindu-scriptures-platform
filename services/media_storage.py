@@ -58,6 +58,11 @@ class LocalMediaStorage:
         normalized_relative = self._normalize_relative_path(relative_path)
         return f"{self.public_url_prefix}/{normalized_relative.as_posix()}"
 
+    def exists_relative_path(self, relative_path: Path) -> bool:
+        normalized_relative = self._normalize_relative_path(relative_path)
+        target_path = (self.root_dir / normalized_relative).resolve()
+        return target_path.exists()
+
     def resolve_relative_path_from_url(self, url: str) -> Path | None:
         if not isinstance(url, str):
             return None

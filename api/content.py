@@ -112,6 +112,7 @@ IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS",
 IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB", "200"))
 IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
 IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(1024 * 1024)))
+MEDIA_FILENAME_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def require_import_permission(current_user: User = Depends(get_current_user)) -> User:
@@ -145,6 +146,38 @@ def _is_bank_media_path(relative_path: Path | None) -> bool:
     if relative_path is None:
         return False
     return len(relative_path.parts) > 0 and relative_path.parts[0] == "bank"
+
+
+def _sanitize_media_filename_component(value: str, fallback: str) -> str:
+    normalized = re.sub(r"\s+", "-", (value or "").strip())
+    normalized = MEDIA_FILENAME_COMPONENT_RE.sub("-", normalized)
+    normalized = re.sub(r"-+", "-", normalized).strip("-._")
+    return normalized or fallback
+
+
+def _sanitize_media_suffix(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9.]", "", (value or "").strip())
+    cleaned = cleaned.lstrip(".")
+    return f".{cleaned}" if cleaned else ""
+
+
+def _build_media_bank_relative_path(filename: str | None, fallback_suffix: str = "") -> Path:
+    raw_name = Path(filename).name if filename else ""
+    raw_suffix = Path(raw_name).suffix if raw_name else ""
+    suffix = _sanitize_media_suffix(raw_suffix or fallback_suffix)
+    stem = Path(raw_name).stem if raw_name else ""
+    safe_stem = _sanitize_media_filename_component(stem, "asset")
+
+    candidate = Path("bank") / f"{safe_stem}{suffix}"
+    if not MEDIA_STORAGE.exists_relative_path(candidate):
+        return candidate
+
+    index = 2
+    while True:
+        candidate = Path("bank") / f"{safe_stem}-{index}{suffix}"
+        if not MEDIA_STORAGE.exists_relative_path(candidate):
+            return candidate
+        index += 1
 
 
 def _sanitize_content_data_for_response(content_data: object) -> dict:
@@ -3961,11 +3994,10 @@ def upload_media_bank_asset(
     if not suffix and content_type:
         suffix = f".{content_type.split('/')[-1]}"
 
-    filename = f"{uuid4().hex}{suffix}"
-    relative_path = Path("bank") / filename
+    relative_path = _build_media_bank_relative_path(file.filename, suffix)
     total_bytes = _save_upload_to_media_storage(file, relative_path)
 
-    original_filename = file.filename or filename
+    original_filename = file.filename or relative_path.name
     metadata = {
         "original_filename": original_filename,
         "display_name": original_filename,

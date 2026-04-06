@@ -68,6 +68,13 @@ type Toast = {
   message: string;
 };
 
+type PreviewAsset = {
+  id: number;
+  label: string;
+  mediaType: string;
+  url: string;
+};
+
 const getDisplayName = (asset: MediaAsset) => {
   const metadata =
     asset.metadata_json && typeof asset.metadata_json === "object"
@@ -85,6 +92,12 @@ const getDisplayName = (asset: MediaAsset) => {
 const isExternalUrl = (rawUrl: string) => {
   const normalized = rawUrl.trim().toLowerCase();
   return normalized.startsWith("http://") || normalized.startsWith("https://");
+};
+
+const canPreviewInModal = (asset: MediaAsset) => {
+  if (isExternalUrl(asset.url)) return false;
+  const type = (asset.media_type || "").toLowerCase();
+  return type === "image" || type === "video" || type === "audio";
 };
 
 export default function AdminMediaBankPage() {
@@ -110,6 +123,7 @@ export default function AdminMediaBankPage() {
   const [openActionsId, setOpenActionsId] = useState<number | null>(null);
   const [externalFormOpen, setExternalFormOpen] = useState(false);
   const [externalFormSubmitting, setExternalFormSubmitting] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState<PreviewAsset | null>(null);
   const [accountPrefReady, setAccountPrefReady] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
@@ -210,6 +224,23 @@ export default function AdminMediaBankPage() {
       document.removeEventListener("mousedown", onPointerDown);
     };
   }, [openActionsId]);
+
+  useEffect(() => {
+    if (!previewAsset) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewAsset(null);
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [previewAsset]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -430,6 +461,24 @@ export default function AdminMediaBankPage() {
     }
   };
 
+  const handleAssetOpen = (asset: MediaAsset) => {
+    if (isExternalUrl(asset.url)) {
+      window.open(asset.url, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (!canPreviewInModal(asset)) {
+      return;
+    }
+
+    setPreviewAsset({
+      id: asset.id,
+      label: getDisplayName(asset),
+      mediaType: asset.media_type || "media",
+      url: resolveMediaUrl(asset.url),
+    });
+  };
+
   if (!authChecked) {
     return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
   }
@@ -613,7 +662,17 @@ export default function AdminMediaBankPage() {
                 const label = getDisplayName(asset);
                 const isRenaming = renameId === asset.id;
                 const isImage = (asset.media_type || "").toLowerCase() === "image";
+                const isVideo = (asset.media_type || "").toLowerCase() === "video";
+                const isAudio = (asset.media_type || "").toLowerCase() === "audio";
                 const showUrl = isExternalUrl(asset.url);
+                const previewable = canPreviewInModal(asset) || showUrl;
+                const previewLabel = showUrl
+                  ? `Open ${label}`
+                  : isVideo
+                    ? `Play ${label}`
+                    : isAudio
+                      ? `Preview ${label}`
+                      : `Preview ${label}`;
                 return (
                   <div
                     key={asset.id}
@@ -625,17 +684,102 @@ export default function AdminMediaBankPage() {
                   >
                     {browserView === "icon" ? (
                       <>
-                        {isImage ? (
-                          <img
-                            src={resolveMediaUrl(asset.url)}
-                            alt={label}
-                            className="aspect-square w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex aspect-square w-full items-center justify-center bg-zinc-100 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
-                            {asset.media_type || "media"}
-                          </div>
-                        )}
+                        <div
+                          className="relative"
+                          ref={(element) => {
+                            actionMenuRefs.current[asset.id] = element;
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (previewable) {
+                                handleAssetOpen(asset);
+                              }
+                            }}
+                            disabled={!previewable}
+                            className="group flex w-full rounded-t-xl bg-zinc-50 text-left disabled:cursor-default"
+                            aria-label={previewLabel}
+                          >
+                            {isImage ? (
+                              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-zinc-50 p-2">
+                                <img
+                                  src={resolveMediaUrl(asset.url)}
+                                  alt={label}
+                                  className="max-h-full max-w-full object-contain transition duration-200 group-hover:scale-[1.02]"
+                                />
+                              </div>
+                            ) : isVideo ? (
+                              <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-zinc-950 p-2">
+                                <video
+                                  src={resolveMediaUrl(asset.url)}
+                                  className="max-h-full max-w-full object-contain"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex aspect-square w-full items-center justify-center rounded-t-xl bg-zinc-100 px-4 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                {showUrl ? "Open link" : asset.media_type || "media"}
+                              </div>
+                            )}
+                          </button>
+                          {!isRenaming && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
+                                }}
+                                disabled={deletingId === asset.id || updatingId === asset.id || replacingId === asset.id}
+                                className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-zinc-700 shadow-sm transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
+                                aria-label="Open asset actions"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
+                              {openActionsId === asset.id && (
+                                <div className="absolute right-2 top-11 z-20 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      replaceTargetIdRef.current = asset.id;
+                                      replaceInputRef.current?.click();
+                                    }}
+                                    disabled={isExternalUrl(asset.url) || replacingId === asset.id}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                                  >
+                                    Replace file
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      setRenameId(asset.id);
+                                      setRenameValue(label);
+                                    }}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                                  >
+                                    Rename
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionsId(null);
+                                      void handleDelete(asset);
+                                    }}
+                                    disabled={deletingId === asset.id}
+                                    className="w-full rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
                         <div className="space-y-2 p-3">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
@@ -662,7 +806,7 @@ export default function AdminMediaBankPage() {
                                       cancelRename();
                                     }
                                   }}
-                                  className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                                  className="min-w-[18rem] max-w-full rounded border border-black/10 bg-white px-2 py-1 text-sm sm:min-w-[22rem]"
                                 />
                               ) : (
                                 <>
@@ -704,64 +848,7 @@ export default function AdminMediaBankPage() {
                                   Cancel
                                 </button>
                               </>
-                            ) : (
-                              <div
-                                className="relative"
-                                ref={(element) => {
-                                  actionMenuRefs.current[asset.id] = element;
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenActionsId((prev) => (prev === asset.id ? null : asset.id));
-                                  }}
-                                  disabled={deletingId === asset.id || updatingId === asset.id || replacingId === asset.id}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:opacity-50"
-                                  aria-label="Open asset actions"
-                                >
-                                  <MoreVertical size={16} />
-                                </button>
-                                {openActionsId === asset.id && (
-                                  <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionsId(null);
-                                        replaceTargetIdRef.current = asset.id;
-                                        replaceInputRef.current?.click();
-                                      }}
-                                      disabled={isExternalUrl(asset.url) || replacingId === asset.id}
-                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-                                    >
-                                      Replace file
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionsId(null);
-                                        setRenameId(asset.id);
-                                        setRenameValue(label);
-                                      }}
-                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
-                                    >
-                                      Rename
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setOpenActionsId(null);
-                                        void handleDelete(asset);
-                                      }}
-                                      disabled={deletingId === asset.id}
-                                      className="w-full rounded px-2 py-1.5 text-left text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       </>
@@ -791,26 +878,48 @@ export default function AdminMediaBankPage() {
                                   cancelRename();
                                 }
                               }}
-                              className="w-full rounded border border-black/10 bg-white px-2 py-1 text-sm"
+                              className="min-w-[18rem] max-w-full rounded border border-black/10 bg-white px-2 py-1 text-sm sm:min-w-[24rem]"
                             />
                           ) : (
-                            <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (previewable) {
+                                  handleAssetOpen(asset);
+                                }
+                              }}
+                              disabled={!previewable}
+                              className="flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
+                              aria-label={previewLabel}
+                            >
                               {isImage ? (
-                                <img
-                                  src={resolveMediaUrl(asset.url)}
-                                  alt={label}
-                                  className="h-10 w-10 shrink-0 rounded-md border border-black/10 object-cover"
-                                />
+                                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-zinc-50 p-1">
+                                  <img
+                                    src={resolveMediaUrl(asset.url)}
+                                    alt={label}
+                                    className="max-h-full max-w-full object-contain"
+                                  />
+                                </div>
+                              ) : isVideo ? (
+                                <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-zinc-950 p-1">
+                                  <video
+                                    src={resolveMediaUrl(asset.url)}
+                                    className="max-h-full max-w-full object-contain"
+                                    muted
+                                    playsInline
+                                    preload="metadata"
+                                  />
+                                </div>
                               ) : (
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-black/10 bg-zinc-50 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
-                                  {asset.media_type || "media"}
+                                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border border-black/10 bg-zinc-50 px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+                                  {showUrl ? "Link" : asset.media_type || "media"}
                                 </div>
                               )}
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{label}</div>
                                 {showUrl && <div className="truncate text-xs text-zinc-500">{asset.url}</div>}
                               </div>
-                            </div>
+                            </button>
                           )}
                         </div>
                         <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{asset.media_type || "other"}</span>
@@ -925,6 +1034,56 @@ export default function AdminMediaBankPage() {
           await handleAddExternalLink(payload);
         }}
       />
+
+      {previewAsset && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPreviewAsset(null)}
+        >
+          <div
+            className="w-full max-w-5xl rounded-2xl border border-white/10 bg-zinc-950 p-4 text-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-lg font-semibold">{previewAsset.label}</div>
+                <div className="text-xs uppercase tracking-[0.14em] text-zinc-400">{previewAsset.mediaType}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewAsset(null)}
+                className="rounded-md border border-white/10 px-3 py-1.5 text-sm text-zinc-200 transition hover:bg-white/5"
+              >
+                Close
+              </button>
+            </div>
+
+            {previewAsset.mediaType.toLowerCase() === "image" ? (
+              <div className="flex max-h-[75vh] items-center justify-center overflow-hidden rounded-xl bg-black p-2">
+                <img
+                  src={previewAsset.url}
+                  alt={previewAsset.label}
+                  className="max-h-[72vh] max-w-full object-contain"
+                />
+              </div>
+            ) : previewAsset.mediaType.toLowerCase() === "video" ? (
+              <video
+                src={previewAsset.url}
+                controls
+                autoPlay
+                playsInline
+                className="max-h-[75vh] w-full rounded-xl bg-black"
+              />
+            ) : (
+              <div className="rounded-xl bg-black/40 p-4">
+                <audio controls autoPlay className="w-full">
+                  <source src={previewAsset.url} />
+                </audio>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
