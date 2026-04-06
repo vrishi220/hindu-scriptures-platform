@@ -484,6 +484,38 @@ const resolveAbsoluteUrl = (rawUrl: string, requestUrl: string): string => {
   }
 };
 
+const inferImageMimeType = (url: string, contentTypeHeader: string): string | null => {
+  const header = (contentTypeHeader || "").toLowerCase().split(";")[0].trim();
+  if (header.startsWith("image/")) {
+    return header;
+  }
+  // Guard against embedding HTML/login/error pages as image data.
+  if (header.startsWith("text/") || header.includes("json") || header.includes("xml")) {
+    return null;
+  }
+
+  let path = "";
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    path = url.toLowerCase();
+  }
+
+  if (/\.png($|\?)/.test(path)) return "image/png";
+  if (/\.(jpg|jpeg)($|\?)/.test(path)) return "image/jpeg";
+  if (/\.webp($|\?)/.test(path)) return "image/webp";
+  if (/\.gif($|\?)/.test(path)) return "image/gif";
+  if (/\.bmp($|\?)/.test(path)) return "image/bmp";
+  if (/\.svg($|\?)/.test(path)) return "image/svg+xml";
+
+  // Some media gateways return octet-stream for image files.
+  if (header === "application/octet-stream") {
+    return "image/jpeg";
+  }
+
+  return null;
+};
+
 const fetchImageAsDataUri = async (
   imageUrl: string,
   requestUrl: string,
@@ -519,18 +551,35 @@ const fetchImageAsDataUri = async (
     return null;
   }
 
+  // Fallback path: if same-origin media proxy call failed, try direct backend media with bearer token.
+  if (
+    !response.ok &&
+    token &&
+    normalizedImageUrl.startsWith("/api/media/")
+  ) {
+    try {
+      response = await fetch(`${API_BASE_URL}${normalizedImageUrl}`, {
+        headers: buildAuthHeader(token),
+        cache: "no-store",
+      });
+    } catch {
+      return null;
+    }
+  }
+
   if (!response.ok) {
     return null;
   }
 
   const contentType = response.headers.get("content-type") || "";
-  if (!contentType.toLowerCase().startsWith("image/")) {
+  const resolvedMimeType = inferImageMimeType(absoluteUrl, contentType);
+  if (!resolvedMimeType) {
     return null;
   }
 
   const bytes = await response.arrayBuffer();
   const base64 = Buffer.from(bytes).toString("base64");
-  return `data:${contentType};base64,${base64}`;
+  return `data:${resolvedMimeType};base64,${base64}`;
 };
 
 const pickAuthor = (bookPayload: Record<string, unknown> | null): string => {
@@ -604,7 +653,7 @@ const buildBookPreviewHtml = (
   const coverAuthor = (options?.author || "").trim() || "Unknown Author";
   const coverImageSrc = (options?.coverImageSrc || "").trim();
   const blocksHtml = bodyBlocks
-    .map((block) => {
+    .map((block, blockIndex) => {
       const renderedLines = Array.isArray(block.content?.rendered_lines)
         ? block.content.rendered_lines
         : [];
@@ -843,7 +892,16 @@ const buildBookPreviewHtml = (
         })
         .join("");
 
-      const linesHtml = `${nonTranslationHtml}${wordMeaningsHtml}${translationHtml}`;
+      const nonTranslationSectionHtml = nonTranslationHtml
+        ? `<div class=\"content-section section-primary\">${nonTranslationHtml}</div>`
+        : "";
+      const wordMeaningsSectionHtml = wordMeaningsHtml
+        ? `<div class=\"content-section section-word-meanings\">${wordMeaningsHtml}</div>`
+        : "";
+      const translationSectionHtml = translationHtml
+        ? `<div class=\"content-section section-translation\">${translationHtml}</div>`
+        : "";
+      const linesHtml = `${nonTranslationSectionHtml}${wordMeaningsSectionHtml}${translationSectionHtml}`;
       const hideNodeFallbackTitle = /^Node\s+\d+$/i.test((block.title || "").trim());
       const titleHtml =
         appliedShowPreviewTitles && !hideNodeFallbackTitle
@@ -859,8 +917,10 @@ const buildBookPreviewHtml = (
       const templateKey = (block.template_key || "").trim().toLowerCase();
       const isLeafTemplate = templateKey.includes("leaf");
       const isLevelTemplate = templateKey.includes("level");
+      const hasNextBlock = blockIndex < bodyBlocks.length - 1;
       const hasPageBreakAfter =
-        (appliedPdfSettings.pageBreakMode === "between_leaf" && isLeafTemplate) ||
+        // Leaf mode should break between successive rendered blocks regardless of template naming.
+        (appliedPdfSettings.pageBreakMode === "between_leaf" && hasNextBlock) ||
         (appliedPdfSettings.pageBreakMode === "between_level" && isLevelTemplate);
       const blockClass = `block${hasPageBreakAfter ? " page-break-after" : ""}`;
 
@@ -893,14 +953,25 @@ const buildBookPreviewHtml = (
           .cover-page { min-height: calc(100vh - 44mm); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
           .cover-title { font-size: 36px; margin: 0 0 8px 0; line-height: 1.2; }
           .cover-author { font-size: 20px; margin: 0 0 22px 0; color: #444; }
-          .cover-image-wrap { width: 100%; display: flex; justify-content: center; }
-          .cover-image { max-width: 72%; max-height: 62vh; object-fit: contain; border-radius: 10px; }
+          .cover-image-wrap { width: 100%; display: flex; justify-content: center; align-items: center; }
+          .cover-image {
+            width: min(96%, 185mm);
+            max-height: calc(100vh - 120mm);
+            object-fit: contain;
+            border-radius: 10px;
+          }
           .page-break { page-break-after: always; break-after: page; }
           h1 { font-size: 24px; margin: 0 0 6px 0; }
           h3 { font-size: 16px; margin: 0 0 8px; }
           .block { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; break-inside: avoid; }
           .block.page-break-after { page-break-after: always; break-after: page; }
+          .content-section + .content-section {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e3e3e3;
+          }
           .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
+          .line + .line { margin-top: 6px; }
           .line.indented { margin-left: 14px; }
           .line.sanskrit { font-family: "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", serif; font-size: 18px; line-height: 1.75; }
           .field-sanskrit { margin-bottom: 8px; }
