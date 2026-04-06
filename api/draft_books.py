@@ -220,6 +220,78 @@ def _resolve_pdf_devanagari_font_name() -> str:
     return resolved or _resolve_pdf_font_name()
 
 
+def _resolve_pdf_telugu_font_name(fallback_font: str) -> str:
+    telugu_candidates = [
+        "/app/fonts/NotoSansTelugu-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Telugu MN.ttc",
+        "/System/Library/Fonts/Supplemental/Telugu Sangam MN.ttc",
+        "C:/Windows/Fonts/gautami.ttf",
+        "C:/Windows/Fonts/Nirmala.ttf",
+    ]
+    resolved = _register_pdf_font_from_candidates(telugu_candidates, "SnapshotTelugu")
+    return resolved or fallback_font
+
+
+def _resolve_pdf_kannada_font_name(fallback_font: str) -> str:
+    kannada_candidates = [
+        "/app/fonts/NotoSansKannada-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansKannada-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansKannada-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Kannada MN.ttc",
+        "/System/Library/Fonts/Supplemental/Kannada Sangam MN.ttc",
+        "C:/Windows/Fonts/tunga.ttf",
+        "C:/Windows/Fonts/Nirmala.ttf",
+    ]
+    resolved = _register_pdf_font_from_candidates(kannada_candidates, "SnapshotKannada")
+    return resolved or fallback_font
+
+
+def _resolve_pdf_tamil_font_name(fallback_font: str) -> str:
+    tamil_candidates = [
+        "/app/fonts/NotoSansTamil-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansTamil-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansTamil-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Tamil MN.ttc",
+        "/System/Library/Fonts/Supplemental/Tamil Sangam MN.ttc",
+        "C:/Windows/Fonts/latha.ttf",
+        "C:/Windows/Fonts/Nirmala.ttf",
+    ]
+    resolved = _register_pdf_font_from_candidates(tamil_candidates, "SnapshotTamil")
+    return resolved or fallback_font
+
+
+def _resolve_pdf_malayalam_font_name(fallback_font: str) -> str:
+    malayalam_candidates = [
+        "/app/fonts/NotoSansMalayalam-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansMalayalam-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Malayalam MN.ttc",
+        "/System/Library/Fonts/Supplemental/Malayalam Sangam MN.ttc",
+        "C:/Windows/Fonts/kartika.ttf",
+        "C:/Windows/Fonts/Nirmala.ttf",
+    ]
+    resolved = _register_pdf_font_from_candidates(malayalam_candidates, "SnapshotMalayalam")
+    return resolved or fallback_font
+
+
+def _detect_indic_script(text: str) -> str | None:
+    if not text:
+        return None
+    if re.search(r"[\u0C00-\u0C7F]", text):
+        return "telugu"
+    if re.search(r"[\u0C80-\u0CFF]", text):
+        return "kannada"
+    if re.search(r"[\u0B80-\u0BFF]", text):
+        return "tamil"
+    if re.search(r"[\u0D00-\u0D7F]", text):
+        return "malayalam"
+    if re.search(r"[\u0900-\u097F]", text):
+        return "devanagari"
+    return None
+
+
 _TRANSLATION_CODE_TO_LABEL = {
     "en": "English",
     "hi": "Hindi",
@@ -3313,6 +3385,10 @@ def _generate_rendered_pdf(
     y = page_height - top_margin
     pdf_font_name = _resolve_pdf_font_name()
     pdf_devanagari_font_name = _resolve_pdf_devanagari_font_name()
+    pdf_telugu_font_name = _resolve_pdf_telugu_font_name(pdf_devanagari_font_name)
+    pdf_kannada_font_name = _resolve_pdf_kannada_font_name(pdf_devanagari_font_name)
+    pdf_tamil_font_name = _resolve_pdf_tamil_font_name(pdf_devanagari_font_name)
+    pdf_malayalam_font_name = _resolve_pdf_malayalam_font_name(pdf_devanagari_font_name)
 
     def write_line(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         nonlocal y
@@ -3320,16 +3396,30 @@ def _generate_rendered_pdf(
             pdf.showPage()
             y = page_height - top_margin
 
-        contains_indic_script = bool(re.search(r"[\u0900-\u0DFF]", text or ""))
-        resolved_font = font_name or (
-            pdf_devanagari_font_name if use_devanagari or contains_indic_script else pdf_font_name
-        )
+        detected_script = _detect_indic_script(text or "")
+        if font_name:
+            resolved_font = font_name
+        elif use_devanagari:
+            resolved_font = pdf_devanagari_font_name
+        elif detected_script == "telugu":
+            resolved_font = pdf_telugu_font_name
+        elif detected_script == "kannada":
+            resolved_font = pdf_kannada_font_name
+        elif detected_script == "tamil":
+            resolved_font = pdf_tamil_font_name
+        elif detected_script == "malayalam":
+            resolved_font = pdf_malayalam_font_name
+        elif detected_script == "devanagari":
+            resolved_font = pdf_devanagari_font_name
+        else:
+            resolved_font = pdf_font_name
+
         if pdf_font_name != "Helvetica" and resolved_font.startswith("Helvetica"):
             resolved_font = pdf_font_name
 
         pdf.setFont(resolved_font, font_size)
         pdf.drawString(left_margin, y, text)
-        y -= devanagari_line_height if use_devanagari else line_height
+        y -= devanagari_line_height if use_devanagari or detected_script is not None else line_height
 
     normalized_cover_title = (cover_title or "").strip()
     normalized_cover_author = (cover_author or "").strip()
