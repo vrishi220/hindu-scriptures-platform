@@ -15934,10 +15934,10 @@ function ScripturesContent() {
         )}
 
         {showPdfExportDialog && pdfExportTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
-            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-2 sm:items-center sm:p-3">
+            <div className="w-full max-w-xl rounded-2xl bg-[color:var(--paper)] p-3 shadow-2xl sm:rounded-3xl sm:p-5">
+              <div className="mb-2 flex items-center justify-between sm:mb-4">
+                <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
                   Export PDF
                 </h2>
                 <button
@@ -15953,11 +15953,11 @@ function ScripturesContent() {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Scope</div>
+              <div className="space-y-2.5 sm:space-y-4">
+                <div className="rounded-xl border border-black/10 bg-white/70 p-2.5 sm:p-3">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Scope</div>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-2.5 py-2 text-sm text-zinc-700">
                       <input
                         type="radio"
                         name="pdf-export-scope"
@@ -15966,7 +15966,7 @@ function ScripturesContent() {
                       />
                       Full book
                     </label>
-                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-2.5 py-2 text-sm text-zinc-700">
                       <input
                         type="radio"
                         name="pdf-export-scope"
@@ -15990,14 +15990,14 @@ function ScripturesContent() {
                     bookPreviewArtifact.preview_scope === "node" &&
                     typeof bookPreviewArtifact.root_node_id === "number"
                   ) && (
-                    <div className="mt-2 text-xs text-zinc-500">
+                    <div className="mt-1.5 text-xs text-zinc-500">
                       Open a level preview for this book to enable scoped export.
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Page Range</div>
+                <div className="rounded-xl border border-black/10 bg-white/70 p-2.5 sm:p-3">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-500">Page Range</div>
                   <input
                     type="text"
                     value={pdfExportPageRanges}
@@ -16007,8 +16007,10 @@ function ScripturesContent() {
                   />
                 </div>
 
-                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
-                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">PDF Settings</div>
+                <details className="rounded-xl border border-black/10 bg-white/70 p-2.5 sm:p-3">
+                  <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.2em] text-zinc-500">
+                    PDF Settings (Advanced)
+                  </summary>
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
                     <label className="flex flex-col gap-1 text-sm text-zinc-700">
                       <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">Page Size</span>
@@ -16074,10 +16076,10 @@ function ScripturesContent() {
                     />
                     Include cover page
                   </label>
-                </div>
+                </details>
               </div>
 
-              <div className="mt-5 flex items-center justify-end gap-2">
+              <div className="mt-3 flex items-center justify-end gap-2 border-t border-black/10 pt-3 sm:mt-5 sm:pt-4">
                 <button
                   type="button"
                   onClick={() => {
