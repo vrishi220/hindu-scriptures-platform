@@ -14,13 +14,42 @@ const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
 const ENABLE_BROWSER_RENDERED_PDF =
-  (process.env.ENABLE_BROWSER_RENDERED_PDF || "false").trim().toLowerCase() === "true";
+  (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
 
 const buildFallbackReason = (prefix: string, error: unknown): string => {
   if (error instanceof Error && error.name) {
     return `${prefix}_${error.name}`;
   }
   return prefix;
+};
+
+type BrowserLaunchResult = {
+  browser: {
+    newPage: () => Promise<{
+      setContent: (html: string, options?: { waitUntil?: "networkidle" | "load" | "domcontentloaded" }) => Promise<void>;
+      pdf: (options: { format: "A4"; printBackground: boolean }) => Promise<Uint8Array | Buffer | ArrayBuffer>;
+    }>;
+    close: () => Promise<void>;
+  };
+  engine: string;
+};
+
+const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
+  try {
+    const pw = await import("@playwright/test");
+    const browser = await pw.chromium.launch({ headless: true });
+    return { browser, engine: "playwright-test" };
+  } catch {
+    const chromium = await import("@sparticuz/chromium");
+    const playwrightCore = await import("playwright-core");
+    const executablePath = await chromium.default.executablePath();
+    const browser = await playwrightCore.chromium.launch({
+      args: chromium.default.args,
+      executablePath,
+      headless: true,
+    });
+    return { browser, engine: "playwright-core-sparticuz" };
+  }
 };
 
 type BookPreviewRenderLine = {
@@ -154,6 +183,46 @@ const transliterationScriptClassName = (script: TransliterationScriptOption): st
   if (script === "tamil") return "script-tamil";
   if (script === "malayalam") return "script-malayalam";
   return "script-iast";
+};
+
+const normalizeIndicDisplayText = (value: string): string => {
+  if (!value) return "";
+  return value
+    .normalize("NFC")
+    .replace(/[\u200B\uFEFF\u00AD]/g, "")
+    .replace(/([\u094D\u09CD\u0A4D\u0ACD\u0B4D\u0BCD\u0C4D\u0CCD\u0D4D])\s+([\u0900-\u0D7F])/g, "$1$2");
+};
+
+const detectIndicScriptClassAndLang = (
+  text: string,
+  language?: string
+): { className: string; lang: string } | null => {
+  const normalizedLanguage = normalizeTranslationLanguage(language);
+  if (normalizedLanguage === "telugu") return { className: "script-telugu", lang: "te" };
+  if (normalizedLanguage === "kannada") return { className: "script-kannada", lang: "kn" };
+  if (normalizedLanguage === "tamil") return { className: "script-tamil", lang: "ta" };
+  if (normalizedLanguage === "malayalam") return { className: "script-malayalam", lang: "ml" };
+  if (normalizedLanguage === "sanskrit") return { className: "script-devanagari", lang: "sa-Deva" };
+
+  if (!text) return null;
+  if (/[\u0C00-\u0C7F]/.test(text)) return { className: "script-telugu", lang: "te" };
+  if (/[\u0C80-\u0CFF]/.test(text)) return { className: "script-kannada", lang: "kn" };
+  if (/[\u0B80-\u0BFF]/.test(text)) return { className: "script-tamil", lang: "ta" };
+  if (/[\u0D00-\u0D7F]/.test(text)) return { className: "script-malayalam", lang: "ml" };
+  if (/[\u0900-\u097F]/.test(text)) return { className: "script-devanagari", lang: "sa-Deva" };
+  return null;
+};
+
+const inferLanguageFromLabel = (label: string): string => {
+  const normalized = (label || "").trim().toLowerCase();
+  if (normalized.includes("telugu")) return "telugu";
+  if (normalized.includes("kannada")) return "kannada";
+  if (normalized.includes("tamil")) return "tamil";
+  if (normalized.includes("malayalam")) return "malayalam";
+  if (normalized.includes("sanskrit")) return "sanskrit";
+  if (normalized.includes("hindi")) return "hindi";
+  if (normalized.includes("english")) return "english";
+  return "";
 };
 
 const getTranslationLookupKeys = (language: string): string[] => {
@@ -546,7 +615,9 @@ const buildBookPreviewHtml = (
       const wordMeaningEntries = wordMeaningRows
         .map((row) => {
           const source =
-            typeof row.resolved_source?.text === "string" ? row.resolved_source.text.trim() : "";
+            typeof row.resolved_source?.text === "string"
+              ? normalizeIndicDisplayText(row.resolved_source.text.trim())
+              : "";
           const sourceMode =
             typeof row.resolved_source?.mode === "string"
               ? row.resolved_source.mode.trim().toLowerCase()
@@ -557,7 +628,10 @@ const buildBookPreviewHtml = (
               : "";
           const sourceLanguage =
             typeof row.source?.language === "string" ? row.source.language.trim().toLowerCase() : "";
-          const meaning = typeof row.resolved_meaning?.text === "string" ? row.resolved_meaning.text.trim() : "";
+          const meaning =
+            typeof row.resolved_meaning?.text === "string"
+              ? normalizeIndicDisplayText(row.resolved_meaning.text.trim())
+              : "";
           if (!source && !meaning) {
             return null;
           }
@@ -576,6 +650,7 @@ const buildBookPreviewHtml = (
             typeof row.resolved_meaning?.language === "string"
               ? row.resolved_meaning.language.trim().toLowerCase()
               : "";
+          const meaningScript = detectIndicScriptClassAndLang(meaning, meaningLanguage);
           const meaningWithBadge =
             meaning && fallbackBadgeVisible && meaningLanguage ? `${meaning} (${meaningLanguage})` : meaning;
 
@@ -595,6 +670,8 @@ const buildBookPreviewHtml = (
             meaning: meaningWithBadge,
             sourceScriptClass,
             sourceLang,
+            meaningScriptClass: meaningScript?.className || "",
+            meaningLang: meaningScript?.lang || "",
           };
         })
         .filter((entry): entry is {
@@ -604,6 +681,8 @@ const buildBookPreviewHtml = (
           meaning: string;
           sourceScriptClass: string;
           sourceLang: string;
+          meaningScriptClass: string;
+          meaningLang: string;
         } => Boolean(entry));
 
       const nonTranslationHtml = nonTranslationEntries
@@ -656,7 +735,9 @@ const buildBookPreviewHtml = (
                 const meaning = escapeHtml(entry.meaning);
                 const sourceClass = entry.sourceScriptClass ? ` ${entry.sourceScriptClass}` : "";
                 const langAttr = entry.sourceLang ? ` lang=\"${escapeHtml(entry.sourceLang)}\"` : "";
-                return `<div class=\"line indented\"><span class=\"word-meaning-source${sourceClass}\"${langAttr}>${source}</span><span class=\"word-meaning-sep\"> — </span><span class=\"word-meaning-target\">${meaning}</span></div>`;
+                const meaningClass = entry.meaningScriptClass ? ` ${entry.meaningScriptClass}` : "";
+                const meaningLangAttr = entry.meaningLang ? ` lang=\"${escapeHtml(entry.meaningLang)}\"` : "";
+                return `<div class=\"line indented\"><span class=\"word-meaning-source${sourceClass}\"${langAttr}>${source}</span><span class=\"word-meaning-sep\"> — </span><span class=\"word-meaning-target${meaningClass}\"${meaningLangAttr}>${meaning}</span></div>`;
               })
               .join("")}`
           : "";
@@ -664,10 +745,16 @@ const buildBookPreviewHtml = (
       const translationHtml = translationEntries
         .map((entry) => {
           const label = escapeHtml(entry.label);
-          const value = escapeHtml(entry.value);
+          const normalizedValue = normalizeIndicDisplayText(entry.value);
+          const value = escapeHtml(normalizedValue);
+          const inferredLanguage = inferLanguageFromLabel(entry.label);
+          const scriptInfo = detectIndicScriptClassAndLang(normalizedValue, inferredLanguage);
+          const valueClass = scriptInfo?.className ? ` ${scriptInfo.className}` : "";
+          const valueLangAttr = scriptInfo?.lang ? ` lang=\"${escapeHtml(scriptInfo.lang)}\"` : "";
+          const renderedValue = `<span class=\"word-meaning-target${valueClass}\"${valueLangAttr}>${value}</span>`;
           return appliedShowPreviewLabels
-            ? `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${value}</div>`
-            : `<div class=\"line\">${value}</div>`;
+            ? `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${renderedValue}</div>`
+            : `<div class=\"line\">${renderedValue}</div>`;
         })
         .join("");
 
@@ -866,17 +953,12 @@ export async function GET(
         showPreviewLabels: false,
         previewTransliterationScript: "iast",
       });
-      let pw: typeof import("@playwright/test");
+      let browser: BrowserLaunchResult["browser"];
+      let browserEngine = "unknown";
       try {
-        pw = await import("@playwright/test");
-      } catch (error) {
-        fallbackReason = buildFallbackReason("playwright_import_failed", error);
-        throw error;
-      }
-
-      let browser: Awaited<ReturnType<(typeof pw.chromium)["launch"]>>;
-      try {
-        browser = await pw.chromium.launch({ headless: true });
+        const launched = await launchPdfBrowser();
+        browser = launched.browser;
+        browserEngine = launched.engine;
       } catch (error) {
         fallbackReason = buildFallbackReason("playwright_launch_failed", error);
         throw error;
@@ -900,6 +982,7 @@ export async function GET(
             "Content-Disposition": `attachment; filename=\"${fileName}\"`,
             "Cache-Control": "no-store",
             "X-PDF-Renderer": "browser",
+            "X-PDF-Browser-Engine": browserEngine,
           },
         });
       } catch (error) {
@@ -958,6 +1041,7 @@ export async function GET(
 
   const pdfBytes = new Uint8Array(await response.arrayBuffer());
   const disposition = response.headers.get("Content-Disposition") || `attachment; filename="book-${bookId}.pdf"`;
+  const backendFontDiagnostics = response.headers.get("X-Backend-PDF-Fonts");
 
   return new NextResponse(pdfBytes, {
     status: 200,
@@ -967,6 +1051,7 @@ export async function GET(
       "Cache-Control": "no-store",
       "X-PDF-Renderer": "backend",
       ...(fallbackReason ? { "X-PDF-Fallback-Reason": fallbackReason } : {}),
+      ...(backendFontDiagnostics ? { "X-Backend-PDF-Fonts": backendFontDiagnostics } : {}),
     },
   });
 }
@@ -1079,17 +1164,12 @@ export async function POST(
         previewTransliterationScript:
           (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast",
       });
-      let pw: typeof import("@playwright/test");
+      let browser: BrowserLaunchResult["browser"];
+      let browserEngine = "unknown";
       try {
-        pw = await import("@playwright/test");
-      } catch (error) {
-        fallbackReason = buildFallbackReason("playwright_import_failed", error);
-        throw error;
-      }
-
-      let browser: Awaited<ReturnType<(typeof pw.chromium)["launch"]>>;
-      try {
-        browser = await pw.chromium.launch({ headless: true });
+        const launched = await launchPdfBrowser();
+        browser = launched.browser;
+        browserEngine = launched.engine;
       } catch (error) {
         fallbackReason = buildFallbackReason("playwright_launch_failed", error);
         throw error;
@@ -1113,6 +1193,7 @@ export async function POST(
             "Content-Disposition": `attachment; filename=\"${fileName}\"`,
             "Cache-Control": "no-store",
             "X-PDF-Renderer": "browser",
+            "X-PDF-Browser-Engine": browserEngine,
           },
         });
       } catch (error) {
@@ -1171,6 +1252,7 @@ export async function POST(
 
   const pdfBytes = new Uint8Array(await response.arrayBuffer());
   const disposition = response.headers.get("Content-Disposition") || `attachment; filename="book-${bookId}.pdf"`;
+  const backendFontDiagnostics = response.headers.get("X-Backend-PDF-Fonts");
 
   return new NextResponse(pdfBytes, {
     status: 200,
@@ -1180,6 +1262,7 @@ export async function POST(
       "Cache-Control": "no-store",
       "X-PDF-Renderer": "backend",
       ...(fallbackReason ? { "X-PDF-Fallback-Reason": fallbackReason } : {}),
+      ...(backendFontDiagnostics ? { "X-Backend-PDF-Fonts": backendFontDiagnostics } : {}),
     },
   });
 }

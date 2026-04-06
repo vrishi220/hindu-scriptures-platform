@@ -3,6 +3,7 @@ import textwrap
 import hashlib
 import json
 import re
+import urllib.request
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,6 +104,29 @@ _METADATA_TEMPLATE_KEY_FALLBACK_FIELDS = (
 
 _CUSTOM_TEMPLATE_KEY_PATTERN = "custom.template.{template_id}.v{version}.content_item.v1"
 
+_RUNTIME_FONT_CACHE: dict[str, str | None] = {}
+_RUNTIME_FONT_DIR = Path("/tmp/hsp_pdf_fonts")
+_RUNTIME_FONT_SOURCES: dict[str, list[str]] = {
+    "NotoSans-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/main/fonts/ttf/NotoSans/NotoSans-Regular.ttf",
+    ],
+    "NotoSansDevanagari-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/devanagari/main/fonts/ttf/NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
+    ],
+    "NotoSansTelugu-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/telugu/main/fonts/ttf/NotoSansTelugu/NotoSansTelugu-Regular.ttf",
+    ],
+    "NotoSansKannada-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/kannada/main/fonts/ttf/NotoSansKannada/NotoSansKannada-Regular.ttf",
+    ],
+    "NotoSansTamil-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/tamil/main/fonts/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf",
+    ],
+    "NotoSansMalayalam-Regular.ttf": [
+        "https://raw.githubusercontent.com/notofonts/malayalam/main/fonts/ttf/NotoSansMalayalam/NotoSansMalayalam-Regular.ttf",
+    ],
+}
+
 
 
 def _metadata_liquid_template(fields: list[str]) -> str:
@@ -162,8 +186,49 @@ def _register_pdf_font_from_candidates(candidates: list[str], prefix: str) -> st
     return None
 
 
+def _ensure_runtime_font(font_filename: str) -> str | None:
+    cached = _RUNTIME_FONT_CACHE.get(font_filename)
+    if cached is not None:
+        return cached
+
+    sources = _RUNTIME_FONT_SOURCES.get(font_filename, [])
+    if not sources:
+        _RUNTIME_FONT_CACHE[font_filename] = None
+        return None
+
+    try:
+        _RUNTIME_FONT_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        _RUNTIME_FONT_CACHE[font_filename] = None
+        return None
+
+    target_path = _RUNTIME_FONT_DIR / font_filename
+    if target_path.exists() and target_path.stat().st_size > 1024:
+        resolved_path = str(target_path)
+        _RUNTIME_FONT_CACHE[font_filename] = resolved_path
+        return resolved_path
+
+    for source_url in sources:
+        try:
+            with urllib.request.urlopen(source_url, timeout=4) as response:
+                payload = response.read()
+            if not payload or len(payload) <= 1024:
+                continue
+            target_path.write_bytes(payload)
+            resolved_path = str(target_path)
+            _RUNTIME_FONT_CACHE[font_filename] = resolved_path
+            return resolved_path
+        except Exception:
+            continue
+
+    _RUNTIME_FONT_CACHE[font_filename] = None
+    return None
+
+
 def _resolve_pdf_font_name() -> str:
+    runtime_noto = _ensure_runtime_font("NotoSans-Regular.ttf")
     unicode_candidates = [
+        runtime_noto,
         "/app/fonts/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSans-Regular.ttf",
@@ -176,12 +241,25 @@ def _resolve_pdf_font_name() -> str:
         "C:/Windows/Fonts/arial.ttf",
     ]
 
-    resolved = _register_pdf_font_from_candidates(unicode_candidates, "SnapshotUnicode")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in unicode_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotUnicode",
+    )
     return resolved or "Helvetica"
 
 
 def _resolve_pdf_devanagari_font_name() -> str:
+    runtime_devanagari = _ensure_runtime_font("NotoSansDevanagari-Regular.ttf")
+    runtime_telugu = _ensure_runtime_font("NotoSansTelugu-Regular.ttf")
+    runtime_kannada = _ensure_runtime_font("NotoSansKannada-Regular.ttf")
+    runtime_tamil = _ensure_runtime_font("NotoSansTamil-Regular.ttf")
+    runtime_malayalam = _ensure_runtime_font("NotoSansMalayalam-Regular.ttf")
     devanagari_candidates = [
+        runtime_devanagari,
+        runtime_telugu,
+        runtime_kannada,
+        runtime_tamil,
+        runtime_malayalam,
         "/app/fonts/NotoSansDevanagari-Regular.ttf",
         "/app/fonts/NotoSansTelugu-Regular.ttf",
         "/app/fonts/NotoSansKannada-Regular.ttf",
@@ -216,12 +294,17 @@ def _resolve_pdf_devanagari_font_name() -> str:
         "C:/Windows/Fonts/gautami.ttf",
         "C:/Windows/Fonts/vrinda.ttf",
     ]
-    resolved = _register_pdf_font_from_candidates(devanagari_candidates, "SnapshotDevanagari")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in devanagari_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotDevanagari",
+    )
     return resolved or _resolve_pdf_font_name()
 
 
 def _resolve_pdf_telugu_font_name(fallback_font: str) -> str:
+    runtime_telugu = _ensure_runtime_font("NotoSansTelugu-Regular.ttf")
     telugu_candidates = [
+        runtime_telugu,
         "/app/fonts/NotoSansTelugu-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansTelugu-Regular.ttf",
@@ -230,12 +313,17 @@ def _resolve_pdf_telugu_font_name(fallback_font: str) -> str:
         "C:/Windows/Fonts/gautami.ttf",
         "C:/Windows/Fonts/Nirmala.ttf",
     ]
-    resolved = _register_pdf_font_from_candidates(telugu_candidates, "SnapshotTelugu")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in telugu_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotTelugu",
+    )
     return resolved or fallback_font
 
 
 def _resolve_pdf_kannada_font_name(fallback_font: str) -> str:
+    runtime_kannada = _ensure_runtime_font("NotoSansKannada-Regular.ttf")
     kannada_candidates = [
+        runtime_kannada,
         "/app/fonts/NotoSansKannada-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansKannada-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansKannada-Regular.ttf",
@@ -244,12 +332,17 @@ def _resolve_pdf_kannada_font_name(fallback_font: str) -> str:
         "C:/Windows/Fonts/tunga.ttf",
         "C:/Windows/Fonts/Nirmala.ttf",
     ]
-    resolved = _register_pdf_font_from_candidates(kannada_candidates, "SnapshotKannada")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in kannada_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotKannada",
+    )
     return resolved or fallback_font
 
 
 def _resolve_pdf_tamil_font_name(fallback_font: str) -> str:
+    runtime_tamil = _ensure_runtime_font("NotoSansTamil-Regular.ttf")
     tamil_candidates = [
+        runtime_tamil,
         "/app/fonts/NotoSansTamil-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansTamil-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansTamil-Regular.ttf",
@@ -258,12 +351,17 @@ def _resolve_pdf_tamil_font_name(fallback_font: str) -> str:
         "C:/Windows/Fonts/latha.ttf",
         "C:/Windows/Fonts/Nirmala.ttf",
     ]
-    resolved = _register_pdf_font_from_candidates(tamil_candidates, "SnapshotTamil")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in tamil_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotTamil",
+    )
     return resolved or fallback_font
 
 
 def _resolve_pdf_malayalam_font_name(fallback_font: str) -> str:
+    runtime_malayalam = _ensure_runtime_font("NotoSansMalayalam-Regular.ttf")
     malayalam_candidates = [
+        runtime_malayalam,
         "/app/fonts/NotoSansMalayalam-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansMalayalam-Regular.ttf",
@@ -272,7 +370,10 @@ def _resolve_pdf_malayalam_font_name(fallback_font: str) -> str:
         "C:/Windows/Fonts/kartika.ttf",
         "C:/Windows/Fonts/Nirmala.ttf",
     ]
-    resolved = _register_pdf_font_from_candidates(malayalam_candidates, "SnapshotMalayalam")
+    resolved = _register_pdf_font_from_candidates(
+        [candidate for candidate in malayalam_candidates if isinstance(candidate, str) and candidate.strip()],
+        "SnapshotMalayalam",
+    )
     return resolved or fallback_font
 
 
@@ -3373,7 +3474,7 @@ def _generate_rendered_pdf(
     show_heading_metadata: bool = True,
     start_content_on_new_page: bool = False,
     show_section_labels: bool = True,
-) -> bytes:
+) -> tuple[bytes, dict[str, str]]:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
     page_width, page_height = letter
@@ -3389,6 +3490,14 @@ def _generate_rendered_pdf(
     pdf_kannada_font_name = _resolve_pdf_kannada_font_name(pdf_devanagari_font_name)
     pdf_tamil_font_name = _resolve_pdf_tamil_font_name(pdf_devanagari_font_name)
     pdf_malayalam_font_name = _resolve_pdf_malayalam_font_name(pdf_devanagari_font_name)
+    font_diagnostics = {
+        "base": pdf_font_name,
+        "devanagari": pdf_devanagari_font_name,
+        "telugu": pdf_telugu_font_name,
+        "kannada": pdf_kannada_font_name,
+        "tamil": pdf_tamil_font_name,
+        "malayalam": pdf_malayalam_font_name,
+    }
 
     def write_line(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         nonlocal y
@@ -3529,10 +3638,10 @@ def _generate_rendered_pdf(
 
     pdf.save()
     buffer.seek(0)
-    return buffer.getvalue()
+    return buffer.getvalue(), font_diagnostics
 
 
-def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> bytes:
+def _generate_snapshot_pdf(snapshot: EditionSnapshot, draft_title: str | None, db: Session) -> tuple[bytes, dict[str, str]]:
     appendix_raw = snapshot.snapshot_data.get("provenance_appendix") if isinstance(snapshot.snapshot_data, dict) else None
     appendix_entries = []
     if isinstance(appendix_raw, dict):
@@ -4176,7 +4285,7 @@ def export_snapshot_pdf(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")
 
     draft = db.query(DraftBook).filter(DraftBook.id == snapshot.draft_book_id).first()
-    pdf_bytes = _generate_snapshot_pdf(snapshot, draft.title if draft else None, db)
+    pdf_bytes, font_diagnostics = _generate_snapshot_pdf(snapshot, draft.title if draft else None, db)
     filename = f"draft-{snapshot.draft_book_id}-edition-v{snapshot.version}.pdf"
     _audit_event(
         "snapshot.pdf_exported",
@@ -4189,7 +4298,12 @@ def export_snapshot_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Backend-PDF-Fonts": ";".join(
+                f"{key}={value}" for key, value in font_diagnostics.items()
+            ),
+        },
     )
 
 
@@ -4279,7 +4393,7 @@ def _export_book_pdf_with_options(
         "",
     )
 
-    pdf_bytes = _generate_rendered_pdf(
+    pdf_bytes, font_diagnostics = _generate_rendered_pdf(
         document_heading="",
         effective_title=book.book_name,
         heading_metadata_lines=[],
@@ -4306,7 +4420,12 @@ def _export_book_pdf_with_options(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Backend-PDF-Fonts": ";".join(
+                f"{key}={value}" for key, value in font_diagnostics.items()
+            ),
+        },
     )
 
 
