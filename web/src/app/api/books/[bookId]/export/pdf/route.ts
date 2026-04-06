@@ -23,11 +23,73 @@ const buildFallbackReason = (prefix: string, error: unknown): string => {
   return prefix;
 };
 
+type PdfPageBreakMode = "none" | "between_level" | "between_leaf";
+type PdfPageSize = "A4" | "Letter";
+
+type NormalizedPdfSettings = {
+  pageBreakMode: PdfPageBreakMode;
+  pageSize: PdfPageSize;
+  landscape: boolean;
+  marginMm: number;
+  includeCoverPage: boolean;
+  pageRanges?: string;
+};
+
+const DEFAULT_PDF_SETTINGS: NormalizedPdfSettings = {
+  pageBreakMode: "none",
+  pageSize: "A4",
+  landscape: false,
+  marginMm: 16,
+  includeCoverPage: true,
+};
+
+const normalizePdfPageRanges = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length > 80) return undefined;
+  // Accept values like: "1", "1-3", "1-3, 5, 7-9"
+  if (!/^[0-9\-,\s]+$/.test(trimmed)) return undefined;
+  return trimmed;
+};
+
+const normalizePdfSettings = (value: unknown): NormalizedPdfSettings => {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+  const pageBreakMode: PdfPageBreakMode =
+    raw.page_break_mode === "between_level" || raw.page_break_mode === "between_leaf"
+      ? raw.page_break_mode
+      : "none";
+
+  const pageSize: PdfPageSize = raw.page_size === "Letter" ? "Letter" : "A4";
+  const landscape = raw.orientation === "landscape";
+  const marginCandidate = typeof raw.margin_mm === "number" ? raw.margin_mm : Number(raw.margin_mm);
+  const marginMm = Number.isFinite(marginCandidate)
+    ? Math.max(8, Math.min(32, Math.round(marginCandidate)))
+    : DEFAULT_PDF_SETTINGS.marginMm;
+  const includeCoverPage = raw.include_cover_page !== false;
+  const pageRanges = normalizePdfPageRanges(raw.page_ranges);
+
+  return {
+    pageBreakMode,
+    pageSize,
+    landscape,
+    marginMm,
+    includeCoverPage,
+    ...(pageRanges ? { pageRanges } : {}),
+  };
+};
+
 type BrowserLaunchResult = {
   browser: {
     newPage: () => Promise<{
       setContent: (html: string, options?: { waitUntil?: "networkidle" | "load" | "domcontentloaded" }) => Promise<void>;
-      pdf: (options: { format: "A4"; printBackground: boolean }) => Promise<Uint8Array | Buffer | ArrayBuffer>;
+      pdf: (options: {
+        format?: "A4" | "Letter";
+        landscape?: boolean;
+        pageRanges?: string;
+        printBackground: boolean;
+      }) => Promise<Uint8Array | Buffer | ArrayBuffer>;
     }>;
     close: () => Promise<void>;
   };
@@ -501,6 +563,8 @@ const buildBookPreviewHtml = (
     showPreviewTitles?: boolean;
     showPreviewLabels?: boolean;
     previewTransliterationScript?: string;
+    wordMeaningsDisplayMode?: "inline" | "table" | "hide";
+    pdfSettings?: NormalizedPdfSettings;
   }
 ) => {
   const renderSettings = artifact.render_settings || {
@@ -532,6 +596,11 @@ const buildBookPreviewHtml = (
   const appliedShowPreviewLabels = options?.showPreviewLabels === true;
   const appliedPreviewTransliterationScript: TransliterationScriptOption =
     normalizeTransliterationScript(options?.previewTransliterationScript || "iast");
+  const appliedWordMeaningsDisplayMode: "inline" | "table" | "hide" =
+    options?.wordMeaningsDisplayMode ?? "inline";
+  const appliedPdfSettings = options?.pdfSettings ?? DEFAULT_PDF_SETTINGS;
+  const pageSizeCss = appliedPdfSettings.pageSize;
+  const pageMarginCss = `${appliedPdfSettings.marginMm}mm`;
   const coverAuthor = (options?.author || "").trim() || "Unknown Author";
   const coverImageSrc = (options?.coverImageSrc || "").trim();
   const blocksHtml = bodyBlocks
@@ -731,20 +800,32 @@ const buildBookPreviewHtml = (
         })
         .join("");
 
-      const wordMeaningsHtml =
-        wordMeaningEntries.length > 0
-          ? `<div class=\"line\"><strong>Word Meanings:</strong></div>${wordMeaningEntries
-              .map((entry) => {
-                const source = escapeHtml(entry.source);
-                const meaning = escapeHtml(entry.meaning);
-                const sourceClass = entry.sourceScriptClass ? ` ${entry.sourceScriptClass}` : "";
-                const langAttr = entry.sourceLang ? ` lang=\"${escapeHtml(entry.sourceLang)}\"` : "";
-                const meaningClass = entry.meaningScriptClass ? ` ${entry.meaningScriptClass}` : "";
-                const meaningLangAttr = entry.meaningLang ? ` lang=\"${escapeHtml(entry.meaningLang)}\"` : "";
-                return `<div class=\"line indented\"><span class=\"word-meaning-source${sourceClass}\"${langAttr}>${source}</span><span class=\"word-meaning-sep\"> — </span><span class=\"word-meaning-target${meaningClass}\"${meaningLangAttr}>${meaning}</span></div>`;
-              })
-              .join("")}`
-          : "";
+      const wordMeaningsHtml = (() => {
+        if (wordMeaningEntries.length === 0 || appliedWordMeaningsDisplayMode === "hide") return "";
+        if (appliedWordMeaningsDisplayMode === "inline") {
+          const inlineParts = wordMeaningEntries.map((entry) => {
+            const source = escapeHtml(entry.source);
+            const meaning = escapeHtml(entry.meaning);
+            const sourceClass = entry.sourceScriptClass ? ` ${entry.sourceScriptClass}` : "";
+            const langAttr = entry.sourceLang ? ` lang="${escapeHtml(entry.sourceLang)}"` : "";
+            const meaningClass = entry.meaningScriptClass ? ` ${entry.meaningScriptClass}` : "";
+            const meaningLangAttr = entry.meaningLang ? ` lang="${escapeHtml(entry.meaningLang)}"` : "";
+            return `<span class="word-meaning-source${sourceClass}"${langAttr}>${source}</span><span class="word-meaning-sep"> : </span><span class="word-meaning-target${meaningClass}"${meaningLangAttr}>${meaning}</span>`;
+          });
+          return `<div class="line word-meanings-inline">${inlineParts.join('<span class="word-meaning-sep"> ; </span>')}</div>`;
+        }
+        // "table" mode — one div per entry
+        const rows = wordMeaningEntries.map((entry) => {
+          const source = escapeHtml(entry.source);
+          const meaning = escapeHtml(entry.meaning);
+          const sourceClass = entry.sourceScriptClass ? ` ${entry.sourceScriptClass}` : "";
+          const langAttr = entry.sourceLang ? ` lang="${escapeHtml(entry.sourceLang)}"` : "";
+          const meaningClass = entry.meaningScriptClass ? ` ${entry.meaningScriptClass}` : "";
+          const meaningLangAttr = entry.meaningLang ? ` lang="${escapeHtml(entry.meaningLang)}"` : "";
+          return `<div class="line indented"><span class="word-meaning-source${sourceClass}"${langAttr}>${source}</span><span class="word-meaning-sep"> — </span><span class="word-meaning-target${meaningClass}"${meaningLangAttr}>${meaning}</span></div>`;
+        });
+        return `<div class="line"><strong>Word Meanings:</strong></div>${rows.join("")}`;
+      })();
 
       const translationHtml = translationEntries
         .map((entry) => {
@@ -775,8 +856,16 @@ const buildBookPreviewHtml = (
         ? `<div class=\"meta\">template=${escapeHtml(block.template_key)}${metadataSourceNode}</div>`
         : "";
 
+      const templateKey = (block.template_key || "").trim().toLowerCase();
+      const isLeafTemplate = templateKey.includes("leaf");
+      const isLevelTemplate = templateKey.includes("level");
+      const hasPageBreakAfter =
+        (appliedPdfSettings.pageBreakMode === "between_leaf" && isLeafTemplate) ||
+        (appliedPdfSettings.pageBreakMode === "between_level" && isLevelTemplate);
+      const blockClass = `block${hasPageBreakAfter ? " page-break-after" : ""}`;
+
       return `
-        <div class=\"block\">
+        <div class=\"${blockClass}\">
           ${titleHtml}
           ${linesHtml || '<p class=\"muted\">No visible content for current settings.</p>'}
           ${metadata}
@@ -794,7 +883,7 @@ const buildBookPreviewHtml = (
         <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />
         <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Devanagari:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Serif:ital,wght@0,400;1,400&display=block\" rel=\"stylesheet\" />
         <style>
-          @page { size: A4; margin: 22mm 16mm; }
+          @page { size: ${pageSizeCss}; margin: 22mm ${pageMarginCss}; }
           body {
             font-family: "Noto Sans", "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
             color: #111;
@@ -810,6 +899,7 @@ const buildBookPreviewHtml = (
           h1 { font-size: 24px; margin: 0 0 6px 0; }
           h3 { font-size: 16px; margin: 0 0 8px; }
           .block { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; break-inside: avoid; }
+          .block.page-break-after { page-break-after: always; break-after: page; }
           .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
           .line.indented { margin-left: 14px; }
           .line.sanskrit { font-family: "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", serif; font-size: 18px; line-height: 1.75; }
@@ -842,16 +932,15 @@ const buildBookPreviewHtml = (
         </style>
       </head>
       <body>
-        <section class=\"cover-page\">
-          <h1 class=\"cover-title\">${escapeHtml(artifact.book_name)}</h1>
-          <p class=\"cover-author\">${escapeHtml(coverAuthor)}</p>
-          ${
-            coverImageSrc
-              ? `<div class=\"cover-image-wrap\"><img class=\"cover-image\" src=\"${escapeHtml(coverImageSrc)}\" alt=\"Book cover\" /></div>`
-              : ""
-          }
-        </section>
-        <div class=\"page-break\"></div>
+        ${
+          appliedPdfSettings.includeCoverPage
+            ? `<section class=\"cover-page\">\n          <h1 class=\"cover-title\">${escapeHtml(artifact.book_name)}</h1>\n          <p class=\"cover-author\">${escapeHtml(coverAuthor)}</p>\n          ${
+                coverImageSrc
+                  ? `<div class=\"cover-image-wrap\"><img class=\"cover-image\" src=\"${escapeHtml(coverImageSrc)}\" alt=\"Book cover\" /></div>`
+                  : ""
+              }\n        </section>\n        <div class=\"page-break\"></div>`
+            : ""
+        }
         ${blocksHtml || '<p class=\"muted\">No items in this section.</p>'}
       </body>
     </html>
@@ -868,6 +957,7 @@ export async function GET(
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
   const requestCookieHeader = request.headers.get("cookie");
   const body = {};
+  const pdfSettings = normalizePdfSettings(undefined);
   const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(undefined);
   let activeAccessToken = accessToken;
 
@@ -996,6 +1086,7 @@ export async function GET(
         showPreviewTitles: false,
         showPreviewLabels: false,
         previewTransliterationScript: "iast",
+        pdfSettings,
       });
       let browser: BrowserLaunchResult["browser"];
       let browserEngine = "unknown";
@@ -1010,7 +1101,12 @@ export async function GET(
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "networkidle" });
-        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        const pdfBuffer = await page.pdf({
+          format: pdfSettings.pageSize,
+          landscape: pdfSettings.landscape,
+          printBackground: true,
+          ...(pdfSettings.pageRanges ? { pageRanges: pdfSettings.pageRanges } : {}),
+        });
         const pdfBytes = new Uint8Array(pdfBuffer);
         const safeBookName = (artifact.book_name || `book-${bookId}`)
           .trim()
@@ -1110,6 +1206,7 @@ export async function POST(
   const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
   const requestCookieHeader = request.headers.get("cookie");
   const body = await request.json().catch(() => ({}));
+  const pdfSettings = normalizePdfSettings((body as { pdf_settings?: unknown }).pdf_settings);
   const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(
     (body as { selected_translation_languages?: unknown }).selected_translation_languages
   );
@@ -1237,6 +1334,9 @@ export async function POST(
               requestCookieHeader
             )) || resolveAbsoluteUrl(normalizeCoverImageUrl(coverImageUrl), request.url)
         : null;
+      const rawDisplayMode = (body as { preview_word_meanings_display_mode?: string }).preview_word_meanings_display_mode;
+      const wordMeaningsDisplayMode: "inline" | "table" | "hide" =
+        rawDisplayMode === "table" || rawDisplayMode === "hide" ? rawDisplayMode : "inline";
       const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
         author,
         coverImageSrc,
@@ -1244,6 +1344,8 @@ export async function POST(
         showPreviewLabels: (body as { preview_show_labels?: boolean }).preview_show_labels === true,
         previewTransliterationScript:
           (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast",
+        wordMeaningsDisplayMode,
+        pdfSettings,
       });
       let browser: BrowserLaunchResult["browser"];
       let browserEngine = "unknown";
@@ -1258,7 +1360,12 @@ export async function POST(
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "networkidle" });
-        const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+        const pdfBuffer = await page.pdf({
+          format: pdfSettings.pageSize,
+          landscape: pdfSettings.landscape,
+          printBackground: true,
+          ...(pdfSettings.pageRanges ? { pageRanges: pdfSettings.pageRanges } : {}),
+        });
         const pdfBytes = new Uint8Array(pdfBuffer);
         const safeBookName = (artifact.book_name || `book-${bookId}`)
           .trim()

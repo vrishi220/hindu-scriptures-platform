@@ -15,6 +15,7 @@ import {
   Link2,
   MoreVertical,
   Pencil,
+  Printer,
   Plus,
   ShoppingBasket,
   SlidersHorizontal,
@@ -2442,6 +2443,22 @@ function ScripturesContent() {
   const [appliedPreviewFontSizePercent, setAppliedPreviewFontSizePercent] = useState(100);
   const [appliedBookPreviewTransliterationScript, setAppliedBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
+  const [showPdfExportDialog, setShowPdfExportDialog] = useState(false);
+  const [pdfExportTarget, setPdfExportTarget] = useState<{
+    bookId: number;
+    bookName?: string;
+  } | null>(null);
+  const [pdfExportScope, setPdfExportScope] = useState<"book" | "preview">("book");
+  const [pdfExportPageRanges, setPdfExportPageRanges] = useState("");
+  const [pdfExportPageBreakMode, setPdfExportPageBreakMode] =
+    useState<"none" | "between_level" | "between_leaf">("none");
+  const [pdfExportPageSize, setPdfExportPageSize] = useState<"A4" | "Letter">("A4");
+  const [pdfExportOrientation, setPdfExportOrientation] = useState<"portrait" | "landscape">(
+    "portrait"
+  );
+  const [pdfExportMarginMm, setPdfExportMarginMm] = useState(16);
+  const [pdfExportIncludeCoverPage, setPdfExportIncludeCoverPage] = useState(true);
+  const [pdfExportSubmitting, setPdfExportSubmitting] = useState(false);
   const [showPreviewControls, setShowPreviewControls] = useState(false);
   const [previewControlsTab, setPreviewControlsTab] = useState<"content" | "translations">(
     "content"
@@ -2735,6 +2752,7 @@ function ScripturesContent() {
     const shouldLockBodyScroll =
       showPropertiesModal ||
       showBookPreview ||
+      showPdfExportDialog ||
       showShareManager ||
       showCreateBook ||
       showPreferencesDialog ||
@@ -2778,6 +2796,7 @@ function ScripturesContent() {
   }, [
     showPropertiesModal,
     showBookPreview,
+    showPdfExportDialog,
     showShareManager,
     showCreateBook,
     showPreferencesDialog,
@@ -8417,8 +8436,19 @@ function ScripturesContent() {
   const handleExportBookPdf = async (
     targetBookId: number,
     targetBookName?: string,
-    options?: { respectCurrentPreviewScope?: boolean }
-  ) => {
+    options?: {
+      respectCurrentPreviewScope?: boolean;
+      outputMode?: "download" | "print";
+      pdfSettings?: {
+        page_break_mode?: "none" | "between_level" | "between_leaf";
+        page_size?: "A4" | "Letter";
+        orientation?: "portrait" | "landscape";
+        margin_mm?: number;
+        include_cover_page?: boolean;
+        page_ranges?: string;
+      };
+    }
+  ): Promise<boolean> => {
     try {
       const useAppliedPreviewSettings = Boolean(showBookPreview && bookPreviewArtifact);
       const activeTranslationLanguages = useAppliedPreviewSettings
@@ -8502,13 +8532,17 @@ function ScripturesContent() {
             ? appliedShowPreviewLabels
             : showPreviewLabels,
           preview_transliteration_script: activeTransliterationScript,
+          preview_word_meanings_display_mode: useAppliedPreviewSettings
+            ? appliedPreviewWordMeaningsDisplayMode
+            : previewWordMeaningsDisplayMode,
+          pdf_settings: options?.pdfSettings,
         }),
       });
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
         alert(payload?.detail || "Failed to export book PDF");
-        return;
+        return false;
       }
 
       const blob = await response.blob();
@@ -8519,6 +8553,31 @@ function ScripturesContent() {
         .replace(/^-+|-+$/g, "") || `book-${targetBookId}`;
       const fileName = `${safeName}.pdf`;
 
+      if (options?.outputMode === "print") {
+        const printUrl = window.URL.createObjectURL(blob);
+        const printWindow = window.open(printUrl, "_blank");
+        if (!printWindow) {
+          window.URL.revokeObjectURL(printUrl);
+          alert("Unable to open print preview. Please allow pop-ups and try again.");
+          return false;
+        }
+
+        // Delay print slightly to allow built-in PDF viewer to fully initialize.
+        window.setTimeout(() => {
+          try {
+            printWindow.focus();
+            printWindow.print();
+          } catch {
+            // No-op; user can still print manually from the opened tab.
+          }
+        }, 450);
+
+        window.setTimeout(() => {
+          window.URL.revokeObjectURL(printUrl);
+        }, 60_000);
+        return true;
+      }
+
       const url = window.URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -8527,8 +8586,108 @@ function ScripturesContent() {
       anchor.click();
       anchor.remove();
       window.URL.revokeObjectURL(url);
+      return true;
     } catch {
       alert("Failed to export book PDF");
+      return false;
+    }
+  };
+
+  const openPdfExportDialog = (
+    bookIdForExport: number,
+    bookNameForExport?: string,
+    options?: { preferPreviewScope?: boolean }
+  ) => {
+    const canUseCurrentNodePreviewScope = Boolean(
+      showBookPreview &&
+        bookPreviewArtifact &&
+        bookPreviewArtifact.book_id === bookIdForExport &&
+        bookPreviewArtifact.preview_scope === "node" &&
+        typeof bookPreviewArtifact.root_node_id === "number"
+    );
+
+    setPdfExportTarget({
+      bookId: bookIdForExport,
+      bookName: bookNameForExport,
+    });
+    setPdfExportScope(
+      options?.preferPreviewScope && canUseCurrentNodePreviewScope ? "preview" : "book"
+    );
+    setPdfExportPageRanges("");
+    setPdfExportPageBreakMode("none");
+    setPdfExportPageSize("A4");
+    setPdfExportOrientation("portrait");
+    setPdfExportMarginMm(16);
+    setPdfExportIncludeCoverPage(true);
+    setShowPdfExportDialog(true);
+  };
+
+  const handleSubmitPdfExportDialog = async () => {
+    if (!pdfExportTarget) return;
+
+    const canUseCurrentNodePreviewScope = Boolean(
+      showBookPreview &&
+        bookPreviewArtifact &&
+        bookPreviewArtifact.book_id === pdfExportTarget.bookId &&
+        bookPreviewArtifact.preview_scope === "node" &&
+        typeof bookPreviewArtifact.root_node_id === "number"
+    );
+    const shouldUsePreviewScope = pdfExportScope === "preview" && canUseCurrentNodePreviewScope;
+    const normalizedMarginMm = Math.max(8, Math.min(32, Math.round(pdfExportMarginMm || 16)));
+    const pageRanges = pdfExportPageRanges.trim();
+
+    setPdfExportSubmitting(true);
+    const ok = await handleExportBookPdf(pdfExportTarget.bookId, pdfExportTarget.bookName, {
+      respectCurrentPreviewScope: shouldUsePreviewScope,
+      pdfSettings: {
+        page_break_mode: pdfExportPageBreakMode,
+        page_size: pdfExportPageSize,
+        orientation: pdfExportOrientation,
+        margin_mm: normalizedMarginMm,
+        include_cover_page: pdfExportIncludeCoverPage,
+        ...(pageRanges ? { page_ranges: pageRanges } : {}),
+      },
+    });
+    setPdfExportSubmitting(false);
+
+    if (ok) {
+      setShowPdfExportDialog(false);
+      setPdfExportTarget(null);
+    }
+  };
+
+  const handlePrintPdfFromDialog = async () => {
+    if (!pdfExportTarget) return;
+
+    const canUseCurrentNodePreviewScope = Boolean(
+      showBookPreview &&
+        bookPreviewArtifact &&
+        bookPreviewArtifact.book_id === pdfExportTarget.bookId &&
+        bookPreviewArtifact.preview_scope === "node" &&
+        typeof bookPreviewArtifact.root_node_id === "number"
+    );
+    const shouldUsePreviewScope = pdfExportScope === "preview" && canUseCurrentNodePreviewScope;
+    const normalizedMarginMm = Math.max(8, Math.min(32, Math.round(pdfExportMarginMm || 16)));
+    const pageRanges = pdfExportPageRanges.trim();
+
+    setPdfExportSubmitting(true);
+    const ok = await handleExportBookPdf(pdfExportTarget.bookId, pdfExportTarget.bookName, {
+      respectCurrentPreviewScope: shouldUsePreviewScope,
+      outputMode: "print",
+      pdfSettings: {
+        page_break_mode: pdfExportPageBreakMode,
+        page_size: pdfExportPageSize,
+        orientation: pdfExportOrientation,
+        margin_mm: normalizedMarginMm,
+        include_cover_page: pdfExportIncludeCoverPage,
+        ...(pageRanges ? { page_ranges: pageRanges } : {}),
+      },
+    });
+    setPdfExportSubmitting(false);
+
+    if (ok) {
+      setShowPdfExportDialog(false);
+      setPdfExportTarget(null);
     }
   };
 
@@ -11336,7 +11495,7 @@ function ScripturesContent() {
                                           type="button"
                                           onClick={() => {
                                             setOpenBookRowActionsId(null);
-                                            void handleExportBookPdf(book.id, book.book_name);
+                                            openPdfExportDialog(book.id, book.book_name);
                                           }}
                                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                         >
@@ -11511,7 +11670,7 @@ function ScripturesContent() {
                                         type="button"
                                         onClick={() => {
                                           setOpenBookRowActionsId(null);
-                                          void handleExportBookPdf(book.id, book.book_name);
+                                          openPdfExportDialog(book.id, book.book_name);
                                         }}
                                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                       >
@@ -12042,7 +12201,7 @@ function ScripturesContent() {
                                   type="button"
                                   onClick={() => {
                                     setShowBookRootActionsMenu(false);
-                                    void handleExportBookPdf(currentBook.id, currentBook.book_name);
+                                    openPdfExportDialog(currentBook.id, currentBook.book_name);
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
@@ -15304,8 +15463,8 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      void handleExportBookPdf(bookPreviewArtifact.book_id, bookPreviewArtifact.book_name, {
-                        respectCurrentPreviewScope: true,
+                      openPdfExportDialog(bookPreviewArtifact.book_id, bookPreviewArtifact.book_name, {
+                        preferPreviewScope: true,
                       });
                     }}
                     disabled={showPreviewControls}
@@ -15769,6 +15928,188 @@ function ScripturesContent() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showPdfExportDialog && pdfExportTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                  Export PDF
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPdfExportDialog(false);
+                    setPdfExportTarget(null);
+                  }}
+                  className="rounded-full p-1 text-zinc-500 transition hover:bg-black/5 hover:text-zinc-700"
+                  aria-label="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Scope</div>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                      <input
+                        type="radio"
+                        name="pdf-export-scope"
+                        checked={pdfExportScope === "book"}
+                        onChange={() => setPdfExportScope("book")}
+                      />
+                      Full book
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                      <input
+                        type="radio"
+                        name="pdf-export-scope"
+                        checked={pdfExportScope === "preview"}
+                        onChange={() => setPdfExportScope("preview")}
+                        disabled={!(
+                          showBookPreview &&
+                          bookPreviewArtifact &&
+                          bookPreviewArtifact.book_id === pdfExportTarget.bookId &&
+                          bookPreviewArtifact.preview_scope === "node" &&
+                          typeof bookPreviewArtifact.root_node_id === "number"
+                        )}
+                      />
+                      Current level preview
+                    </label>
+                  </div>
+                  {!(
+                    showBookPreview &&
+                    bookPreviewArtifact &&
+                    bookPreviewArtifact.book_id === pdfExportTarget.bookId &&
+                    bookPreviewArtifact.preview_scope === "node" &&
+                    typeof bookPreviewArtifact.root_node_id === "number"
+                  ) && (
+                    <div className="mt-2 text-xs text-zinc-500">
+                      Open a level preview for this book to enable scoped export.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Page Range</div>
+                  <input
+                    type="text"
+                    value={pdfExportPageRanges}
+                    onChange={(event) => setPdfExportPageRanges(event.target.value)}
+                    placeholder="All pages (or e.g. 1-3, 5, 8-10)"
+                    className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                  />
+                </div>
+
+                <div className="rounded-xl border border-black/10 bg-white/70 p-3">
+                  <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">PDF Settings</div>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 text-sm text-zinc-700">
+                      <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">Page Size</span>
+                      <select
+                        value={pdfExportPageSize}
+                        onChange={(event) => setPdfExportPageSize(event.target.value as "A4" | "Letter")}
+                        className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      >
+                        <option value="A4">A4</option>
+                        <option value="Letter">Letter</option>
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm text-zinc-700">
+                      <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">Orientation</span>
+                      <select
+                        value={pdfExportOrientation}
+                        onChange={(event) =>
+                          setPdfExportOrientation(event.target.value as "portrait" | "landscape")
+                        }
+                        className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      >
+                        <option value="portrait">Portrait</option>
+                        <option value="landscape">Landscape</option>
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm text-zinc-700">
+                      <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">Page Breaks</span>
+                      <select
+                        value={pdfExportPageBreakMode}
+                        onChange={(event) =>
+                          setPdfExportPageBreakMode(
+                            event.target.value as "none" | "between_level" | "between_leaf"
+                          )
+                        }
+                        className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      >
+                        <option value="none">Continuous</option>
+                        <option value="between_level">Break between level renderings</option>
+                        <option value="between_leaf">Break between leaf renderings</option>
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-sm text-zinc-700">
+                      <span className="text-xs uppercase tracking-[0.14em] text-zinc-500">Horizontal Margin (mm)</span>
+                      <input
+                        type="number"
+                        min={8}
+                        max={32}
+                        value={pdfExportMarginMm}
+                        onChange={(event) => setPdfExportMarginMm(Number(event.target.value) || 16)}
+                        className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="mt-3 flex items-center gap-2 text-sm text-zinc-700">
+                    <input
+                      type="checkbox"
+                      checked={pdfExportIncludeCoverPage}
+                      onChange={(event) => setPdfExportIncludeCoverPage(event.target.checked)}
+                    />
+                    Include cover page
+                  </label>
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPdfExportDialog(false);
+                    setPdfExportTarget(null);
+                  }}
+                  disabled={pdfExportSubmitting}
+                  className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handlePrintPdfFromDialog();
+                  }}
+                  disabled={pdfExportSubmitting}
+                  className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleSubmitPdfExportDialog();
+                  }}
+                  disabled={pdfExportSubmitting}
+                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {pdfExportSubmitting ? "Exporting..." : "Download PDF"}
+                </button>
               </div>
             </div>
           </div>
