@@ -101,6 +101,10 @@ type BookPreviewArtifact = {
   sections: {
     body: BookPreviewBlock[];
   };
+  has_more?: boolean;
+  total_blocks?: number;
+  offset?: number;
+  limit?: number;
   render_settings?: {
     show_sanskrit: boolean;
     show_transliteration: boolean;
@@ -864,7 +868,9 @@ export async function GET(
   const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(undefined);
   let activeAccessToken = accessToken;
 
-  const doPostPreview = (token?: string) =>
+  const PAGE_LIMIT = 500;
+
+  const doPostPreviewPage = (token: string | undefined, offset: number) =>
     fetch(`${API_BASE_URL}/api/books/${bookId}/preview/render`, {
       method: "POST",
       headers: {
@@ -872,9 +878,44 @@ export async function GET(
         "Content-Type": "application/json",
         ...buildAuthHeader(token),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, offset, limit: PAGE_LIMIT }),
       cache: "no-store",
     });
+
+  const fetchAllPreviewPages = async (token: string | undefined): Promise<Response> => {
+    const firstResp = await doPostPreviewPage(token, 0);
+    if (!firstResp.ok) return firstResp;
+    const firstArtifact = (await firstResp.json()) as BookPreviewArtifact;
+    if (!firstArtifact.has_more) {
+      return new Response(JSON.stringify(firstArtifact), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const allBlocks: BookPreviewBlock[] = [...firstArtifact.sections.body];
+    let offset = PAGE_LIMIT;
+    const total = firstArtifact.total_blocks ?? 0;
+    while (offset < total) {
+      const pageResp = await doPostPreviewPage(token, offset);
+      if (!pageResp.ok) break;
+      const pageArtifact = (await pageResp.json()) as BookPreviewArtifact;
+      allBlocks.push(...pageArtifact.sections.body);
+      if (!pageArtifact.has_more) break;
+      offset += PAGE_LIMIT;
+    }
+    const merged: BookPreviewArtifact = {
+      ...firstArtifact,
+      sections: { body: allBlocks },
+      has_more: false,
+      total_blocks: allBlocks.length,
+      offset: 0,
+      limit: allBlocks.length,
+    };
+    return new Response(JSON.stringify(merged), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
 
   const doGetPdf = (token?: string) =>
     fetch(`${API_BASE_URL}/api/books/${bookId}/export/pdf`, {
@@ -900,7 +941,7 @@ export async function GET(
   // Prefer backend-generated PDF bytes by default.
   if (ENABLE_BROWSER_RENDERED_PDF) {
     try {
-    let previewResponse = await doPostPreview(activeAccessToken);
+    let previewResponse = await fetchAllPreviewPages(activeAccessToken);
     if (previewResponse.status === 401 && refreshToken) {
       const newTokens = await refreshAccessToken(refreshToken);
       if (newTokens) {
@@ -918,7 +959,7 @@ export async function GET(
           sameSite: "lax",
           path: "/",
         });
-        previewResponse = await doPostPreview(activeAccessToken);
+        previewResponse = await fetchAllPreviewPages(activeAccessToken);
       }
     }
 
@@ -1083,7 +1124,9 @@ export async function POST(
       cache: "no-store",
     });
 
-  const doPostPreview = (token?: string) =>
+  const PAGE_LIMIT_POST = 500;
+
+  const doPostPreviewPage = (token: string | undefined, offset: number) =>
     fetch(`${API_BASE_URL}/api/books/${bookId}/preview/render`, {
       method: "POST",
       headers: {
@@ -1091,9 +1134,44 @@ export async function POST(
         "Content-Type": "application/json",
         ...buildAuthHeader(token),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, offset, limit: PAGE_LIMIT_POST }),
       cache: "no-store",
     });
+
+  const fetchAllPreviewPagesPost = async (token: string | undefined): Promise<Response> => {
+    const firstResp = await doPostPreviewPage(token, 0);
+    if (!firstResp.ok) return firstResp;
+    const firstArtifact = (await firstResp.json()) as BookPreviewArtifact;
+    if (!firstArtifact.has_more) {
+      return new Response(JSON.stringify(firstArtifact), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const allBlocks: BookPreviewBlock[] = [...firstArtifact.sections.body];
+    let offset = PAGE_LIMIT_POST;
+    const total = firstArtifact.total_blocks ?? 0;
+    while (offset < total) {
+      const pageResp = await doPostPreviewPage(token, offset);
+      if (!pageResp.ok) break;
+      const pageArtifact = (await pageResp.json()) as BookPreviewArtifact;
+      allBlocks.push(...pageArtifact.sections.body);
+      if (!pageArtifact.has_more) break;
+      offset += PAGE_LIMIT_POST;
+    }
+    const merged: BookPreviewArtifact = {
+      ...firstArtifact,
+      sections: { body: allBlocks },
+      has_more: false,
+      total_blocks: allBlocks.length,
+      offset: 0,
+      limit: allBlocks.length,
+    };
+    return new Response(JSON.stringify(merged), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
 
   const doGetBook = (token?: string) =>
     fetch(`${API_BASE_URL}/api/content/books/${bookId}`, {
@@ -1110,7 +1188,7 @@ export async function POST(
   // Prefer backend-generated PDF bytes by default.
   if (ENABLE_BROWSER_RENDERED_PDF) {
     try {
-    let previewResponse = await doPostPreview(activeAccessToken);
+    let previewResponse = await fetchAllPreviewPagesPost(activeAccessToken);
     if (previewResponse.status === 401 && refreshToken) {
       const newTokens = await refreshAccessToken(refreshToken);
       if (newTokens) {
@@ -1128,7 +1206,7 @@ export async function POST(
           sameSite: "lax",
           path: "/",
         });
-        previewResponse = await doPostPreview(activeAccessToken);
+        previewResponse = await fetchAllPreviewPagesPost(activeAccessToken);
       }
     }
 
