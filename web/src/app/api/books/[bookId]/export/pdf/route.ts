@@ -14,7 +14,14 @@ const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
 const ENABLE_BROWSER_RENDERED_PDF =
-  (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
+  (process.env.ENABLE_BROWSER_RENDERED_PDF || "false").trim().toLowerCase() === "true";
+
+const buildFallbackReason = (prefix: string, error: unknown): string => {
+  if (error instanceof Error && error.name) {
+    return `${prefix}_${error.name}`;
+  }
+  return prefix;
+};
 
 type BookPreviewRenderLine = {
   field?: string;
@@ -859,8 +866,21 @@ export async function GET(
         showPreviewLabels: false,
         previewTransliterationScript: "iast",
       });
-      const pw = await import("@playwright/test");
-      const browser = await pw.chromium.launch({ headless: true });
+      let pw: typeof import("@playwright/test");
+      try {
+        pw = await import("@playwright/test");
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_import_failed", error);
+        throw error;
+      }
+
+      let browser: Awaited<ReturnType<(typeof pw.chromium)["launch"]>>;
+      try {
+        browser = await pw.chromium.launch({ headless: true });
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_launch_failed", error);
+        throw error;
+      }
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "networkidle" });
@@ -882,6 +902,9 @@ export async function GET(
             "X-PDF-Renderer": "browser",
           },
         });
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_render_failed", error);
+        throw error;
       } finally {
         await browser.close();
       }
@@ -889,7 +912,9 @@ export async function GET(
       fallbackReason = `preview_status_${previewResponse.status}`;
     }
     } catch (error) {
-      fallbackReason = error instanceof Error ? error.name || "browser_render_error" : "browser_render_error";
+      if (!fallbackReason) {
+        fallbackReason = buildFallbackReason("browser_render_failed", error);
+      }
       // Fall through to backend PDF fallback.
     }
   }
@@ -1054,8 +1079,21 @@ export async function POST(
         previewTransliterationScript:
           (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast",
       });
-      const pw = await import("@playwright/test");
-      const browser = await pw.chromium.launch({ headless: true });
+      let pw: typeof import("@playwright/test");
+      try {
+        pw = await import("@playwright/test");
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_import_failed", error);
+        throw error;
+      }
+
+      let browser: Awaited<ReturnType<(typeof pw.chromium)["launch"]>>;
+      try {
+        browser = await pw.chromium.launch({ headless: true });
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_launch_failed", error);
+        throw error;
+      }
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "networkidle" });
@@ -1077,6 +1115,9 @@ export async function POST(
             "X-PDF-Renderer": "browser",
           },
         });
+      } catch (error) {
+        fallbackReason = buildFallbackReason("playwright_render_failed", error);
+        throw error;
       } finally {
         await browser.close();
       }
@@ -1084,7 +1125,9 @@ export async function POST(
       fallbackReason = `preview_status_${previewResponse.status}`;
     }
     } catch (error) {
-      fallbackReason = error instanceof Error ? error.name || "browser_render_error" : "browser_render_error";
+      if (!fallbackReason) {
+        fallbackReason = buildFallbackReason("browser_render_failed", error);
+      }
       // Fall through to backend PDF fallback.
     }
   }
