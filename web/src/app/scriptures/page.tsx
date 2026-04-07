@@ -4,8 +4,10 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ChevronsDown,
   ChevronsUp,
   Download,
@@ -2226,6 +2228,8 @@ function ScripturesContent() {
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeError, setTreeError] = useState<string | null>(null);
+  const [treeReorderingNodeId, setTreeReorderingNodeId] = useState<number | null>(null);
+  const [treeReorderModeNodeId, setTreeReorderModeNodeId] = useState<number | null>(null);
   const [privateBookGate, setPrivateBookGate] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -5703,6 +5707,105 @@ function ScripturesContent() {
       }
     }
     return null;
+  };
+
+  const collectTreeNodeIds = (nodes: TreeNode[]) => {
+    const ids = new Set<number>();
+
+    const visit = (items: TreeNode[]) => {
+      items.forEach((node) => {
+        ids.add(node.id);
+        if (node.children && node.children.length > 0) {
+          visit(node.children);
+        }
+      });
+    };
+
+    visit(nodes);
+    return ids;
+  };
+
+  const refreshTreePreservingState = async (
+    targetBookId: string,
+    targetSelectedNodeId: number | null,
+    preservedExpandedIds: Set<number>
+  ) => {
+    const response = await fetch(`/api/books/${targetBookId}/tree`, {
+      credentials: "include",
+      cache: "no-store",
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { detail?: string }
+      | TreeNode[]
+      | null;
+
+    if (!response.ok || !Array.isArray(payload)) {
+      const detail = !Array.isArray(payload) ? payload?.detail : null;
+      throw new Error(detail || "Failed to refresh tree");
+    }
+
+    const data = nestFlatTreeNodes(payload);
+    const availableNodeIds = collectTreeNodeIds(data);
+    const nextExpandedIds = new Set<number>();
+    preservedExpandedIds.forEach((id) => {
+      if (availableNodeIds.has(id)) {
+        nextExpandedIds.add(id);
+      }
+    });
+
+    setTreeData(data);
+
+    if (targetSelectedNodeId !== null) {
+      const path = findPath(data, targetSelectedNodeId);
+      if (path) {
+        setSelectedId(targetSelectedNodeId);
+        setBreadcrumb(path);
+        path.forEach((node) => nextExpandedIds.add(node.id));
+        scrollToNode(targetSelectedNodeId);
+      } else {
+        setSelectedId(BOOK_ROOT_NODE_ID);
+        setBreadcrumb([]);
+        setNodeContent(null);
+      }
+    } else {
+      setSelectedId(BOOK_ROOT_NODE_ID);
+      setBreadcrumb([]);
+      setNodeContent(null);
+    }
+
+    setExpandedIds(nextExpandedIds);
+  };
+
+  const reorderTreeNode = async (nodeId: number, direction: "up" | "down") => {
+    if (!bookId) {
+      return;
+    }
+
+    const targetSelectedNodeId =
+      typeof selectedId === "number" && selectedId !== BOOK_ROOT_NODE_ID ? selectedId : null;
+    const preservedExpandedIds = new Set(expandedIds);
+
+    setTreeReorderingNodeId(nodeId);
+    setTreeError(null);
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${nodeId}/reorder`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to reorder node");
+      }
+
+      await refreshTreePreservingState(bookId, targetSelectedNodeId, preservedExpandedIds);
+    } catch (err) {
+      setTreeError(err instanceof Error ? err.message : "Failed to reorder node");
+    } finally {
+      setTreeReorderingNodeId(null);
+    }
   };
 
   const toggleNode = (nodeId: number) => {
@@ -10125,7 +10228,7 @@ function ScripturesContent() {
       return seqA - seqB;
     });
     
-    return sorted.map((node) => (
+    return sorted.map((node, index) => (
       <div key={node.id} className="mt-2">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           {node.children && node.children.length > 0 && (
@@ -10179,6 +10282,50 @@ function ScripturesContent() {
               })()}
             </span>
           </button>
+          {(canContribute || canEditCurrentBook) && (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setTreeReorderModeNodeId((prev) => (prev === node.id ? null : node.id))
+                }
+                title={treeReorderModeNodeId === node.id ? "Done reordering" : "Reorder siblings"}
+                aria-label={treeReorderModeNodeId === node.id ? "Done reordering" : "Reorder siblings"}
+                disabled={treeReorderingNodeId !== null}
+                className={`flex h-7 w-7 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-35 ${
+                  treeReorderModeNodeId === node.id
+                    ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
+                    : "border-black/10 bg-white/80 text-zinc-600 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                }`}
+              >
+                <SlidersHorizontal size={14} />
+              </button>
+              {treeReorderModeNodeId === node.id && (
+                <>
+              <button
+                type="button"
+                onClick={() => reorderTreeNode(node.id, "up")}
+                title="Move up"
+                aria-label="Move up"
+                disabled={index === 0 || treeReorderingNodeId !== null}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => reorderTreeNode(node.id, "down")}
+                title="Move down"
+                aria-label="Move down"
+                disabled={index === sorted.length - 1 || treeReorderingNodeId !== null}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <ChevronDown size={14} />
+              </button>
+                </>
+              )}
+            </div>
+          )}
           {(canContribute || canEditCurrentBook) && canAddChild(node) && (
             <button
               type="button"
@@ -11936,10 +12083,11 @@ function ScripturesContent() {
               } md:flex`}
               style={{ scrollbarGutter: "stable" }}
             >
-              {(treeLoading || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
+              {(treeLoading || treeReorderingNodeId !== null || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
                 <div className="sticky top-0 z-10 bg-white/90 pb-1">
                   <div className="flex items-center justify-end gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                     {treeLoading && <span>Loading</span>}
+                    {treeReorderingNodeId !== null && <span>Reordering</span>}
                     {bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
                       <>
                         <button

@@ -280,6 +280,19 @@ def _ensure_default_for_media_type(db: Session, node_id: int, media_type: str) -
     _set_media_metadata(first_item, metadata)
 
 
+def _parse_numeric_order_value(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or not normalized.isdigit():
+        return None
+    return int(normalized)
+
+
 # Import request/response schemas
 class ImportResponse(BaseModel):
     """Response from import operation."""
@@ -338,6 +351,10 @@ class LicensePolicyCheckPayload(BaseModel):
 class NodeMediaReorderPayload(BaseModel):
     media_type: str
     media_ids: list[int]
+
+
+class NodeReorderPayload(BaseModel):
+    direction: Literal["up", "down"]
 
 
 class NodeMediaSetDefaultPayload(BaseModel):
@@ -3856,6 +3873,74 @@ def repair_node_level(
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
     return ContentNodePublic.model_validate(payload_out)
+
+
+@router.patch("/nodes/{node_id}/reorder")
+def reorder_node(
+    node_id: int,
+    payload: NodeReorderPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    siblings = (
+        db.query(ContentNode)
+        .filter(
+            ContentNode.book_id == node.book_id,
+            ContentNode.parent_node_id == node.parent_node_id,
+        )
+        .all()
+    )
+    if len(siblings) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Node has no siblings to reorder",
+        )
+
+    ordered_siblings = sorted(
+        siblings,
+        key=lambda sibling: (
+            _parse_numeric_order_value(sibling.sequence_number)
+            if _parse_numeric_order_value(sibling.sequence_number) is not None
+            else 10**9,
+            sibling.id,
+        ),
+    )
+
+    current_index = next(
+        (index for index, sibling in enumerate(ordered_siblings) if sibling.id == node_id),
+        None,
+    )
+    if current_index is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    target_index = current_index - 1 if payload.direction == "up" else current_index + 1
+    if target_index < 0 or target_index >= len(ordered_siblings):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Node cannot be moved {payload.direction}",
+        )
+
+    reordered_siblings = list(ordered_siblings)
+    moved_node = reordered_siblings.pop(current_index)
+    reordered_siblings.insert(target_index, moved_node)
+
+    for index, sibling in enumerate(reordered_siblings, start=1):
+        sibling.sequence_number = index
+
+    node.last_modified_by = current_user.id
+    db.commit()
+
+    return {
+        "node_id": node_id,
+        "sequence_number": target_index + 1,
+        "sibling_ids": [sibling.id for sibling in reordered_siblings],
+    }
 
 
 @router.delete("/nodes/{node_id}", response_model=dict)
