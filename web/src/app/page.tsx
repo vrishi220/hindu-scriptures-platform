@@ -46,6 +46,17 @@ type SearchResponse = {
   results: SearchResult[];
 };
 
+type BasketListItem = {
+  cart_item_id?: number;
+  node_id: number;
+  title?: string;
+  content?: string;
+  breadcrumb?: string;
+  book_name?: string;
+  level_name?: string;
+  order: number;
+};
+
 type BookOption = {
   id: number;
   book_name: string;
@@ -129,14 +140,7 @@ function HomeContent() {
   } | null>(null);
   const [verseMode, setVerseMode] = useState<"daily" | "random">("daily");
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
-  const [basketItems, setBasketItems] = useState<Array<{
-    cart_item_id?: number;
-    node_id: number;
-    title?: string;
-    book_name?: string;
-    level_name?: string;
-    order: number;
-  }>>([]);
+  const [basketItems, setBasketItems] = useState<BasketListItem[]>([]);
   const [openResultActionsId, setOpenResultActionsId] = useState<number | null>(null);
   const [featuredBooksDensity, setFeaturedBooksDensity] = useState<"comfortable" | "compact">("comfortable");
   const resultActionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -155,6 +159,8 @@ function HomeContent() {
           order: number;
           metadata?: {
             title?: string;
+            content?: string;
+            breadcrumb?: string;
             book_name?: string;
             level_name?: string;
           };
@@ -166,6 +172,8 @@ function HomeContent() {
           cart_item_id: item.id,
           node_id: item.item_id,
           title: item.metadata?.title,
+          content: item.metadata?.content,
+          breadcrumb: item.metadata?.breadcrumb,
           book_name: item.metadata?.book_name,
           level_name: item.metadata?.level_name,
           order: item.order,
@@ -178,7 +186,7 @@ function HomeContent() {
     }
   };
 
-  const addToBasket = (nodeId: number, title: string, bookName?: string, levelName?: string) => {
+  const addToBasket = (nodeId: number, title: string, content?: string, bookName?: string, levelName?: string, breadcrumb?: string) => {
     void (async () => {
       if (basketItems.some((item) => item.node_id === nodeId)) {
         return;
@@ -194,6 +202,8 @@ function HomeContent() {
             item_type: "library_node",
             metadata: {
               title,
+              content,
+              breadcrumb,
               book_name: bookName,
               level_name: levelName,
             },
@@ -215,6 +225,8 @@ function HomeContent() {
           order: number;
           metadata?: {
             title?: string;
+            content?: string;
+            breadcrumb?: string;
             book_name?: string;
             level_name?: string;
           };
@@ -225,6 +237,8 @@ function HomeContent() {
             cart_item_id: item.id,
             node_id: item.item_id,
             title: item.metadata?.title || title,
+            content: item.metadata?.content || content,
+            breadcrumb: item.metadata?.breadcrumb || breadcrumb,
             book_name: item.metadata?.book_name || bookName,
             level_name: item.metadata?.level_name || levelName,
             order: item.order,
@@ -236,11 +250,21 @@ function HomeContent() {
     })();
   };
 
-  const removeFromBasket = (nodeId: number) => {
+  const removeFromBasket = (item: BasketListItem) => {
     void (async () => {
-      const target = basketItems.find((item) => item.node_id === nodeId);
+      const target = basketItems.find((candidate) => {
+        if (item.cart_item_id && candidate.cart_item_id) {
+          return candidate.cart_item_id === item.cart_item_id;
+        }
+        return candidate.node_id === item.node_id && candidate.order === item.order;
+      });
       if (!target?.cart_item_id) {
-        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        setBasketItems((prev) => prev.filter((candidate) => {
+          if (item.cart_item_id && candidate.cart_item_id) {
+            return candidate.cart_item_id !== item.cart_item_id;
+          }
+          return !(candidate.node_id === item.node_id && candidate.order === item.order);
+        }));
         return;
       }
 
@@ -252,7 +276,12 @@ function HomeContent() {
         if (!response.ok && response.status !== 404) {
           return;
         }
-        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        setBasketItems((prev) => prev.filter((candidate) => {
+          if (item.cart_item_id && candidate.cart_item_id) {
+            return candidate.cart_item_id !== item.cart_item_id;
+          }
+          return !(candidate.node_id === item.node_id && candidate.order === item.order);
+        }));
       } catch {
         // ignore basket remove failures for now
       }
@@ -272,13 +301,18 @@ function HomeContent() {
     })();
   };
 
-  const moveBasketItem = (nodeId: number, direction: "up" | "down") => {
+  const moveBasketItem = (item: BasketListItem, direction: "up" | "down") => {
     void (async () => {
       if (isReorderingBasket) return;
 
       setIsReorderingBasket(true);
       const current = [...basketItems].sort((a, b) => a.order - b.order);
-      const index = current.findIndex((item) => item.node_id === nodeId);
+      const index = current.findIndex((candidate) => {
+        if (item.cart_item_id && candidate.cart_item_id) {
+          return candidate.cart_item_id === item.cart_item_id;
+        }
+        return candidate.node_id === item.node_id && candidate.order === item.order;
+      });
       if (index === -1) {
         setIsReorderingBasket(false);
         return;

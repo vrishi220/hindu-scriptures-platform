@@ -4,8 +4,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { getMe } from "../lib/authClient";
 
 type BasketItem = {
+  cart_item_id?: number;
   node_id: number;
   title?: string;
+  content?: string;
+  breadcrumb?: string;
   book_name?: string;
   level_name?: string;
   order: number;
@@ -88,8 +91,8 @@ const getBookTreeNodeLabel = (node: BookTreeNode): string => {
 
 type BasketPanelProps = {
   items: BasketItem[];
-  onRemoveItem: (nodeId: number) => void;
-  onMoveItem?: (nodeId: number, direction: "up" | "down") => void;
+  onRemoveItem: (item: BasketItem) => void;
+  onMoveItem?: (item: BasketItem, direction: "up" | "down") => void;
   reorderLoading?: boolean;
   onClearBasket: () => void;
   onItemsAdded?: () => void;
@@ -149,6 +152,54 @@ export default function BasketPanel({
   const [highlightedBasketNodeId, setHighlightedBasketNodeId] = useState<number | null>(null);
   const basketItemRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const widgetContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const getBasketItemBreadcrumb = (item: BasketItem): string => {
+    if (item.breadcrumb && item.breadcrumb.trim()) {
+      const normalized = item.breadcrumb
+        .split(" / ")
+        .map((segment) => {
+          const parts = segment
+            .split(":")
+            .map((part) => part.trim())
+            .filter(Boolean);
+          if (parts.length !== 2) return segment.trim();
+
+          const [left, right] = parts;
+          const leftTokens = left.toLowerCase().split(/\s+/);
+          const rightTokens = right.toLowerCase().split(/\s+/);
+          const leftNumber = leftTokens.find((token) => /^\d+$/.test(token));
+          const rightNumber = rightTokens.find((token) => /^\d+$/.test(token));
+          const leftHasChapter = leftTokens.some((token) => token === "chapter");
+          const rightHasChapter = rightTokens.some((token) => token === "chapter");
+
+          if (leftNumber && rightNumber && leftNumber === rightNumber) {
+            if (leftHasChapter && !rightHasChapter) return right;
+            if (!leftHasChapter && rightHasChapter) return left;
+          }
+
+          return segment.trim();
+        })
+        .filter(Boolean)
+        .join(" / ");
+      return normalized;
+    }
+    const parts = [item.book_name, item.level_name, item.title]
+      .map((value) => (value || "").trim())
+      .filter(Boolean);
+    return parts.join(" / ");
+  };
+
+  const isTitleAlreadyInBreadcrumb = (breadcrumb: string, title: string): boolean => {
+    const normalizedTitle = title.trim().toLowerCase();
+    if (!normalizedTitle) return false;
+    const segments = breadcrumb
+      .split("/")
+      .map((segment) => segment.trim().toLowerCase())
+      .filter(Boolean);
+    if (segments.length === 0) return false;
+    const lastSegment = segments[segments.length - 1];
+    return lastSegment === normalizedTitle || lastSegment.endsWith(`: ${normalizedTitle}`);
+  };
 
   const measureWidgetSize = useCallback(() => {
     const element = widgetContainerRef.current;
@@ -996,9 +1047,12 @@ export default function BasketPanel({
                 {items
                   .slice()
                   .sort((a, b) => a.order - b.order)
-                  .map((item, index, arr) => (
+                  .map((item, index, arr) => {
+                  const itemKey = item.cart_item_id ?? `node-${item.node_id}-${item.order}`;
+                  const displayBreadcrumb = getBasketItemBreadcrumb(item);
+                  return (
                   <div
-                    key={item.node_id}
+                    key={itemKey}
                     ref={(element) => {
                       basketItemRefs.current[item.node_id] = element;
                     }}
@@ -1009,10 +1063,23 @@ export default function BasketPanel({
                     }`}
                   >
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-[color:var(--deep)]">
-                        {item.title || `Node ${item.node_id}`}
+                      <div className="line-clamp-2 text-sm font-medium text-[color:var(--deep)]">
+                        {displayBreadcrumb || item.title || `Node ${item.node_id}`}
                       </div>
-                      {item.book_name && (
+                      {displayBreadcrumb &&
+                        item.title &&
+                        displayBreadcrumb !== item.title &&
+                        !isTitleAlreadyInBreadcrumb(displayBreadcrumb, item.title) && (
+                        <div className="mt-1 text-xs text-zinc-500">
+                          {item.title}
+                        </div>
+                      )}
+                      {item.content && (
+                        <div className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-zinc-600">
+                          {item.content}
+                        </div>
+                      )}
+                      {item.book_name && !displayBreadcrumb && (
                         <div className="text-xs text-zinc-500">
                           {item.book_name}
                           {item.level_name && ` • ${item.level_name}`}
@@ -1029,7 +1096,7 @@ export default function BasketPanel({
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => onMoveItem(item.node_id, "up")}
+                            onClick={() => onMoveItem(item, "up")}
                             disabled={reorderLoading || index === 0}
                             className="rounded border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40"
                             aria-label="Move up"
@@ -1039,7 +1106,7 @@ export default function BasketPanel({
                           </button>
                           <button
                             type="button"
-                            onClick={() => onMoveItem(item.node_id, "down")}
+                            onClick={() => onMoveItem(item, "down")}
                             disabled={reorderLoading || index === arr.length - 1}
                             className="rounded border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40"
                             aria-label="Move down"
@@ -1050,14 +1117,14 @@ export default function BasketPanel({
                         </div>
                       )}
                       <button
-                        onClick={() => onRemoveItem(item.node_id)}
+                        onClick={() => onRemoveItem(item)}
                         className="text-red-500 hover:text-red-700"
                       >
                         ✕
                       </button>
                     </div>
                   </div>
-                ))}
+                );})}
               </div>
             )}
           </div>

@@ -382,6 +382,8 @@ type BasketItem = {
   cart_item_id?: number;
   node_id: number;
   title?: string;
+  content?: string;
+  breadcrumb?: string;
   order: number;
   book_name?: string;
   level_name?: string;
@@ -4288,6 +4290,8 @@ function ScripturesContent() {
           order: number;
           metadata?: {
             title?: string;
+            content?: string;
+            breadcrumb?: string;
             book_name?: string;
             level_name?: string;
           };
@@ -4299,6 +4303,8 @@ function ScripturesContent() {
           cart_item_id: item.id,
           node_id: item.item_id,
           title: item.metadata?.title,
+          content: item.metadata?.content,
+          breadcrumb: item.metadata?.breadcrumb,
           book_name: item.metadata?.book_name,
           level_name: item.metadata?.level_name,
           order: item.order,
@@ -4677,6 +4683,44 @@ function ScripturesContent() {
         Boolean(nodeContent.has_content)
       ) || nodeContent.id;
       const title = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
+      const contentPreview =
+        formatValue(nodeContent.content_data?.basic?.translation) ||
+        formatValue(nodeContent.content_data?.translations?.english) ||
+        formatValue(nodeContent.content_data?.basic?.transliteration) ||
+        formatValue(nodeContent.content_data?.basic?.sanskrit) ||
+        undefined;
+      const fullPath = findPath(treeData, nodeContent.id) || breadcrumb;
+      const breadcrumbPathParts = fullPath.map((node, index) => {
+        const canonicalLevel = getSchemaMatchedLevelName(
+          formatValue(node.level_name) || "",
+          typeof node.level_order === "number" ? node.level_order : null
+        );
+        const levelRaw = canonicalLevel || formatValue(node.level_name) || "Level";
+        const levelLabel = levelRaw
+          .toString()
+          .replace(/_/g, " ")
+          .toLowerCase()
+          .replace(/\b\w/g, (char) => char.toUpperCase());
+        const isLeaf = index === fullPath.length - 1;
+        const seq = formatSequenceDisplay(node.sequence_number || node.id, isLeaf);
+        const levelWithSeq = seq ? `${levelLabel} ${seq}` : levelLabel;
+        const preferred = getNodeBreadcrumbLabel(node).trim();
+        const normalizedPreferred = preferred.toLowerCase();
+        const normalizedLevelWithSeq = levelWithSeq.toLowerCase();
+        const preferredHasSameSeq = Boolean(seq) && normalizedPreferred.includes(seq.toString());
+        const levelHasSameSeq = Boolean(seq) && normalizedLevelWithSeq.includes(seq.toString());
+
+        if (!preferred) return levelWithSeq;
+        if (normalizedPreferred === levelLabel.toLowerCase()) return levelWithSeq;
+        if (normalizedPreferred === normalizedLevelWithSeq) return preferred;
+        if (preferredHasSameSeq && levelHasSameSeq) return preferred;
+        return `${preferred}: ${levelWithSeq}`;
+      });
+      const breadcrumbParts = [
+        currentBook?.book_name,
+        ...breadcrumbPathParts,
+      ].filter((part): part is string => Boolean(part && part.trim()));
+      const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
 
       try {
         const response = await fetch("/api/cart/items", {
@@ -4688,6 +4732,8 @@ function ScripturesContent() {
             item_type: "library_node",
             metadata: {
               title,
+              content: contentPreview,
+              breadcrumb: breadcrumbText,
               book_name: currentBook?.book_name,
               level_name: nodeContent.level_name,
             },
@@ -4709,6 +4755,8 @@ function ScripturesContent() {
           order: number;
           metadata?: {
             title?: string;
+            content?: string;
+            breadcrumb?: string;
             book_name?: string;
             level_name?: string;
           };
@@ -4721,6 +4769,8 @@ function ScripturesContent() {
               cart_item_id: item.id,
               node_id: item.item_id,
               title: item.metadata?.title || title,
+              content: item.metadata?.content || contentPreview,
+              breadcrumb: item.metadata?.breadcrumb || breadcrumbText,
               book_name: item.metadata?.book_name || currentBook?.book_name,
               level_name: item.metadata?.level_name || nodeContent.level_name,
               order: item.order,
@@ -4733,11 +4783,21 @@ function ScripturesContent() {
     })();
   };
 
-  const removeFromBasket = (nodeId: number) => {
+  const removeFromBasket = (item: BasketItem) => {
     void (async () => {
-      const target = basketItems.find((item) => item.node_id === nodeId);
+      const target = basketItems.find((candidate) => {
+        if (item.cart_item_id && candidate.cart_item_id) {
+          return candidate.cart_item_id === item.cart_item_id;
+        }
+        return candidate.node_id === item.node_id && candidate.order === item.order;
+      });
       if (!target?.cart_item_id) {
-        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        setBasketItems((prev) => prev.filter((candidate) => {
+          if (item.cart_item_id && candidate.cart_item_id) {
+            return candidate.cart_item_id !== item.cart_item_id;
+          }
+          return !(candidate.node_id === item.node_id && candidate.order === item.order);
+        }));
         return;
       }
 
@@ -4749,20 +4809,30 @@ function ScripturesContent() {
         if (!response.ok && response.status !== 404) {
           return;
         }
-        setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+        setBasketItems((prev) => prev.filter((candidate) => {
+          if (item.cart_item_id && candidate.cart_item_id) {
+            return candidate.cart_item_id !== item.cart_item_id;
+          }
+          return !(candidate.node_id === item.node_id && candidate.order === item.order);
+        }));
       } catch {
         // ignore basket remove failures for now
       }
     })();
   };
 
-  const moveBasketItem = (nodeId: number, direction: "up" | "down") => {
+  const moveBasketItem = (item: BasketItem, direction: "up" | "down") => {
     void (async () => {
       if (isReorderingBasket) return;
 
       setIsReorderingBasket(true);
       const current = [...basketItems].sort((a, b) => a.order - b.order);
-      const index = current.findIndex((item) => item.node_id === nodeId);
+      const index = current.findIndex((candidate) => {
+        if (item.cart_item_id && candidate.cart_item_id) {
+          return candidate.cart_item_id === item.cart_item_id;
+        }
+        return candidate.node_id === item.node_id && candidate.order === item.order;
+      });
       if (index === -1) {
         setIsReorderingBasket(false);
         return;
@@ -17018,13 +17088,7 @@ function ScripturesContent() {
       {/* Floating Basket Panel */}
       {authEmail ? (
         <BasketPanel
-          items={basketItems.map(item => ({
-            node_id: item.node_id,
-            order: item.order,
-            title: item.title,
-            book_name: item.book_name,
-            level_name: item.level_name,
-          }))}
+          items={basketItems}
           onRemoveItem={removeFromBasket}
           onMoveItem={moveBasketItem}
           reorderLoading={isReorderingBasket}
