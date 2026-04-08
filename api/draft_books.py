@@ -2707,6 +2707,7 @@ def _resolve_pdf_content_lines(
     content: dict,
     render_settings: SnapshotRenderSettings,
     selected_translation_languages: list[str] | None = None,
+    word_meanings_display_mode: str = "inline",
 ) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
     rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
@@ -2716,6 +2717,9 @@ def _resolve_pdf_content_lines(
     )
 
     def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
+        if word_meanings_display_mode == "hide":
+            return []
+
         raw_rows = (
             resolved_content.get("word_meanings_rows")
             if isinstance(resolved_content.get("word_meanings_rows"), list)
@@ -3569,6 +3573,9 @@ def _generate_rendered_pdf(
     show_heading_metadata: bool = True,
     start_content_on_new_page: bool = False,
     show_section_labels: bool = True,
+    show_block_titles: bool = True,
+    show_line_labels: bool = True,
+    word_meanings_display_mode: str = "inline",
 ) -> tuple[bytes, dict[str, str]]:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
@@ -3713,13 +3720,15 @@ def _generate_rendered_pdf(
             continue
 
         for block in blocks:
-            write_wrapped_text(f"{block.order}. {_normalize_pdf_text(block.title)}", "Helvetica-Bold", 10)
+            if show_block_titles:
+                write_wrapped_text(f"{block.order}. {_normalize_pdf_text(block.title)}", "Helvetica-Bold", 10)
 
             block_content = block.content if isinstance(block.content, dict) else {}
             content_lines = _resolve_pdf_content_lines(
                 block_content,
                 render_settings,
                 selected_translation_languages,
+                word_meanings_display_mode,
             )
             for label, value in content_lines:
                 normalized_label = _normalize_pdf_text(label)
@@ -3727,7 +3736,7 @@ def _generate_rendered_pdf(
                 is_sanskrit = label.lower() == "sanskrit"
                 display_text = (
                     f"   {normalized_value}"
-                    if not normalized_label
+                    if not show_line_labels or not normalized_label
                     else f"   {normalized_label}: {normalized_value}"
                 )
                 write_wrapped_text(
@@ -4540,6 +4549,13 @@ def _export_book_pdf_with_options(
         show_heading_metadata=False,
         start_content_on_new_page=True,
         show_section_labels=False,
+        show_block_titles=payload.preview_show_titles if payload.preview_show_titles is not None else True,
+        show_line_labels=payload.preview_show_labels if payload.preview_show_labels is not None else True,
+        word_meanings_display_mode=(
+            payload.preview_word_meanings_display_mode
+            if payload.preview_word_meanings_display_mode in {"inline", "table", "hide"}
+            else "inline"
+        ),
     )
 
     safe_book_name = re.sub(r"[^a-z0-9]+", "-", (book.book_name or "book").strip().lower()).strip("-")
