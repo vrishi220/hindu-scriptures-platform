@@ -2713,7 +2713,7 @@ def _resolve_pdf_content_lines(
     render_settings: SnapshotRenderSettings,
     selected_translation_languages: list[str] | None = None,
     word_meanings_display_mode: str = "inline",
-    preview_transliteration_script: str = "iast",
+    preview_transliteration_script: str | None = None,
 ) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
     rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
@@ -2721,8 +2721,10 @@ def _resolve_pdf_content_lines(
     resolved_selected_translation_languages = _normalize_selected_translation_languages(
         selected_translation_languages
     )
-    resolved_preview_transliteration_script = normalize_transliteration_script(
-        preview_transliteration_script
+    resolved_preview_transliteration_script = (
+        normalize_transliteration_script(preview_transliteration_script)
+        if isinstance(preview_transliteration_script, str) and preview_transliteration_script.strip()
+        else None
     )
 
     def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
@@ -2768,7 +2770,7 @@ def _resolve_pdf_content_lines(
                 if isinstance(row.get("source"), dict)
                 else ""
             ).lower()
-            if source_text and source_language == "sa":
+            if source_text and source_language == "sa" and resolved_preview_transliteration_script:
                 source_text = transliterate_text(
                     source_text,
                     resolved_preview_transliteration_script,
@@ -2804,7 +2806,7 @@ def _resolve_pdf_content_lines(
             if not value:
                 continue
 
-            if field_name == "transliteration":
+            if field_name == "transliteration" and resolved_preview_transliteration_script:
                 value = transliterate_text(value, resolved_preview_transliteration_script)
 
             if field_name in visible_by_key and not visible_by_key.get(field_name, False):
@@ -3599,7 +3601,7 @@ def _generate_rendered_pdf(
     show_block_titles: bool = True,
     show_line_labels: bool = True,
     word_meanings_display_mode: str = "inline",
-    preview_transliteration_script: str = "iast",
+    preview_transliteration_script: str | None = None,
 ) -> tuple[bytes, dict[str, str]]:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
