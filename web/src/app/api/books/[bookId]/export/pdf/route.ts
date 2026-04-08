@@ -1300,6 +1300,14 @@ export async function POST(
   const selectedTranslationLanguages = normalizeSelectedTranslationLanguages(
     (body as { selected_translation_languages?: unknown }).selected_translation_languages
   );
+  const previewTransliterationScript: TransliterationScriptOption = normalizeTransliterationScript(
+    (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast"
+  );
+  const requiresComplexIndicShaping =
+    previewTransliterationScript === "telugu" ||
+    previewTransliterationScript === "kannada" ||
+    previewTransliterationScript === "tamil" ||
+    previewTransliterationScript === "malayalam";
   let activeAccessToken = accessToken;
 
   const doPostPdf = (token?: string) =>
@@ -1376,7 +1384,7 @@ export async function POST(
 
   // Browser-rendered PDF can produce inconsistent mobile output on some viewers.
   // Prefer backend-generated PDF bytes by default.
-  if (ENABLE_BROWSER_RENDERED_PDF) {
+  if (ENABLE_BROWSER_RENDERED_PDF || requiresComplexIndicShaping) {
     try {
     let previewResponse = await fetchAllPreviewPagesPost(activeAccessToken);
     if (previewResponse.status === 401 && refreshToken) {
@@ -1432,8 +1440,7 @@ export async function POST(
         coverImageSrc,
         showPreviewTitles: (body as { preview_show_titles?: boolean }).preview_show_titles === true,
         showPreviewLabels: (body as { preview_show_labels?: boolean }).preview_show_labels === true,
-        previewTransliterationScript:
-          (body as { preview_transliteration_script?: string }).preview_transliteration_script || "iast",
+        previewTransliterationScript,
         wordMeaningsDisplayMode,
         pdfSettings,
       });
@@ -1487,8 +1494,29 @@ export async function POST(
       if (!fallbackReason) {
         fallbackReason = buildFallbackReason("browser_render_failed", error);
       }
+      if (requiresComplexIndicShaping) {
+        return NextResponse.json(
+          {
+            detail:
+              "Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.",
+            reason: fallbackReason,
+          },
+          { status: 503 }
+        );
+      }
       // Fall through to backend PDF fallback.
     }
+  }
+
+  if (requiresComplexIndicShaping && fallbackReason) {
+    return NextResponse.json(
+      {
+        detail:
+          "Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.",
+        reason: fallbackReason,
+      },
+      { status: 503 }
+    );
   }
 
   let response: Response;
