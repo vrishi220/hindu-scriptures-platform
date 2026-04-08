@@ -467,7 +467,8 @@ test.describe('Navigation Scheme - Core Flows', () => {
     });
 
     await page.goto('/scriptures?book=1&preview=book&from=home');
-    await page.waitForLoadState('networkidle');
+    // Preview mode can keep background requests active; waiting for network idle is flaky.
+    await page.waitForURL(/\/scriptures\?.*preview=book/, { timeout: 10000 });
 
     await page.waitForTimeout(500);
     const stableUrl = page.url();
