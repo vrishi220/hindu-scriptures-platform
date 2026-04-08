@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Playfair_Display, Space_Grotesk, Noto_Serif_Devanagari } from "next/font/google";
+import { Playfair_Display, Space_Grotesk, Noto_Serif, Noto_Serif_Devanagari } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
@@ -23,6 +23,12 @@ const devanagariFont = Noto_Serif_Devanagari({
   weight: ["400", "600"],
 });
 
+const scriptureLatinFont = Noto_Serif({
+  variable: "--font-scripture-latin",
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "600"],
+});
+
 export const metadata: Metadata = {
   title: "Hindu Scriptures Platform",
   description:
@@ -38,7 +44,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} antialiased min-h-screen flex flex-col`}>
+      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} ${scriptureLatinFont.variable} antialiased min-h-screen flex flex-col`}>
         {gaMeasurementId ? (
           <Suspense fallback={null}>
             <GoogleAnalytics measurementId={gaMeasurementId} />

@@ -21,6 +21,7 @@
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
   --font-devanagari: var(--font-devanagari);
+  --font-scripture-latin: var(--font-scripture-latin);
 }
 
 body {
@@ -34,7 +35,9 @@ body {
 }
 
 .scripture-iast {
-  font-family: var(--font-display), "Noto Serif", "Times New Roman", serif;
+  font-family: var(--font-scripture-latin), "Noto Serif", "Times New Roman", serif;
+  font-feature-settings: "liga" 1, "kern" 1;
+  text-rendering: optimizeLegibility;
 }
 
 body[data-ui-theme="classic"] {
