@@ -941,7 +941,7 @@ const buildBookPreviewHtml = (
         <meta charset=\"utf-8\" />
         <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />
         <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />
-        <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Devanagari:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Serif:ital,wght@0,400;1,400&display=block\" rel=\"stylesheet\" />
+        <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Devanagari:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&family=Noto+Serif+Telugu:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Serif:ital,wght@0,400;1,400&display=block\" rel=\"stylesheet\" />
         <style>
           @page { size: ${pageSizeCss}; margin: 22mm ${pageMarginCss}; }
           body {
@@ -981,7 +981,9 @@ const buildBookPreviewHtml = (
             font-family: "Noto Sans Devanagari", "Kohinoor Devanagari", "Devanagari Sangam MN", "Mangal", "Nirmala UI", "Arial Unicode MS", serif;
           }
           .script-telugu {
-            font-family: "Noto Sans Telugu", "Noto Serif Telugu", "Kohinoor Telugu", "Telugu Sangam MN", "Gautami", "Vani", "Nirmala UI", "Arial Unicode MS", sans-serif;
+            font-family: "Noto Serif Telugu", "Noto Sans Telugu", "Kohinoor Telugu", "Telugu Sangam MN", "Gautami", "Vani", "Nirmala UI", "Arial Unicode MS", serif;
+            line-height: 1.78;
+            font-feature-settings: "kern" 1, "liga" 1;
           }
           .script-kannada {
             font-family: "Noto Sans Kannada", "Noto Serif Kannada", "Kannada Sangam MN", "Tunga", "Nirmala UI", "Arial Unicode MS", sans-serif;

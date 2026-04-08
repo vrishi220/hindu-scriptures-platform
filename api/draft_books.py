@@ -3613,6 +3613,7 @@ def _generate_rendered_pdf(
     bottom_margin = 56
     line_height = 14
     devanagari_line_height = 17
+    telugu_line_height = 18
     max_content_width = page_width - left_margin - right_margin
     y = page_height - top_margin
     pdf_font_name = _resolve_pdf_font_name()
@@ -3660,7 +3661,12 @@ def _generate_rendered_pdf(
 
         pdf.setFont(resolved_font, font_size)
         pdf.drawString(left_margin, y, normalized_text)
-        y -= devanagari_line_height if use_devanagari or detected_script is not None else line_height
+        if detected_script == "telugu":
+            y -= telugu_line_height
+        elif use_devanagari or detected_script is not None:
+            y -= devanagari_line_height
+        else:
+            y -= line_height
 
     def write_wrapped_text(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         normalized_text = _normalize_pdf_text(text)
