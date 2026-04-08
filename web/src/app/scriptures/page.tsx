@@ -2366,6 +2366,11 @@ function ScripturesContent() {
   const [importProgressTotal, setImportProgressTotal] = useState<number | null>(null);
   const [showImportUrlInput, setShowImportUrlInput] = useState(false);
   const [importUrl, setImportUrl] = useState("");
+  const [appendImportToExisting, setAppendImportToExisting] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+  const [pendingImportBookName, setPendingImportBookName] = useState<string | null>(null);
+  const [pendingImportBookCode, setPendingImportBookCode] = useState<string | null>(null);
+  const [showImportUploadConfirm, setShowImportUploadConfirm] = useState(false);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
@@ -8399,9 +8404,7 @@ function ScripturesContent() {
     });
   }, [pollImportJob]);
 
-  const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.currentTarget.value = "";
+  const startImportBookFile = async (file: File, allowExistingContent: boolean) => {
     if (!file || !canImport) return;
 
     setImportSubmitting(true);
@@ -8546,9 +8549,10 @@ function ScripturesContent() {
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-        import_type: "json",
+          import_type: "json",
           schema_version: "hsp-book-json-v1",
           canonical_json_url: canonicalJsonUrl,
+          ...(allowExistingContent ? { allow_existing_content: true } : {}),
         }),
       });
 
@@ -8601,6 +8605,37 @@ function ScripturesContent() {
         setImportProgressTotal(null);
       }
     }
+  };
+
+  const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !canImport) return;
+
+    let detectedBookName: string | null = null;
+    let detectedBookCode: string | null = null;
+    try {
+      const parsed = JSON.parse(await file.text()) as {
+        book?: { book_name?: unknown; book_code?: unknown };
+      };
+      const rawBookName = parsed?.book?.book_name;
+      const rawBookCode = parsed?.book?.book_code;
+      if (typeof rawBookName === "string" && rawBookName.trim()) {
+        detectedBookName = rawBookName.trim();
+      }
+      if (typeof rawBookCode === "string" && rawBookCode.trim()) {
+        detectedBookCode = rawBookCode.trim();
+      }
+    } catch {
+      detectedBookName = null;
+      detectedBookCode = null;
+    }
+
+    setPendingImportFile(file);
+    setPendingImportBookName(detectedBookName);
+    setPendingImportBookCode(detectedBookCode);
+    setAppendImportToExisting(false);
+    setShowImportUploadConfirm(true);
   };
 
   const handleImportBookUrl = async () => {
@@ -11623,6 +11658,72 @@ function ScripturesContent() {
                   ) : (
                     <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {canImport && showImportUploadConfirm && pendingImportFile && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 px-4">
+              <div className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-4 shadow-2xl">
+                <h3 className="text-sm font-semibold text-zinc-900">Confirm Upload Import</h3>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Import file: <span className="font-medium text-zinc-800">{pendingImportFile.name}</span>
+                </p>
+                <div className="mt-2 rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+                  <p>
+                    Book name: <span className="font-medium text-zinc-800">{pendingImportBookName || "Not detected"}</span>
+                  </p>
+                  <p className="mt-1">
+                    Book code: <span className="font-medium text-zinc-800">{pendingImportBookCode || "Not detected"}</span>
+                  </p>
+                </div>
+                <label className="mt-3 flex items-start gap-2 rounded-lg border border-black/10 bg-zinc-50 p-2 text-sm text-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={appendImportToExisting}
+                    onChange={(event) => setAppendImportToExisting(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    Append to existing book
+                    <span className="block text-xs text-zinc-500">
+                      Use when importing another part into the same book.
+                    </span>
+                  </span>
+                </label>
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowImportUploadConfirm(false);
+                      setPendingImportFile(null);
+                      setPendingImportBookName(null);
+                      setPendingImportBookCode(null);
+                      setAppendImportToExisting(false);
+                    }}
+                    className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedFile = pendingImportFile;
+                      const shouldAppend = appendImportToExisting;
+                      setShowImportUploadConfirm(false);
+                      setPendingImportFile(null);
+                      setPendingImportBookName(null);
+                      setPendingImportBookCode(null);
+                      setAppendImportToExisting(false);
+                      if (selectedFile) {
+                        void startImportBookFile(selectedFile, shouldAppend);
+                      }
+                    }}
+                    className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-zinc-900 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
+                  >
+                    Continue
+                  </button>
                 </div>
               </div>
             </div>
