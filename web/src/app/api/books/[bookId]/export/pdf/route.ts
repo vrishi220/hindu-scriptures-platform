@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   hasDevanagariLetters,
   normalizeTransliterationScript,
@@ -145,7 +146,21 @@ const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
     }
 
     const chromium = await import("@sparticuz/chromium");
-    const executablePath = await chromium.default.executablePath();
+    const sparticuzBinCandidates = [
+      process.env.PLAYWRIGHT_SPARTICUZ_BIN_PATH,
+      join(process.cwd(), "node_modules", "@sparticuz", "chromium", "bin"),
+      "/var/task/node_modules/@sparticuz/chromium/bin",
+      "/var/task/web/node_modules/@sparticuz/chromium/bin",
+    ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()));
+
+    const sparticuzBinPath = sparticuzBinCandidates.find((candidate) => existsSync(candidate));
+    if (!sparticuzBinPath) {
+      throw new Error(
+        "sparticuz_bin_missing_no_chromium_brotli_assets_found_set_PLAYWRIGHT_SPARTICUZ_BIN_PATH_or_enable_outputFileTracingIncludes"
+      );
+    }
+
+    const executablePath = await chromium.default.executablePath(sparticuzBinPath);
     const browser = await playwrightCore.chromium.launch({
       args: [...chromium.default.args, ...launchArgs],
       executablePath,

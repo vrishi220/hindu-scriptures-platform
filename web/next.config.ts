@@ -42,6 +42,11 @@ const nextConfig: NextConfig = {
 			packageVersion ||
 			"0.1.0",
 	},
+	outputFileTracingIncludes: {
+		"/api/books/[bookId]/export/pdf": [
+			"./node_modules/@sparticuz/chromium/bin/**",
+		],
+	},
 };
 
 export default nextConfig;
