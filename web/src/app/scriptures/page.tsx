@@ -4993,8 +4993,20 @@ function ScripturesContent() {
     [previewBodyFontSizeRem]
   );
 
+  const IAST_DIACRITIC_PATTERN = /[\u0100\u0101\u012a\u012b\u016a\u016b\u1e5a\u1e5b\u1e5c\u1e5d\u1e36\u1e37\u1e38\u1e39\u1e44\u1e45\u00d1\u00f1\u1e6c\u1e6d\u1e0c\u1e0d\u1e46\u1e47\u015a\u015b\u1e62\u1e63\u1e24\u1e25\u1e42\u1e43\u1e40\u1e41\u1e56\u1e57]/;
+  const IAST_COMBINING_MARK_PATTERN = /[\u0300\u0301\u0304\u0307\u0323\u0325]/;
   const MOJIBAKE_HINT_PATTERN = /[ÃÂÐÑ]/;
   const INVISIBLE_CONTROL_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+  const isIosBrowser = useMemo(() => {
+    if (typeof navigator === "undefined") {
+      return false;
+    }
+    const ua = navigator.userAgent || "";
+    const isAppleMobile = /iP(hone|ad|od)/i.test(ua);
+    const isTouchMac = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+    return isAppleMobile || isTouchMac;
+  }, []);
 
   const tryRepairUtf8Mojibake = (value: string): string => {
     if (!value || !MOJIBAKE_HINT_PATTERN.test(value)) {
@@ -5025,7 +5037,17 @@ function ScripturesContent() {
     }
     const withoutHiddenControls = value.replace(INVISIBLE_CONTROL_PATTERN, "");
     const repaired = tryRepairUtf8Mojibake(withoutHiddenControls);
-    return repaired.normalize("NFC");
+    const normalized = repaired.normalize("NFC");
+    if (
+      isIosBrowser &&
+      (IAST_DIACRITIC_PATTERN.test(normalized) || IAST_COMBINING_MARK_PATTERN.test(normalized))
+    ) {
+      return normalized
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .normalize("NFC");
+    }
+    return normalized;
   };
 
   const renderTransliterationByPreference = (value: string): string => {
@@ -5045,9 +5067,6 @@ function ScripturesContent() {
     }
     return normalizeTextForDisplay(transliterateFromIast(normalizedValue, appliedPreviewTransliterationScript));
   };
-
-  const IAST_DIACRITIC_PATTERN = /[\u0100\u0101\u012a\u012b\u016a\u016b\u1e5a\u1e5b\u1e5c\u1e5d\u1e36\u1e37\u1e38\u1e39\u1e44\u1e45\u00d1\u00f1\u1e6c\u1e6d\u1e0c\u1e0d\u1e46\u1e47\u015a\u015b\u1e62\u1e63\u1e24\u1e25\u1e42\u1e43\u1e40\u1e41\u1e56\u1e57]/;
-  const IAST_COMBINING_MARK_PATTERN = /[\u0300\u0301\u0304\u0307\u0323\u0325]/;
 
   const scriptFontClassName = (value: string): string => {
     const normalizedValue = normalizeTextForDisplay(value);
