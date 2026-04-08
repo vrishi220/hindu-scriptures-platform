@@ -8847,6 +8847,11 @@ function ScripturesContent() {
           preview_show_labels: useAppliedPreviewSettings
             ? appliedShowPreviewLabels
             : showPreviewLabels,
+          preview_show_level_numbers: useAppliedPreviewSettings
+            ? appliedShowPreviewLevelNumbers
+            : showPreviewLevelNumbers,
+          preview_show_details: activeShowPreviewDetails,
+          preview_show_media: activeShowPreviewMedia,
           preview_transliteration_script: activeTransliterationScript,
           preview_word_meanings_display_mode: useAppliedPreviewSettings
             ? appliedPreviewWordMeaningsDisplayMode

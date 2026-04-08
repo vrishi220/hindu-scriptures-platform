@@ -251,6 +251,8 @@ type BookPreviewBlock = {
   template_key: string;
   source_node_id: number | null;
   content: {
+    level_name?: string;
+    sequence_number?: string | number | null;
     translations?: Record<string, string>;
     rendered_lines?: BookPreviewRenderLine[];
     word_meanings_rows?: BookPreviewWordMeaningRow[];
@@ -740,6 +742,8 @@ const buildBookPreviewHtml = (
     coverImageSrc?: string | null;
     showPreviewTitles?: boolean;
     showPreviewLabels?: boolean;
+    showPreviewLevelNumbers?: boolean;
+    showPreviewDetails?: boolean;
     previewTransliterationScript?: string;
     wordMeaningsDisplayMode?: "inline" | "table" | "hide";
     pdfSettings?: NormalizedPdfSettings;
@@ -772,6 +776,8 @@ const buildBookPreviewHtml = (
   const bodyBlocks = artifact.sections?.body || [];
   const appliedShowPreviewTitles = options?.showPreviewTitles === true;
   const appliedShowPreviewLabels = options?.showPreviewLabels === true;
+  const appliedShowPreviewLevelNumbers = options?.showPreviewLevelNumbers === true;
+  const appliedShowPreviewDetails = options?.showPreviewDetails === true;
   const appliedPreviewTransliterationScript: TransliterationScriptOption =
     normalizeTransliterationScript(options?.previewTransliterationScript || "iast");
   const appliedWordMeaningsDisplayMode: "inline" | "table" | "hide" =
@@ -953,9 +959,13 @@ const buildBookPreviewHtml = (
           const isSanskrit = entry.field === "sanskrit";
           const lineClass = `line field-${entry.field}${isSanskrit ? " sanskrit" : ""}`;
           if (entry.field === "sanskrit") {
-            return `<div class=\"${lineClass}\" lang=\"sa-Deva\"><span class=\"script-devanagari\">${escapeHtml(
+            const label = escapeHtml(entry.label || "Sanskrit");
+            const valueHtml = `<div class=\"${lineClass}\" lang=\"sa-Deva\"><span class=\"script-devanagari\">${escapeHtml(
               entry.value
             )}</span></div>`;
+            return appliedShowPreviewLabels
+              ? `<div class=\"line-label\">${label}</div>${valueHtml}`
+              : valueHtml;
           }
           if (entry.field === "transliteration") {
             const value = escapeHtml(entry.value);
@@ -963,9 +973,15 @@ const buildBookPreviewHtml = (
               appliedPreviewTransliterationScript
             );
             const transliterationLang = transliterationScriptToLang(appliedPreviewTransliterationScript);
-            return `<div class=\"${lineClass}\"><span class=\"script-text ${transliterationScriptClass}\" lang=\"${escapeHtml(
+            const label = `${escapeHtml(entry.label || "Transliteration")} (${escapeHtml(
+              transliterationScriptLabel(appliedPreviewTransliterationScript)
+            )})`;
+            const valueHtml = `<div class=\"${lineClass}\"><span class=\"script-text ${transliterationScriptClass}\" lang=\"${escapeHtml(
               transliterationLang
             )}\">${value}</span></div>`;
+            return appliedShowPreviewLabels
+              ? `<div class=\"line-label\">${label}</div>${valueHtml}`
+              : valueHtml;
           }
           const label =
             entry.field === "transliteration"
@@ -1045,7 +1061,8 @@ const buildBookPreviewHtml = (
         ? `<div class=\"content-section section-translation\">${translationHtml}</div>`
         : "";
       const linesHtml = `${nonTranslationSectionHtml}${wordMeaningsSectionHtml}${translationSectionHtml}`;
-      const hideNodeFallbackTitle = /^Node\s+\d+$/i.test((block.title || "").trim());
+      const hideNodeFallbackTitle =
+        !appliedShowPreviewDetails && /^Node\s+\d+$/i.test((block.title || "").trim());
       const titleHtml =
         appliedShowPreviewTitles && !hideNodeFallbackTitle
           ? `<h3>${escapeHtml(block.title)}</h3>`
@@ -1056,6 +1073,16 @@ const buildBookPreviewHtml = (
       const metadata = renderSettings.show_metadata
         ? `<div class=\"meta\">template=${escapeHtml(block.template_key)}${metadataSourceNode}</div>`
         : "";
+      const levelName =
+        typeof block.content?.level_name === "string" ? block.content.level_name.trim() : "";
+      const sequenceNumber =
+        block.content?.sequence_number == null ? "" : String(block.content.sequence_number).trim();
+      const levelBadgeHtml =
+        appliedShowPreviewLevelNumbers && levelName && sequenceNumber
+          ? `<div class=\"level-number\">${escapeHtml(levelName.replace(/_/g, " "))} ${escapeHtml(
+              sequenceNumber
+            )}</div>`
+          : "";
 
       const templateKey = (block.template_key || "").trim().toLowerCase();
       const isLeafTemplate = templateKey.includes("leaf");
@@ -1069,6 +1096,7 @@ const buildBookPreviewHtml = (
 
       return `
         <div class=\"${blockClass}\">
+          ${levelBadgeHtml}
           ${titleHtml}
           ${linesHtml || '<p class=\"muted\">No visible content for current settings.</p>'}
           ${metadata}
@@ -1114,6 +1142,20 @@ const buildBookPreviewHtml = (
             margin-top: 10px;
             padding-top: 10px;
             border-top: 1px solid #e3e3e3;
+          }
+          .line-label {
+            margin-top: 4px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: #6b7280;
+          }
+          .level-number {
+            margin-bottom: 6px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            color: #71717a;
           }
           .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
           .line + .line { margin-top: 6px; }
@@ -1571,6 +1613,9 @@ export async function POST(
         coverImageSrc,
         showPreviewTitles: (body as { preview_show_titles?: boolean }).preview_show_titles === true,
         showPreviewLabels: (body as { preview_show_labels?: boolean }).preview_show_labels === true,
+        showPreviewLevelNumbers:
+          (body as { preview_show_level_numbers?: boolean }).preview_show_level_numbers === true,
+        showPreviewDetails: (body as { preview_show_details?: boolean }).preview_show_details === true,
         previewTransliterationScript,
         wordMeaningsDisplayMode,
         pdfSettings,
