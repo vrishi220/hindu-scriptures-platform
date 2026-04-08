@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   hasDevanagariLetters,
@@ -17,6 +17,46 @@ const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token"
 const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
 const ENABLE_BROWSER_RENDERED_PDF =
   (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
+
+const loadVendoredFontDataUri = (fileName: string): string => {
+  const fontCandidates = [
+    join(process.cwd(), "assets", "pdf-fonts", fileName),
+    join(process.cwd(), "..", "assets", "pdf-fonts", fileName),
+    join("/var/task", "assets", "pdf-fonts", fileName),
+    join("/var/task", "web", "assets", "pdf-fonts", fileName),
+  ];
+
+  for (const candidate of fontCandidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const bytes = readFileSync(candidate);
+      return `data:font/ttf;base64,${bytes.toString("base64")}`;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return "";
+};
+
+const TELUGU_PDF_FONT_DATA_URI = loadVendoredFontDataUri("NotoSansTelugu-Regular.ttf");
+const DEVANAGARI_PDF_FONT_DATA_URI = loadVendoredFontDataUri("NotoSansDevanagari-Regular.ttf");
+
+const toDevanagariDigits = (value: string): string => {
+  return value.replace(/[0-9]/g, (digit) => String.fromCharCode(0x0966 + Number(digit)));
+};
+
+const normalizeDevanagariVerseMarkers = (value: string): string => {
+  if (!value) return "";
+  return value
+    .replace(/\|\|\s*([0-9]+)\s*\|\|/g, (_match, digits: string) => `॥ ${toDevanagariDigits(digits)} ॥`)
+    .replace(/\|\|/g, "॥")
+    .replace(/\|/g, "।")
+    // Keep a visible gap before danda markers for readability.
+    .replace(/([^\s॥।])\s*॥/g, "$1 ॥")
+    .replace(/([^\s॥।])\s*।/g, "$1 ।")
+    .replace(/\s{2,}/g, " ");
+};
 
 const buildFallbackReason = (prefix: string, error: unknown): string => {
   if (error instanceof Error) {
@@ -92,6 +132,7 @@ type BrowserLaunchResult = {
   browser: {
     newPage: () => Promise<{
       setContent: (html: string, options?: { waitUntil?: "networkidle" | "load" | "domcontentloaded" }) => Promise<void>;
+      evaluate: <T>(fn: () => T | Promise<T>) => Promise<T>;
       pdf: (options: {
         format?: "A4" | "Letter";
         landscape?: boolean;
@@ -102,6 +143,18 @@ type BrowserLaunchResult = {
     close: () => Promise<void>;
   };
   engine: string;
+};
+
+const waitForFontsBeforePdf = async (page: {
+  evaluate: (fn: () => Promise<void>) => Promise<void>;
+}) => {
+  await page.evaluate(async () => {
+    if (!document.fonts || !document.fonts.ready) return;
+    await Promise.race([
+      document.fonts.ready,
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  });
 };
 
 const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
@@ -317,12 +370,19 @@ const normalizeIndicDisplayText = (value: string): string => {
 
 const expandVerseSeparatorsForPdf = (value: string): string => {
   if (!value) return "";
-  return value
+  // Keep common full verse markers (e.g. ॥ 1 ॥, || 1 ||) on one line.
+  const grouped = value
     .replace(/\r\n?/g, "\n")
+    .replace(/॥\s*(\d+)\s*॥/g, "\n॥ $1 ॥\n")
+    .replace(/\|\|\s*(\d+)\s*\|\|/g, "\n|| $1 ||\n");
+
+  return grouped
     .replace(/॥/g, "\n॥\n")
     .replace(/\|\|/g, "\n||\n")
     .replace(/।/g, "\n।\n")
     .replace(/(?<!\|)\|(?!\|)/g, "\n|\n")
+    .replace(/\n\s*॥\s*(\d+)\s*॥\s*\n/g, "\n॥ $1 ॥\n")
+    .replace(/\n\s*\|\|\s*(\d+)\s*\|\|\s*\n/g, "\n|| $1 ||\n")
     .replace(/[ \t]*\n[ \t]*/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -721,6 +781,12 @@ const buildBookPreviewHtml = (
   const pageMarginCss = `${appliedPdfSettings.marginMm}mm`;
   const coverAuthor = (options?.author || "").trim() || "Unknown Author";
   const coverImageSrc = (options?.coverImageSrc || "").trim();
+  const devanagariFontFaceCss = DEVANAGARI_PDF_FONT_DATA_URI
+    ? `@font-face { font-family: "Noto Sans Devanagari Local"; src: url("${DEVANAGARI_PDF_FONT_DATA_URI}") format("truetype"); font-display: swap; }`
+    : "";
+  const teluguFontFaceCss = TELUGU_PDF_FONT_DATA_URI
+    ? `@font-face { font-family: "Noto Sans Telugu Local"; src: url("${TELUGU_PDF_FONT_DATA_URI}") format("truetype"); font-display: swap; }`
+    : "";
   const blocksHtml = bodyBlocks
     .map((block, blockIndex) => {
       const renderedLines = Array.isArray(block.content?.rendered_lines)
@@ -737,10 +803,12 @@ const buildBookPreviewHtml = (
                 ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
                 : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
               : rawValue;
-          const normalizedValueForPdf =
-            field === "sanskrit" || field === "transliteration"
-              ? expandVerseSeparatorsForPdf(value)
+          const normalizedScriptValue =
+            field === "sanskrit" ||
+            (field === "transliteration" && appliedPreviewTransliterationScript === "devanagari")
+              ? normalizeDevanagariVerseMarkers(value)
               : value;
+          const normalizedValueForPdf = normalizedScriptValue;
           if (!normalizedValueForPdf || !shouldShowField(field)) {
             return null;
           }
@@ -885,7 +953,9 @@ const buildBookPreviewHtml = (
           const isSanskrit = entry.field === "sanskrit";
           const lineClass = `line field-${entry.field}${isSanskrit ? " sanskrit" : ""}`;
           if (entry.field === "sanskrit") {
-            return `<div class=\"${lineClass}\">${escapeHtml(entry.value)}</div>`;
+            return `<div class=\"${lineClass}\" lang=\"sa-Deva\"><span class=\"script-devanagari\">${escapeHtml(
+              entry.value
+            )}</span></div>`;
           }
           if (entry.field === "transliteration") {
             const value = escapeHtml(entry.value);
@@ -1014,8 +1084,10 @@ const buildBookPreviewHtml = (
         <meta charset=\"utf-8\" />
         <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />
         <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />
-        <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Devanagari:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&family=Noto+Serif+Telugu:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Serif:ital,wght@0,400;1,400&display=block\" rel=\"stylesheet\" />
+        <link href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Devanagari:wght@400;700&family=Noto+Sans+Telugu:wght@400;700&family=Noto+Serif+Telugu:wght@400;700&family=Noto+Sans+Kannada:wght@400;700&family=Noto+Sans+Tamil:wght@400;700&family=Noto+Sans+Malayalam:wght@400;700&family=Noto+Serif:ital,wght@0,400;1,400&display=swap\" rel=\"stylesheet\" />
         <style>
+          ${devanagariFontFaceCss}
+          ${teluguFontFaceCss}
           @page { size: ${pageSizeCss}; margin: 22mm ${pageMarginCss}; }
           body {
             font-family: "Noto Sans", "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
@@ -1046,17 +1118,17 @@ const buildBookPreviewHtml = (
           .line { font-size: 14px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
           .line + .line { margin-top: 6px; }
           .line.indented { margin-left: 14px; }
-          .line.sanskrit { font-family: "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", serif; font-size: 18px; line-height: 1.75; }
+          .line.sanskrit { font-family: "Noto Sans Devanagari Local", "Noto Sans Devanagari", "Noto Sans Telugu", "Noto Sans Kannada", "Noto Sans Tamil", "Noto Sans Malayalam", "Arial Unicode MS", serif; font-size: 18px; line-height: 1.75; }
           .field-sanskrit { margin-bottom: 8px; }
           .field-transliteration { margin-bottom: 12px; }
           .field-transliteration .script-text { font-size: 15px; line-height: 1.7; }
           .script-devanagari {
-            font-family: "Noto Sans Devanagari", "Kohinoor Devanagari", "Devanagari Sangam MN", "Mangal", "Nirmala UI", "Arial Unicode MS", serif;
+            font-family: "Noto Sans Devanagari Local", "Noto Sans Devanagari", "Kohinoor Devanagari", "Devanagari Sangam MN", "Mangal", "Nirmala UI", "Arial Unicode MS", serif;
           }
           .script-telugu {
-            font-family: "Noto Serif Telugu", "Noto Sans Telugu", "Kohinoor Telugu", "Telugu Sangam MN", "Gautami", "Vani", "Nirmala UI", "Arial Unicode MS", serif;
+            font-family: "Noto Sans Telugu Local", "Noto Sans Telugu", "Noto Serif Telugu", "Kohinoor Telugu", "Telugu Sangam MN", "Gautami", "Vani", "Nirmala UI", "Arial Unicode MS", sans-serif;
             line-height: 1.78;
-            font-feature-settings: "kern" 1, "liga" 1;
+            font-feature-settings: normal;
           }
           .script-kannada {
             font-family: "Noto Sans Kannada", "Noto Serif Kannada", "Kannada Sangam MN", "Tunga", "Nirmala UI", "Arial Unicode MS", sans-serif;
@@ -1248,6 +1320,7 @@ export async function GET(
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "domcontentloaded" });
+        await waitForFontsBeforePdf(page);
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
           landscape: pdfSettings.landscape,
@@ -1516,6 +1589,7 @@ export async function POST(
       try {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: "domcontentloaded" });
+        await waitForFontsBeforePdf(page);
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
           landscape: pdfSettings.landscape,
