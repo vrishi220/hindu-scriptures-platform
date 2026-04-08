@@ -246,6 +246,29 @@ def test_pdf_importer_fetch_and_extract_plain_text_file(tmp_path: Path):
     assert importer.pages
 
 
+def test_pdf_importer_rejects_remote_non_pdf_response(monkeypatch):
+    config = PDFImportConfig(
+        book_name="Remote Non PDF",
+        book_code="remote-non-pdf",
+        schema_id=1,
+        pdf_file_path="https://example.com/source",
+        extraction_rules=[PDFExtractionRule(level_name="Shloka")],
+    )
+    importer = PDFImporter(config)
+
+    def _fake_get(*args, **kwargs):
+        return _FakeResponse(
+            content=b"<html><body>please enable javascript</body></html>",
+            status_code=200,
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
+
+    monkeypatch.setattr("requests.get", _fake_get)
+
+    assert importer.fetch_and_extract() is False
+    assert any("does not look like a PDF" in warning for warning in importer.warnings)
+
+
 def test_pdf_importer_extract_and_flatten_tree():
     config = PDFImportConfig(
         book_name="PDF Tree Book",

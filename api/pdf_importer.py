@@ -4,6 +4,7 @@ Handles extraction of chapters and verses from PDF documents.
 Supports both searchable and scanned (OCR) PDFs.
 """
 import re
+import hashlib
 from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field
 from io import BytesIO
@@ -51,6 +52,45 @@ class PDFImporter:
         self.text_content: Optional[str] = None
         self.pages: List[str] = []
         self.warnings: List[str] = []
+
+    @staticmethod
+    def _byte_preview(content: bytes, limit: int = 120) -> str:
+        preview = content[:limit].decode("utf-8", errors="replace")
+        return re.sub(r"\s+", " ", preview).strip()
+
+    @staticmethod
+    def _looks_like_pdf_bytes(content: bytes) -> bool:
+        return content.startswith(b"%PDF")
+
+    @staticmethod
+    def _looks_like_pdf_content_type(content_type: str) -> bool:
+        normalized = (content_type or "").lower()
+        return "application/pdf" in normalized
+
+    @staticmethod
+    def _looks_like_gibberish(text: str) -> bool:
+        if not text:
+            return False
+        replacement_ratio = text.count("\ufffd") / max(len(text), 1)
+        control_count = sum(1 for char in text if ord(char) < 32 and char not in "\n\r\t")
+        control_ratio = control_count / max(len(text), 1)
+        return replacement_ratio > 0.01 or control_ratio > 0.02
+
+    def _resolve_page_window(self, total_pages: int) -> tuple[int, int]:
+        if total_pages <= 0:
+            return 0, -1
+
+        start_page = max(0, int(self.config.start_page or 0))
+        end_page_inclusive = total_pages - 1 if self.config.end_page is None else int(self.config.end_page)
+        end_page_inclusive = min(total_pages - 1, end_page_inclusive)
+
+        if start_page >= total_pages or start_page > end_page_inclusive:
+            self.warnings.append(
+                f"Configured page range is invalid for this PDF: start={start_page}, end={end_page_inclusive}, total={total_pages}"
+            )
+            return 0, -1
+
+        return start_page, end_page_inclusive
     
     def fetch_and_extract(self) -> bool:
         """
@@ -60,6 +100,8 @@ class PDFImporter:
         """
         try:
             # Fetch content
+            source_is_remote = self.config.pdf_file_path.startswith('http')
+            remote_content_type = ""
             if self.config.pdf_file_path.startswith('http'):
                 import requests
                 headers = {
@@ -70,15 +112,26 @@ class PDFImporter:
                 response = requests.get(self.config.pdf_file_path, headers=headers, timeout=30)
                 response.raise_for_status()
                 content = response.content
-                is_pdf = response.headers.get('content-type', '').lower().startswith('application/pdf')
+                remote_content_type = response.headers.get('content-type', '')
+                is_pdf = self._looks_like_pdf_content_type(remote_content_type)
+                self.warnings.append(
+                    f"Remote fetch details: status={response.status_code}, content_type={remote_content_type or 'unknown'}, bytes={len(content)}, sha256={hashlib.sha256(content).hexdigest()[:16]}"
+                )
             else:
                 with open(self.config.pdf_file_path, 'rb') as f:
                     content = f.read()
                 is_pdf = self.config.pdf_file_path.lower().endswith('.pdf')
             
             # Check if it's a PDF by looking at header
-            if not is_pdf and content.startswith(b'%PDF'):
+            if not is_pdf and self._looks_like_pdf_bytes(content):
                 is_pdf = True
+
+            if source_is_remote and not is_pdf:
+                self.warnings.append(
+                    "Remote response does not look like a PDF. "
+                    f"content_type={remote_content_type or 'unknown'} preview={self._byte_preview(content)}"
+                )
+                return False
             
             # Try to extract as PDF first
             if is_pdf:
@@ -87,19 +140,37 @@ class PDFImporter:
                     pdf_bytes = BytesIO(content)
                     reader = pypdf.PdfReader(pdf_bytes)
                     total_pages = len(reader.pages)
-                    
-                    for page_num in range(total_pages):
+
+                    start_page, end_page = self._resolve_page_window(total_pages)
+                    if end_page < start_page:
+                        return False
+
+                    skipped_pages = 0
+                    for page_num in range(start_page, end_page + 1):
                         try:
                             page = reader.pages[page_num]
-                            text = page.extract_text()
-                            if text and len(text.strip()) > 50:  # Only add non-empty pages
+                            text = (page.extract_text() or "").strip()
+                            if text:
                                 self.pages.append(text)
+                            else:
+                                skipped_pages += 1
                         except Exception as e:
                             self.warnings.append(f"Warning: Page {page_num} extraction failed: {str(e)}")
+
+                    processed = (end_page - start_page) + 1
+                    self.warnings.append(
+                        f"PDF extraction window: pages {start_page}-{end_page} of {total_pages} (processed={processed}, empty={skipped_pages})"
+                    )
                     
                     if not self.pages:
                         self.warnings.append("PDF loaded but no text could be extracted")
                         return False
+
+                    combined_preview = "\n".join(self.pages[:2])
+                    if self._looks_like_gibberish(combined_preview):
+                        self.warnings.append(
+                            "Extracted text appears garbled. This PDF may require OCR or a different parser/font mapping path."
+                        )
                     
                 except ImportError:
                     self.warnings.append("pypdf not installed. Install with: pip install pypdf")
