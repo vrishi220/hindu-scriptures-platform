@@ -4993,11 +4993,39 @@ function ScripturesContent() {
     [previewBodyFontSizeRem]
   );
 
+  const MOJIBAKE_HINT_PATTERN = /[ÃÂÐÑ]/;
+  const INVISIBLE_CONTROL_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+  const tryRepairUtf8Mojibake = (value: string): string => {
+    if (!value || !MOJIBAKE_HINT_PATTERN.test(value)) {
+      return value;
+    }
+    if ([...value].some((char) => char.codePointAt(0)! > 255)) {
+      return value;
+    }
+    try {
+      const bytes = new Uint8Array(value.length);
+      for (let index = 0; index < value.length; index += 1) {
+        bytes[index] = value.charCodeAt(index) & 0xff;
+      }
+      const repaired = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      const repairedLooksBetter =
+        repaired !== value &&
+        !MOJIBAKE_HINT_PATTERN.test(repaired) &&
+        (IAST_DIACRITIC_PATTERN.test(repaired) || hasDevanagariLetters(repaired));
+      return repairedLooksBetter ? repaired : value;
+    } catch {
+      return value;
+    }
+  };
+
   const normalizeTextForDisplay = (value: string): string => {
     if (!value) {
       return "";
     }
-    return value.normalize("NFC");
+    const withoutHiddenControls = value.replace(INVISIBLE_CONTROL_PATTERN, "");
+    const repaired = tryRepairUtf8Mojibake(withoutHiddenControls);
+    return repaired.normalize("NFC");
   };
 
   const renderTransliterationByPreference = (value: string): string => {
