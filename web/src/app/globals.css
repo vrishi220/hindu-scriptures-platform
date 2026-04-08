@@ -29,6 +29,14 @@ body {
   font-family: var(--font-sans), var(--font-devanagari), "Noto Serif Devanagari", sans-serif;
 }
 
+.scripture-devanagari {
+  font-family: var(--font-devanagari), "Noto Serif Devanagari", "Kohinoor Devanagari", serif;
+}
+
+.scripture-iast {
+  font-family: var(--font-display), "Noto Serif", "Times New Roman", serif;
+}
+
 body[data-ui-theme="classic"] {
   --background: #f7f4ef;
   --foreground: #171412;

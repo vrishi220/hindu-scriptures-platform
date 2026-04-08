@@ -2835,12 +2835,16 @@ function ScripturesContent() {
       text: true,
     };
 
-    const lineClassNameForField = (fieldName: string) =>
-      fieldName === "sanskrit"
-        ? "whitespace-pre-wrap text-base leading-relaxed text-[color:var(--deep)]"
-        : fieldName === "transliteration"
-          ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700"
-          : "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700";
+    const lineClassNameForField = (fieldName: string, value: string) => {
+      const baseClassName =
+        fieldName === "sanskrit"
+          ? "whitespace-pre-wrap text-base leading-relaxed text-[color:var(--deep)]"
+          : fieldName === "transliteration"
+            ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700"
+            : "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700";
+      const scriptClassName = scriptFontClassName(value);
+      return scriptClassName ? `${baseClassName} ${scriptClassName}` : baseClassName;
+    };
 
     const metadataLabelForField = (fieldName: string) => {
       if (fieldName === "sanskrit") {
@@ -2885,7 +2889,7 @@ function ScripturesContent() {
           key: `translation-${language}`,
           label: appliedShowPreviewLabels ? `${translationLanguageLabel(language)} Translation` : "",
           value,
-          className: lineClassNameForField("english"),
+          className: lineClassNameForField("english", value),
           fieldName: "english",
           isFieldStart: true,
         });
@@ -2926,7 +2930,7 @@ function ScripturesContent() {
           key: `${fieldName || "line"}-${index}`,
           label,
           value,
-          className: lineClassNameForField(fieldName),
+          className: lineClassNameForField(fieldName, value),
           fieldName,
           isFieldStart,
         });
@@ -2962,7 +2966,7 @@ function ScripturesContent() {
               : "Text"
         : "";
 
-      const className = lineClassNameForField(key);
+      const className = lineClassNameForField(key, value);
 
       lines.push({ key, label, value, className, fieldName: key, isFieldStart: true });
     }
@@ -2976,7 +2980,7 @@ function ScripturesContent() {
           key: "text",
           label: "Text",
           value: fallback,
-          className: "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700",
+          className: lineClassNameForField("text", fallback),
           fieldName: "text",
           isFieldStart: true,
         });
@@ -5003,6 +5007,34 @@ function ScripturesContent() {
       return transliterateFromDevanagari(value, appliedPreviewTransliterationScript);
     }
     return transliterateFromIast(value, appliedPreviewTransliterationScript);
+  };
+
+  const IAST_DIACRITIC_PATTERN = /[\u0100\u0101\u012a\u012b\u016a\u016b\u1e5a\u1e5b\u1e5c\u1e5d\u1e36\u1e37\u1e38\u1e39\u1e44\u1e45\u00d1\u00f1\u1e6c\u1e6d\u1e0c\u1e0d\u1e46\u1e47\u015a\u015b\u1e62\u1e63\u1e24\u1e25\u1e42\u1e43\u1e40\u1e41\u1e56\u1e57]/;
+
+  const scriptFontClassName = (value: string): string => {
+    if (!value) {
+      return "";
+    }
+    if (hasDevanagariLetters(value)) {
+      return "scripture-devanagari";
+    }
+    if (IAST_DIACRITIC_PATTERN.test(value)) {
+      return "scripture-iast";
+    }
+    return "";
+  };
+
+  const scriptLangForText = (value: string): string | undefined => {
+    if (!value) {
+      return undefined;
+    }
+    if (hasDevanagariLetters(value)) {
+      return "sa";
+    }
+    if (IAST_DIACRITIC_PATTERN.test(value)) {
+      return "sa-Latn";
+    }
+    return undefined;
   };
 
   useEffect(() => {
@@ -10765,7 +10797,7 @@ function ScripturesContent() {
                   {line.label && (
                     <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                   )}
-                  <p className={line.className} style={previewBodyTextStyle}>{line.value}</p>
+                  <p className={line.className} style={previewBodyTextStyle} lang={scriptLangForText(line.value)}>{line.value}</p>
                 </div>
               ))}
             </div>
@@ -13677,7 +13709,7 @@ function ScripturesContent() {
                                       <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                         {primaryLabel}
                                       </div>
-                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-900">
+                                      <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-900 ${scriptFontClassName(primaryContent)}`} lang={scriptLangForText(primaryContent)}>
                                         {primaryContent}
                                       </div>
                                     </div>
@@ -13687,7 +13719,7 @@ function ScripturesContent() {
                                       <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                         {transliterationLabel} ({transliterationScriptLabel(transliterationScript)})
                                       </div>
-                                      <div className="whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700">
+                                      <div className={`whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700 ${scriptFontClassName(transliteration)}`} lang={scriptLangForText(transliteration)}>
                                         {transliteration}
                                       </div>
                                     </div>
@@ -13699,7 +13731,7 @@ function ScripturesContent() {
                                       <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                         Sanskrit (Original)
                                       </div>
-                                      <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                      <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(originalSanskrit)}`} lang={scriptLangForText(originalSanskrit)}>
                                         {originalSanskrit}
                                       </div>
                                     </div>
@@ -13712,7 +13744,7 @@ function ScripturesContent() {
                                           <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
                                             {entry.label}
                                           </div>
-                                          <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                                          <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(entry.value)}`} lang={scriptLangForText(entry.value)}>
                                             {entry.value}
                                           </div>
                                         </div>
