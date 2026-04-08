@@ -2337,6 +2337,7 @@ function ScripturesContent() {
   const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
+  const lastFailedPreviewRequestKey = useRef<string | null>(null);
   const activePreviewRequestKey = useRef<string | null>(null);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
@@ -7792,11 +7793,15 @@ function ScripturesContent() {
 
       if (!append) {
         lastHandledPreviewRequestKey.current = requestKey;
+        if (lastFailedPreviewRequestKey.current === requestKey) {
+          lastFailedPreviewRequestKey.current = null;
+        }
         syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
         setShowBookPreview(true);
       }
     } catch (err) {
       if (!append) {
+        lastFailedPreviewRequestKey.current = requestKey;
         if (lastHandledPreviewRequestKey.current === requestKey) {
           lastHandledPreviewRequestKey.current = null;
         }
@@ -7887,6 +7892,7 @@ function ScripturesContent() {
     const previewParam = searchParams.get("preview");
     if (previewParam !== "book" && previewParam !== "node") {
       lastHandledPreviewRequestKey.current = null;
+      lastFailedPreviewRequestKey.current = null;
       activePreviewRequestKey.current = null;
       return;
     }
@@ -7911,6 +7917,13 @@ function ScripturesContent() {
       lastHandledPreviewRequestKey.current !== currentPreviewRequestKey
     ) {
       lastHandledPreviewRequestKey.current = null;
+    }
+
+    if (
+      lastFailedPreviewRequestKey.current !== null &&
+      lastFailedPreviewRequestKey.current !== currentPreviewRequestKey
+    ) {
+      lastFailedPreviewRequestKey.current = null;
     }
   }, [searchParams, bookId]);
 
@@ -7944,6 +7957,9 @@ function ScripturesContent() {
 
     const requestKey = buildPreviewRequestKey(previewScope, bookId, requestNodeId);
     if (lastHandledPreviewRequestKey.current === requestKey) {
+      return;
+    }
+    if (lastFailedPreviewRequestKey.current === requestKey) {
       return;
     }
     if (activePreviewRequestKey.current === requestKey) {
