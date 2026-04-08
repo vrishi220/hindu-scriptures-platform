@@ -18,8 +18,14 @@ const ENABLE_BROWSER_RENDERED_PDF =
   (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
 
 const buildFallbackReason = (prefix: string, error: unknown): string => {
-  if (error instanceof Error && error.name) {
-    return `${prefix}_${error.name}`;
+  if (error instanceof Error) {
+    const name = error.name || "Error";
+    const message = (error.message || "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .replace(/[^A-Za-z0-9_.:-]/g, "")
+      .slice(0, 120);
+    return message ? `${prefix}_${name}_${message}` : `${prefix}_${name}`;
   }
   return prefix;
 };
@@ -1220,6 +1226,7 @@ export async function GET(
         browser = launched.browser;
         browserEngine = launched.engine;
       } catch (error) {
+        console.error("[pdf-export] browser launch failed (GET)", error);
         fallbackReason = buildFallbackReason("playwright_launch_failed", error);
         throw error;
       }
@@ -1251,6 +1258,7 @@ export async function GET(
           },
         });
       } catch (error) {
+        console.error("[pdf-export] browser render failed (GET)", error);
         fallbackReason = buildFallbackReason("playwright_render_failed", error);
         throw error;
       } finally {
@@ -1486,6 +1494,7 @@ export async function POST(
         browser = launched.browser;
         browserEngine = launched.engine;
       } catch (error) {
+        console.error("[pdf-export] browser launch failed (POST)", error);
         fallbackReason = buildFallbackReason("playwright_launch_failed", error);
         throw error;
       }
@@ -1517,6 +1526,7 @@ export async function POST(
           },
         });
       } catch (error) {
+        console.error("[pdf-export] browser render failed (POST)", error);
         fallbackReason = buildFallbackReason("playwright_render_failed", error);
         throw error;
       } finally {
