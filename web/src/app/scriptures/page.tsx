@@ -2337,6 +2337,7 @@ function ScripturesContent() {
   const activeNodeCommentsNodeId = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
+  const activePreviewRequestKey = useRef<string | null>(null);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
   const importPollingRunIdRef = useRef(0);
@@ -7350,6 +7351,17 @@ function ScripturesContent() {
     return `/scriptures?${params.toString()}`;
   };
 
+  const buildPreviewRequestKey = (
+    scope: "book" | "node",
+    targetBookId: string,
+    targetNodeId?: number | null
+  ) => {
+    const requestNodeIdPart = scope === "node" && typeof targetNodeId === "number"
+      ? `:${targetNodeId}`
+      : "";
+    return `${scope}:${targetBookId}${requestNodeIdPart}`;
+  };
+
   const syncPreviewUrl = (
     scope: "book" | "node",
     targetBookId: string,
@@ -7536,6 +7548,11 @@ function ScripturesContent() {
       scope === "node" ? (typeof targetNodeId === "number" ? targetNodeId : selectedId) : null;
     if (scope === "node" && !previewNodeId) {
       return;
+    }
+    const requestKey = buildPreviewRequestKey(scope, previewBookId, previewNodeId);
+
+    if (!append) {
+      activePreviewRequestKey.current = requestKey;
     }
 
     const nextLanguageSettings = append
@@ -7774,17 +7791,22 @@ function ScripturesContent() {
       }
 
       if (!append) {
-        const requestNodeIdPart = scope === "node" && previewNodeId ? `:${previewNodeId}` : "";
-        lastHandledPreviewRequestKey.current = `${scope}:${previewBookId}${requestNodeIdPart}`;
+        lastHandledPreviewRequestKey.current = requestKey;
         syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
         setShowBookPreview(true);
       }
     } catch (err) {
       if (!append) {
+        if (lastHandledPreviewRequestKey.current === requestKey) {
+          lastHandledPreviewRequestKey.current = null;
+        }
         setShowBookPreview(false);
       }
       setBookPreviewError(err instanceof Error ? err.message : "Failed to render book preview");
     } finally {
+      if (!append && activePreviewRequestKey.current === requestKey) {
+        activePreviewRequestKey.current = null;
+      }
       if (append) {
         setBookPreviewLoadingMore(false);
       } else {
@@ -7864,6 +7886,37 @@ function ScripturesContent() {
   useEffect(() => {
     const previewParam = searchParams.get("preview");
     if (previewParam !== "book" && previewParam !== "node") {
+      lastHandledPreviewRequestKey.current = null;
+      activePreviewRequestKey.current = null;
+      return;
+    }
+
+    const previewBookId = searchParams.get("book") || bookId;
+    if (!previewBookId) {
+      return;
+    }
+
+    const previewNodeId =
+      previewParam === "node"
+        ? Number.parseInt(searchParams.get("node") || "", 10)
+        : null;
+    const currentPreviewRequestKey = buildPreviewRequestKey(
+      previewParam,
+      previewBookId,
+      Number.isFinite(previewNodeId ?? NaN) ? previewNodeId : null
+    );
+
+    if (
+      lastHandledPreviewRequestKey.current !== null &&
+      lastHandledPreviewRequestKey.current !== currentPreviewRequestKey
+    ) {
+      lastHandledPreviewRequestKey.current = null;
+    }
+  }, [searchParams, bookId]);
+
+  useEffect(() => {
+    const previewParam = searchParams.get("preview");
+    if (previewParam !== "book" && previewParam !== "node") {
       return;
     }
     if (!urlInitialized || !bookId) {
@@ -7878,7 +7931,7 @@ function ScripturesContent() {
     }
 
     let previewScope: "book" | "node" = "book";
-    let requestNodeIdPart = "";
+    let requestNodeId: number | null = null;
     if (previewParam === "node") {
       const nodeParam = searchParams.get("node");
       const requestedNodeId = nodeParam ? Number.parseInt(nodeParam, 10) : NaN;
@@ -7886,14 +7939,16 @@ function ScripturesContent() {
         return;
       }
       previewScope = "node";
-      requestNodeIdPart = `:${requestedNodeId}`;
+      requestNodeId = requestedNodeId;
     }
 
-    const requestKey = `${previewScope}:${bookId}${requestNodeIdPart}`;
+    const requestKey = buildPreviewRequestKey(previewScope, bookId, requestNodeId);
     if (lastHandledPreviewRequestKey.current === requestKey) {
       return;
     }
-    lastHandledPreviewRequestKey.current = requestKey;
+    if (activePreviewRequestKey.current === requestKey) {
+      return;
+    }
 
     void handlePreviewBook(previewScope, bookId, "replace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
