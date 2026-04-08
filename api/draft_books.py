@@ -59,7 +59,12 @@ from models.user import User
 from services import get_db
 from services.license_policy import classify_license_action, normalize_license
 from services.metadata_defaults import ensure_default_metadata_binding_for_draft
-from services.transliteration import devanagari_to_iast, latin_to_devanagari
+from services.transliteration import (
+    devanagari_to_iast,
+    latin_to_devanagari,
+    normalize_transliteration_script,
+    transliterate_text,
+)
 
 router = APIRouter(tags=["draft_books"])
 logger = logging.getLogger(__name__)
@@ -2708,12 +2713,16 @@ def _resolve_pdf_content_lines(
     render_settings: SnapshotRenderSettings,
     selected_translation_languages: list[str] | None = None,
     word_meanings_display_mode: str = "inline",
+    preview_transliteration_script: str = "iast",
 ) -> list[tuple[str, str]]:
     resolved_content = content if isinstance(content, dict) else {}
     rendered_lines = resolved_content.get("rendered_lines") if isinstance(resolved_content.get("rendered_lines"), list) else []
     translation_map = _normalize_translation_map(resolved_content.get("translations"))
     resolved_selected_translation_languages = _normalize_selected_translation_languages(
         selected_translation_languages
+    )
+    resolved_preview_transliteration_script = normalize_transliteration_script(
+        preview_transliteration_script
     )
 
     def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
@@ -2754,6 +2763,17 @@ def _resolve_pdf_content_lines(
             if not source_text and not meaning_text:
                 continue
 
+            source_language = _as_clean_string(
+                (row.get("source") or {}).get("language")
+                if isinstance(row.get("source"), dict)
+                else ""
+            ).lower()
+            if source_text and source_language == "sa":
+                source_text = transliterate_text(
+                    source_text,
+                    resolved_preview_transliteration_script,
+                )
+
             combined_value = " — ".join(part for part in (source_text, meaning_text) if part)
             label = "Word Meanings" if not word_meaning_lines else ""
             word_meaning_lines.append((label, combined_value))
@@ -2783,6 +2803,9 @@ def _resolve_pdf_content_lines(
             value = _as_clean_string(line.get("value"))
             if not value:
                 continue
+
+            if field_name == "transliteration":
+                value = transliterate_text(value, resolved_preview_transliteration_script)
 
             if field_name in visible_by_key and not visible_by_key.get(field_name, False):
                 continue
@@ -3576,6 +3599,7 @@ def _generate_rendered_pdf(
     show_block_titles: bool = True,
     show_line_labels: bool = True,
     word_meanings_display_mode: str = "inline",
+    preview_transliteration_script: str = "iast",
 ) -> tuple[bytes, dict[str, str]]:
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter, invariant=1)
@@ -3729,6 +3753,7 @@ def _generate_rendered_pdf(
                 render_settings,
                 selected_translation_languages,
                 word_meanings_display_mode,
+                preview_transliteration_script,
             )
             for label, value in content_lines:
                 normalized_label = _normalize_pdf_text(label)
@@ -4555,6 +4580,11 @@ def _export_book_pdf_with_options(
             payload.preview_word_meanings_display_mode
             if payload.preview_word_meanings_display_mode in {"inline", "table", "hide"}
             else "inline"
+        ),
+        preview_transliteration_script=(
+            payload.preview_transliteration_script
+            if isinstance(payload.preview_transliteration_script, str)
+            else "iast"
         ),
     )
 

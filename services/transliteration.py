@@ -10,6 +10,90 @@ except Exception:  # pragma: no cover - optional dependency
 DEVANAGARI_PATTERN = re.compile(r"[\u0900-\u097F]")
 IAST_DIACRITIC_PATTERN = re.compile(r"[āīūṛṝḷḹṅñṭḍṇśṣṃṁḥ]", re.IGNORECASE)
 
+TRANSLITERATION_SCRIPT_OPTIONS = {
+    "iast",
+    "harvard_kyoto",
+    "itrans",
+    "devanagari",
+    "bengali",
+    "gujarati",
+    "gurmukhi",
+    "kannada",
+    "malayalam",
+    "oriya",
+    "tamil",
+    "telugu",
+}
+
+
+def normalize_transliteration_script(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in TRANSLITERATION_SCRIPT_OPTIONS:
+        return normalized
+    if normalized in {"hk"}:
+        return "harvard_kyoto"
+    if normalized in {"dev", "deva"}:
+        return "devanagari"
+    return "iast"
+
+
+def _scheme_for_option(script: str) -> str | None:
+    if sanscript is None:
+        return None
+
+    mapping = {
+        "iast": "IAST",
+        "harvard_kyoto": "HK",
+        "itrans": "ITRANS",
+        "devanagari": "DEVANAGARI",
+        "bengali": "BENGALI",
+        "gujarati": "GUJARATI",
+        "gurmukhi": "GURMUKHI",
+        "kannada": "KANNADA",
+        "malayalam": "MALAYALAM",
+        "oriya": "ORIYA",
+        "tamil": "TAMIL",
+        "telugu": "TELUGU",
+    }
+    scheme_attr = mapping.get(script)
+    return getattr(sanscript, scheme_attr, None) if scheme_attr else None
+
+
+def transliterate_text(text: str, target_script: str | None) -> str:
+    source = (text or "").strip()
+    if not source:
+        return ""
+
+    normalized_target = normalize_transliteration_script(target_script)
+    if sanscript is None:
+        return source
+
+    target_scheme = _scheme_for_option(normalized_target)
+    if not target_scheme:
+        return source
+
+    if contains_devanagari(source):
+        try:
+            converted = sanscript.transliterate(source, sanscript.DEVANAGARI, target_scheme)
+            return (converted or source).strip() or source
+        except Exception:
+            return source
+
+    normalized_source = source
+    for source_scheme in _preferred_latin_schemes(normalized_source):
+        try:
+            devanagari = sanscript.transliterate(normalized_source, source_scheme, sanscript.DEVANAGARI)
+            if not devanagari or not contains_devanagari(devanagari):
+                continue
+            converted = sanscript.transliterate(devanagari, sanscript.DEVANAGARI, target_scheme)
+            normalized_converted = (converted or "").strip()
+            if normalized_converted:
+                return normalized_converted
+        except Exception:
+            continue
+
+    return source
+
 
 def contains_devanagari(text: str) -> bool:
     return bool(text and DEVANAGARI_PATTERN.search(text))
