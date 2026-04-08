@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Playfair_Display, Space_Grotesk } from "next/font/google";
+import { Playfair_Display, Space_Grotesk, Noto_Serif_Devanagari } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
@@ -9,12 +9,18 @@ import GoogleAnalytics from "@/components/GoogleAnalytics";
 
 const displayFont = Playfair_Display({
   variable: "--font-display",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
 });
 
 const sansFont = Space_Grotesk({
   variable: "--font-sans",
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
+});
+
+const devanagariFont = Noto_Serif_Devanagari({
+  variable: "--font-devanagari",
+  subsets: ["devanagari"],
+  weight: ["400", "600"],
 });
 
 export const metadata: Metadata = {
@@ -32,7 +38,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} antialiased min-h-screen flex flex-col`}>
+      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} antialiased min-h-screen flex flex-col`}>
         {gaMeasurementId ? (
           <Suspense fallback={null}>
             <GoogleAnalytics measurementId={gaMeasurementId} />

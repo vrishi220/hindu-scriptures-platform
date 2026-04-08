@@ -20,12 +20,13 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
+  --font-devanagari: var(--font-devanagari);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
+  font-family: var(--font-sans), var(--font-devanagari), "Noto Serif Devanagari", sans-serif;
 }
 
 body[data-ui-theme="classic"] {
