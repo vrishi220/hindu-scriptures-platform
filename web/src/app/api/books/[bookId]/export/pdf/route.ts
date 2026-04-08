@@ -1190,7 +1190,7 @@ export async function GET(
       }
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.setContent(html, { waitUntil: "domcontentloaded" });
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
           landscape: pdfSettings.landscape,
@@ -1456,7 +1456,7 @@ export async function POST(
       }
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle" });
+        await page.setContent(html, { waitUntil: "domcontentloaded" });
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
           landscape: pdfSettings.landscape,
@@ -1495,10 +1495,10 @@ export async function POST(
         fallbackReason = buildFallbackReason("browser_render_failed", error);
       }
       if (requiresComplexIndicShaping) {
+        const reasonSuffix = fallbackReason ? ` (reason: ${fallbackReason})` : "";
         return NextResponse.json(
           {
-            detail:
-              "Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.",
+            detail: `Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.${reasonSuffix}`,
             reason: fallbackReason,
           },
           { status: 503 }
@@ -1509,10 +1509,10 @@ export async function POST(
   }
 
   if (requiresComplexIndicShaping && fallbackReason) {
+    const reasonSuffix = fallbackReason ? ` (reason: ${fallbackReason})` : "";
     return NextResponse.json(
       {
-        detail:
-          "Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.",
+        detail: `Indic-script PDF export requires browser rendering for correct glyph shaping. Please retry shortly.${reasonSuffix}`,
         reason: fallbackReason,
       },
       { status: 503 }
