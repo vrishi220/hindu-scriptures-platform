@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { existsSync } from "node:fs";
 import {
   hasDevanagariLetters,
   normalizeTransliterationScript,
@@ -97,16 +98,50 @@ type BrowserLaunchResult = {
 };
 
 const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
+  const launchArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--font-render-hinting=medium",
+  ];
+
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+    process.env.CHROMIUM_PATH,
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/google-chrome",
+  ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()));
+
   try {
     const pw = await import("@playwright/test");
-    const browser = await pw.chromium.launch({ headless: true });
+    const browser = await pw.chromium.launch({ headless: true, args: launchArgs });
     return { browser, engine: "playwright-test" };
   } catch {
-    const chromium = await import("@sparticuz/chromium");
     const playwrightCore = await import("playwright-core");
+
+    for (const executablePath of executableCandidates) {
+      if (!existsSync(executablePath)) {
+        continue;
+      }
+      try {
+        const browser = await playwrightCore.chromium.launch({
+          executablePath,
+          args: launchArgs,
+          headless: true,
+        });
+        return { browser, engine: "playwright-core-system" };
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    const chromium = await import("@sparticuz/chromium");
     const executablePath = await chromium.default.executablePath();
     const browser = await playwrightCore.chromium.launch({
-      args: chromium.default.args,
+      args: [...chromium.default.args, ...launchArgs],
       executablePath,
       headless: true,
     });
