@@ -2900,7 +2900,7 @@ function ScripturesContent() {
       let previousFieldName = "";
       for (let index = 0; index < renderedLines.length; index += 1) {
         const line = renderedLines[index];
-        const rawValue = (line?.value || "").trim();
+        const rawValue = normalizeTextForDisplay((line?.value || "").trim());
         if (!rawValue) {
           continue;
         }
@@ -2945,7 +2945,7 @@ function ScripturesContent() {
     }
 
     for (const key of resolvedSettings.text_order) {
-      const rawValue = (block.content[key] || "").trim();
+      const rawValue = normalizeTextForDisplay((block.content[key] || "").trim());
       const value =
         key === "transliteration"
           ? hasDevanagariLetters(rawValue)
@@ -2974,7 +2974,7 @@ function ScripturesContent() {
     appendSelectedTranslationLines();
 
     if (lines.length === 0) {
-      const fallback = (block.content.text || "").trim();
+      const fallback = normalizeTextForDisplay((block.content.text || "").trim());
       if (fallback) {
         lines.push({
           key: "text",
@@ -4993,45 +4993,57 @@ function ScripturesContent() {
     [previewBodyFontSizeRem]
   );
 
-  const renderTransliterationByPreference = (value: string): string => {
-    if (!value) return "";
-    if (hasDevanagariLetters(value)) {
-      return transliterateFromDevanagari(value, transliterationScript);
-    }
-    return transliterateFromIast(value, transliterationScript);
-  };
-
-  const renderPreviewTransliteration = (value: string): string => {
-    if (!value) return "";
-    if (hasDevanagariLetters(value)) {
-      return transliterateFromDevanagari(value, appliedPreviewTransliterationScript);
-    }
-    return transliterateFromIast(value, appliedPreviewTransliterationScript);
-  };
-
-  const IAST_DIACRITIC_PATTERN = /[\u0100\u0101\u012a\u012b\u016a\u016b\u1e5a\u1e5b\u1e5c\u1e5d\u1e36\u1e37\u1e38\u1e39\u1e44\u1e45\u00d1\u00f1\u1e6c\u1e6d\u1e0c\u1e0d\u1e46\u1e47\u015a\u015b\u1e62\u1e63\u1e24\u1e25\u1e42\u1e43\u1e40\u1e41\u1e56\u1e57]/;
-
-  const scriptFontClassName = (value: string): string => {
+  const normalizeTextForDisplay = (value: string): string => {
     if (!value) {
       return "";
     }
-    if (hasDevanagariLetters(value)) {
+    return value.normalize("NFC");
+  };
+
+  const renderTransliterationByPreference = (value: string): string => {
+    const normalizedValue = normalizeTextForDisplay(value);
+    if (!normalizedValue) return "";
+    if (hasDevanagariLetters(normalizedValue)) {
+      return normalizeTextForDisplay(transliterateFromDevanagari(normalizedValue, transliterationScript));
+    }
+    return normalizeTextForDisplay(transliterateFromIast(normalizedValue, transliterationScript));
+  };
+
+  const renderPreviewTransliteration = (value: string): string => {
+    const normalizedValue = normalizeTextForDisplay(value);
+    if (!normalizedValue) return "";
+    if (hasDevanagariLetters(normalizedValue)) {
+      return normalizeTextForDisplay(transliterateFromDevanagari(normalizedValue, appliedPreviewTransliterationScript));
+    }
+    return normalizeTextForDisplay(transliterateFromIast(normalizedValue, appliedPreviewTransliterationScript));
+  };
+
+  const IAST_DIACRITIC_PATTERN = /[\u0100\u0101\u012a\u012b\u016a\u016b\u1e5a\u1e5b\u1e5c\u1e5d\u1e36\u1e37\u1e38\u1e39\u1e44\u1e45\u00d1\u00f1\u1e6c\u1e6d\u1e0c\u1e0d\u1e46\u1e47\u015a\u015b\u1e62\u1e63\u1e24\u1e25\u1e42\u1e43\u1e40\u1e41\u1e56\u1e57]/;
+  const IAST_COMBINING_MARK_PATTERN = /[\u0300\u0301\u0304\u0307\u0323\u0325]/;
+
+  const scriptFontClassName = (value: string): string => {
+    const normalizedValue = normalizeTextForDisplay(value);
+    if (!normalizedValue) {
+      return "";
+    }
+    if (hasDevanagariLetters(normalizedValue)) {
       return "scripture-devanagari";
     }
-    if (IAST_DIACRITIC_PATTERN.test(value)) {
+    if (IAST_DIACRITIC_PATTERN.test(normalizedValue) || IAST_COMBINING_MARK_PATTERN.test(normalizedValue)) {
       return "scripture-iast";
     }
     return "";
   };
 
   const scriptLangForText = (value: string): string | undefined => {
-    if (!value) {
+    const normalizedValue = normalizeTextForDisplay(value);
+    if (!normalizedValue) {
       return undefined;
     }
-    if (hasDevanagariLetters(value)) {
+    if (hasDevanagariLetters(normalizedValue)) {
       return "sa";
     }
-    if (IAST_DIACRITIC_PATTERN.test(value)) {
+    if (IAST_DIACRITIC_PATTERN.test(normalizedValue) || IAST_COMBINING_MARK_PATTERN.test(normalizedValue)) {
       return "sa-Latn";
     }
     return undefined;
@@ -13710,7 +13722,7 @@ function ScripturesContent() {
                                         {primaryLabel}
                                       </div>
                                       <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-900 ${scriptFontClassName(primaryContent)}`} lang={scriptLangForText(primaryContent)}>
-                                        {primaryContent}
+                                        {normalizeTextForDisplay(primaryContent)}
                                       </div>
                                     </div>
                                   )}
@@ -13720,7 +13732,7 @@ function ScripturesContent() {
                                         {transliterationLabel} ({transliterationScriptLabel(transliterationScript)})
                                       </div>
                                       <div className={`whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700 ${scriptFontClassName(transliteration)}`} lang={scriptLangForText(transliteration)}>
-                                        {transliteration}
+                                        {normalizeTextForDisplay(transliteration)}
                                       </div>
                                     </div>
                                   )}
@@ -13732,7 +13744,7 @@ function ScripturesContent() {
                                         Sanskrit (Original)
                                       </div>
                                       <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(originalSanskrit)}`} lang={scriptLangForText(originalSanskrit)}>
-                                        {originalSanskrit}
+                                        {normalizeTextForDisplay(originalSanskrit)}
                                       </div>
                                     </div>
                                   )}
@@ -13745,7 +13757,7 @@ function ScripturesContent() {
                                             {entry.label}
                                           </div>
                                           <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(entry.value)}`} lang={scriptLangForText(entry.value)}>
-                                            {entry.value}
+                                            {normalizeTextForDisplay(entry.value)}
                                           </div>
                                         </div>
                                       ))}
