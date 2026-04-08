@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import urllib.request
+import unicodedata
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -391,6 +392,72 @@ def _detect_indic_script(text: str) -> str | None:
     if re.search(r"[\u0900-\u097F]", text):
         return "devanagari"
     return None
+
+
+def _normalize_pdf_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+
+    normalized = unicodedata.normalize("NFC", value)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    return normalized
+
+
+def _split_long_pdf_token(token: str, font_name: str, font_size: int, max_width: float) -> list[str]:
+    normalized_token = _normalize_pdf_text(token)
+    if not normalized_token:
+        return [""]
+
+    chunks: list[str] = []
+    current = ""
+    for character in normalized_token:
+        candidate = current + character
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            chunks.append(current)
+            current = character
+        else:
+            current = candidate
+
+    if current:
+        chunks.append(current)
+    return chunks or [normalized_token]
+
+
+def _wrap_pdf_text_to_width(text: str, font_name: str, font_size: int, max_width: float) -> list[str]:
+    normalized_text = _normalize_pdf_text(text)
+    if not normalized_text:
+        return [""]
+
+    wrapped_lines: list[str] = []
+    for raw_paragraph in normalized_text.split("\n"):
+        paragraph = raw_paragraph.strip()
+        if not paragraph:
+            wrapped_lines.append("")
+            continue
+
+        current_line = ""
+        for token in paragraph.split():
+            candidate = token if not current_line else f"{current_line} {token}"
+            if pdfmetrics.stringWidth(candidate, font_name, font_size) <= max_width:
+                current_line = candidate
+                continue
+
+            if current_line:
+                wrapped_lines.append(current_line)
+                current_line = ""
+
+            if pdfmetrics.stringWidth(token, font_name, font_size) <= max_width:
+                current_line = token
+                continue
+
+            token_chunks = _split_long_pdf_token(token, font_name, font_size, max_width)
+            wrapped_lines.extend(token_chunks[:-1])
+            current_line = token_chunks[-1]
+
+        if current_line:
+            wrapped_lines.append(current_line)
+
+    return wrapped_lines or [""]
 
 
 _TRANSLATION_CODE_TO_LABEL = {
@@ -3480,9 +3547,12 @@ def _generate_rendered_pdf(
     page_width, page_height = letter
 
     left_margin = 48
+    right_margin = 48
     top_margin = 56
+    bottom_margin = 56
     line_height = 14
     devanagari_line_height = 17
+    max_content_width = page_width - left_margin - right_margin
     y = page_height - top_margin
     pdf_font_name = _resolve_pdf_font_name()
     pdf_devanagari_font_name = _resolve_pdf_devanagari_font_name()
@@ -3501,11 +3571,12 @@ def _generate_rendered_pdf(
 
     def write_line(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         nonlocal y
-        if y < 56:
+        if y < bottom_margin:
             pdf.showPage()
             y = page_height - top_margin
 
-        detected_script = _detect_indic_script(text or "")
+        normalized_text = _normalize_pdf_text(text)
+        detected_script = _detect_indic_script(normalized_text)
         if font_name:
             resolved_font = font_name
         elif use_devanagari:
@@ -3527,11 +3598,44 @@ def _generate_rendered_pdf(
             resolved_font = pdf_font_name
 
         pdf.setFont(resolved_font, font_size)
-        pdf.drawString(left_margin, y, text)
+        pdf.drawString(left_margin, y, normalized_text)
         y -= devanagari_line_height if use_devanagari or detected_script is not None else line_height
 
-    normalized_cover_title = (cover_title or "").strip()
-    normalized_cover_author = (cover_author or "").strip()
+    def write_wrapped_text(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
+        normalized_text = _normalize_pdf_text(text)
+        detected_script = _detect_indic_script(normalized_text)
+        resolved_use_devanagari = use_devanagari or detected_script is not None
+
+        if font_name:
+            resolved_font = font_name
+        elif use_devanagari:
+            resolved_font = pdf_devanagari_font_name
+        elif detected_script == "telugu":
+            resolved_font = pdf_telugu_font_name
+        elif detected_script == "kannada":
+            resolved_font = pdf_kannada_font_name
+        elif detected_script == "tamil":
+            resolved_font = pdf_tamil_font_name
+        elif detected_script == "malayalam":
+            resolved_font = pdf_malayalam_font_name
+        elif detected_script == "devanagari":
+            resolved_font = pdf_devanagari_font_name
+        else:
+            resolved_font = pdf_font_name
+
+        if pdf_font_name != "Helvetica" and resolved_font.startswith("Helvetica"):
+            resolved_font = pdf_font_name
+
+        for wrapped_line in _wrap_pdf_text_to_width(normalized_text, resolved_font, font_size, max_content_width):
+            write_line(
+                wrapped_line,
+                font_name=resolved_font,
+                font_size=font_size,
+                use_devanagari=resolved_use_devanagari,
+            )
+
+    normalized_cover_title = _normalize_pdf_text((cover_title or "").strip())
+    normalized_cover_author = _normalize_pdf_text((cover_author or "").strip())
     if normalized_cover_title or normalized_cover_author:
         center_x = page_width / 2
         cover_title_text = normalized_cover_title or effective_title
@@ -3544,10 +3648,10 @@ def _generate_rendered_pdf(
 
         cover_y = page_height - 200
         pdf.setFont(pdf_font_name, 30)
-        pdf.drawCentredString(center_x, cover_y, title_line_1)
+        pdf.drawCentredString(center_x, cover_y, _normalize_pdf_text(title_line_1))
         if title_line_2:
             cover_y -= 42
-            pdf.drawCentredString(center_x, cover_y, title_line_2)
+            pdf.drawCentredString(center_x, cover_y, _normalize_pdf_text(title_line_2))
 
         if normalized_cover_author:
             cover_y -= 70
@@ -3561,18 +3665,18 @@ def _generate_rendered_pdf(
         y = page_height - top_margin
 
     if show_heading_metadata:
-        write_line(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
+        write_wrapped_text(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
         for metadata_line in heading_metadata_lines:
-            write_line(metadata_line, "Helvetica", 10)
+            write_wrapped_text(metadata_line, "Helvetica", 10)
         write_line("", "Helvetica", 10)
 
     if show_section_labels:
-        write_line("Rendered Content", "Helvetica-Bold", 12)
+        write_wrapped_text("Rendered Content", "Helvetica-Bold", 12)
     for section_name in ("front", "body", "back"):
         blocks = getattr(sections, section_name, [])
         if show_section_labels:
             section_label = section_name.title()
-            write_line(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
+            write_wrapped_text(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
 
         if not blocks:
             if show_section_labels:
@@ -3581,7 +3685,7 @@ def _generate_rendered_pdf(
             continue
 
         for block in blocks:
-            write_line(f"{block.order}. {block.title}", "Helvetica-Bold", 10)
+            write_wrapped_text(f"{block.order}. {_normalize_pdf_text(block.title)}", "Helvetica-Bold", 10)
 
             block_content = block.content if isinstance(block.content, dict) else {}
             content_lines = _resolve_pdf_content_lines(
@@ -3590,17 +3694,19 @@ def _generate_rendered_pdf(
                 selected_translation_languages,
             )
             for label, value in content_lines:
-                wrapped = textwrap.wrap(value, width=110) or [value]
+                normalized_label = _normalize_pdf_text(label)
+                normalized_value = _normalize_pdf_text(value)
                 is_sanskrit = label.lower() == "sanskrit"
-                if wrapped:
-                    first_line_text = f"   {wrapped[0]}" if not label else f"   {label}: {wrapped[0]}"
-                    write_line(first_line_text, font_size=11 if is_sanskrit else 10, use_devanagari=is_sanskrit)
-                    for continuation in wrapped[1:]:
-                        write_line(
-                            f"   {continuation}",
-                            font_size=11 if is_sanskrit else 10,
-                            use_devanagari=is_sanskrit,
-                        )
+                display_text = (
+                    f"   {normalized_value}"
+                    if not normalized_label
+                    else f"   {normalized_label}: {normalized_value}"
+                )
+                write_wrapped_text(
+                    display_text,
+                    font_size=11 if is_sanskrit else 10,
+                    use_devanagari=is_sanskrit,
+                )
 
             if render_settings.show_metadata:
                 metadata_parts = [f"template={block.template_key}"]
@@ -3609,18 +3715,18 @@ def _generate_rendered_pdf(
                 sequence_number = block_content.get("sequence_number")
                 if sequence_number is not None:
                     metadata_parts.append(f"seq={sequence_number}")
-                write_line("   " + " • ".join(metadata_parts))
+                write_wrapped_text("   " + " • ".join(metadata_parts))
 
             write_line("", "Helvetica", 10)
 
     write_line("", "Helvetica", 10)
 
     if appendix_entries is not None:
-        write_line("Provenance Appendix", "Helvetica-Bold", 12)
+        write_wrapped_text("Provenance Appendix", "Helvetica-Bold", 12)
         if not appendix_entries:
-            write_line("No provenance appendix entries available.")
+            write_wrapped_text("No provenance appendix entries available.")
         else:
-            write_line(f"Total entries: {len(appendix_entries)}")
+            write_wrapped_text(f"Total entries: {len(appendix_entries)}")
             write_line("", "Helvetica", 10)
             for index, entry in enumerate(appendix_entries, start=1):
                 section = str(entry.get("section") or "body")
@@ -3631,9 +3737,9 @@ def _generate_rendered_pdf(
                 source_author = str(entry.get("source_author") or "Unknown")
                 source_version = str(entry.get("source_version") or "latest")
 
-                write_line(f"{index}. [{section}] {title}")
-                write_line(f"   source_node_id={source_node_id} source_book_id={source_book_id}")
-                write_line(f"   license={license_type} author={source_author} version={source_version}")
+                write_wrapped_text(f"{index}. [{section}] {title}")
+                write_wrapped_text(f"   source_node_id={source_node_id} source_book_id={source_book_id}")
+                write_wrapped_text(f"   license={license_type} author={source_author} version={source_version}")
                 write_line("", "Helvetica", 10)
 
     pdf.save()

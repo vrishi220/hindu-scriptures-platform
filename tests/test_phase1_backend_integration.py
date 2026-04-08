@@ -3249,6 +3249,36 @@ class TestDraftBookAndEditionSnapshotIntegration:
             ("", "karma_hk — action"),
         ]
 
+    def test_pdf_text_normalization_uses_nfc_and_normalizes_newlines(self, client):
+        normalized = draft_books_api._normalize_pdf_text("na\u0304rada\r\nline2\rline3")
+
+        assert normalized == "nārada\nline2\nline3"
+
+    def test_pdf_text_wrap_uses_rendered_width_not_character_count(self, client):
+        font_name = "Helvetica"
+        font_size = 10
+        max_width = draft_books_api.pdfmetrics.stringWidth("alpha beta gamma", font_name, font_size) - 1
+
+        wrapped = draft_books_api._wrap_pdf_text_to_width(
+            "alpha beta gamma delta",
+            font_name,
+            font_size,
+            max_width,
+        )
+
+        assert wrapped == ["alpha beta", "gamma delta"]
+
+    def test_pdf_text_wrap_splits_long_tokens_without_losing_text(self, client):
+        font_name = "Helvetica"
+        font_size = 10
+        token = "dharmaksetradharmaksetra"
+        max_width = draft_books_api.pdfmetrics.stringWidth("dharmak", font_name, font_size)
+
+        wrapped = draft_books_api._wrap_pdf_text_to_width(token, font_name, font_size, max_width)
+
+        assert len(wrapped) > 1
+        assert "".join(wrapped) == token
+
     def test_book_preview_render_includes_word_meanings_with_fallback_badge_metadata(self, client):
         headers = _register_and_login(client)
 
