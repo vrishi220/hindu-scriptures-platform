@@ -107,6 +107,7 @@ _CUSTOM_TEMPLATE_KEY_PATTERN = "custom.template.{template_id}.v{version}.content
 
 _RUNTIME_FONT_CACHE: dict[str, str | None] = {}
 _RUNTIME_FONT_DIR = Path("/tmp/hsp_pdf_fonts")
+_VENDORED_PDF_FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "pdf-fonts"
 _RUNTIME_FONT_SOURCES: dict[str, list[str]] = {
     "NotoSans-Regular.ttf": [
         "https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/main/fonts/ttf/NotoSans/NotoSans-Regular.ttf",
@@ -226,9 +227,18 @@ def _ensure_runtime_font(font_filename: str) -> str | None:
     return None
 
 
+def _vendored_pdf_font(font_filename: str) -> str | None:
+    font_path = _VENDORED_PDF_FONT_DIR / font_filename
+    if font_path.exists() and font_path.stat().st_size > 1024:
+        return str(font_path)
+    return None
+
+
 def _resolve_pdf_font_name() -> str:
+    vendored_noto = _vendored_pdf_font("NotoSans-Regular.ttf")
     runtime_noto = _ensure_runtime_font("NotoSans-Regular.ttf")
     unicode_candidates = [
+        vendored_noto,
         runtime_noto,
         "/app/fonts/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
@@ -250,12 +260,22 @@ def _resolve_pdf_font_name() -> str:
 
 
 def _resolve_pdf_devanagari_font_name() -> str:
+    vendored_devanagari = _vendored_pdf_font("NotoSansDevanagari-Regular.ttf")
+    vendored_telugu = _vendored_pdf_font("NotoSansTelugu-Regular.ttf")
+    vendored_kannada = _vendored_pdf_font("NotoSansKannada-Regular.ttf")
+    vendored_tamil = _vendored_pdf_font("NotoSansTamil-Regular.ttf")
+    vendored_malayalam = _vendored_pdf_font("NotoSansMalayalam-Regular.ttf")
     runtime_devanagari = _ensure_runtime_font("NotoSansDevanagari-Regular.ttf")
     runtime_telugu = _ensure_runtime_font("NotoSansTelugu-Regular.ttf")
     runtime_kannada = _ensure_runtime_font("NotoSansKannada-Regular.ttf")
     runtime_tamil = _ensure_runtime_font("NotoSansTamil-Regular.ttf")
     runtime_malayalam = _ensure_runtime_font("NotoSansMalayalam-Regular.ttf")
     devanagari_candidates = [
+        vendored_devanagari,
+        vendored_telugu,
+        vendored_kannada,
+        vendored_tamil,
+        vendored_malayalam,
         runtime_devanagari,
         runtime_telugu,
         runtime_kannada,
@@ -303,8 +323,10 @@ def _resolve_pdf_devanagari_font_name() -> str:
 
 
 def _resolve_pdf_telugu_font_name(fallback_font: str) -> str:
+    vendored_telugu = _vendored_pdf_font("NotoSansTelugu-Regular.ttf")
     runtime_telugu = _ensure_runtime_font("NotoSansTelugu-Regular.ttf")
     telugu_candidates = [
+        vendored_telugu,
         runtime_telugu,
         "/app/fonts/NotoSansTelugu-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
@@ -322,8 +344,10 @@ def _resolve_pdf_telugu_font_name(fallback_font: str) -> str:
 
 
 def _resolve_pdf_kannada_font_name(fallback_font: str) -> str:
+    vendored_kannada = _vendored_pdf_font("NotoSansKannada-Regular.ttf")
     runtime_kannada = _ensure_runtime_font("NotoSansKannada-Regular.ttf")
     kannada_candidates = [
+        vendored_kannada,
         runtime_kannada,
         "/app/fonts/NotoSansKannada-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansKannada-Regular.ttf",
@@ -341,8 +365,10 @@ def _resolve_pdf_kannada_font_name(fallback_font: str) -> str:
 
 
 def _resolve_pdf_tamil_font_name(fallback_font: str) -> str:
+    vendored_tamil = _vendored_pdf_font("NotoSansTamil-Regular.ttf")
     runtime_tamil = _ensure_runtime_font("NotoSansTamil-Regular.ttf")
     tamil_candidates = [
+        vendored_tamil,
         runtime_tamil,
         "/app/fonts/NotoSansTamil-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansTamil-Regular.ttf",
@@ -360,8 +386,10 @@ def _resolve_pdf_tamil_font_name(fallback_font: str) -> str:
 
 
 def _resolve_pdf_malayalam_font_name(fallback_font: str) -> str:
+    vendored_malayalam = _vendored_pdf_font("NotoSansMalayalam-Regular.ttf")
     runtime_malayalam = _ensure_runtime_font("NotoSansMalayalam-Regular.ttf")
     malayalam_candidates = [
+        vendored_malayalam,
         runtime_malayalam,
         "/app/fonts/NotoSansMalayalam-Regular.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf",
