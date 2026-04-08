@@ -1046,7 +1046,7 @@ const buildBookPreviewHtml = (
           const valueLangAttr = scriptInfo?.lang ? ` lang=\"${escapeHtml(scriptInfo.lang)}\"` : "";
           const renderedValue = `<span class=\"word-meaning-target${valueClass}\"${valueLangAttr}>${value}</span>`;
           return appliedShowPreviewLabels
-            ? `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line indented\">${renderedValue}</div>`
+            ? `<div class=\"line\"><strong>${label}:</strong></div><div class=\"line\">${renderedValue}</div>`
             : `<div class=\"line\">${renderedValue}</div>`;
         })
         .join("");
