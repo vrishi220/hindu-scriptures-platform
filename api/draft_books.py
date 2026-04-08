@@ -436,6 +436,19 @@ def _normalize_pdf_text(value: object) -> str:
     return normalized
 
 
+def _expand_verse_separators_for_pdf(value: str) -> str:
+    normalized = _normalize_pdf_text(value)
+    if not normalized:
+        return ""
+
+    expanded = normalized.replace("॥", "\n॥\n").replace("||", "\n||\n")
+    expanded = expanded.replace("।", "\n।\n")
+    expanded = re.sub(r"(?<!\|)\|(?!\|)", "\n|\n", expanded)
+    expanded = re.sub(r"[ \t]*\n[ \t]*", "\n", expanded)
+    expanded = re.sub(r"\n{3,}", "\n\n", expanded)
+    return expanded.strip()
+
+
 def _split_long_pdf_token(token: str, font_name: str, font_size: int, max_width: float) -> list[str]:
     normalized_token = _normalize_pdf_text(token)
     if not normalized_token:
@@ -2808,6 +2821,9 @@ def _resolve_pdf_content_lines(
 
             if field_name == "transliteration" and resolved_preview_transliteration_script:
                 value = transliterate_text(value, resolved_preview_transliteration_script)
+
+            if field_name in {"sanskrit", "transliteration"}:
+                value = _expand_verse_separators_for_pdf(value)
 
             if field_name in visible_by_key and not visible_by_key.get(field_name, False):
                 continue

@@ -259,6 +259,19 @@ const normalizeIndicDisplayText = (value: string): string => {
     .replace(/([\u094D\u09CD\u0A4D\u0ACD\u0B4D\u0BCD\u0C4D\u0CCD\u0D4D])\s+([\u0900-\u0D7F])/g, "$1$2");
 };
 
+const expandVerseSeparatorsForPdf = (value: string): string => {
+  if (!value) return "";
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/॥/g, "\n॥\n")
+    .replace(/\|\|/g, "\n||\n")
+    .replace(/।/g, "\n।\n")
+    .replace(/(?<!\|)\|(?!\|)/g, "\n|\n")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+
 const detectIndicScriptClassAndLang = (
   text: string,
   language?: string
@@ -668,14 +681,18 @@ const buildBookPreviewHtml = (
                 ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
                 : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
               : rawValue;
-          if (!value || !shouldShowField(field)) {
+          const normalizedValueForPdf =
+            field === "sanskrit" || field === "transliteration"
+              ? expandVerseSeparatorsForPdf(value)
+              : value;
+          if (!normalizedValueForPdf || !shouldShowField(field)) {
             return null;
           }
 
           const hasSemanticLabel =
             typeof line.label === "string" && /[A-Za-z0-9\u0900-\u097F]/.test(line.label);
           const label = hasSemanticLabel ? line.label!.trim() : labelForField(field);
-          return { field, label, value };
+          return { field, label, value: normalizedValueForPdf };
         })
         .filter((entry): entry is { field: string; label: string; value: string } => Boolean(entry));
 
