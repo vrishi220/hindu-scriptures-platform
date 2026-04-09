@@ -19,6 +19,8 @@ export interface BookDetails {
   visibility: 'public' | 'private';
   description?: string;
   content_path?: string;
+  book_name: string;
+  [key: string]: unknown;
 }
 
 export interface TreeNode {

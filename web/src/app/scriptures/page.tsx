@@ -2220,22 +2220,6 @@ function ScripturesContent() {
   };
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [books, setBooks] = useState<BookOption[]>([]);
-  const [bookQuery, setBookQuery] = useState("");
-  const [bookHasMore, setBookHasMore] = useState(true);
-  const [bookLoadingMore, setBookLoadingMore] = useState(false);
-  const [bookId, setBookId] = useState("");
-  const [currentBook, setCurrentBook] = useState<BookDetails | null>(null);
-  const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [treeError, setTreeError] = useState<string | null>(null);
-  const [treeReorderingNodeId, setTreeReorderingNodeId] = useState<number | null>(null);
-  const [treeReorderModeNodeId, setTreeReorderModeNodeId] = useState<number | null>(null);
-  const [privateBookGate, setPrivateBookGate] = useState(false);
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [urlInitialized, setUrlInitialized] = useState(false);
-  const [breadcrumb, setBreadcrumb] = useState<TreeNode[]>([]);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [email, setEmail] = useState("");
@@ -2620,6 +2604,43 @@ function ScripturesContent() {
   });
 
   const activeBooksAbortController = useRef<AbortController | null>(null);
+
+    // Create aliases to browse state for backward compatibility
+    const bookId = browsingHook.bookId || "";
+    const books = browsingHook.books;
+    const bookQuery = browsingHook.bookQuery;
+    const bookHasMore = browsingHook.bookHasMore;
+    const bookLoadingMore = browsingHook.bookLoadingMore;
+    const currentBook = browsingHook.currentBook;
+    const treeData = browsingHook.treeData;
+    const treeLoading = browsingHook.treeLoading;
+    const treeError = browsingHook.treeError;
+    const treeReorderingNodeId = browsingHook.treeReorderingNodeId;
+    const treeReorderModeNodeId = browsingHook.treeReorderModeNodeId;
+    const privateBookGate = browsingHook.privateBookGate;
+    const expandedIds = browsingHook.expandedIds;
+    const selectedId = browsingHook.selectedId;
+    const urlInitialized = browsingHook.urlInitialized;
+    const breadcrumb = browsingHook.breadcrumb;
+
+    // Create setters for backward compatibility
+    const setBookId = browsingHook.setBookId;
+    const setBooks = browsingHook.setBooks;
+    const setBookQuery = browsingHook.setBookQuery;
+    const setBookHasMore = browsingHook.setBookHasMore;
+    const setBookLoadingMore = browsingHook.setBookLoadingMore;
+    const setCurrentBook = browsingHook.setCurrentBook;
+    const setTreeData = browsingHook.setTreeData;
+    const setTreeLoading = browsingHook.setTreeLoading;
+    const setTreeError = browsingHook.setTreeError;
+    const setTreeReorderingNodeId = browsingHook.setTreeReorderingNodeId;
+    const setTreeReorderModeNodeId = browsingHook.setTreeReorderModeNodeId;
+    const setPrivateBookGate = browsingHook.setPrivateBookGate;
+    const setExpandedIds = browsingHook.setExpandedIds;
+    const setSelectedId = browsingHook.setSelectedId;
+    const setUrlInitialized = browsingHook.setUrlInitialized;
+    const setBreadcrumb = browsingHook.setBreadcrumb;
+
   const activeBooksRequestId = useRef(0);
   const bookNextOffsetRef = useRef(0);
   const bookHasMoreRef = useRef(true);
@@ -5573,120 +5594,7 @@ function ScripturesContent() {
       setNodeContent(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId, urlInitialized, searchParams.get("node"), treeData]);
-
-  const loadBooksPage = useCallback(
-    async ({ reset = false }: { reset?: boolean } = {}) => {
-      if (!reset && (!bookHasMoreRef.current || bookLoadingRef.current)) {
-        return;
-      }
-
-      const query = bookQuery.trim();
-      const pageSize =
-        bookBrowserDensity === 0
-          ? BOOKS_PAGE_SIZE_LIST
-          : BOOKS_PAGE_SIZE_BY_DENSITY[bookBrowserDensity as 1 | 2 | 3 | 4 | 5];
-      const offset = reset ? 0 : bookNextOffsetRef.current;
-
-      if (reset) {
-        activeBooksAbortController.current?.abort();
-        setBooks([]);
-        setBookHasMore(true);
-        bookNextOffsetRef.current = 0;
-        bookHasMoreRef.current = true;
-      }
-
-      const abortController = new AbortController();
-      activeBooksAbortController.current = abortController;
-      const requestId = activeBooksRequestId.current + 1;
-      activeBooksRequestId.current = requestId;
-
-      bookLoadingRef.current = true;
-      setBookLoadingMore(true);
-      try {
-        const params = new URLSearchParams();
-        if (query) {
-          params.set("q", query);
-        }
-        params.set("limit", String(pageSize));
-        params.set("offset", String(offset));
-
-        const response = await fetch(`/api/books?${params.toString()}`, {
-          credentials: "include",
-          signal: abortController.signal,
-        });
-        if (requestId !== activeBooksRequestId.current) {
-          return;
-        }
-
-        if (!response.ok) {
-          if (reset) {
-            setBooks([]);
-          }
-          setBookHasMore(false);
-          bookHasMoreRef.current = false;
-          return;
-        }
-
-        const data = (await response.json()) as BookOption[];
-        if (requestId !== activeBooksRequestId.current) {
-          return;
-        }
-
-        setBooks((prev) => (reset ? data : [...prev, ...data]));
-        const nextOffset = offset + data.length;
-        bookNextOffsetRef.current = nextOffset;
-
-        const hasMore = data.length === pageSize;
-        setBookHasMore(hasMore);
-        bookHasMoreRef.current = hasMore;
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
-        if (reset) {
-          setBooks([]);
-        }
-        setBookHasMore(false);
-        bookHasMoreRef.current = false;
-      } finally {
-        if (requestId === activeBooksRequestId.current) {
-          bookLoadingRef.current = false;
-          setBookLoadingMore(false);
-          if (!reset) {
-            if (typeof window !== "undefined") {
-              window.requestAnimationFrame(() => {
-                const container = booksScrollContainerRef.current;
-                if (!container || !bookHasMoreRef.current || bookLoadingRef.current) {
-                  return;
-                }
-                const distanceToBottom =
-                  container.scrollHeight - (container.scrollTop + container.clientHeight);
-                const threshold = Math.max(240, container.clientHeight * 0.35);
-                if (distanceToBottom <= threshold) {
-                  void browsingHook.loadBooksPage();
-                }
-              });
-            }
-          }
-        }
-      }
-    },
-    [bookQuery, bookBrowserDensity]
-  );
-
-  useEffect(() => {
-    const loadBooksImpl = async () => {
-      await browsingHook.loadBooksPage({ reset: true });
-    };
-    void loadBooksImpl();
-  }, [browsingHook]);
-
-  useEffect(() => {
-    return () => {
-      activeBooksAbortController.current?.abort();
-    };
-  }, []);
+  }, [browsingHook.bookId, browsingHook.urlInitialized, searchParams.get("node"), browsingHook.treeData]);
 
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
     activeTreeAbortController.current?.abort();
@@ -5930,18 +5838,6 @@ function ScripturesContent() {
     } finally {
       setTreeReorderingNodeId(null);
     }
-  };
-
-  const toggleNode = (nodeId: number) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
   };
 
   const loadNodeContent = async (nodeId: number, force = false) => {
@@ -7350,11 +7246,11 @@ function ScripturesContent() {
   };
 
   const loadBookShares = async () => {
-    if (!bookId) return;
+    if (!browsingHook.bookId) return;
     setSharesLoading(true);
     setSharesError(null);
     try {
-      const response = await fetch(`/api/books/${bookId}/shares`, {
+      const response = await fetch(`/api/books/${browsingHook.bookId}/shares`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -7377,6 +7273,7 @@ function ScripturesContent() {
       setSharesLoading(false);
     }
   };
+
 
   const buildScripturesBrowsePath = (targetBookId: string, targetNodeId?: number | null) => {
     const params = new URLSearchParams();
