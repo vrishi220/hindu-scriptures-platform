@@ -145,8 +145,8 @@ class TestScripturesPrivateGateContract:
 
         assert "useEffect(() => {\n    if (authEmail) {\n      setPrivateBookGate(false);\n    }\n  }, [authEmail]);" in scriptures_page
 
-    def test_preview_to_browse_handler_closes_preview_and_loads_tree(self):
-        """Browse action from preview should close preview and force open/populate browse state."""
+    def test_preview_to_browse_handler_closes_preview_and_opens_browse_state(self):
+        """Browse action from preview should close preview and force open browse state."""
         repo_root = Path(__file__).resolve().parents[1]
         scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
             encoding="utf-8"
@@ -154,8 +154,9 @@ class TestScripturesPrivateGateContract:
 
         assert "const handleBrowseFromPreview = (targetBookId: string, targetNodeId?: number | null) => {" in scriptures_page
         assert "setShowBookPreview(false);" in scriptures_page
+        assert "setShowBrowseBookModal(true);" in scriptures_page
+        assert 'setMobilePanel("tree");' in scriptures_page
         assert 'syncBrowseUrl(targetBookId, targetNodeId, "push");' in scriptures_page
-        assert "void loadTree(targetBookId, typeof targetNodeId === \"number\" ? targetNodeId : undefined);" in scriptures_page
 
     def test_browse_effect_resets_preview_state(self):
         """browse=1 URL flow should reset preview state to avoid modal overlap/flashing."""
@@ -200,7 +201,12 @@ class TestScripturesPrivateGateContract:
             encoding="utf-8"
         )
 
-        assert 'const handleSelectBook = (value: string, options?: { syncUrl?: boolean }): boolean => {' in scriptures_page
+        assert (
+            "const handleSelectBook = (\n"
+            "    value: string,\n"
+            "    options?: { syncUrl?: boolean; preserveLayout?: boolean }\n"
+            "  ): boolean => {"
+        ) in scriptures_page
         assert 'const didSelect = handleSelectBook(nextBookId, { syncUrl: false });' in scriptures_page
 
 
