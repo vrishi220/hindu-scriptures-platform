@@ -686,6 +686,50 @@ test.describe('Scripture Browser', () => {
     await expect(page.getByText('Node media manager')).toBeVisible();
     await expect(page.locator('video')).toBeVisible();
   });
+
+  test('book PDF export dialog sends advanced settings through the scriptures proxy', async ({ page }) => {
+    let exportRequestBody: Record<string, unknown> | null = null;
+
+    await setupEditableScripturesMocks(page);
+    await page.route('**/api/books/101/export/pdf', async route => {
+      exportRequestBody = JSON.parse(route.request().postData() || '{}') as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/pdf',
+        body: '%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF',
+      });
+    });
+
+    await page.goto('http://localhost:3000/scriptures?book=101&browse=1');
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    await page.getByRole('button', { name: 'Book tree actions' }).click();
+    await page.getByRole('button', { name: 'Download PDF' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Export PDF' })).toBeVisible();
+    await page.getByPlaceholder('All pages (or e.g. 1-3, 5, 8-10)').fill('1-3, 5');
+    await page.getByText('PDF Settings (Advanced)').click();
+    await page.getByLabel('Page Size').selectOption('Letter');
+    await page.getByLabel('Orientation').selectOption('landscape');
+    await page.getByLabel('Page Breaks').selectOption('between_leaf');
+    await page.getByLabel('Horizontal Margin (mm)').fill('99');
+    await page.getByLabel('Include cover page').uncheck();
+    await page.getByRole('button', { name: 'Download PDF' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Export PDF' })).not.toBeVisible();
+    expect(exportRequestBody).not.toBeNull();
+    expect(exportRequestBody).toMatchObject({
+      pdf_settings: {
+        page_break_mode: 'between_leaf',
+        page_size: 'Letter',
+        orientation: 'landscape',
+        margin_mm: 32,
+        include_cover_page: false,
+        page_ranges: '1-3, 5',
+      },
+    });
+  });
 });
 
 test.describe('Authentication', () => {

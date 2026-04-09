@@ -92,6 +92,81 @@ def _register_and_login_as_admin(client):
     return headers
 
 
+def _create_minimal_book_with_exportable_content(client, headers, *, name_prefix: str = "PDF Export"):
+    schema_response = client.post(
+        "/api/content/schemas",
+        json={
+            "name": f"{name_prefix} Schema {uuid4().hex[:8]}",
+            "description": "Schema for book PDF export coverage",
+            "levels": ["Chapter", "Verse"],
+        },
+        headers=headers,
+    )
+    assert schema_response.status_code == status.HTTP_201_CREATED
+    schema_id = schema_response.json()["id"]
+
+    book_response = client.post(
+        "/api/content/books",
+        json={
+            "schema_id": schema_id,
+            "book_name": f"{name_prefix} Book {uuid4().hex[:6]}",
+            "book_code": f"{name_prefix.lower().replace(' ', '-')}-{uuid4().hex[:8]}",
+            "language_primary": "sanskrit",
+            "metadata": {"author": "Regression Suite"},
+        },
+        headers=headers,
+    )
+    assert book_response.status_code == status.HTTP_201_CREATED
+    book_id = book_response.json()["id"]
+
+    chapter_response = client.post(
+        "/api/content/nodes",
+        json={
+            "book_id": book_id,
+            "level_name": "Chapter",
+            "level_order": 1,
+            "sequence_number": "1",
+            "title_english": "Chapter 1",
+            "has_content": False,
+        },
+        headers=headers,
+    )
+    assert chapter_response.status_code == status.HTTP_201_CREATED
+    chapter_id = chapter_response.json()["id"]
+
+    verse_response = client.post(
+        "/api/content/nodes",
+        json={
+            "book_id": book_id,
+            "parent_node_id": chapter_id,
+            "level_name": "Verse",
+            "level_order": 2,
+            "sequence_number": "1",
+            "title_english": "Verse 1",
+            "has_content": True,
+            "content_data": {
+                "basic": {
+                    "sanskrit": "धर्मक्षेत्रे कुरुक्षेत्रे",
+                    "translation": "Dharma field verse",
+                },
+                "translations": {
+                    "english": "Dharma field verse",
+                    "hindi": "धर्मक्षेत्र का श्लोक",
+                },
+            },
+        },
+        headers=headers,
+    )
+    assert verse_response.status_code == status.HTTP_201_CREATED
+
+    return {
+        "schema_id": schema_id,
+        "book_id": book_id,
+        "chapter_id": chapter_id,
+        "verse_id": verse_response.json()["id"],
+    }
+
+
 class TestPasswordResetIntegration:
     def test_register_rejects_weak_password(self, client):
         suffix = uuid4().hex[:8]
@@ -2597,6 +2672,84 @@ class TestDraftBookAndEditionSnapshotIntegration:
         assert export_response_1.status_code == status.HTTP_200_OK
         export_response_2 = client.get(
             f"/api/edition-snapshots/{snapshot_id}/export/pdf",
+            headers=headers,
+        )
+        assert export_response_2.status_code == status.HTTP_200_OK
+
+        hash_1 = hashlib.sha256(export_response_1.content).hexdigest()
+        hash_2 = hashlib.sha256(export_response_2.content).hexdigest()
+        assert hash_1 == hash_2
+
+    def test_book_pdf_export_honors_visibility_and_returns_pdf_headers(self, client):
+        headers_owner = _register_and_login(client)
+        headers_non_owner = _register_and_login(client)
+        book_fixture = _create_minimal_book_with_exportable_content(
+            client,
+            headers_owner,
+            name_prefix="Visibility PDF",
+        )
+        book_id = book_fixture["book_id"]
+
+        private_non_owner_response = client.get(
+            f"/api/books/{book_id}/export/pdf",
+            headers=headers_non_owner,
+        )
+        assert private_non_owner_response.status_code == status.HTTP_404_NOT_FOUND
+
+        owner_export_response = client.get(
+            f"/api/books/{book_id}/export/pdf",
+            headers=headers_owner,
+        )
+        assert owner_export_response.status_code == status.HTTP_200_OK
+        assert owner_export_response.headers.get("content-type", "").startswith("application/pdf")
+        assert "attachment; filename=" in owner_export_response.headers.get("content-disposition", "")
+        assert owner_export_response.headers.get("x-backend-pdf-fonts") is not None
+        assert owner_export_response.content.startswith(b"%PDF")
+
+        publish_response = client.patch(
+            f"/api/content/books/{book_id}",
+            json={"status": "published", "visibility": "public"},
+            headers=headers_owner,
+        )
+        assert publish_response.status_code == status.HTTP_200_OK
+
+        public_non_owner_response = client.get(
+            f"/api/books/{book_id}/export/pdf",
+            headers=headers_non_owner,
+        )
+        assert public_non_owner_response.status_code == status.HTTP_200_OK
+        assert public_non_owner_response.content.startswith(b"%PDF")
+
+    def test_book_pdf_export_with_payload_is_deterministic_for_same_scope(self, client):
+        headers = _register_and_login(client)
+        book_fixture = _create_minimal_book_with_exportable_content(
+            client,
+            headers,
+            name_prefix="Deterministic PDF",
+        )
+        book_id = book_fixture["book_id"]
+        verse_id = book_fixture["verse_id"]
+
+        payload = {
+            "node_id": verse_id,
+            "preview_show_titles": False,
+            "preview_show_labels": False,
+            "preview_transliteration_script": "devanagari",
+            "preview_word_meanings_display_mode": "hide",
+            "selected_translation_languages": ["english"],
+        }
+
+        export_response_1 = client.post(
+            f"/api/books/{book_id}/export/pdf",
+            json=payload,
+            headers=headers,
+        )
+        assert export_response_1.status_code == status.HTTP_200_OK
+        assert export_response_1.content.startswith(b"%PDF")
+
+        export_response_2 = client.post(
+            f"/api/books/{book_id}/export/pdf",
+            json=payload,
             headers=headers,
         )
         assert export_response_2.status_code == status.HTTP_200_OK
