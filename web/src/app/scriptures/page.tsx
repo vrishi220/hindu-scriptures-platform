@@ -5588,7 +5588,9 @@ function ScripturesContent() {
     }
 
     lastAutoSelectNodeId.current = null;
-    if (selectedId) {
+    // Keep the synthetic book-root selection when URL has no node param.
+    // Clearing it hides root-scoped actions like media manager/PDF export.
+    if (selectedId && selectedId !== BOOK_ROOT_NODE_ID) {
       setSelectedId(null);
       setBreadcrumb([]);
       setNodeContent(null);

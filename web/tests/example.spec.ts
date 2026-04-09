@@ -634,6 +634,12 @@ test.describe('Scripture Browser', () => {
     await page.waitForLoadState('domcontentloaded');
 
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    await page
+      .locator('button.w-full.rounded-lg.border')
+      .filter({ hasText: 'Mock Multimedia Book' })
+      .first()
+      .click();
+    await expect(page.getByRole('button', { name: 'Book tree actions' })).toBeVisible();
     await page.getByRole('button', { name: 'Book tree actions' }).click();
     await page.getByRole('button', { name: 'Manage multimedia' }).click();
 
@@ -704,6 +710,12 @@ test.describe('Scripture Browser', () => {
     await page.waitForLoadState('domcontentloaded');
 
     await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    await page
+      .locator('button.w-full.rounded-lg.border')
+      .filter({ hasText: 'Mock Multimedia Book' })
+      .first()
+      .click();
+    await expect(page.getByRole('button', { name: 'Book tree actions' })).toBeVisible();
     await page.getByRole('button', { name: 'Book tree actions' }).click();
     await page.getByRole('button', { name: 'Download PDF' }).click();
 
