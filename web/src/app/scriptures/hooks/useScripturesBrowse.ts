@@ -20,7 +20,7 @@ export interface BookDetails {
   description?: string;
   content_path?: string;
   book_name: string;
-  [key: string]: unknown;
+  [key: string]: any;
 }
 
 export interface TreeNode {
