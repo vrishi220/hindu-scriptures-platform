@@ -1,14 +1,15 @@
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useScripturesBrowse } from '../useScripturesBrowse';
 
 describe('useScripturesBrowse', () => {
   beforeEach(() => {
     // Mock fetch for testing
-    global.fetch = jest.fn();
+    global.fetch = vi.fn() as unknown as typeof fetch;
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('Initial state', () => {
@@ -49,11 +50,11 @@ describe('useScripturesBrowse', () => {
   describe('Book loading', () => {
     it('should load books successfully', async () => {
       const mockBooks = [
-        { id: 1, title: 'Book 1', slug: 'book-1', visibility: 'public' as const },
-        { id: 2, title: 'Book 2', slug: 'book-2', visibility: 'private' as const },
+        { id: 1, book_name: 'Book 1', visibility: 'public' as const },
+        { id: 2, book_name: 'Book 2', visibility: 'private' as const },
       ];
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: async () => mockBooks,
       });
@@ -69,9 +70,9 @@ describe('useScripturesBrowse', () => {
     });
 
     it('should handle book search query', async () => {
-      const mockBooks = [{ id: 1, title: 'Gita', slug: 'gita', visibility: 'public' as const }];
+      const mockBooks = [{ id: 1, book_name: 'Gita', visibility: 'public' as const }];
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: async () => mockBooks,
       });
@@ -93,7 +94,7 @@ describe('useScripturesBrowse', () => {
     });
 
     it('should handle loading errors gracefully', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: false,
         status: 500,
       });
@@ -109,15 +110,18 @@ describe('useScripturesBrowse', () => {
     });
 
     it('should support pagination with loadBooksPage', async () => {
-      const page1 = [
-        { id: 1, title: 'Book 1', slug: 'book-1', visibility: 'public' as const },
-      ];
+      // page1 must fill the full pageSize (density=2 => 20) so bookHasMore stays true
+      const page1 = Array.from({ length: 20 }, (_, i) => ({
+        id: i + 1,
+        book_name: `Book ${i + 1}`,
+        visibility: 'public' as const,
+      }));
       const page2 = [
-        { id: 2, title: 'Book 2', slug: 'book-2', visibility: 'public' as const },
+        { id: 21, book_name: 'Book 21', visibility: 'public' as const },
       ];
 
       // First page
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: async () => page1,
       });
@@ -129,10 +133,10 @@ describe('useScripturesBrowse', () => {
       });
 
       expect(result.current.books).toEqual(page1);
-      expect(result.current.bookHasMore).toBe(false); // page1 has 1 item, default page size is 20
+      expect(result.current.bookHasMore).toBe(true); // page1 fills pageSize, so more may exist
 
       // Second page
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: async () => page2,
       });
@@ -148,18 +152,18 @@ describe('useScripturesBrowse', () => {
   describe('Tree navigation', () => {
     it('should load tree for selected book', async () => {
       const mockTreeData = [
-        { id: 1, text: 'Chapter 1', children: [] },
-        { id: 2, text: 'Chapter 2', children: [] },
+        { id: 1, level_name: 'chapter', children: [] },
+        { id: 2, level_name: 'chapter', children: [] },
       ];
 
       const mockBookDetails = {
         id: 1,
-        title: 'Book 1',
-        slug: 'book-1',
+        book_name: 'Book 1',
         visibility: 'public' as const,
+        schema: { id: 1, levels: ['chapter'] },
       };
 
-      (global.fetch as jest.Mock)
+      (global.fetch as unknown as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce({
           ok: true,
           json: async () => mockBookDetails,
@@ -182,7 +186,7 @@ describe('useScripturesBrowse', () => {
 
     it('should gate private books for anonymous users', async () => {
       const mockBooks = [
-        { id: 1, title: 'Private Book', slug: 'private', visibility: 'private' as const },
+        { id: 1, book_name: 'Private Book', visibility: 'private' as const },
       ];
 
       const { result } = renderHook(() =>
@@ -203,10 +207,10 @@ describe('useScripturesBrowse', () => {
     });
 
     it('should allow authenticated users to load private books', async () => {
-      const mockTreeData = [{ id: 1, text: 'Content', children: [] }];
+      const mockTreeData = [{ id: 1, level_name: 'verse', children: [] }];
 
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      (global.fetch as unknown as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, book_name: 'Book 1', schema: { id: 1, levels: ['verse'] } }) })
         .mockResolvedValueOnce({ ok: true, json: async () => mockTreeData });
 
       const { result } = renderHook(() =>
@@ -221,8 +225,8 @@ describe('useScripturesBrowse', () => {
     });
 
     it('should handle tree loading errors', async () => {
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      (global.fetch as unknown as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 1, book_name: 'Book 1', schema: { id: 1, levels: ['verse'] } }) })
         .mockResolvedValueOnce({
           ok: false,
           status: 500,
@@ -274,10 +278,10 @@ describe('useScripturesBrowse', () => {
   describe('Book refresh', () => {
     it('should reset pagination on refresh', async () => {
       const mockBooks = [
-        { id: 1, title: 'Book 1', slug: 'book-1', visibility: 'public' as const },
+        { id: 1, book_name: 'Book 1', visibility: 'public' as const },
       ];
 
-      (global.fetch as jest.Mock).mockResolvedValue({
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
         json: async () => mockBooks,
       });
@@ -300,12 +304,17 @@ describe('useScripturesBrowse', () => {
 
   describe('Cleanup', () => {
     it('should abort pending requests on unmount', () => {
-      (global.fetch as jest.Mock).mockImplementationOnce(
+      (global.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
         () => new Promise(() => {}) // Never resolves
       );
 
-      const abortSpy = jest.spyOn(AbortController.prototype, 'abort');
-      const { unmount } = renderHook(() => useScripturesBrowse());
+      const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
+      const { result, unmount } = renderHook(() => useScripturesBrowse());
+
+      // Start an in-flight fetch so the AbortController ref is populated
+      act(() => {
+        void result.current.loadBooksPage({ reset: true });
+      });
 
       unmount();
 

@@ -11073,7 +11073,7 @@ function ScripturesContent() {
         void browsingHook.loadBooksPage();
       }
     },
-    [loadBooksPage]
+    [browsingHook]
   );
 
   const handleBooksScroll = useCallback(
@@ -11103,7 +11103,7 @@ function ScripturesContent() {
     return () => {
       window.cancelAnimationFrame(rafId);
     };
-  }, [filteredBooks.length, bookBrowserDensity, loadBooksPage]);
+  }, [filteredBooks.length, bookBrowserDensity, browsingHook]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -11138,7 +11138,7 @@ function ScripturesContent() {
     return () => {
       observer.disconnect();
     };
-  }, [filteredBooks.length, loadBooksPage]);
+  }, [filteredBooks.length, browsingHook]);
 
   const handleSelectBook = (value: string, options?: { syncUrl?: boolean }): boolean => {
     const syncUrl = options?.syncUrl ?? true;
