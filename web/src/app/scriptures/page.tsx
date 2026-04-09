@@ -5537,7 +5537,7 @@ function ScripturesContent() {
     if (lastTreeBookId.current !== bookId) {
       lastTreeBookId.current = bookId;
       lastAutoSelectNodeId.current = nodeId ?? null;
-      loadTree(bookId, nodeId);
+      browsingHook.loadTree(bookId, nodeId);
       return;
     }
 
@@ -5561,7 +5561,7 @@ function ScripturesContent() {
 
       if (lastAutoSelectNodeId.current !== nodeId) {
         lastAutoSelectNodeId.current = nodeId;
-        loadTree(bookId, nodeId);
+        browsingHook.loadTree(bookId, nodeId);
       }
       return;
     }
@@ -5664,7 +5664,7 @@ function ScripturesContent() {
                   container.scrollHeight - (container.scrollTop + container.clientHeight);
                 const threshold = Math.max(240, container.clientHeight * 0.35);
                 if (distanceToBottom <= threshold) {
-                  void loadBooksPage();
+                  void browsingHook.loadBooksPage();
                 }
               });
             }
@@ -5676,11 +5676,11 @@ function ScripturesContent() {
   );
 
   useEffect(() => {
-    const loadBooks = async () => {
-      await loadBooksPage({ reset: true });
+    const loadBooksImpl = async () => {
+      await browsingHook.loadBooksPage({ reset: true });
     };
-    void loadBooks();
-  }, [bookQuery, loadBooksPage]);
+    void loadBooksImpl();
+  }, [browsingHook]);
 
   useEffect(() => {
     return () => {
@@ -7346,7 +7346,7 @@ function ScripturesContent() {
   };
 
   const loadBooksRefresh = async () => {
-    await loadBooksPage({ reset: true });
+    await browsingHook.loadBooksPage({ reset: true });
   };
 
   const loadBookShares = async () => {
@@ -7527,12 +7527,12 @@ function ScripturesContent() {
     setBrowseTransitioningFromPreview(true);
     setShowBookPreview(false);
     setPreviewLinkMessage(null);
-    setPrivateBookGate(false);
+    browsingHook.setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
     syncBrowseUrl(targetBookId, targetNodeId, "push");
-    void loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
+    void browsingHook.loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
   };
 
   const handleClosePrivateBookGate = () => {
@@ -8032,11 +8032,11 @@ function ScripturesContent() {
     const nodeId = nodeParam ? parseInt(nodeParam, 10) : undefined;
     setShowBookPreview(false);
     setPreviewLinkMessage(null);
-    setPrivateBookGate(false);
+    browsingHook.setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
-    void loadTree(bookId, Number.isFinite(nodeId ?? NaN) ? nodeId : undefined);
+    void browsingHook.loadTree(bookId, Number.isFinite(nodeId ?? NaN) ? nodeId : undefined);
   }, [urlInitialized, bookId, canExploreStructure, searchParams]);
 
   useEffect(() => {
@@ -8228,9 +8228,9 @@ function ScripturesContent() {
         });
         // Refresh books list and select the new book
         await loadBooksRefresh();
-        setBookId(newBook.id.toString());
+        browsingHook.setBookId(newBook.id.toString());
         router.push(`/scriptures?book=${newBook.id}`, { scroll: false });
-        loadTree(newBook.id.toString());
+        browsingHook.loadTree(newBook.id.toString());
       } else {
         const errData = await response.json();
         alert(errData.detail || "Failed to create book");
@@ -8391,9 +8391,9 @@ function ScripturesContent() {
           ? finalResult.book_id
           : null;
       if (importedBookId !== null) {
-        setBookId(String(importedBookId));
+        browsingHook.setBookId(String(importedBookId));
         router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
-        loadTree(String(importedBookId));
+        browsingHook.loadTree(String(importedBookId));
       }
 
       clearPersistedImportJobState();
@@ -10462,7 +10462,7 @@ function ScripturesContent() {
           {node.children && node.children.length > 0 && (
             <button
               type="button"
-              onClick={() => toggleNode(node.id)}
+              onClick={() => browsingHook.toggleNode(node.id)}
               className="h-6 w-6 rounded-full border border-black/10 bg-white/80 text-xs text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
               style={{ marginLeft: `${depth * 12}px` }}
             >
@@ -11173,7 +11173,7 @@ function ScripturesContent() {
       const distanceToBottom = container.scrollHeight - (container.scrollTop + container.clientHeight);
       const threshold = Math.max(240, container.clientHeight * 0.35);
       if (distanceToBottom <= threshold) {
-        void loadBooksPage();
+        void browsingHook.loadBooksPage();
       }
     },
     [loadBooksPage]
@@ -11199,7 +11199,7 @@ function ScripturesContent() {
 
       const isScrollable = container.scrollHeight > container.clientHeight + 1;
       if (!isScrollable) {
-        void loadBooksPage();
+        void browsingHook.loadBooksPage();
       }
     });
 
@@ -11228,7 +11228,7 @@ function ScripturesContent() {
         if (!bookHasMoreRef.current || bookLoadingRef.current) {
           return;
         }
-        void loadBooksPage();
+        void browsingHook.loadBooksPage();
       },
       {
         root,
@@ -13190,9 +13190,9 @@ function ScripturesContent() {
                                           method: "DELETE",
                                           credentials: "include",
                                         });
-                                        setSelectedId(null);
+                                        browsingHook.setSelectedId(null);
                                         setNodeContent(null);
-                                        if (bookId) loadTree(bookId);
+                                        if (bookId) browsingHook.loadTree(bookId);
                                       } catch {
                                         alert("Failed to delete");
                                       }
@@ -17537,7 +17537,7 @@ function ScripturesContent() {
           onClearBasket={clearBasket}
           onItemsAdded={() => {
             if (bookId) {
-              void loadTree(bookId);
+              void browsingHook.loadTree(bookId);
             }
           }}
         />
