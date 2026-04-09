@@ -120,6 +120,8 @@ export interface UseScripturesBrowseReturn {
 const BOOK_ROOT_NODE_ID = 1;
 const ANONYMOUS_BOOK_NOT_FOUND_MESSAGE = 'Book not found. Please sign in to access this book.';
 const BOOKS_PAGE_SIZE_LIST = 20;
+const TREE_CACHE_TTL_MS = 90_000;
+const TREE_CACHE_MAX_ENTRIES = 20;
 const BOOKS_PAGE_SIZE_BY_DENSITY: Record<number, number> = {
   1: 15,
   2: 20,
@@ -179,6 +181,52 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
   // Request tracking refs for tree
   const activeTreeAbortController = useRef<AbortController | null>(null);
   const activeTreeRequestId = useRef(0);
+  const treeCacheRef = useRef<
+    Map<
+      string,
+      {
+        cachedAt: number;
+        currentBook: BookDetails | null;
+        treeData: TreeNode[];
+      }
+    >
+  >(new Map());
+
+  const readTreeCache = useCallback((selectedBookId: string) => {
+    const cached = treeCacheRef.current.get(selectedBookId);
+    if (!cached) {
+      return null;
+    }
+    const isFresh = Date.now() - cached.cachedAt <= TREE_CACHE_TTL_MS;
+    if (!isFresh) {
+      treeCacheRef.current.delete(selectedBookId);
+      return null;
+    }
+    treeCacheRef.current.delete(selectedBookId);
+    treeCacheRef.current.set(selectedBookId, cached);
+    return cached;
+  }, []);
+
+  const writeTreeCache = useCallback(
+    (selectedBookId: string, nextCurrentBook: BookDetails | null, nextTreeData: TreeNode[]) => {
+      if (!selectedBookId) {
+        return;
+      }
+      treeCacheRef.current.set(selectedBookId, {
+        cachedAt: Date.now(),
+        currentBook: nextCurrentBook,
+        treeData: nextTreeData,
+      });
+      while (treeCacheRef.current.size > TREE_CACHE_MAX_ENTRIES) {
+        const oldestKey = treeCacheRef.current.keys().next().value;
+        if (!oldestKey) {
+          break;
+        }
+        treeCacheRef.current.delete(oldestKey);
+      }
+    },
+    []
+  );
 
   // Helper: Find path to a node in the tree
   const findPath = (nodes: TreeNode[], targetId: number): TreeNode[] | null => {
@@ -365,6 +413,28 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
         }
       }
 
+      const cachedTree = readTreeCache(selectedBookId);
+      if (cachedTree) {
+        setTreeError(null);
+        setCurrentBook(cachedTree.currentBook);
+        setTreeData(cachedTree.treeData);
+        setExpandedIds(new Set(cachedTree.treeData.map((node) => node.id)));
+        if (autoSelectNodeId) {
+          const path = findPath(cachedTree.treeData, autoSelectNodeId);
+          if (path) {
+            applySelection(autoSelectNodeId, path, true, false);
+          } else {
+            setSelectedId(BOOK_ROOT_NODE_ID);
+            setBreadcrumb([]);
+          }
+        } else {
+          setSelectedId(BOOK_ROOT_NODE_ID);
+          setBreadcrumb([]);
+        }
+        setUrlInitialized(true);
+        return;
+      }
+
       setTreeLoading(true);
       setTreeError(null);
       try {
@@ -378,11 +448,13 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
         });
 
         const [detailsResponse, response] = await Promise.all([detailsPromise, treePromise]);
+        let resolvedBookDetails: BookDetails | null = null;
 
         if (requestId !== activeTreeRequestId.current) return;
         if (detailsResponse.ok) {
           const detailsData = (await detailsResponse.json()) as BookDetails;
           if (requestId !== activeTreeRequestId.current) return;
+          resolvedBookDetails = detailsData;
           setCurrentBook(detailsData);
         } else {
           setCurrentBook(null);
@@ -415,6 +487,7 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
         const data = nestFlatTreeNodes(flatData);
         if (requestId !== activeTreeRequestId.current) return;
         setTreeData(data);
+        writeTreeCache(selectedBookId, resolvedBookDetails, data);
         setExpandedIds(new Set(data.map((node) => node.id)));
 
         // Auto-select node if provided in params
@@ -442,8 +515,15 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
         }
       }
     },
-    [authEmail, books, nestFlatTreeNodes, applySelection]
+    [authEmail, books, nestFlatTreeNodes, applySelection, readTreeCache, writeTreeCache]
   );
+
+  useEffect(() => {
+    if (!bookId || treeData.length === 0) {
+      return;
+    }
+    writeTreeCache(bookId, currentBook, treeData);
+  }, [bookId, currentBook, treeData, writeTreeCache]);
 
   // Toggle tree node expansion
   const toggleNode = useCallback((nodeId: number) => {

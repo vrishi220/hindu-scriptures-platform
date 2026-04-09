@@ -48,6 +48,7 @@ from models.schemas import (
     ContentNodeCreate,
     ContentNodePublic,
     ContentNodeTree,
+    ContentNodeTreeItem,
     ContentNodeUpdate,
     CommentaryAuthorCreate,
     CommentaryAuthorPublic,
@@ -2831,12 +2832,12 @@ def list_nodes(
     return payloads
 
 
-@router.get("/books/{book_id}/tree", response_model=list[ContentNodePublic])
+@router.get("/books/{book_id}/tree", response_model=list[ContentNodeTreeItem])
 def list_book_tree(
     book_id: int,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(require_view_permission),
-) -> list[ContentNodePublic]:
+) -> list[ContentNodeTreeItem]:
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -2904,12 +2905,12 @@ def list_book_tree(
     
     nodes = sorted(nodes, key=lambda n: (n.level_order, natural_sort_key(n)))
     
-    payloads: list[ContentNodePublic] = []
+    payloads: list[ContentNodeTreeItem] = []
     for item in nodes:
         payload = _node_response_payload(item)
         payload["level_order"] = depth_by_id.get(item.id, 1)
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
-        payloads.append(ContentNodePublic.model_validate(payload))
+        payloads.append(ContentNodeTreeItem.model_validate(payload))
     return payloads
 
 

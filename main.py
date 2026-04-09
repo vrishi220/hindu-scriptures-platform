@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books, metadata, templates
@@ -55,6 +56,7 @@ if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
     os.makedirs(MEDIA_DIR, exist_ok=True)
 
 app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.on_event("startup")

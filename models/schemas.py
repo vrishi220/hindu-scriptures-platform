@@ -578,6 +578,26 @@ class ContentNodePublic(ContentNodeBase):
     last_modified_by: int | None = None
 
 
+class ContentNodeTreeItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    book_id: int
+    parent_node_id: int | None = None
+    referenced_node_id: int | None = None
+    level_name: str
+    level_order: int
+    sequence_number: str | None = None
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool = False
+    created_by: int | None = None
+    last_modified_by: int | None = None
+
+
 class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
 

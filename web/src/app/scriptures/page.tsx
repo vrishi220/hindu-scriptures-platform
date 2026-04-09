@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
@@ -601,6 +602,10 @@ const SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY = "scriptures_media_manager_dens
 const ANONYMOUS_BOOK_NOT_FOUND_MESSAGE = "Book not found. Sign in and try again.";
 const BOOK_PREVIEW_PAGE_SIZE = 500;
 const BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX = 240;
+const NODE_CONTENT_CACHE_TTL_MS = 60_000;
+const NODE_CONTENT_CACHE_MAX_ENTRIES = 250;
+const BOOK_PREVIEW_CACHE_TTL_MS = 120_000;
+const BOOK_PREVIEW_CACHE_MAX_ENTRIES = 120;
 const DEFAULT_CONTENT_FIELD_LABELS = {
   sanskrit: "Sanskrit",
   transliteration: "Transliteration",
@@ -2299,6 +2304,9 @@ function ScripturesContent() {
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
   const lastLoadedNodeId = useRef<number | null>(null);
+  const lastBrowseLoadKey = useRef<string | null>(null);
+  const lastIssuedTreeLoadKey = useRef<string | null>(null);
+  const activeTreeRequestKey = useRef<string | null>(null);
   const activeTreeRequestId = useRef(0);
   const activeTreeAbortController = useRef<AbortController | null>(null);
   const activeContentRequestId = useRef(0);
@@ -2324,8 +2332,16 @@ function ScripturesContent() {
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const lastFailedPreviewRequestKey = useRef<string | null>(null);
   const activePreviewRequestKey = useRef<string | null>(null);
+  const previewPrefetchInFlightKeysRef = useRef<Set<string>>(new Set());
+  const nodeContentCacheRef = useRef<Map<number, { cachedAt: number; data: NodeContent }>>(new Map());
+  const bookPreviewCacheRef = useRef<Map<string, { cachedAt: number; artifact: BookPreviewArtifact }>>(new Map());
+  const bookPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
+  const browseBookOverlayRef = useRef<HTMLDivElement | null>(null);
+  const previewCloseInProgressRef = useRef(false);
+  const browseCloseInProgressRef = useRef(false);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
+  const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
   const importPollingRunIdRef = useRef(0);
   const activeImportJobIdRef = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
@@ -5153,8 +5169,14 @@ function ScripturesContent() {
   useEffect(() => {
     if (!preferences) return;
 
-    if (previewSettingsInitialized.current) return;
+    if (previewSettingsInitialized.current) {
+      if (!previewSettingsReady) {
+        setPreviewSettingsReady(true);
+      }
+      return;
+    }
     previewSettingsInitialized.current = true;
+    setPreviewSettingsReady(true);
 
     const previewScript = normalizeTransliterationScript(
       preferences.preview_transliteration_script
@@ -5201,7 +5223,7 @@ function ScripturesContent() {
     );
     setHiddenPreviewLevels(persistedHiddenLevels);
     setAppliedHiddenPreviewLevels(persistedHiddenLevels);
-  }, [preferences]);
+  }, [preferences, previewSettingsReady]);
 
   useEffect(() => {
     if (!bookPreviewLoading) {
@@ -5546,19 +5568,32 @@ function ScripturesContent() {
       // away (including a book that previously errored) triggers a fresh load.
       if (!bookId) {
         lastTreeBookId.current = null;
+        lastIssuedTreeLoadKey.current = null;
         setTreeError(null);
       }
       return;
     }
 
+    const urlBookParam = searchParams.get("book") || "";
     const nodeParam = searchParams.get("node");
     const nodeIdFromUrl = nodeParam ? parseInt(nodeParam, 10) : undefined;
-    const nodeId = pendingSavedNodeId.current ?? nodeIdFromUrl;
+    const nodeId =
+      pendingSavedNodeId.current ?? (urlBookParam === bookId ? nodeIdFromUrl : undefined);
+    const desiredTreeLoadKey = `${bookId}:${typeof nodeId === "number" ? nodeId : "root"}`;
 
     if (lastTreeBookId.current !== bookId) {
       lastTreeBookId.current = bookId;
       lastAutoSelectNodeId.current = nodeId ?? null;
-      browsingHook.loadTree(bookId, nodeId);
+      setTreeData([]);
+      setTreeError(null);
+      setCurrentBook(null);
+      setSelectedId(null);
+      setBreadcrumb([]);
+      setNodeContent(null);
+      if (lastIssuedTreeLoadKey.current !== desiredTreeLoadKey) {
+        lastIssuedTreeLoadKey.current = desiredTreeLoadKey;
+        loadTree(bookId, nodeId);
+      }
       return;
     }
 
@@ -5582,12 +5617,16 @@ function ScripturesContent() {
 
       if (lastAutoSelectNodeId.current !== nodeId) {
         lastAutoSelectNodeId.current = nodeId;
-        browsingHook.loadTree(bookId, nodeId);
+        if (lastIssuedTreeLoadKey.current !== desiredTreeLoadKey) {
+          lastIssuedTreeLoadKey.current = desiredTreeLoadKey;
+          loadTree(bookId, nodeId);
+        }
       }
       return;
     }
 
     lastAutoSelectNodeId.current = null;
+    lastIssuedTreeLoadKey.current = desiredTreeLoadKey;
     // Keep the synthetic book-root selection when URL has no node param.
     // Clearing it hides root-scoped actions like media manager/PDF export.
     if (selectedId && selectedId !== BOOK_ROOT_NODE_ID) {
@@ -5599,9 +5638,15 @@ function ScripturesContent() {
   }, [browsingHook.bookId, browsingHook.urlInitialized, searchParams.get("node"), browsingHook.treeData]);
 
   const loadTree = async (selectedId: string, autoSelectNodeId?: number) => {
+    const requestKey = `${selectedId}:${typeof autoSelectNodeId === "number" ? autoSelectNodeId : "root"}`;
+    if (activeTreeRequestKey.current === requestKey && activeTreeAbortController.current) {
+      return;
+    }
+
     activeTreeAbortController.current?.abort();
     const abortController = new AbortController();
     activeTreeAbortController.current = abortController;
+    activeTreeRequestKey.current = requestKey;
     const requestId = activeTreeRequestId.current + 1;
     activeTreeRequestId.current = requestId;
 
@@ -5693,6 +5738,10 @@ function ScripturesContent() {
         const path = findPath(data, autoSelectNodeId);
         if (path) {
           applySelection(autoSelectNodeId, path, true, false, true);
+        } else {
+          setSelectedId(BOOK_ROOT_NODE_ID);
+          setNodeContent(null);
+          setBreadcrumb([]);
         }
       } else {
         setSelectedId(BOOK_ROOT_NODE_ID);
@@ -5710,6 +5759,7 @@ function ScripturesContent() {
       setUrlInitialized(true);
     } finally {
       if (requestId === activeTreeRequestId.current) {
+        activeTreeRequestKey.current = null;
         setTreeLoading(false);
       }
     }
@@ -5842,9 +5892,47 @@ function ScripturesContent() {
     }
   };
 
+  const readCachedNodeContent = (nodeId: number): NodeContent | null => {
+    const cached = nodeContentCacheRef.current.get(nodeId);
+    if (!cached) {
+      return null;
+    }
+    if (Date.now() - cached.cachedAt > NODE_CONTENT_CACHE_TTL_MS) {
+      nodeContentCacheRef.current.delete(nodeId);
+      return null;
+    }
+    nodeContentCacheRef.current.delete(nodeId);
+    nodeContentCacheRef.current.set(nodeId, cached);
+    return cached.data;
+  };
+
+  const writeCachedNodeContent = (nodeId: number, data: NodeContent) => {
+    nodeContentCacheRef.current.set(nodeId, {
+      cachedAt: Date.now(),
+      data,
+    });
+    while (nodeContentCacheRef.current.size > NODE_CONTENT_CACHE_MAX_ENTRIES) {
+      const oldestKey = nodeContentCacheRef.current.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      nodeContentCacheRef.current.delete(oldestKey);
+    }
+  };
+
   const loadNodeContent = async (nodeId: number, force = false) => {
     if (!force && activeContentNodeId.current === nodeId) return;
     if (!force && !contentLoading && nodeContent?.id === nodeId) return;
+
+    if (!force) {
+      const cachedNodeContent = readCachedNodeContent(nodeId);
+      if (cachedNodeContent) {
+        lastLoadedNodeId.current = nodeId;
+        setNodeContent(cachedNodeContent);
+        setContentLoading(false);
+        return;
+      }
+    }
 
     activeContentAbortController.current?.abort();
     const abortController = new AbortController();
@@ -5865,6 +5953,7 @@ function ScripturesContent() {
         const data = (await response.json()) as NodeContent;
         if (requestId !== activeContentRequestId.current) return;
         setNodeContent(data);
+        writeCachedNodeContent(nodeId, data);
       } else {
         if (requestId !== activeContentRequestId.current) return;
         setNodeContent(null);
@@ -7312,6 +7401,147 @@ function ScripturesContent() {
     return `${scope}:${targetBookId}${requestNodeIdPart}`;
   };
 
+  const buildPreviewArtifactCacheKey = (params: {
+    scope: "book" | "node";
+    bookId: string;
+    nodeId?: number | null;
+    pageOffset: number;
+    pageLimit: number;
+    languageSettings: BookPreviewLanguageSettings;
+    showDetails: boolean;
+    showMedia: boolean;
+    transliterationScript: TransliterationScriptOption;
+    translationLanguages: string[];
+    hiddenLevels: string[];
+    previewWordMeaningsDisplayMode: "inline" | "table" | "hide";
+    sourceLanguage: string;
+  }): string => {
+    const normalizedLanguages = [...params.translationLanguages].map((value) => value.trim().toLowerCase()).sort();
+    const normalizedHiddenLevels = [...params.hiddenLevels].map((value) => value.trim().toLowerCase()).sort();
+    return JSON.stringify({
+      s: params.scope,
+      b: params.bookId,
+      n: params.scope === "node" && typeof params.nodeId === "number" ? params.nodeId : null,
+      o: params.pageOffset,
+      l: params.pageLimit,
+      ls: params.languageSettings,
+      d: params.showDetails,
+      m: params.showMedia,
+      t: params.transliterationScript,
+      tl: normalizedLanguages,
+      hl: normalizedHiddenLevels,
+      wm: params.previewWordMeaningsDisplayMode,
+      sl: params.sourceLanguage,
+    });
+  };
+
+  const readCachedPreviewArtifact = (cacheKey: string): BookPreviewArtifact | null => {
+    const cached = bookPreviewCacheRef.current.get(cacheKey);
+    if (!cached) {
+      return null;
+    }
+    if (Date.now() - cached.cachedAt > BOOK_PREVIEW_CACHE_TTL_MS) {
+      bookPreviewCacheRef.current.delete(cacheKey);
+      return null;
+    }
+    bookPreviewCacheRef.current.delete(cacheKey);
+    bookPreviewCacheRef.current.set(cacheKey, cached);
+    return cached.artifact;
+  };
+
+  const writeCachedPreviewArtifact = (cacheKey: string, artifact: BookPreviewArtifact) => {
+    bookPreviewCacheRef.current.set(cacheKey, {
+      cachedAt: Date.now(),
+      artifact,
+    });
+    while (bookPreviewCacheRef.current.size > BOOK_PREVIEW_CACHE_MAX_ENTRIES) {
+      const oldestKey = bookPreviewCacheRef.current.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+      bookPreviewCacheRef.current.delete(oldestKey);
+    }
+  };
+
+  const updateScripturesUrl = (
+    nextParams: URLSearchParams,
+    historyMode: "push" | "replace" = "replace"
+  ) => {
+    const currentQuery = searchParams.toString();
+    const nextQuery = nextParams.toString();
+    if (nextQuery === currentQuery) {
+      return;
+    }
+
+    const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
+    if (typeof window !== "undefined") {
+      if (historyMode === "push") {
+        window.history.pushState(null, "", nextPath);
+      } else {
+        window.history.replaceState(null, "", nextPath);
+      }
+      return;
+    }
+
+    if (historyMode === "push") {
+      router.push(nextPath, { scroll: false });
+    } else {
+      router.replace(nextPath);
+    }
+  };
+
+  const deferUntilNextPaint = (callback: () => void) => {
+    if (typeof window === "undefined") {
+      callback();
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.setTimeout(callback, 0);
+    });
+  };
+
+  const hideOverlayImmediately = (element: HTMLDivElement | null) => {
+    if (!element) {
+      return;
+    }
+    element.style.pointerEvents = "none";
+    const contentElement = element.firstElementChild as HTMLElement | null;
+    if (contentElement) {
+      contentElement.style.opacity = "0";
+      contentElement.style.visibility = "hidden";
+    }
+  };
+
+  const resetOverlayVisibility = (element: HTMLDivElement | null) => {
+    if (!element) {
+      return;
+    }
+    element.style.pointerEvents = "";
+    const contentElement = element.firstElementChild as HTMLElement | null;
+    if (contentElement) {
+      contentElement.style.opacity = "";
+      contentElement.style.visibility = "";
+    }
+  };
+
+  const hideOverlayRootImmediately = (element: HTMLDivElement | null) => {
+    if (!element) {
+      return;
+    }
+    element.style.opacity = "0";
+    element.style.pointerEvents = "none";
+    element.style.visibility = "hidden";
+  };
+
+  const resetOverlayRootVisibility = (element: HTMLDivElement | null) => {
+    if (!element) {
+      return;
+    }
+    element.style.opacity = "";
+    element.style.pointerEvents = "";
+    element.style.visibility = "";
+  };
+
   const syncPreviewUrl = (
     scope: "book" | "node",
     targetBookId: string,
@@ -7327,17 +7557,7 @@ function ScripturesContent() {
     }
     nextParams.delete("browse");
     nextParams.set("preview", scope);
-    const currentQuery = searchParams.toString();
-    const nextQuery = nextParams.toString();
-    if (nextQuery === currentQuery) {
-      return;
-    }
-    const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
-    if (historyMode === "push") {
-      router.push(nextPath, { scroll: false });
-    } else {
-      router.replace(nextPath);
-    }
+    updateScripturesUrl(nextParams, historyMode);
   };
 
   const syncBrowseUrl = (
@@ -7354,17 +7574,7 @@ function ScripturesContent() {
     }
     nextParams.delete("preview");
     nextParams.set("browse", "1");
-    const currentQuery = searchParams.toString();
-    const nextQuery = nextParams.toString();
-    if (nextQuery === currentQuery) {
-      return;
-    }
-    const nextPath = nextQuery ? `/scriptures?${nextQuery}` : "/scriptures";
-    if (historyMode === "push") {
-      router.push(nextPath, { scroll: false });
-    } else {
-      router.replace(nextPath);
-    }
+    updateScripturesUrl(nextParams, historyMode);
   };
 
   const clearPreviewUrl = () => {
@@ -7373,8 +7583,7 @@ function ScripturesContent() {
       return;
     }
     nextParams.delete("preview");
-    const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+    updateScripturesUrl(nextParams, "replace");
   };
 
   const clearBrowseUrl = () => {
@@ -7383,43 +7592,66 @@ function ScripturesContent() {
       return;
     }
     nextParams.delete("browse");
-    const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+    updateScripturesUrl(nextParams, "replace");
   };
 
   const handleClosePreview = () => {
-    setShowBookPreview(false);
+    if (previewCloseInProgressRef.current) {
+      return;
+    }
+    previewCloseInProgressRef.current = true;
+    hideOverlayImmediately(bookPreviewOverlayRef.current);
     setPreviewLinkMessage(null);
 
     const fromParam = searchParams.get("from");
-    if (fromParam === "home") {
-      router.push("/", { scroll: false });
-      return;
-    }
-    if (fromParam === "search" && searchReturnUrl) {
-      router.push(searchReturnUrl, { scroll: false });
-      return;
-    }
+    deferUntilNextPaint(() => {
+      startTransition(() => {
+        setShowBookPreview(false);
+        previewCloseInProgressRef.current = false;
+        resetOverlayVisibility(bookPreviewOverlayRef.current);
 
-    clearPreviewUrl();
+        if (fromParam === "home") {
+          router.push("/", { scroll: false });
+          return;
+        }
+        if (fromParam === "search" && searchReturnUrl) {
+          router.push(searchReturnUrl, { scroll: false });
+          return;
+        }
+
+        clearPreviewUrl();
+      });
+    });
   };
 
   const handleCloseBrowseModal = () => {
-    setShowBrowseBookModal(false);
-    setShowExploreStructure(false);
-    setMobilePanel("content");
+    if (browseCloseInProgressRef.current) {
+      return;
+    }
+    browseCloseInProgressRef.current = true;
+    hideOverlayRootImmediately(browseBookOverlayRef.current);
 
     const fromParam = searchParams.get("from");
-    if (fromParam === "home") {
-      router.push("/", { scroll: false });
-      return;
-    }
-    if (fromParam === "search" && searchReturnUrl) {
-      router.push(searchReturnUrl, { scroll: false });
-      return;
-    }
+    deferUntilNextPaint(() => {
+      startTransition(() => {
+        setShowBrowseBookModal(false);
+        setShowExploreStructure(false);
+        setMobilePanel("content");
+        browseCloseInProgressRef.current = false;
+        resetOverlayRootVisibility(browseBookOverlayRef.current);
 
-    clearBrowseUrl();
+        if (fromParam === "home") {
+          router.push("/", { scroll: false });
+          return;
+        }
+        if (fromParam === "search" && searchReturnUrl) {
+          router.push(searchReturnUrl, { scroll: false });
+          return;
+        }
+
+        clearBrowseUrl();
+      });
+    });
   };
 
   const handleBrowseFromPreview = (targetBookId: string, targetNodeId?: number | null) => {
@@ -7431,7 +7663,6 @@ function ScripturesContent() {
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
     syncBrowseUrl(targetBookId, targetNodeId, "push");
-    void loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
   };
 
   const handleClosePrivateBookGate = () => {
@@ -7462,8 +7693,7 @@ function ScripturesContent() {
     nextParams.delete("node");
     nextParams.delete("from");
     nextParams.delete("searchContext");
-    const nextQuery = nextParams.toString();
-    router.replace(nextQuery ? `/scriptures?${nextQuery}` : "/scriptures");
+    updateScripturesUrl(nextParams, "replace");
   };
 
   const handleCopyPreviewPath = async (relativePath: string) => {
@@ -7529,6 +7759,53 @@ function ScripturesContent() {
       nextPreviewTranslationLanguages,
       sourceLanguage
     );
+    const pageLimit = scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000;
+    const previewArtifactCacheKey = append
+      ? null
+      : buildPreviewArtifactCacheKey({
+          scope,
+          bookId: previewBookId,
+          nodeId: previewNodeId,
+          pageOffset,
+          pageLimit,
+          languageSettings: nextLanguageSettings,
+          showDetails: nextShowPreviewDetails,
+          showMedia: nextShowPreviewMedia,
+          transliterationScript: nextPreviewTransliterationScript,
+          translationLanguages: resolvedPreviewTranslationLanguages,
+          hiddenLevels: Array.from(nextHiddenPreviewLevels),
+          previewWordMeaningsDisplayMode: nextPreviewWordMeaningsDisplayMode,
+          sourceLanguage: translationLanguageToCode(preferences?.source_language),
+        });
+
+    if (!append && previewArtifactCacheKey) {
+      const cachedArtifact = readCachedPreviewArtifact(previewArtifactCacheKey);
+      if (cachedArtifact) {
+        setBookPreviewLoadingScope(scope);
+        setBookPreviewError(null);
+        setBookPreviewArtifact(cachedArtifact);
+        setAppliedBookPreviewLanguageSettings(nextLanguageSettings);
+        setAppliedShowPreviewLabels(nextShowPreviewLabels);
+        setAppliedShowPreviewLevelNumbers(nextShowPreviewLevelNumbers);
+        setAppliedShowPreviewDetails(nextShowPreviewDetails);
+        setAppliedShowPreviewTitles(nextShowPreviewTitles);
+        setAppliedShowPreviewMedia(nextShowPreviewMedia);
+        setAppliedPreviewWordMeaningsDisplayMode(nextPreviewWordMeaningsDisplayMode);
+        setAppliedPreviewFontSizePercent(previewFontSizePercent);
+        setAppliedBookPreviewTransliterationScript(nextPreviewTransliterationScript);
+        setAppliedPreviewTranslationLanguages(resolvedPreviewTranslationLanguages);
+        setAppliedHiddenPreviewLevels(nextHiddenPreviewLevels);
+        setAppliedPreviewVariantAuthorSlugs(previewVariantAuthorSlugs);
+        lastHandledPreviewRequestKey.current = requestKey;
+        if (lastFailedPreviewRequestKey.current === requestKey) {
+          lastFailedPreviewRequestKey.current = null;
+        }
+        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
+        setShowBookPreview(true);
+        activePreviewRequestKey.current = null;
+        return;
+      }
+    }
 
     setBookPreviewLoadingScope(scope);
     setBookPreviewError(null);
@@ -7576,7 +7853,7 @@ function ScripturesContent() {
           text_order: ["sanskrit", "transliteration", "english", "text"],
         },
         offset: pageOffset,
-        limit: scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000,
+        limit: pageLimit,
       };
 
       const requestPreviewArtifact = async () => {
@@ -7667,6 +7944,10 @@ function ScripturesContent() {
         has_more: Boolean(artifact.has_more),
       };
 
+      if (!append && previewArtifactCacheKey) {
+        writeCachedPreviewArtifact(previewArtifactCacheKey, normalizedArtifact);
+      }
+
       if (append) {
         setBookPreviewArtifact((prev) => {
           if (!prev) {
@@ -7708,10 +7989,36 @@ function ScripturesContent() {
           ),
           preview_hidden_levels: serializeHiddenPreviewLevels(nextHiddenPreviewLevels),
         });
-        setPreferences(nextPreferences);
-        const saveSucceeded = await savePreferences(nextPreferences);
-        if (!saveSucceeded) {
-          setBookPreviewError("Failed to save preview settings. Changes not persisted.");
+        const currentPreferences = normalizePreferences(
+          preferences || DEFAULT_USER_PREFERENCES
+        );
+        const shouldPersistPreviewPreferences =
+          currentPreferences.preview_show_titles !== nextPreferences.preview_show_titles ||
+          currentPreferences.preview_show_labels !== nextPreferences.preview_show_labels ||
+          currentPreferences.preview_show_level_numbers !==
+            nextPreferences.preview_show_level_numbers ||
+          currentPreferences.preview_show_details !== nextPreferences.preview_show_details ||
+          currentPreferences.preview_show_media !== nextPreferences.preview_show_media ||
+          currentPreferences.preview_show_sanskrit !== nextPreferences.preview_show_sanskrit ||
+          currentPreferences.preview_show_transliteration !==
+            nextPreferences.preview_show_transliteration ||
+          currentPreferences.preview_show_english !== nextPreferences.preview_show_english ||
+          currentPreferences.preview_show_commentary !==
+            nextPreferences.preview_show_commentary ||
+          currentPreferences.preview_transliteration_script !==
+            nextPreferences.preview_transliteration_script ||
+          currentPreferences.preview_word_meanings_display_mode !==
+            nextPreferences.preview_word_meanings_display_mode ||
+          currentPreferences.preview_translation_languages !==
+            nextPreferences.preview_translation_languages ||
+          currentPreferences.preview_hidden_levels !== nextPreferences.preview_hidden_levels;
+
+        if (shouldPersistPreviewPreferences) {
+          setPreferences(nextPreferences);
+          const saveSucceeded = await savePreferences(nextPreferences);
+          if (!saveSucceeded) {
+            setBookPreviewError("Failed to save preview settings. Changes not persisted.");
+          }
         }
       }
 
@@ -7768,6 +8075,161 @@ function ScripturesContent() {
       }
     }
   };
+
+  const prefetchNodePreviewArtifact = useCallback(
+    async (targetNodeId: number) => {
+      if (!bookId || !Number.isFinite(targetNodeId)) {
+        return;
+      }
+
+      const resolvedPreviewTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+        [...previewTranslationLanguages],
+        sourceLanguage
+      );
+
+      const previewArtifactCacheKey = buildPreviewArtifactCacheKey({
+        scope: "node",
+        bookId,
+        nodeId: targetNodeId,
+        pageOffset: 0,
+        pageLimit: 5000,
+        languageSettings: { ...bookPreviewLanguageSettings },
+        showDetails: showPreviewDetails,
+        showMedia: showPreviewMedia,
+        transliterationScript: previewTransliterationScript,
+        translationLanguages: resolvedPreviewTranslationLanguages,
+        hiddenLevels: Array.from(hiddenPreviewLevels),
+        previewWordMeaningsDisplayMode,
+        sourceLanguage: translationLanguageToCode(preferences?.source_language),
+      });
+
+      if (readCachedPreviewArtifact(previewArtifactCacheKey)) {
+        return;
+      }
+
+      if (previewPrefetchInFlightKeysRef.current.has(previewArtifactCacheKey)) {
+        return;
+      }
+      previewPrefetchInFlightKeysRef.current.add(previewArtifactCacheKey);
+
+      try {
+        const requestBody = {
+          node_id: targetNodeId,
+          metadata_bindings: {
+            global: {
+              word_meanings: {
+                source: {
+                  source_display_mode: bookPreviewLanguageSettings.show_sanskrit
+                    ? "script"
+                    : "transliteration",
+                  preferred_transliteration_scheme:
+                    previewTransliterationScript === "harvard_kyoto"
+                      ? "hk"
+                      : previewTransliterationScript === "itrans"
+                        ? "itrans"
+                        : "iast",
+                  allow_runtime_transliteration_generation: true,
+                },
+                meanings: {
+                  meaning_language: translationLanguageToCode(preferences?.source_language),
+                  fallback_order: ["user_preference", "en", "first_available"],
+                },
+                rendering: {
+                  show_language_badge_when_fallback_used: true,
+                },
+              },
+              translation_language: translationLanguageToCode(
+                resolvedPreviewTranslationLanguages[0] || preferences?.source_language
+              ),
+            },
+          },
+          render_settings: {
+            ...bookPreviewLanguageSettings,
+            show_metadata: showPreviewDetails,
+            show_media: showPreviewMedia,
+            text_order: ["sanskrit", "transliteration", "english", "text"],
+          },
+          offset: 0,
+          limit: 5000,
+        };
+
+        const response = await fetch(`/api/books/${bookId}/preview/render`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | BookPreviewArtifact
+          | { detail?: string }
+          | null;
+
+        if (!response.ok || !payload) {
+          return;
+        }
+
+        const artifact = payload as BookPreviewArtifact;
+        const legacyBody = (artifact as BookPreviewArtifact & { body?: unknown }).body;
+        const normalizedBody = Array.isArray(artifact.sections?.body)
+          ? artifact.sections.body
+          : Array.isArray(legacyBody)
+            ? legacyBody
+            : [];
+        const normalizedArtifact: BookPreviewArtifact = {
+          ...artifact,
+          section_order:
+            Array.isArray(artifact.section_order) && artifact.section_order.length > 0
+              ? artifact.section_order
+              : ["body"],
+          sections: {
+            body: normalizedBody,
+          },
+          offset: typeof artifact.offset === "number" ? artifact.offset : 0,
+          limit: typeof artifact.limit === "number" ? artifact.limit : 5000,
+          total_blocks:
+            typeof artifact.total_blocks === "number"
+              ? artifact.total_blocks
+              : normalizedBody.length,
+          has_more: Boolean(artifact.has_more),
+        };
+
+        writeCachedPreviewArtifact(previewArtifactCacheKey, normalizedArtifact);
+      } catch {
+        // Ignore prefetch failures; user-triggered navigation will retry through normal flow.
+      } finally {
+        previewPrefetchInFlightKeysRef.current.delete(previewArtifactCacheKey);
+      }
+    },
+    [
+      bookId,
+      previewTranslationLanguages,
+      sourceLanguage,
+      bookPreviewLanguageSettings,
+      showPreviewDetails,
+      showPreviewMedia,
+      previewTransliterationScript,
+      hiddenPreviewLevels,
+      previewWordMeaningsDisplayMode,
+      preferences?.source_language,
+      readCachedPreviewArtifact,
+      writeCachedPreviewArtifact,
+    ]
+  );
+
+  useEffect(() => {
+    if (!showBookPreview || !bookPreviewArtifact || bookPreviewArtifact.preview_scope !== "node") {
+      return;
+    }
+
+    const { previousSiblingId, nextSiblingId } = getPreviewSiblingNavigation(bookPreviewArtifact);
+    const prefetchTargets = [previousSiblingId, nextSiblingId].filter(
+      (id): id is number => typeof id === "number"
+    );
+
+    prefetchTargets.forEach((targetNodeId) => {
+      void prefetchNodePreviewArtifact(targetNodeId);
+    });
+  }, [bookPreviewArtifact, showBookPreview, getPreviewSiblingNavigation, prefetchNodePreviewArtifact]);
 
   const handlePreviewSiblingNavigation = async (direction: "previous" | "next") => {
     if (!bookPreviewArtifact || bookPreviewArtifact.preview_scope !== "node") {
@@ -7885,7 +8347,7 @@ function ScripturesContent() {
       return;
     }
     // Avoid rendering preview with default settings before persisted preview preferences hydrate.
-    if (!previewSettingsInitialized.current) {
+    if (!previewSettingsReady) {
       return;
     }
     if (showBookPreview || bookPreviewLoading) {
@@ -7917,11 +8379,12 @@ function ScripturesContent() {
 
     void handlePreviewBook(previewScope, bookId, "replace");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlInitialized, bookId, selectedId, searchParams, showBookPreview, bookPreviewLoading]);
+  }, [urlInitialized, bookId, selectedId, searchParams, showBookPreview, bookPreviewLoading, previewSettingsReady]);
 
   useEffect(() => {
     const browseParam = searchParams.get("browse");
     if (browseParam !== "1") {
+      lastBrowseLoadKey.current = null;
       return;
     }
     if (!urlInitialized || !bookId || !canExploreStructure) {
@@ -7929,14 +8392,39 @@ function ScripturesContent() {
     }
     const nodeParam = searchParams.get("node");
     const nodeId = nodeParam ? parseInt(nodeParam, 10) : undefined;
+    const selectedBookId = String(bookId);
+    const shouldResetBrowseTree = currentBook?.id?.toString() !== selectedBookId;
+    if (shouldResetBrowseTree) {
+      setTreeData([]);
+      setTreeError(null);
+      setCurrentBook(null);
+      setExpandedIds(new Set());
+      setSelectedId(null);
+      setBreadcrumb([]);
+      setTreeLoading(true);
+    }
     setShowBookPreview(false);
     setPreviewLinkMessage(null);
     browsingHook.setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
-    void browsingHook.loadTree(bookId, Number.isFinite(nodeId ?? NaN) ? nodeId : undefined);
-  }, [urlInitialized, bookId, canExploreStructure, searchParams]);
+    const resolvedNodeId = Number.isFinite(nodeId ?? NaN) ? nodeId : undefined;
+    lastBrowseLoadKey.current = `${selectedBookId}:${typeof resolvedNodeId === "number" ? resolvedNodeId : "root"}`;
+  }, [
+    urlInitialized,
+    bookId,
+    canExploreStructure,
+    searchParams,
+    currentBook?.id,
+    setTreeData,
+    setTreeError,
+    setCurrentBook,
+    setExpandedIds,
+    setSelectedId,
+    setBreadcrumb,
+    setTreeLoading,
+  ]);
 
   useEffect(() => {
     if (!showBrowseBookModal || !isExploreVisible) {
@@ -8129,7 +8617,7 @@ function ScripturesContent() {
         await loadBooksRefresh();
         browsingHook.setBookId(newBook.id.toString());
         router.push(`/scriptures?book=${newBook.id}`, { scroll: false });
-        browsingHook.loadTree(newBook.id.toString());
+        loadTree(newBook.id.toString());
       } else {
         const errData = await response.json();
         alert(errData.detail || "Failed to create book");
@@ -8292,7 +8780,7 @@ function ScripturesContent() {
       if (importedBookId !== null) {
         browsingHook.setBookId(String(importedBookId));
         router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
-        browsingHook.loadTree(String(importedBookId));
+        loadTree(String(importedBookId));
       }
 
       clearPersistedImportJobState();
@@ -11142,8 +11630,12 @@ function ScripturesContent() {
     };
   }, [filteredBooks.length, browsingHook]);
 
-  const handleSelectBook = (value: string, options?: { syncUrl?: boolean }): boolean => {
+  const handleSelectBook = (
+    value: string,
+    options?: { syncUrl?: boolean; preserveLayout?: boolean }
+  ): boolean => {
     const syncUrl = options?.syncUrl ?? true;
+    const preserveLayout = options?.preserveLayout ?? false;
     if (value !== bookId && hasUnsavedInlineChanges()) {
       const shouldDiscard = window.confirm(
         "You have unsaved changes in Edit details. Discard changes and switch books?"
@@ -11154,8 +11646,10 @@ function ScripturesContent() {
     }
 
     if (value && value === bookId) {
-      setShowExploreStructure(false);
-      setMobilePanel("content");
+      if (!preserveLayout) {
+        setShowExploreStructure(false);
+        setMobilePanel("content");
+      }
       if (selectedId === null && treeData.length > 0) {
         const firstLeafId = findFirstLeafId(treeData);
         if (firstLeafId) {
@@ -11165,7 +11659,6 @@ function ScripturesContent() {
       return true;
     }
 
-    setBookId(value);
     if (syncUrl) {
       if (value) {
         router.push(`/scriptures?book=${value}`, { scroll: false });
@@ -11176,8 +11669,10 @@ function ScripturesContent() {
     setSelectedId(null);
     setBreadcrumb([]);
     setNodeContent(null);
-    setShowExploreStructure(false);
-    setMobilePanel("content");
+    if (!preserveLayout) {
+      setShowExploreStructure(false);
+      setMobilePanel("content");
+    }
     return true;
   };
 
@@ -11220,19 +11715,38 @@ function ScripturesContent() {
 
   const handlePreviewBookFromRow = async (book: BookOption) => {
     const nextBookId = book.id.toString();
-    const didSelect = handleSelectBook(nextBookId, { syncUrl: false });
+    const didSelect = handleSelectBook(nextBookId, { syncUrl: false, preserveLayout: true });
     if (!didSelect) return;
     await handlePreviewBook("book", nextBookId, "push");
   };
 
   const handleBrowseBookFromRow = (book: BookOption) => {
     const nextBookId = book.id.toString();
+    const switchingToDifferentBook = nextBookId !== bookId;
     const didSelect = handleSelectBook(nextBookId, { syncUrl: false });
     if (!didSelect) return;
+    if (switchingToDifferentBook) {
+      setTreeData([]);
+      setTreeError(null);
+      setCurrentBook(null);
+      setExpandedIds(new Set());
+      setSelectedId(null);
+      setBreadcrumb([]);
+      setTreeLoading(true);
+    }
     syncBrowseUrl(nextBookId, undefined, "push");
     setShowExploreStructure(true);
     setMobilePanel("tree");
     setShowBrowseBookModal(true);
+  };
+
+  const handleBrowseBookFromRowMenuAction = (book: BookOption) => {
+    flushSync(() => {
+      setOpenBookRowActionsId(null);
+    });
+    deferUntilNextPaint(() => {
+      handleBrowseBookFromRow(book);
+    });
   };
 
   const handleToggleBookVisibility = async (book: BookOption) => {
@@ -11879,8 +12393,7 @@ function ScripturesContent() {
                                         <button
                                           type="button"
                                           onClick={() => {
-                                            setOpenBookRowActionsId(null);
-                                            handleBrowseBookFromRow(book);
+                                            handleBrowseBookFromRowMenuAction(book);
                                           }}
                                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                         >
@@ -12054,8 +12567,7 @@ function ScripturesContent() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setOpenBookRowActionsId(null);
-                                          handleBrowseBookFromRow(book);
+                                          handleBrowseBookFromRowMenuAction(book);
                                         }}
                                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                       >
@@ -12210,7 +12722,10 @@ function ScripturesContent() {
           )}
 
           {showBrowseBookModal && bookId && isExploreVisible && (
-          <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
+          <div
+            ref={browseBookOverlayRef}
+            className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
+          >
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
               <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div>
@@ -13091,7 +13606,7 @@ function ScripturesContent() {
                                         });
                                         browsingHook.setSelectedId(null);
                                         setNodeContent(null);
-                                        if (bookId) browsingHook.loadTree(bookId);
+                                        if (bookId) loadTree(bookId);
                                       } catch {
                                         alert("Failed to delete");
                                       }
@@ -15759,7 +16274,10 @@ function ScripturesContent() {
         )}
 
         {showBookPreview && bookPreviewArtifact && (
-          <div className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]">
+          <div
+            ref={bookPreviewOverlayRef}
+            className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
+          >
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
               <div className="flex flex-col gap-2 border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-4 sm:py-2.5">
                 <div className="flex-1">
@@ -17436,7 +17954,7 @@ function ScripturesContent() {
           onClearBasket={clearBasket}
           onItemsAdded={() => {
             if (bookId) {
-              void browsingHook.loadTree(bookId);
+              void loadTree(bookId);
             }
           }}
         />

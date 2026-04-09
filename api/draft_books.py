@@ -3,9 +3,11 @@ import textwrap
 import hashlib
 import json
 import re
+from collections import OrderedDict
 from io import BytesIO
 from datetime import datetime, timezone
-from time import perf_counter
+from threading import Lock
+from time import monotonic, perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from liquid import Template
@@ -121,6 +123,18 @@ _METADATA_TEMPLATE_KEY_FALLBACK_FIELDS = (
 )
 
 _CUSTOM_TEMPLATE_KEY_PATTERN = "custom.template.{template_id}.v{version}.content_item.v1"
+_SYSTEM_TEMPLATE_CACHE_TTL_SECONDS = 300
+_PREVIEW_RENDER_CACHE_TTL_SECONDS = 90
+_PREVIEW_RENDER_CACHE_MAX_ENTRIES = 160
+
+_SYSTEM_TEMPLATE_SOURCES_CACHE: dict[str, object] = {
+    "expires_at": 0.0,
+    "sources": {},
+}
+_SYSTEM_TEMPLATE_SOURCES_CACHE_LOCK = Lock()
+
+_PREVIEW_RENDER_CACHE: OrderedDict[str, tuple[float, dict]] = OrderedDict()
+_PREVIEW_RENDER_CACHE_LOCK = Lock()
 
 
 def _metadata_liquid_template(fields: list[str]) -> str:
@@ -885,7 +899,60 @@ def _can_use_template_for_owner(template: RenderTemplate, owner_id: int) -> bool
     return bool(template.visibility == "published" and template.is_active)
 
 
+def _preview_payload_cache_fragment(payload: BookPreviewRenderRequest) -> str:
+    raw = {
+        "node_id": payload.node_id,
+        "offset": payload.offset,
+        "limit": payload.limit,
+        "render_settings": payload.render_settings,
+        "metadata_bindings": payload.metadata_bindings,
+        "session_template_bindings": payload.session_template_bindings,
+    }
+    encoded = json.dumps(raw, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _preview_render_cache_key(
+    book_id: int,
+    current_user_id: int | None,
+    payload: BookPreviewRenderRequest,
+) -> str:
+    user_part = current_user_id if isinstance(current_user_id, int) else "anon"
+    payload_hash = _preview_payload_cache_fragment(payload)
+    return f"book:{book_id}:user:{user_part}:payload:{payload_hash}"
+
+
+def _get_cached_preview_render(cache_key: str) -> dict | None:
+    now = monotonic()
+    with _PREVIEW_RENDER_CACHE_LOCK:
+        cached = _PREVIEW_RENDER_CACHE.get(cache_key)
+        if cached is None:
+            return None
+        expires_at, payload = cached
+        if expires_at <= now:
+            _PREVIEW_RENDER_CACHE.pop(cache_key, None)
+            return None
+        _PREVIEW_RENDER_CACHE.move_to_end(cache_key)
+        return payload
+
+
+def _set_cached_preview_render(cache_key: str, payload: dict) -> None:
+    expires_at = monotonic() + _PREVIEW_RENDER_CACHE_TTL_SECONDS
+    with _PREVIEW_RENDER_CACHE_LOCK:
+        _PREVIEW_RENDER_CACHE[cache_key] = (expires_at, payload)
+        _PREVIEW_RENDER_CACHE.move_to_end(cache_key)
+        while len(_PREVIEW_RENDER_CACHE) > _PREVIEW_RENDER_CACHE_MAX_ENTRIES:
+            _PREVIEW_RENDER_CACHE.popitem(last=False)
+
+
 def _load_system_template_sources(db: Session) -> dict[str, str]:
+    now = monotonic()
+    with _SYSTEM_TEMPLATE_SOURCES_CACHE_LOCK:
+        expires_at = float(_SYSTEM_TEMPLATE_SOURCES_CACHE.get("expires_at", 0.0) or 0.0)
+        cached_sources = _SYSTEM_TEMPLATE_SOURCES_CACHE.get("sources")
+        if expires_at > now and isinstance(cached_sources, dict):
+            return dict(cached_sources)
+
     rows = (
         db.query(RenderTemplate)
         .filter(
@@ -902,6 +969,11 @@ def _load_system_template_sources(db: Session) -> dict[str, str]:
         if not system_key or not liquid_template.strip():
             continue
         sources[system_key] = liquid_template
+
+    with _SYSTEM_TEMPLATE_SOURCES_CACHE_LOCK:
+        _SYSTEM_TEMPLATE_SOURCES_CACHE["sources"] = dict(sources)
+        _SYSTEM_TEMPLATE_SOURCES_CACHE["expires_at"] = now + _SYSTEM_TEMPLATE_CACHE_TTL_SECONDS
+
     return sources
 
 
@@ -3968,6 +4040,23 @@ def preview_book_render(
     if not _book_is_visible_to_user(db, book, current_user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
 
+    cache_key = _preview_render_cache_key(book.id, current_user_id, payload)
+    cached_preview_payload = _get_cached_preview_render(cache_key)
+    if cached_preview_payload is not None:
+        logger.info(
+            "preview_book_render_timing %s",
+            {
+                "book_id": book.id,
+                "scope": "cache",
+                "root_node_id": payload.node_id,
+                "section_render_ms": 0.0,
+                "book_template_ms": 0.0,
+                "total_ms": round((perf_counter() - endpoint_start) * 1000, 2),
+                "body_blocks": len(cached_preview_payload.get("sections", {}).get("body", [])),
+            },
+        )
+        return BookPreviewRenderArtifactPublic.model_validate(cached_preview_payload)
+
     root_node: ContentNode | None = None
     total_nodes = 0
     page_offset = max(payload.offset, 0)
@@ -4102,7 +4191,14 @@ def preview_book_render(
         },
     )
 
-    return BookPreviewRenderArtifactPublic(
+    # Strip server-internal fields not needed by the browser — resolved_template_source
+    # can be kilobytes per block (repeated Liquid source) and resolved_metadata is used
+    # only during rendering. Clearing them before serialization cuts response size ~70-90%.
+    for block in sections.body:
+        block.resolved_template_source = None
+        block.resolved_metadata = {}
+
+    response_payload = BookPreviewRenderArtifactPublic(
         book_id=book.id,
         book_name=book.book_name,
         preview_scope="node" if root_node else "book",
@@ -4121,6 +4217,8 @@ def preview_book_render(
         total_blocks=total_nodes,
         has_more=(page_offset + len(paged_source_nodes)) < total_nodes,
     )
+    _set_cached_preview_render(cache_key, response_payload.model_dump())
+    return response_payload
 
 
 @router.get("/edition-snapshots/{snapshot_id}/export/pdf")
