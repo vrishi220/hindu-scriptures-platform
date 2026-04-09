@@ -14839,7 +14839,7 @@ function ScripturesContent() {
                         <MoreVertical size={16} />
                       </button>
                       {bookMediaActionsOpen && (
-                        <div className="absolute right-0 top-10 z-50 mt-1 w-[calc(100vw-2rem)] max-w-[260px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute right-0 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
                           <button
                             type="button"
                             onClick={() => {
@@ -15478,7 +15478,7 @@ function ScripturesContent() {
                         <MoreVertical size={16} />
                       </button>
                       {nodeMediaActionsOpen && (
-                        <div className="absolute right-0 top-10 z-50 mt-1 w-[calc(100vw-2rem)] max-w-[250px] rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute right-0 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
                           <button
                             type="button"
                             onClick={() => {
