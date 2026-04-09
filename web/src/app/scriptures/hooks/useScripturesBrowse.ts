@@ -1,29 +1,59 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 
 // Types
 export interface BookOption {
   id: number;
-  title: string;
-  slug: string;
-  visibility: 'public' | 'private';
-  metadata?: Record<string, unknown>;
-  metadata_json?: Record<string, unknown>;
+  book_name: string;
+  title?: string;
+  slug?: string;
+  status?: string;
+  visibility?: 'private' | 'public' | string;
+  metadata?: Record<string, unknown> | null;
+  metadata_json?: Record<string, unknown> | null;
+  schema?: {
+    id: number;
+    name?: string;
+    levels: string[];
+    level_template_defaults?: Record<string, number | string | null>;
+  } | null;
+  variant_authors?: Record<string, string>;
+  level_name_overrides?: Record<string, string> | null;
+  [key: string]: unknown;
 }
 
 export interface BookDetails {
   id: number;
-  title: string;
-  slug: string;
-  visibility: 'public' | 'private';
-  description?: string;
-  content_path?: string;
+  book_name: string;
+  title?: string;
+  slug?: string;
+  status?: string;
+  visibility?: 'private' | 'public' | string;
+  metadata?: Record<string, unknown> | null;
+  metadata_json?: Record<string, unknown> | null;
+  schema: {
+    id: number;
+    name?: string;
+    levels: string[];
+    level_template_defaults?: Record<string, number | string | null>;
+  };
+  variant_authors?: Record<string, string>;
+  level_name_overrides?: Record<string, string> | null;
+  [key: string]: unknown;
 }
 
 export interface TreeNode {
   id: number;
-  text: string;
+  parent_node_id?: number | null;
+  level_name: string;
+  level_order?: number | null;
+  sequence_number?: number | string | null;
+  title_english?: string | null;
+  title_hindi?: string | null;
+  title_sanskrit?: string | null;
+  title_transliteration?: string | null;
+  has_content?: boolean | null;
   children?: TreeNode[];
 }
 
@@ -56,7 +86,7 @@ export interface UseScripturesBrowseReturn {
   treeReorderModeNodeId: number | null;
   privateBookGate: boolean;
   expandedIds: Set<number>;
-  selectedId: number | string | null;
+  selectedId: number | null;
   urlInitialized: boolean;
   breadcrumb: TreeNode[];
 
@@ -71,10 +101,10 @@ export interface UseScripturesBrowseReturn {
   setTreeLoading: (loading: boolean) => void;
   setTreeError: (error: string | null) => void;
   setTreeReorderingNodeId: (id: number | null) => void;
-  setTreeReorderModeNodeId: (id: number | null) => void;
+  setTreeReorderModeNodeId: (id: SetStateAction<number | null>) => void;
   setPrivateBookGate: (gate: boolean) => void;
   setExpandedIds: (ids: Set<number> | ((prev: Set<number>) => Set<number>)) => void;
-  setSelectedId: (id: number | string | null) => void;
+  setSelectedId: (id: number | null) => void;
   setUrlInitialized: (initialized: boolean) => void;
   setBreadcrumb: (breadcrumb: TreeNode[]) => void;
 
@@ -135,7 +165,7 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
 
   const [privateBookGate, setPrivateBookGate] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [selectedId, setSelectedId] = useState<number | string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [urlInitialized, setUrlInitialized] = useState(false);
   const [breadcrumb, setBreadcrumb] = useState<TreeNode[]>([]);
 
