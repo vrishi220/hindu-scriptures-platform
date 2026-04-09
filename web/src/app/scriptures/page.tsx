@@ -33,6 +33,7 @@ import InlineClearButton from "../../components/InlineClearButton";
 import NodeLevelTemplateSection from "./components/NodeLevelTemplateSection";
 import PropertiesPanel from "./components/PropertiesPanel";
 import WordMeaningsEditor from "../../components/WordMeaningsEditor";
+import { useScripturesBrowse } from "./hooks/useScripturesBrowse";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -2574,6 +2575,50 @@ function ScripturesContent() {
   const nodeMediaActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const booksScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const booksLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Initialize browse hook with all necessary config
+  // Note: Keeping old state declarations for now during transition phase
+  // This allows parallel testing before full migration
+  const browsingHook = useScripturesBrowse({
+    bookBrowserDensity,
+    authEmail,
+    booksScrollContainerRef,
+    nestFlatTreeNodes: (nodes: any) => {
+      // Temporarily using any to avoid type conflicts during integration
+      // TODO: Align TreeNode types between hook and page component
+      const isAlreadyNested = nodes.length > 0 && nodes.some((node: any) => 
+        Array.isArray(node.children) && node.children.length > 0
+      );
+
+      if (isAlreadyNested) {
+        return nodes;
+      }
+
+      const nodeMap = new Map<number, any>();
+      const roots: any[] = [];
+
+      nodes.forEach((node: any) => {
+        nodeMap.set(node.id, {
+          ...node,
+          children: [],
+        });
+      });
+
+      nodes.forEach((node: any) => {
+        const parentId = node.parent_node_id;
+        const parent = parentId ? nodeMap.get(parentId) : null;
+        if (parent) {
+          if (!parent.children) parent.children = [];
+          parent.children.push(nodeMap.get(node.id)!);
+        } else {
+          roots.push(nodeMap.get(node.id)!);
+        }
+      });
+
+      return roots;
+    },
+  });
+
   const activeBooksAbortController = useRef<AbortController | null>(null);
   const activeBooksRequestId = useRef(0);
   const bookNextOffsetRef = useRef(0);
