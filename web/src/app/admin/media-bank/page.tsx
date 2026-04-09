@@ -740,7 +740,7 @@ export default function AdminMediaBankPage() {
                                 <MoreVertical size={16} />
                               </button>
                               {openActionsId === asset.id && (
-                                <div className="absolute right-2 top-11 z-20 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                <div className="absolute right-2 top-11 z-20 w-44 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-md">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -806,7 +806,7 @@ export default function AdminMediaBankPage() {
                                       cancelRename();
                                     }
                                   }}
-                                  className="min-w-[18rem] max-w-full rounded border border-black/10 bg-white px-2 py-1 text-sm sm:min-w-[22rem]"
+                                  className="w-full min-w-0 rounded border border-black/10 bg-white px-2 py-1 text-sm"
                                 />
                               ) : (
                                 <>
@@ -878,7 +878,7 @@ export default function AdminMediaBankPage() {
                                   cancelRename();
                                 }
                               }}
-                              className="min-w-[18rem] max-w-full rounded border border-black/10 bg-white px-2 py-1 text-sm sm:min-w-[24rem]"
+                              className="w-full min-w-0 rounded border border-black/10 bg-white px-2 py-1 text-sm"
                             />
                           ) : (
                             <button
@@ -971,7 +971,7 @@ export default function AdminMediaBankPage() {
                                 <MoreVertical size={16} />
                               </button>
                               {openActionsId === asset.id && (
-                                <div className="absolute right-0 top-9 z-10 min-w-[120px] rounded-lg border border-black/10 bg-white p-1 shadow-md">
+                                <div className="absolute right-0 top-full z-10 mt-2 w-44 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1 shadow-md">
                                   <button
                                     type="button"
                                     onClick={() => {
