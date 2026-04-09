@@ -7431,7 +7431,7 @@ function ScripturesContent() {
     setShowBrowseBookModal(true);
     setMobilePanel("tree");
     syncBrowseUrl(targetBookId, targetNodeId, "push");
-    void browsingHook.loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
+    void loadTree(targetBookId, typeof targetNodeId === "number" ? targetNodeId : undefined);
   };
 
   const handleClosePrivateBookGate = () => {
