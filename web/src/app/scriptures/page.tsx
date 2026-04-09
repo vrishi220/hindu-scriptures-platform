@@ -5063,13 +5063,10 @@ function ScripturesContent() {
     Number.isFinite(previewIntentNodeId) &&
     selectedId !== previewIntentNodeId;
   const showPreviewTransitionOverlay =
-    previewIntentScope !== null &&
     !showBookPreview &&
     (bookPreviewLoading ||
-      isWaitingForPreviewNodeSelection ||
-      treeLoading ||
-      contentLoading ||
-      !bookId);
+      (previewIntentScope !== null &&
+        (isWaitingForPreviewNodeSelection || treeLoading || contentLoading || !bookId)));
   const hasEffectiveBookPreviewSummary =
     bookPreviewArtifact?.preview_scope === "book" &&
     Boolean(bookPreviewArtifact.book_template?.rendered_text?.trim());
