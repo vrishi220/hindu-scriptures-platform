@@ -2966,6 +2966,7 @@ function ScripturesContent() {
         return;
       }
       const existingValues = new Set(lines.map((line) => (line.value || "").trim()).filter(Boolean));
+      const hasEnglishLine = () => lines.some((line) => line.fieldName === "english");
       for (const language of appliedPreviewTranslationLanguages) {
         if (language === primaryPreviewTranslationLanguage) {
           continue;
@@ -2983,6 +2984,26 @@ function ScripturesContent() {
           isFieldStart: true,
         });
         existingValues.add(value);
+      }
+
+      // Ensure leaf previews still render text when the selected translation
+      // language has no value on this node but another translation exists.
+      if (!hasEnglishLine()) {
+        const fallbackValue = pickPreferredTranslationText(
+          blockTranslations,
+          primaryPreviewTranslationLanguage,
+        );
+        if (fallbackValue && !existingValues.has(fallbackValue)) {
+          lines.push({
+            key: "translation-fallback",
+            label: appliedShowPreviewLabels ? metadataLabelForField("english") : "",
+            value: fallbackValue,
+            className: lineClassNameForField("english", fallbackValue),
+            fieldName: "english",
+            isFieldStart: true,
+          });
+          existingValues.add(fallbackValue);
+        }
       }
     };
     if (renderedLines.length > 0) {
