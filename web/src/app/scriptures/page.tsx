@@ -5067,6 +5067,7 @@ function ScripturesContent() {
     (bookPreviewLoading ||
       (previewIntentScope !== null &&
         (isWaitingForPreviewNodeSelection || treeLoading || contentLoading || !bookId)));
+  const showPageInlinePreviewLoading = bookPreviewLoading && !showPreviewTransitionOverlay;
   const hasEffectiveBookPreviewSummary =
     bookPreviewArtifact?.preview_scope === "book" &&
     Boolean(bookPreviewArtifact.book_template?.rendered_text?.trim());
@@ -12647,7 +12648,7 @@ function ScripturesContent() {
             </div>
           )}
 
-          {bookPreviewLoading && (
+          {showPageInlinePreviewLoading && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-sm text-zinc-700">
               <span
                 aria-hidden
