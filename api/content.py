@@ -1481,24 +1481,63 @@ def get_daily_verse(
             selected_book_id = random.choice(eligible_book_ids)
 
         book = book_by_id.get(selected_book_id) or db.query(Book).filter(Book.id == selected_book_id).first()
-        verses = (
+        base_verse_query = (
             db.query(ContentNode)
+            .options(
+                load_only(
+                    ContentNode.id,
+                    ContentNode.parent_node_id,
+                    ContentNode.sequence_number,
+                    ContentNode.content_data,
+                )
+            )
             .filter(
                 ContentNode.has_content == True,
                 ContentNode.book_id == selected_book_id,
             )
-            .order_by(ContentNode.id.asc())
-            .all()
         )
-        if not verses:
+        verse_count = base_verse_query.count()
+        if verse_count <= 0:
             return None
 
-        verse_candidates = verses[:]
+        candidate_scan_limit = min(500, verse_count)
+        verse_candidates: list[ContentNode] = []
         if mode == "daily":
-            start_offset = (seed // max(len(eligible_book_ids), 1)) % len(verse_candidates)
-            verse_candidates = verse_candidates[start_offset:] + verse_candidates[:start_offset]
+            start_offset = (seed // max(len(eligible_book_ids), 1)) % verse_count
+            verse_candidates = (
+                base_verse_query
+                .order_by(ContentNode.id.asc())
+                .offset(start_offset)
+                .limit(candidate_scan_limit)
+                .all()
+            )
+            if len(verse_candidates) < candidate_scan_limit and start_offset > 0:
+                verse_candidates.extend(
+                    base_verse_query
+                    .order_by(ContentNode.id.asc())
+                    .limit(candidate_scan_limit - len(verse_candidates))
+                    .all()
+                )
         else:
+            start_offset = random.randrange(verse_count)
+            verse_candidates = (
+                base_verse_query
+                .order_by(ContentNode.id.asc())
+                .offset(start_offset)
+                .limit(candidate_scan_limit)
+                .all()
+            )
+            if len(verse_candidates) < candidate_scan_limit and start_offset > 0:
+                verse_candidates.extend(
+                    base_verse_query
+                    .order_by(ContentNode.id.asc())
+                    .limit(candidate_scan_limit - len(verse_candidates))
+                    .all()
+                )
             random.shuffle(verse_candidates)
+
+        if not verse_candidates:
+            return None
 
         verse = verse_candidates[0]
         content_text = ""
