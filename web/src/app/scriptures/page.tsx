@@ -11239,9 +11239,15 @@ function ScripturesContent() {
       return [] as ReactElement[];
     }
 
-    const visibleBlocks = bookPreviewArtifact.sections.body.filter(
+    const filteredBlocks = bookPreviewArtifact.sections.body.filter(
       (block) => !block.content.level_name || !appliedHiddenPreviewLevels.has(block.content.level_name)
     );
+    const visibleBlocks =
+      bookPreviewArtifact.preview_scope === "node" &&
+      filteredBlocks.length === 0 &&
+      bookPreviewArtifact.sections.body.length > 0
+        ? bookPreviewArtifact.sections.body
+        : filteredBlocks;
 
     const elements: ReactElement[] = [];
     visibleBlocks.forEach((block, blockIndex) => {
