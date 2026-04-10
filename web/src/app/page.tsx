@@ -138,6 +138,7 @@ function HomeContent() {
     book_id: number;
     node_id?: number;
   } | null>(null);
+  const [dailyVerseFetchError, setDailyVerseFetchError] = useState<string | null>(null);
   const [verseMode, setVerseMode] = useState<"daily" | "random">("daily");
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketListItem[]>([]);
@@ -390,11 +391,14 @@ function HomeContent() {
 
   const loadDailyVerse = async (mode: "daily" | "random" = "daily") => {
     try {
-      const response = await fetch(`/api/daily-verse?mode=${mode}`, { credentials: "include" });
+      setDailyVerseFetchError(null);
+      const response = await fetch(`/api/daily-verse?mode=${mode}&_t=${Date.now()}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!response.ok) {
         console.error("Failed to load verse:", response.status);
-        // Set a sentinel value to indicate no content
-        setDailyVerse({ id: 0, title: "", content: "", book_name: "", book_id: 0 });
+        setDailyVerseFetchError("Daily verse is temporarily unavailable.");
         return;
       }
       const data = (await response.json()) as {
@@ -409,12 +413,14 @@ function HomeContent() {
       // If no verse found, set empty state
       if (!data) {
         setDailyVerse({ id: 0, title: "", content: "", book_name: "", book_id: 0 });
+        setDailyVerseFetchError(null);
       } else {
         setDailyVerse(data);
+        setDailyVerseFetchError(null);
       }
     } catch (err) {
       console.error("Error loading verse:", err);
-      setDailyVerse({ id: 0, title: "", content: "", book_name: "", book_id: 0 });
+      setDailyVerseFetchError("Daily verse is temporarily unavailable.");
     }
   };
 
@@ -1291,7 +1297,23 @@ function HomeContent() {
                   </button>
                 </div>
               </div>
-              {!dailyVerse ? (
+              {dailyVerseFetchError ? (
+                <>
+                  <h3 className="mt-3 font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    Could not load verse
+                  </h3>
+                  <p className="mt-3 text-sm text-zinc-600">{dailyVerseFetchError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadDailyVerse(verseMode);
+                    }}
+                    className="mt-4 rounded-full border border-[color:var(--accent)] px-3 py-1 text-xs uppercase tracking-[0.14em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/10"
+                  >
+                    Retry
+                  </button>
+                </>
+              ) : !dailyVerse ? (
                 <>
                   <h3 className="mt-3 font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
                     Loading...
