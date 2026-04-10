@@ -5066,7 +5066,13 @@ function ScripturesContent() {
     !showBookPreview &&
     (bookPreviewLoading ||
       (previewIntentScope !== null &&
-        (isWaitingForPreviewNodeSelection || treeLoading || contentLoading || !bookId)));
+        (
+          !previewSettingsReady ||
+          isWaitingForPreviewNodeSelection ||
+          treeLoading ||
+          contentLoading ||
+          !bookId
+        )));
   const showPageInlinePreviewLoading = bookPreviewLoading && !showPreviewTransitionOverlay;
   const hasEffectiveBookPreviewSummary =
     bookPreviewArtifact?.preview_scope === "book" &&
