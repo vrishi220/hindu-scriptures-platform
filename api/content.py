@@ -8,10 +8,11 @@ from typing import Callable, Literal
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import requests
-from sqlalchemy import Integer, cast, text
+from sqlalchemy import Integer, cast, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy.orm.attributes import flag_modified
@@ -103,6 +104,9 @@ from services.media_storage import FileTooLargeError, get_media_storage_from_env
 from services.transliteration import contains_devanagari, devanagari_to_iast, latin_to_devanagari
 
 router = APIRouter(prefix="/content", tags=["content"])
+
+_NODES_LIST_HARD_LIMIT = int(os.getenv("NODES_LIST_HARD_LIMIT", "50"))
+_DISABLE_CONTENT_DATA_LIST_SEARCH = os.getenv("DISABLE_CONTENT_DATA_LIST_SEARCH", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 PUBLIC_READS_ENABLED = os.getenv("PUBLIC_READS_ENABLED", "false").lower() == "true"
 MEDIA_STORAGE = get_media_storage_from_env()
@@ -1437,6 +1441,9 @@ def get_daily_verse(
     """
     Public endpoint - authentication optional
     mode: 'daily' for consistent daily verse (seeded by date), 'random' for truly random
+    
+    Note: This endpoint is optimized for disk-constrained environments.
+    Candidate scan limit is kept low to reduce temp spill during materialization.
     """
     try:
         from datetime import date
@@ -1500,7 +1507,9 @@ def get_daily_verse(
         if verse_count <= 0:
             return None
 
-        candidate_scan_limit = min(500, verse_count)
+        # Aggressive limit: in disk-constrained environments, scan fewer candidates
+        # to reduce temp spill from sorting/materialization operations.
+        candidate_scan_limit = min(100, max(1, verse_count // 10))
         verse_candidates: list[ContentNode] = []
         if mode == "daily":
             start_offset = (seed // max(len(eligible_book_ids), 1)) % verse_count
@@ -2834,17 +2843,39 @@ def list_nodes(
     - book_id: Filter by specific book
     - limit: Max results to return
     """
-    query = db.query(ContentNode)
+    safe_limit = max(1, min(limit, _NODES_LIST_HARD_LIMIT))
+    query = db.query(ContentNode).options(
+        load_only(
+            ContentNode.id,
+            ContentNode.book_id,
+            ContentNode.parent_node_id,
+            ContentNode.referenced_node_id,
+            ContentNode.level_name,
+            ContentNode.level_order,
+            ContentNode.sequence_number,
+            ContentNode.title_sanskrit,
+            ContentNode.title_transliteration,
+            ContentNode.title_english,
+            ContentNode.title_hindi,
+            ContentNode.title_tamil,
+            ContentNode.has_content,
+            ContentNode.status,
+            ContentNode.created_by,
+            ContentNode.last_modified_by,
+        )
+    )
     
     # Search filter
     if q:
         search_term = f"%{q}%"
-        query = query.filter(
-            (ContentNode.title_english.ilike(search_term)) |
-            (ContentNode.title_sanskrit.ilike(search_term)) |
-            (ContentNode.title_transliteration.ilike(search_term)) |
-            (ContentNode.content_data.cast(str).ilike(search_term))
-        )
+        search_filters = [
+            ContentNode.title_english.ilike(search_term),
+            ContentNode.title_sanskrit.ilike(search_term),
+            ContentNode.title_transliteration.ilike(search_term),
+        ]
+        if not _DISABLE_CONTENT_DATA_LIST_SEARCH:
+            search_filters.append(ContentNode.content_data.cast(str).ilike(search_term))
+        query = query.filter(or_(*search_filters))
     
     # Book filter
     target_book: Book | None = None
@@ -2865,7 +2896,7 @@ def list_nodes(
             return []
         query = query.filter(ContentNode.book_id.in_(visible_book_ids))
     
-    nodes = query.order_by(ContentNode.id).limit(limit).all()
+    nodes = query.order_by(ContentNode.id).limit(safe_limit).all()
     if target_book is not None:
         payloads: list[ContentNodePublic] = []
         for item in nodes:

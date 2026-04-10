@@ -1263,9 +1263,14 @@ function HomeContent() {
 
             <div className="rounded-[32px] border border-black/10 bg-white/80 p-4 shadow-lg">
               <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                  {verseMode === "daily" ? "Daily Verse" : "Random Verse"}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    {verseMode === "daily" ? "Daily Verse" : "Random Verse"}
+                  </p>
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold uppercase tracking-[0.1em] text-amber-800">
+                    Beta
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <button
                     type="button"

@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -15,6 +17,10 @@ from services.transliteration import (
 )
 
 router = APIRouter(prefix="/search", tags=["search"])
+
+_SEARCH_HARD_LIMIT = int(os.getenv("SEARCH_HARD_LIMIT", "50"))
+_SEARCH_HARD_OFFSET = int(os.getenv("SEARCH_HARD_OFFSET", "500"))
+_SEARCH_SKIP_COUNT = os.getenv("SEARCH_SKIP_COUNT", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 _TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL = {
     "en": "english",
@@ -86,6 +92,17 @@ def _pick_translation_text_from_content_data(content_data: object, language: str
             return value
 
     return ""
+
+
+def _clamp_search_window(limit: int, offset: int) -> tuple[int, int]:
+    return min(limit, _SEARCH_HARD_LIMIT), min(offset, _SEARCH_HARD_OFFSET)
+
+
+def _search_total(query, offset: int, rows_len: int) -> int:
+    if _SEARCH_SKIP_COUNT:
+        # In alpha/beta mode, avoid expensive full counts that can spill temp files.
+        return offset + rows_len
+    return query.count()
 
 
 def apply_stable_search_order(query, rank):
@@ -250,13 +267,14 @@ def basic_search(
     current_user: User | None = Depends(get_current_user_optional),
 ) -> SearchResponse:
     query, rank, headline = build_search_query(db, q, book_id, level_name, has_content, language)
-    total = query.count()
+    limit, offset = _clamp_search_window(limit, offset)
     rows = (
         apply_stable_search_order(query.add_columns(rank, headline), rank)
         .limit(limit)
         .offset(offset)
         .all()
     )
+    total = _search_total(query, offset, len(rows))
     results = [
         SearchResult(node=ContentNodePublic.model_validate(row[0]), snippet=row[2])
         for row in rows
@@ -292,13 +310,14 @@ def advanced_search(
         payload.has_content,
         payload.language,
     )
-    total = query.count()
+    limit, offset = _clamp_search_window(payload.limit, payload.offset)
     rows = (
         apply_stable_search_order(query.add_columns(rank, headline), rank)
-        .limit(payload.limit)
-        .offset(payload.offset)
+        .limit(limit)
+        .offset(offset)
         .all()
     )
+    total = _search_total(query, offset, len(rows))
     results = [
         SearchResult(node=ContentNodePublic.model_validate(row[0]), snippet=row[2])
         for row in rows
@@ -312,8 +331,8 @@ def advanced_search(
             "level_name": payload.level_name,
             "has_content": payload.has_content,
             "language": payload.language,
-            "limit": payload.limit,
-            "offset": payload.offset,
+            "limit": limit,
+            "offset": offset,
         },
         total,
     )
@@ -390,8 +409,7 @@ def fulltext_search(
         for tag in tag_list:
             query = query.filter(ContentNode.tags.contains([tag]))
     
-    # Count total before pagination
-    total = query.count()
+    limit, offset = _clamp_search_window(limit, offset)
     
     # Rank by relevance (ts_rank)
     rank_expr = func.ts_rank(ContentNode.search_vector, tsquery)
@@ -401,6 +419,7 @@ def fulltext_search(
     
     # Get results with ranking
     rows = apply_stable_search_order(query.add_columns(rank), rank).offset(offset).limit(limit).all()
+    total = _search_total(query, offset, len(rows))
     
     results = [
         SearchResult(
