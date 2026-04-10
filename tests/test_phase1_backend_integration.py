@@ -1427,6 +1427,110 @@ class TestDailyVerseVisibilityRegression:
         finally:
             monkeypatch.setattr(content_api, "_book_is_visible_to_user", original_book_visibility)
 
+    def test_random_verse_skips_non_previewable_candidates(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Random Verse Previewability Schema {uuid4().hex[:8]}",
+                "description": "Ensure random verse picks previewable text",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Random Previewability Book {uuid4().hex[:6]}",
+                "book_code": f"random-previewability-{uuid4().hex[:10]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        placeholder_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Verse 1",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": "Chapter 1 Verse 1"},
+                },
+            },
+            headers=headers,
+        )
+        assert placeholder_verse_response.status_code == status.HTTP_201_CREATED
+
+        valid_marker = f"previewable-random-marker-{uuid4().hex}"
+        valid_verse_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Verse",
+                "level_order": 2,
+                "sequence_number": "2",
+                "title_english": "Verse 2",
+                "has_content": True,
+                "content_data": {
+                    "translations": {"english": valid_marker},
+                },
+            },
+            headers=headers,
+        )
+        assert valid_verse_response.status_code == status.HTTP_201_CREATED
+
+        original_book_visibility = content_api._book_is_visible_to_user
+        original_shuffle = content_api.random.shuffle
+
+        def only_target_book_visible(db, book, current_user):
+            return book.id == book_id
+
+        def preserve_order(items):
+            return None
+
+        monkeypatch.setattr(content_api, "_book_is_visible_to_user", only_target_book_visible)
+        monkeypatch.setattr(content_api.random, "shuffle", preserve_order)
+
+        try:
+            response = client.get("/api/content/daily-verse?mode=random", headers=headers)
+            assert response.status_code == status.HTTP_200_OK
+            payload = response.json()
+            assert payload is not None
+            assert payload["book_id"] == book_id
+            assert valid_marker in payload["content"]
+        finally:
+            monkeypatch.setattr(content_api, "_book_is_visible_to_user", original_book_visibility)
+            monkeypatch.setattr(content_api.random, "shuffle", original_shuffle)
+
 
 class TestBookSharesPhase2:
     def test_owner_can_share_private_book_with_selected_users(self, client):

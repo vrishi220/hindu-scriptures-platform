@@ -1507,14 +1507,13 @@ def get_daily_verse(
 
         for candidate in verse_candidates:
             extracted_content_text, extracted_sanskrit_text, extracted_transliteration_text = _extract_daily_verse_texts(candidate)
-            candidate_has_placeholder = (
-                extracted_content_text
-                and "placeholder" in extracted_content_text.lower()
-            ) or (
-                extracted_content_text
-                and "chapter" in extracted_content_text.lower()
-                and "verse" in extracted_content_text.lower()
-                and len(extracted_content_text) < 100
+            candidate_has_previewable_text = any(
+                _is_meaningful_daily_verse_text(text_value)
+                for text_value in (
+                    extracted_content_text,
+                    extracted_sanskrit_text,
+                    extracted_transliteration_text,
+                )
             )
 
             verse = candidate
@@ -1522,7 +1521,7 @@ def get_daily_verse(
             sanskrit_text = extracted_sanskrit_text
             transliteration_text = extracted_transliteration_text
 
-            if not candidate_has_placeholder:
+            if candidate_has_previewable_text:
                 break
 
         if not content_text or len(content_text.strip()) < 5:
@@ -1603,6 +1602,22 @@ def _extract_daily_verse_texts(node: ContentNode | None) -> tuple[str, str, str]
         )
 
     return content_text, sanskrit_text, transliteration_text
+
+
+def _is_meaningful_daily_verse_text(value: str) -> bool:
+    normalized = (value or "").strip()
+    if len(normalized) < 5:
+        return False
+
+    lowered = normalized.lower()
+    if "placeholder" in lowered:
+        return False
+
+    # Guard against structural labels being treated as verse text.
+    if "chapter" in lowered and "verse" in lowered and len(normalized) < 100:
+        return False
+
+    return True
 
 
 def _utc_now_iso() -> str:
