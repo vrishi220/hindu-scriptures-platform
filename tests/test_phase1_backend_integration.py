@@ -5987,6 +5987,7 @@ class TestUsersCoverageSprintCOV03:
 
 class TestWordMeaningsValidation:
     def _create_leaf_parent(self, client, headers, book_metadata: dict | None = None):
+        unique_suffix = uuid4().hex[:12]
         schema_response = client.post(
             "/api/content/schemas",
             json={
@@ -6003,8 +6004,8 @@ class TestWordMeaningsValidation:
             "/api/content/books",
             json={
                 "schema_id": schema_id,
-                "book_name": f"Word Meanings Book {uuid4().hex[:6]}",
-                "book_code": f"wm-book-{uuid4().hex[:6]}",
+                "book_name": f"Word Meanings Book {unique_suffix}",
+                "book_code": f"wm-book-{unique_suffix}",
                 "language_primary": "sanskrit",
                 "metadata_json": book_metadata,
             },
