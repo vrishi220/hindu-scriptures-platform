@@ -354,6 +354,9 @@ export default function NavBar() {
             <span className="inline text-xs sm:text-sm font-semibold text-[color:var(--deep)]">
               Hindu Scriptures
             </span>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-800">
+              Beta
+            </span>
           </Link>
         </div>
 
