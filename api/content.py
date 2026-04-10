@@ -1507,9 +1507,9 @@ def get_daily_verse(
         if verse_count <= 0:
             return None
 
-        # Aggressive limit: in disk-constrained environments, scan fewer candidates
-        # to reduce temp spill from sorting/materialization operations.
-        candidate_scan_limit = min(100, max(1, verse_count // 10))
+        # Keep scan bounded for disk-constrained environments while preserving
+        # enough breadth to skip non-previewable candidates reliably.
+        candidate_scan_limit = min(300, verse_count)
         verse_candidates: list[ContentNode] = []
         if mode == "daily":
             start_offset = (seed // max(len(eligible_book_ids), 1)) % verse_count
