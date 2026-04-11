@@ -19,7 +19,7 @@ type WordMeaningsEditorProps = {
   requiredLanguage: string;
   allowedMeaningLanguages: readonly string[];
   onAddRow: () => void;
-  onImportSemicolonSeparated: (value: string) => number;
+  onImportSemicolonSeparated: (value: string, meaningLanguage: string) => number;
   onMoveRow: (rowId: string, direction: "up" | "down") => void;
   onRemoveRow: (rowId: string) => void;
   onSourceFieldChange: (
@@ -47,9 +47,10 @@ export default function WordMeaningsEditor({
 }: WordMeaningsEditorProps) {
   const [semicolonInput, setSemicolonInput] = useState("");
   const [semicolonMessage, setSemicolonMessage] = useState<string | null>(null);
+  const [semicolonMeaningLanguage, setSemicolonMeaningLanguage] = useState(requiredLanguage);
 
   const handleImport = () => {
-    const importedCount = onImportSemicolonSeparated(semicolonInput);
+    const importedCount = onImportSemicolonSeparated(semicolonInput, semicolonMeaningLanguage);
     if (importedCount > 0) {
       setSemicolonMessage(
         importedCount === 1 ? "Added 1 word-meaning row." : `Added ${importedCount} word-meaning rows.`
@@ -96,14 +97,31 @@ export default function WordMeaningsEditor({
           <div className="text-[11px] text-zinc-500">
             Existing rows stay editable after import.
           </div>
-          <button
-            type="button"
-            onClick={handleImport}
-            disabled={!semicolonInput.trim()}
-            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Add tokens
-          </button>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] uppercase tracking-[0.12em] text-zinc-500" htmlFor="semicolon-meaning-language">
+              Meaning Language
+            </label>
+            <select
+              id="semicolon-meaning-language"
+              value={semicolonMeaningLanguage}
+              onChange={(event) => setSemicolonMeaningLanguage(event.target.value)}
+              className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+            >
+              {[...allowedMeaningLanguages].map((language) => (
+                <option key={`semicolon_lang_${language}`} value={language}>
+                  {language}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleImport}
+              disabled={!semicolonInput.trim()}
+              className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add tokens
+            </button>
+          </div>
         </div>
         {semicolonMessage && (
           <div className="mt-2 text-[11px] text-zinc-600">{semicolonMessage}</div>

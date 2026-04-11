@@ -1043,7 +1043,8 @@ const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText
 
 const mapSemicolonSeparatedWordMeaningsToRows = (
   value: string,
-  startingOrder = 1
+  startingOrder = 1,
+  meaningLanguage: string = WORD_MEANINGS_REQUIRED_LANGUAGE
 ): WordMeaningRow[] => {
   const rows: WordMeaningRow[] = [];
 
@@ -1064,9 +1065,11 @@ const mapSemicolonSeparatedWordMeaningsToRows = (
       sourceScriptText: sourcePair.sanskrit,
       sourceTransliterationIast: sourcePair.transliteration,
       meanings: {
-        [WORD_MEANINGS_REQUIRED_LANGUAGE]: meaningToken,
+        [meaningLanguage]: meaningToken,
+        [WORD_MEANINGS_REQUIRED_LANGUAGE]:
+          meaningLanguage === WORD_MEANINGS_REQUIRED_LANGUAGE ? meaningToken : "",
       },
-      activeMeaningLanguage: WORD_MEANINGS_REQUIRED_LANGUAGE,
+      activeMeaningLanguage: meaningLanguage,
     });
   });
 
@@ -10673,10 +10676,11 @@ function ScripturesContent() {
     }));
   };
 
-  const handleImportInlineWordMeanings = (value: string): number => {
+  const handleImportInlineWordMeanings = (value: string, meaningLanguage: string): number => {
     const importedRows = mapSemicolonSeparatedWordMeaningsToRows(
       value,
-      inlineFormData.wordMeanings.length + 1
+      inlineFormData.wordMeanings.length + 1,
+      meaningLanguage
     );
     if (importedRows.length === 0) {
       return 0;
@@ -10775,10 +10779,11 @@ function ScripturesContent() {
     }));
   };
 
-  const handleImportModalWordMeanings = (value: string): number => {
+  const handleImportModalWordMeanings = (value: string, meaningLanguage: string): number => {
     const importedRows = mapSemicolonSeparatedWordMeaningsToRows(
       value,
-      formData.wordMeanings.length + 1
+      formData.wordMeanings.length + 1,
+      meaningLanguage
     );
     if (importedRows.length === 0) {
       return 0;
