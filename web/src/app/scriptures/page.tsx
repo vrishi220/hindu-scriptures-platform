@@ -1065,9 +1065,10 @@ const mapSemicolonSeparatedWordMeaningsToRows = (
       sourceScriptText: sourcePair.sanskrit,
       sourceTransliterationIast: sourcePair.transliteration,
       meanings: {
-        [meaningLanguage]: meaningToken,
-        [WORD_MEANINGS_REQUIRED_LANGUAGE]:
-          meaningLanguage === WORD_MEANINGS_REQUIRED_LANGUAGE ? meaningToken : "",
+        [WORD_MEANINGS_REQUIRED_LANGUAGE]: meaningToken,
+        ...(meaningLanguage === WORD_MEANINGS_REQUIRED_LANGUAGE
+          ? {}
+          : { [meaningLanguage]: meaningToken }),
       },
       activeMeaningLanguage: meaningLanguage,
     });
