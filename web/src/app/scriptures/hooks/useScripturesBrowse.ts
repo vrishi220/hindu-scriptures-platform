@@ -543,6 +543,14 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
     await loadBooksPage({ reset: true });
   }, [loadBooksPage]);
 
+  // Re-fetch books when search query changes (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadBooksPage({ reset: true });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [bookQuery, loadBooksPage]);
+
   // Load book sharing information
   const loadBookShares = useCallback(async () => {
     if (!bookId) return;
