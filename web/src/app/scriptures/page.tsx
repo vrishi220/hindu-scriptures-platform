@@ -1020,24 +1020,30 @@ const splitLegacyWordMeaningEntries = (value: unknown): string[] => {
   return [trimmed.replace(/^\d+\.\s*/, "")].filter(Boolean);
 };
 
+// Separators tried in precedence order. Only the first match wins; combinations are not allowed.
+const WORD_MEANING_SEPARATOR_PATTERNS: RegExp[] = [
+  /^(.*?)\s*:\s*(.+)$/,
+  /^(.*?)\s*=\s*(.+)$/,
+  /^(.*?)\s*\?\s*(.+)$/,
+  /^(.*?)\s*-\s*(.+)$/,
+];
+
 const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText: string } | null => {
   const trimmed = entry.trim();
   if (!trimmed) {
     return null;
   }
 
-  // Key can contain whitespace-separated words; separator must be one of :  -  ?  =
-  const explicitDelimiterPair = trimmed.match(/^(.*?)\s*(?::|=|\?|-)\s*(.+)$/);
-  if (explicitDelimiterPair) {
-    const sourceText = explicitDelimiterPair[1].trim();
-    const meaningText = explicitDelimiterPair[2].trim();
-    if (!sourceText) {
-      return null;
+  for (const pattern of WORD_MEANING_SEPARATOR_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      const sourceText = match[1].trim();
+      const meaningText = match[2].trim();
+      if (!sourceText) {
+        return null;
+      }
+      return { sourceText, meaningText };
     }
-    return {
-      sourceText,
-      meaningText,
-    };
   }
 
   return {
