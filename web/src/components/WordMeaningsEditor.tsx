@@ -44,6 +44,35 @@ type WordMeaningsEditorProps = {
   onMeaningTextChange: (rowId: string, language: string, value: string) => void;
 };
 
+// Separator precedence: :, =, ?, -
+const WORD_MEANING_TOKEN_SEPARATOR_PATTERNS: RegExp[] = [
+  /^(.*?)\s*:\s*(.+)$/,
+  /^(.*?)\s*=\s*(.+)$/,
+  /^(.*?)\s*\?\s*(.+)$/,
+  /^(.*?)\s*-\s*(.+)$/,
+];
+
+const parseWordMeaningTokenEntry = (
+  entry: string
+): { source: string; meaning: string } | null => {
+  const trimmed = entry.trim();
+  if (!trimmed) return null;
+
+  for (const pattern of WORD_MEANING_TOKEN_SEPARATOR_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (!match) continue;
+    const source = match[1].trim();
+    const meaning = match[2].trim();
+    if (!source) return null;
+    return { source, meaning };
+  }
+
+  return {
+    source: trimmed,
+    meaning: "",
+  };
+};
+
 const autoFillSourcePair = (
   sourceScriptRaw: string,
   sourceTransliterationRaw: string
@@ -220,12 +249,9 @@ export default function WordMeaningsEditor({
 
     const parsedRows: WordMeaningRow[] = entries
       .map((entry, index) => {
-        const explicitDelimiterPair = entry.match(/^(.*?)\s*(?:=|:|\?)\s*(.+)$/);
-        const whitespaceDelimitedPair = entry.match(/^(\S+)\s+(.+)$/);
-        const source = (explicitDelimiterPair?.[1] || whitespaceDelimitedPair?.[1] || entry).trim();
-        const meaning = (explicitDelimiterPair?.[2] || whitespaceDelimitedPair?.[2] || "").trim();
-        if (!source) return null;
-        const sourcePair = sourcePairFromDisplayInput(source);
+        const parsed = parseWordMeaningTokenEntry(entry);
+        if (!parsed?.source) return null;
+        const sourcePair = sourcePairFromDisplayInput(parsed.source);
         return {
           id: `wm_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
           order: index + 1,
@@ -233,10 +259,10 @@ export default function WordMeaningsEditor({
           sourceScriptText: sourcePair.sourceScriptText,
           sourceTransliterationIast: sourcePair.sourceTransliterationIast,
           meanings: {
-            [requiredLanguage]: meaning,
+            [requiredLanguage]: parsed.meaning,
             ...(effectiveMeaningLanguage === requiredLanguage
               ? {}
-              : { [effectiveMeaningLanguage]: meaning }),
+              : { [effectiveMeaningLanguage]: parsed.meaning }),
           },
           activeMeaningLanguage: effectiveMeaningLanguage,
         };
@@ -319,7 +345,7 @@ export default function WordMeaningsEditor({
         <div className="rounded-lg border border-black/10 bg-white p-2 sm:p-3">
           <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">Token Editor (Primary)</div>
           <p className="mb-2 text-[11px] text-zinc-600">
-            Enter one token per line or semicolon-separated tokens. Use `source=meaning` (also supports `:` or `?`, or whitespace).
+            Enter one token per line or semicolon-separated tokens. Use explicit separators only: `:`, `=`, `?`, or `-` (in that precedence order).
           </p>
           <textarea
             value={tokenDraft}
