@@ -245,6 +245,13 @@ type BookPreviewWordMeaningRow = {
   };
 };
 
+type BookPreviewVariantEntry = {
+  author_slug?: string;
+  author?: string;
+  language?: string;
+  text?: string;
+};
+
 type BookPreviewBlock = {
   order: number;
   title: string;
@@ -256,6 +263,8 @@ type BookPreviewBlock = {
     translations?: Record<string, string>;
     rendered_lines?: BookPreviewRenderLine[];
     word_meanings_rows?: BookPreviewWordMeaningRow[];
+    translation_variants?: BookPreviewVariantEntry[];
+    commentary_variants?: BookPreviewVariantEntry[];
   };
 };
 
@@ -747,6 +756,7 @@ const buildBookPreviewHtml = (
     previewTransliterationScript?: string;
     wordMeaningsDisplayMode?: "inline" | "table" | "hide";
     pdfSettings?: NormalizedPdfSettings;
+    showCommentary?: boolean;
   }
 ) => {
   const renderSettings = artifact.render_settings || {
@@ -782,6 +792,7 @@ const buildBookPreviewHtml = (
     normalizeTransliterationScript(options?.previewTransliterationScript || "iast");
   const appliedWordMeaningsDisplayMode: "inline" | "table" | "hide" =
     options?.wordMeaningsDisplayMode ?? "inline";
+  const appliedShowCommentary = options?.showCommentary !== false;
   const appliedPdfSettings = options?.pdfSettings ?? DEFAULT_PDF_SETTINGS;
   const pageSizeCss = appliedPdfSettings.pageSize;
   const pageMarginCss = `${appliedPdfSettings.marginMm}mm`;
@@ -1060,7 +1071,69 @@ const buildBookPreviewHtml = (
       const translationSectionHtml = translationHtml
         ? `<div class=\"content-section section-translation\">${translationHtml}</div>`
         : "";
-      const linesHtml = `${nonTranslationSectionHtml}${wordMeaningsSectionHtml}${translationSectionHtml}`;
+
+      // Variant author translations
+      const rawTranslationVariants = Array.isArray(block.content?.translation_variants)
+        ? block.content.translation_variants
+        : [];
+      const selectedLangSet = new Set(selectedTranslationLanguages.map((l) => normalizeTranslationLanguage(l)));
+      const visibleTranslationVariants = renderSettings.show_english
+        ? rawTranslationVariants
+            .map((entry) => ({
+              author: (entry.author || "").trim(),
+              language: normalizeTranslationLanguage((entry.language || "").trim()),
+              text: (entry.text || "").trim(),
+            }))
+            .filter(
+              (entry) =>
+                entry.text &&
+                (selectedLangSet.size === 0 || !entry.language || selectedLangSet.has(entry.language))
+            )
+        : [];
+
+      // Commentary variants
+      const rawCommentaryVariants = Array.isArray(block.content?.commentary_variants)
+        ? block.content.commentary_variants
+        : [];
+      const visibleCommentaryVariants = appliedShowCommentary
+        ? rawCommentaryVariants
+            .map((entry) => ({
+              author: (entry.author || "").trim(),
+              language: normalizeTranslationLanguage((entry.language || "").trim()),
+              text: (entry.text || "").trim(),
+            }))
+            .filter(
+              (entry) =>
+                entry.text &&
+                (selectedLangSet.size === 0 || !entry.language || selectedLangSet.has(entry.language))
+            )
+        : [];
+
+      const buildVariantEntriesHtml = (
+        entries: Array<{ author: string; language: string; text: string }>
+      ) =>
+        entries
+          .map((entry) => {
+            const scriptInfo = detectIndicScriptClassAndLang(entry.text, entry.language);
+            const textClass = scriptInfo?.className ? ` ${scriptInfo.className}` : "";
+            const textLang = scriptInfo?.lang ? ` lang="${escapeHtml(scriptInfo.lang)}"` : "";
+            const authorLabel = entry.author || "Unknown Author";
+            const langLabel = entry.language ? ` &#8226; ${escapeHtml(entry.language)}` : "";
+            return `<div class=\"variant-item\"><div class=\"variant-author\">${escapeHtml(authorLabel)}<span class=\"variant-lang\">${langLabel}</span></div><div class=\"variant-text${textClass}\"${textLang}>${escapeHtml(entry.text)}</div></div>`;
+          })
+          .join("");
+
+      const translationVariantsSectionHtml =
+        visibleTranslationVariants.length > 0
+          ? `<div class=\"content-section section-translation-variants\"><div class=\"variants-heading\">Translations By Authors (${visibleTranslationVariants.length})</div>${buildVariantEntriesHtml(visibleTranslationVariants)}</div>`
+          : "";
+
+      const commentaryVariantsSectionHtml =
+        visibleCommentaryVariants.length > 0
+          ? `<div class=\"content-section section-commentary-variants\"><div class=\"variants-heading\">Commentaries By Authors (${visibleCommentaryVariants.length})</div>${buildVariantEntriesHtml(visibleCommentaryVariants)}</div>`
+          : "";
+
+      const linesHtml = `${nonTranslationSectionHtml}${wordMeaningsSectionHtml}${translationSectionHtml}${translationVariantsSectionHtml}${commentaryVariantsSectionHtml}`;
       const hideNodeFallbackTitle =
         !appliedShowPreviewDetails && /^Node\s+\d+$/i.test((block.title || "").trim());
       const titleHtml =
@@ -1194,6 +1267,12 @@ const buildBookPreviewHtml = (
             font-weight: 600;
           }
           .word-meaning-sep { color: #444; }
+          .section-translation-variants, .section-commentary-variants { margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0; }
+          .variants-heading { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #888; margin-bottom: 6px; }
+          .variant-item { border: 1px solid #e8e8e8; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; background: #fafafa; }
+          .variant-author { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #888; margin-bottom: 3px; }
+          .variant-lang { color: #bbb; }
+          .variant-text { font-size: 13px; line-height: 1.7; color: #333; white-space: pre-wrap; }
           .meta { margin-top: 8px; color: #555; font-size: 12px; }
           .muted { color: #666; }
         </style>
@@ -1615,6 +1694,8 @@ export async function POST(
       const rawDisplayMode = (body as { preview_word_meanings_display_mode?: string }).preview_word_meanings_display_mode;
       const wordMeaningsDisplayMode: "inline" | "table" | "hide" =
         rawDisplayMode === "table" || rawDisplayMode === "hide" ? rawDisplayMode : "inline";
+      const rawRenderSettings = (body as { render_settings?: Record<string, unknown> }).render_settings;
+      const showCommentary = rawRenderSettings?.show_commentary !== false;
       const html = buildBookPreviewHtml(artifact, selectedTranslationLanguages, {
         author,
         coverImageSrc,
@@ -1626,6 +1707,7 @@ export async function POST(
         previewTransliterationScript,
         wordMeaningsDisplayMode,
         pdfSettings,
+        showCommentary,
       });
       let browser: BrowserLaunchResult["browser"];
       let browserEngine = "unknown";
