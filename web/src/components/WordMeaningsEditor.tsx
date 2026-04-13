@@ -45,11 +45,13 @@ type WordMeaningsEditorProps = {
 };
 
 // Separator precedence: :, =, ?, -
+// `:` and `-` count as delimiters only when separated from the key by whitespace,
+// so embedded forms like `nama:` or `dharma-kshetre` are preserved in the key.
 const WORD_MEANING_TOKEN_SEPARATOR_PATTERNS: RegExp[] = [
-  /^(.*?)\s*:\s*(.+)$/,
+  /^(.*?)\s+:\s*(.+)$/,
   /^(.*?)\s*=\s*(.+)$/,
   /^(.*?)\s*\?\s*(.+)$/,
-  /^(.*?)\s*-\s*(.+)$/,
+  /^(.*?)\s+-\s*(.+)$/,
 ];
 
 const parseWordMeaningTokenEntry = (
@@ -345,7 +347,7 @@ export default function WordMeaningsEditor({
         <div className="rounded-lg border border-black/10 bg-white p-2 sm:p-3">
           <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">Token Editor (Primary)</div>
           <p className="mb-2 text-[11px] text-zinc-600">
-            Enter one token per line or semicolon-separated tokens. Use explicit separators only: `:`, `=`, `?`, or `-` (in that precedence order).
+            Enter one token per line or semicolon-separated tokens. Use explicit separators only: `:`, `=`, `?`, or `-` (in that precedence order). For `:` and `-`, include a space before them.
           </p>
           <textarea
             value={tokenDraft}

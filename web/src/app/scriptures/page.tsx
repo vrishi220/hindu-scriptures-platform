@@ -1021,11 +1021,13 @@ const splitLegacyWordMeaningEntries = (value: unknown): string[] => {
 };
 
 // Separators tried in precedence order. Only the first match wins; combinations are not allowed.
+// `:` and `-` are treated as delimiters only when separated from the key by whitespace,
+// so embedded forms like `nama:` or `dharma-kshetre` do not split accidentally.
 const WORD_MEANING_SEPARATOR_PATTERNS: RegExp[] = [
-  /^(.*?)\s*:\s*(.+)$/,
+  /^(.*?)\s+:\s*(.+)$/,
   /^(.*?)\s*=\s*(.+)$/,
   /^(.*?)\s*\?\s*(.+)$/,
-  /^(.*?)\s*-\s*(.+)$/,
+  /^(.*?)\s+-\s*(.+)$/,
 ];
 
 const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText: string } | null => {
