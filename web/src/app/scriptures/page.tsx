@@ -3170,7 +3170,7 @@ function ScripturesContent() {
         fieldName === "sanskrit"
           ? "whitespace-pre-wrap text-base leading-relaxed text-[color:var(--deep)]"
           : fieldName === "transliteration"
-            ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700"
+            ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700 transliteration-highlight"
             : "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700";
       const scriptClassName = scriptFontClassName(value);
       return scriptClassName ? `${baseClassName} ${scriptClassName}` : baseClassName;
@@ -11682,15 +11682,6 @@ function ScripturesContent() {
           })
         : [];
       const wordMeaningRows = resolvePreviewWordMeanings(block);
-      const wordMeaningInlineText = wordMeaningRows
-        .map((row) => {
-          const source = row.sourceText || "—";
-          const meaning = row.meaningText || "—";
-          const fallbackLabel =
-            row.fallbackBadgeVisible && row.meaningLanguage ? ` (${row.meaningLanguage})` : "";
-          return `${source} : ${meaning}${fallbackLabel}`;
-        })
-        .join("; ");
       const rawTitle = block.title || "";
       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
       const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
@@ -11746,7 +11737,7 @@ function ScripturesContent() {
                     <tbody>
                       {wordMeaningRows.map((row) => (
                         <tr key={row.key} className="border-b border-black/5 last:border-b-0">
-                          <td className="px-2 py-1.5 align-top text-zinc-800">
+                          <td className="transliteration-highlight px-2 py-1.5 align-top text-zinc-800">
                             {row.sourceText || "—"}
                           </td>
                           <td className="px-2 py-1.5 align-top text-zinc-700">
@@ -11764,7 +11755,21 @@ function ScripturesContent() {
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>
-                  {wordMeaningInlineText}
+                  {wordMeaningRows.map((row, rowIndex) => {
+                    const source = row.sourceText || "—";
+                    const meaning = row.meaningText || "—";
+                    const fallbackLabel =
+                      row.fallbackBadgeVisible && row.meaningLanguage
+                        ? ` (${row.meaningLanguage})`
+                        : "";
+                    return (
+                      <span key={row.key}>
+                        <span className="transliteration-highlight">{source}</span>
+                        {` : ${meaning}${fallbackLabel}`}
+                        {rowIndex < wordMeaningRows.length - 1 ? "; " : ""}
+                      </span>
+                    );
+                  })}
                 </p>
               )}
             </div>

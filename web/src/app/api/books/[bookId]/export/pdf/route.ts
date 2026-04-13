@@ -1185,7 +1185,14 @@ const buildBookPreviewHtml = (
             font-family: "Noto Serif", "Times New Roman", "Georgia", serif;
             font-variant-ligatures: common-ligatures;
           }
-          .word-meaning-source { font-weight: 500; }
+          .field-transliteration .script-text {
+            color: #6f3a33;
+            font-weight: 600;
+          }
+          .word-meaning-source {
+            color: #6f3a33;
+            font-weight: 600;
+          }
           .word-meaning-sep { color: #444; }
           .meta { margin-top: 8px; color: #555; font-size: 12px; }
           .muted { color: #666; }
