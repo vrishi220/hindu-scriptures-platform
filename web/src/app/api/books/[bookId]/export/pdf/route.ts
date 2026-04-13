@@ -757,6 +757,7 @@ const buildBookPreviewHtml = (
     wordMeaningsDisplayMode?: "inline" | "table" | "hide";
     pdfSettings?: NormalizedPdfSettings;
     showCommentary?: boolean;
+    variantAuthors?: Record<string, string>;
   }
 ) => {
   const renderSettings = artifact.render_settings || {
@@ -793,6 +794,7 @@ const buildBookPreviewHtml = (
   const appliedWordMeaningsDisplayMode: "inline" | "table" | "hide" =
     options?.wordMeaningsDisplayMode ?? "inline";
   const appliedShowCommentary = options?.showCommentary !== false;
+  const appliedVariantAuthors: Record<string, string> = options?.variantAuthors ?? {};
   const appliedPdfSettings = options?.pdfSettings ?? DEFAULT_PDF_SETTINGS;
   const pageSizeCss = appliedPdfSettings.pageSize;
   const pageMarginCss = `${appliedPdfSettings.marginMm}mm`;
@@ -1080,6 +1082,7 @@ const buildBookPreviewHtml = (
       const visibleTranslationVariants = renderSettings.show_english
         ? rawTranslationVariants
             .map((entry) => ({
+              author_slug: (entry.author_slug || "").trim(),
               author: (entry.author || "").trim(),
               language: normalizeTranslationLanguage((entry.language || "").trim()),
               text: (entry.text || "").trim(),
@@ -1098,6 +1101,7 @@ const buildBookPreviewHtml = (
       const visibleCommentaryVariants = appliedShowCommentary
         ? rawCommentaryVariants
             .map((entry) => ({
+              author_slug: (entry.author_slug || "").trim(),
               author: (entry.author || "").trim(),
               language: normalizeTranslationLanguage((entry.language || "").trim()),
               text: (entry.text || "").trim(),
@@ -1110,14 +1114,16 @@ const buildBookPreviewHtml = (
         : [];
 
       const buildVariantEntriesHtml = (
-        entries: Array<{ author: string; language: string; text: string }>
+        entries: Array<{ author_slug: string; author: string; language: string; text: string }>
       ) =>
         entries
           .map((entry) => {
             const scriptInfo = detectIndicScriptClassAndLang(entry.text, entry.language);
             const textClass = scriptInfo?.className ? ` ${scriptInfo.className}` : "";
             const textLang = scriptInfo?.lang ? ` lang="${escapeHtml(scriptInfo.lang)}"` : "";
-            const authorLabel = entry.author || "Unknown Author";
+            const authorLabel =
+              (entry.author_slug ? appliedVariantAuthors[entry.author_slug] || entry.author : entry.author) ||
+              "Unknown Author";
             const langLabel = entry.language ? ` &#8226; ${escapeHtml(entry.language)}` : "";
             return `<div class=\"variant-item\"><div class=\"variant-author\">${escapeHtml(authorLabel)}<span class=\"variant-lang\">${langLabel}</span></div><div class=\"variant-text${textClass}\"${textLang}>${escapeHtml(entry.text)}</div></div>`;
           })
@@ -1708,6 +1714,7 @@ export async function POST(
         wordMeaningsDisplayMode,
         pdfSettings,
         showCommentary,
+        variantAuthors: (bookPayload?.variant_authors as Record<string, string> | undefined) ?? {},
       });
       let browser: BrowserLaunchResult["browser"];
       let browserEngine = "unknown";
