@@ -1164,7 +1164,16 @@ def _safe_int(value: object) -> int | None:
 
 def _content_node_sort_key(node: ContentNode) -> tuple[int, int, int, int]:
     level_order = node.level_order if isinstance(node.level_order, int) else 10**9
-    sequence_number = node.sequence_number if isinstance(node.sequence_number, int) else 10**9
+    seq = node.sequence_number
+    if isinstance(seq, int):
+        sequence_number = seq
+    elif isinstance(seq, str) and seq.strip():
+        try:
+            sequence_number = int(seq.strip())
+        except (ValueError, TypeError):
+            sequence_number = 10**9
+    else:
+        sequence_number = 10**9
     parent_node_id = node.parent_node_id if isinstance(node.parent_node_id, int) else 0
     return (level_order, sequence_number, parent_node_id, node.id)
 
