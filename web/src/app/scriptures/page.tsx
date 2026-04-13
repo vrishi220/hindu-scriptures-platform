@@ -1026,7 +1026,8 @@ const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText
     return null;
   }
 
-  const explicitDelimiterPair = trimmed.match(/^(.*?)\s*(?:=|:|\?)\s*(.+)$/);
+  // Key can contain whitespace-separated words; separator must be one of :  -  ?  =
+  const explicitDelimiterPair = trimmed.match(/^(.*?)\s*(?::|=|\?|-)\s*(.+)$/);
   if (explicitDelimiterPair) {
     const sourceText = explicitDelimiterPair[1].trim();
     const meaningText = explicitDelimiterPair[2].trim();
@@ -1036,14 +1037,6 @@ const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText
     return {
       sourceText,
       meaningText,
-    };
-  }
-
-  const whitespaceDelimitedPair = trimmed.match(/^(\S+)\s+(.+)$/);
-  if (whitespaceDelimitedPair) {
-    return {
-      sourceText: whitespaceDelimitedPair[1].trim(),
-      meaningText: whitespaceDelimitedPair[2].trim(),
     };
   }
 
