@@ -31,6 +31,16 @@ def _ensure_preferences_schema(db: Session) -> None:
     )
     db.execute(
         text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS word_meanings_default_source_language VARCHAR(10) NOT NULL DEFAULT 'sa'"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS word_meanings_default_meaning_language VARCHAR(10) NOT NULL DEFAULT 'en'"
+        )
+    )
+    db.execute(
+        text(
             "ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS preview_show_level_numbers BOOLEAN NOT NULL DEFAULT FALSE"
         )
     )
@@ -91,6 +101,8 @@ def get_user_preferences(
                 preview_show_commentary=True,
                 preview_transliteration_script="iast",
                 preview_word_meanings_display_mode="inline",
+                word_meanings_default_source_language="sa",
+                word_meanings_default_meaning_language="en",
                 preview_translation_languages="english",
                 preview_hidden_levels="",
                 scriptures_book_browser_view="list",

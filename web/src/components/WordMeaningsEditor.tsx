@@ -1,6 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  INDIC_SCRIPT_OPTIONS,
+  inferIndicScriptFromText,
+  isRomanScript,
+  type TransliterationScriptOption,
+  hasDevanagariLetters,
+  transliterateBetweenScripts,
+  transliterateFromDevanagari,
+  transliterateFromIast,
+  transliterateLatinToDevanagari,
+  transliterateLatinToIast,
+} from "@/lib/indicScript";
 
 type WordMeaningRow = {
   id: string;
@@ -18,8 +30,9 @@ type WordMeaningsEditorProps = {
   missingRequired: boolean;
   requiredLanguage: string;
   allowedMeaningLanguages: readonly string[];
-  onAddRow: () => void;
-  onImportSemicolonSeparated: (value: string, meaningLanguage: string) => number;
+  sourceDisplayScript: TransliterationScriptOption;
+  onAddRow: (sourceLanguage: string, meaningLanguage: string) => void;
+  onReplaceRows: (rows: WordMeaningRow[]) => void;
   onMoveRow: (rowId: string, direction: "up" | "down") => void;
   onRemoveRow: (rowId: string) => void;
   onSourceFieldChange: (
@@ -31,101 +44,265 @@ type WordMeaningsEditorProps = {
   onMeaningTextChange: (rowId: string, language: string, value: string) => void;
 };
 
+const autoFillSourcePair = (
+  sourceScriptRaw: string,
+  sourceTransliterationRaw: string
+): { sourceScriptText: string; sourceTransliterationIast: string } => {
+  const sourceScriptText = sourceScriptRaw.trim();
+  const sourceTransliterationIast = sourceTransliterationRaw.trim();
+
+  if (!sourceScriptText && !sourceTransliterationIast) {
+    return { sourceScriptText: "", sourceTransliterationIast: "" };
+  }
+
+  if (sourceScriptText && sourceTransliterationIast) {
+    return { sourceScriptText, sourceTransliterationIast };
+  }
+
+  if (!sourceScriptText && sourceTransliterationIast) {
+    if (hasDevanagariLetters(sourceTransliterationIast)) {
+      return {
+        sourceScriptText: sourceTransliterationIast,
+        sourceTransliterationIast: transliterateFromDevanagari(sourceTransliterationIast, "iast"),
+      };
+    }
+    return {
+      sourceScriptText: transliterateLatinToDevanagari(sourceTransliterationIast),
+      sourceTransliterationIast: transliterateLatinToIast(sourceTransliterationIast),
+    };
+  }
+
+  if (hasDevanagariLetters(sourceScriptText)) {
+    return {
+      sourceScriptText,
+      sourceTransliterationIast: transliterateFromDevanagari(sourceScriptText, "iast"),
+    };
+  }
+
+  return {
+    sourceScriptText: transliterateLatinToDevanagari(sourceScriptText),
+    sourceTransliterationIast: transliterateLatinToIast(sourceScriptText),
+  };
+};
+
 export default function WordMeaningsEditor({
   rows,
   validationErrors,
   missingRequired,
   requiredLanguage,
   allowedMeaningLanguages,
+  sourceDisplayScript,
   onAddRow,
-  onImportSemicolonSeparated,
+  onReplaceRows,
   onMoveRow,
   onRemoveRow,
   onSourceFieldChange,
   onSelectMeaningLanguage,
   onMeaningTextChange,
 }: WordMeaningsEditorProps) {
-  const [semicolonInput, setSemicolonInput] = useState("");
-  const [semicolonMessage, setSemicolonMessage] = useState<string | null>(null);
-  const [semicolonMeaningLanguage, setSemicolonMeaningLanguage] = useState(requiredLanguage);
+  const [editorMode, setEditorMode] = useState<"table" | "token">("token");
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [tokenMessage, setTokenMessage] = useState<string | null>(null);
 
-  const handleImport = () => {
-    const importedCount = onImportSemicolonSeparated(semicolonInput, semicolonMeaningLanguage);
-    if (importedCount > 0) {
-      setSemicolonMessage(
-        importedCount === 1 ? "Added 1 word-meaning row." : `Added ${importedCount} word-meaning rows.`
+  const sourcePairFromDisplayInput = (
+    value: string
+  ): { sourceScriptText: string; sourceTransliterationIast: string } => {
+    if (sourceDisplayScript === "devanagari") {
+      return autoFillSourcePair(value, "");
+    }
+    if (sourceDisplayScript === "iast") {
+      return autoFillSourcePair("", value);
+    }
+    if (!isRomanScript(sourceDisplayScript)) {
+      return autoFillSourcePair(
+        transliterateBetweenScripts(value, sourceDisplayScript, "devanagari"),
+        transliterateBetweenScripts(value, sourceDisplayScript, "iast")
       );
-      setSemicolonInput("");
+    }
+    return autoFillSourcePair("", transliterateLatinToIast(value));
+  };
+
+  const sourceDisplayValueFromRow = (row: WordMeaningRow): string => {
+    const sourceScript = (row.sourceScriptText || "").trim();
+    const rawSourceIast = (row.sourceTransliterationIast || "").trim();
+    // IAST is Latin-only — discard if it contains Indic script characters (corrupt stored data)
+    let sourceIast = rawSourceIast && !inferIndicScriptFromText(rawSourceIast) ? rawSourceIast : "";
+    const sourceIndicScript = inferIndicScriptFromText(sourceScript);
+
+    if (!sourceIast && sourceScript && sourceIndicScript) {
+      if (sourceIndicScript === "devanagari") {
+        sourceIast = transliterateFromDevanagari(sourceScript, "iast").trim();
+      } else {
+        sourceIast = transliterateBetweenScripts(sourceScript, sourceIndicScript, "iast").trim();
+      }
+    }
+
+    if (!sourceIast && sourceScript) {
+      if (hasDevanagariLetters(sourceScript)) {
+        sourceIast = transliterateFromDevanagari(sourceScript, "iast").trim();
+      } else {
+        const inferredScript = inferIndicScriptFromText(sourceScript);
+        if (inferredScript && inferredScript !== "devanagari") {
+          const devanagariCandidate = transliterateBetweenScripts(
+            sourceScript,
+            inferredScript,
+            "devanagari"
+          ).trim();
+          if (hasDevanagariLetters(devanagariCandidate)) {
+            sourceIast = transliterateFromDevanagari(devanagariCandidate, "iast").trim();
+          }
+        }
+        if (!sourceIast) {
+          for (const scriptOption of INDIC_SCRIPT_OPTIONS) {
+            if (scriptOption === "devanagari") continue;
+            const devanagariCandidate = transliterateBetweenScripts(
+              sourceScript,
+              scriptOption,
+              "devanagari"
+            ).trim();
+            if (!hasDevanagariLetters(devanagariCandidate)) {
+              continue;
+            }
+            sourceIast = transliterateFromDevanagari(devanagariCandidate, "iast").trim();
+            break;
+          }
+        }
+      }
+    }
+
+    if (sourceDisplayScript === "devanagari") {
+      return sourceScript;
+    }
+    if (!sourceIast && sourceScript && sourceIndicScript) {
+      return transliterateBetweenScripts(sourceScript, sourceIndicScript, sourceDisplayScript);
+    }
+    if (!sourceIast) {
+      return "";
+    }
+    return transliterateFromIast(sourceIast, sourceDisplayScript);
+  };
+
+  const effectiveSourceLanguage = "sa";
+  const effectiveMeaningLanguage = requiredLanguage;
+  const rowMeaningLanguages = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...allowedMeaningLanguages,
+          ...rows.flatMap((row) => Object.keys(row.meanings)),
+        ])
+      ),
+    [allowedMeaningLanguages, rows]
+  );
+
+  useEffect(() => {
+    if (editorMode !== "token") return;
+    const serialized = rows
+      .map((row) => {
+        const source = (row.sourceScriptText || row.sourceTransliterationIast || "").trim();
+        const sourceDisplay = sourceDisplayValueFromRow(row).trim();
+        const meaning = (
+          row.meanings[requiredLanguage] || ""
+        ).trim();
+        if (!sourceDisplay && !meaning) return "";
+        return meaning ? `${sourceDisplay}=${meaning}` : sourceDisplay;
+      })
+      .filter(Boolean)
+      .join("\n");
+    setTokenDraft(serialized);
+  }, [editorMode, rows, requiredLanguage, sourceDisplayScript]);
+
+  const handleApplyTokenDraft = () => {
+    const entries = tokenDraft
+      .split(/\n|;/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    const parsedRows: WordMeaningRow[] = entries
+      .map((entry, index) => {
+        const explicitDelimiterPair = entry.match(/^(.*?)\s*(?:=|:|\?)\s*(.+)$/);
+        const whitespaceDelimitedPair = entry.match(/^(\S+)\s+(.+)$/);
+        const source = (explicitDelimiterPair?.[1] || whitespaceDelimitedPair?.[1] || entry).trim();
+        const meaning = (explicitDelimiterPair?.[2] || whitespaceDelimitedPair?.[2] || "").trim();
+        if (!source) return null;
+        const sourcePair = sourcePairFromDisplayInput(source);
+        return {
+          id: `wm_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+          order: index + 1,
+          sourceLanguage: effectiveSourceLanguage,
+          sourceScriptText: sourcePair.sourceScriptText,
+          sourceTransliterationIast: sourcePair.sourceTransliterationIast,
+          meanings: {
+            [requiredLanguage]: meaning,
+            ...(effectiveMeaningLanguage === requiredLanguage
+              ? {}
+              : { [effectiveMeaningLanguage]: meaning }),
+          },
+          activeMeaningLanguage: effectiveMeaningLanguage,
+        };
+      })
+      .filter((row): row is WordMeaningRow => Boolean(row));
+
+    if (parsedRows.length === 0) {
+      setTokenMessage("No valid token rows found.");
       return;
     }
 
-    setSemicolonMessage("No valid semicolon-separated entries found.");
+    if (rows.length > 0) {
+      const confirmed = window.confirm(
+        "Apply token edits will replace all existing word-meaning rows. Continue?"
+      );
+      if (!confirmed) {
+        setTokenMessage("Apply cancelled. Existing rows were not changed.");
+        return;
+      }
+    }
+
+    onReplaceRows(parsedRows);
+    setTokenMessage(
+      parsedRows.length === 1
+        ? "Applied token edits to 1 row."
+        : `Applied token edits to ${parsedRows.length} rows.`
+    );
   };
 
   return (
-    <div className="mt-2 rounded-lg border border-black/10 bg-white/80 p-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="mt-2 rounded-lg border border-black/10 bg-white/80 p-2 sm:p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 sm:mb-3 sm:gap-3">
         <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Word Meanings</div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-black/10 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setEditorMode("table")}
+              className={`rounded px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${
+                editorMode === "table"
+                  ? "bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                  : "text-zinc-600"
+              }`}
+            >
+              Table
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditorMode("token")}
+              className={`rounded px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] ${
+                editorMode === "token"
+                  ? "bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                  : "text-zinc-600"
+              }`}
+            >
+              Token
+            </button>
+          </div>
           <button
             type="button"
-            onClick={onAddRow}
+            onClick={() => onAddRow(effectiveSourceLanguage, requiredLanguage)}
             className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50"
           >
             Add row
           </button>
         </div>
-      </div>
-      <div className="mb-3 rounded-lg border border-black/10 bg-white p-3">
-        <div className="mb-1 text-xs uppercase tracking-[0.16em] text-zinc-500">
-          Semicolon Import
-        </div>
-        <p className="mb-2 text-xs text-zinc-600">
-          Paste `word=meaning; word2:meaning2; word3?meaning3` or `word1; word2` to create rows, then refine them below.
-        </p>
-        <textarea
-          value={semicolonInput}
-          onChange={(event) => {
-            setSemicolonInput(event.target.value);
-            setSemicolonMessage(null);
-          }}
-          rows={3}
-          placeholder="karma=action; yoga:discipline; buddhi?intellect"
-          className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-        />
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="text-[11px] text-zinc-500">
-            Existing rows stay editable after import.
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-[11px] uppercase tracking-[0.12em] text-zinc-500" htmlFor="semicolon-meaning-language">
-              Meaning Language
-            </label>
-            <select
-              id="semicolon-meaning-language"
-              value={semicolonMeaningLanguage}
-              onChange={(event) => setSemicolonMeaningLanguage(event.target.value)}
-              className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-[11px] uppercase tracking-[0.12em] text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-            >
-              {[...allowedMeaningLanguages].map((language) => (
-                <option key={`semicolon_lang_${language}`} value={language}>
-                  {language}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={!semicolonInput.trim()}
-              className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Add tokens
-            </button>
-          </div>
-        </div>
-        {semicolonMessage && (
-          <div className="mt-2 text-[11px] text-zinc-600">{semicolonMessage}</div>
-        )}
       </div>
       {missingRequired && (
         <div className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
@@ -138,141 +315,181 @@ export default function WordMeaningsEditor({
         </div>
       )}
 
-      {rows.length === 0 ? (
+      {editorMode === "token" ? (
+        <div className="rounded-lg border border-black/10 bg-white p-2 sm:p-3">
+          <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-zinc-500">Token Editor (Primary)</div>
+          <p className="mb-2 text-[11px] text-zinc-600">
+            Enter one token per line or semicolon-separated tokens. Use `source=meaning` (also supports `:` or `?`, or whitespace).
+          </p>
+          <textarea
+            value={tokenDraft}
+            onChange={(event) => {
+              setTokenDraft(event.target.value);
+              setTokenMessage(null);
+            }}
+            rows={8}
+            className="w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+            placeholder="karma=action\nyoga=discipline"
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="text-[11px] text-zinc-500">Apply replaces all existing rows in this editor.</div>
+            <button
+              type="button"
+              onClick={handleApplyTokenDraft}
+              disabled={!tokenDraft.trim()}
+              className="rounded-lg border border-black/10 bg-white px-2 py-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 sm:text-[11px] sm:tracking-[0.18em]"
+            >
+              Apply Token Edits
+            </button>
+          </div>
+          {tokenMessage && <div className="mt-2 text-[11px] text-zinc-600">{tokenMessage}</div>}
+        </div>
+      ) : rows.length === 0 ? (
         <p className="text-xs text-zinc-500">No word-meaning rows yet.</p>
       ) : (
-        <div className="flex flex-col gap-3">
-          {rows.map((row, index) => (
-            <div key={row.id} className="rounded-lg border border-black/10 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
-                  Row {index + 1}
+        <>
+          <div className="space-y-2 md:hidden">
+            {rows.map((row, index) => (
+              <div key={row.id} className="rounded-lg border border-black/10 bg-white p-2">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Row {index + 1}</div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onMoveRow(row.id, "up")}
+                      disabled={index === 0}
+                      className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onMoveRow(row.id, "down")}
+                      disabled={index === rows.length - 1}
+                      className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveRow(row.id)}
+                      className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onMoveRow(row.id, "up")}
-                    disabled={index === 0}
-                    className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onMoveRow(row.id, "down")}
-                    disabled={index === rows.length - 1}
-                    className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveRow(row.id)}
-                    className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 transition hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <div>
-                  <label className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-                    Source Language
-                  </label>
-                  <select
-                    value={row.sourceLanguage}
-                    onChange={(event) =>
-                      onSourceFieldChange(row.id, "sourceLanguage", event.target.value)
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  >
-                    <option value="sa">sa</option>
-                    <option value="pi">pi</option>
-                    <option value="hi">hi</option>
-                    <option value="ta">ta</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-                    Source (Script)
-                  </label>
+                <div className="grid grid-cols-1 gap-2">
                   <input
                     type="text"
-                    value={row.sourceScriptText}
-                    onChange={(event) =>
-                      onSourceFieldChange(row.id, "sourceScriptText", event.target.value)
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    value={sourceDisplayValueFromRow(row)}
+                    onChange={(event) => {
+                      const nextPair = sourcePairFromDisplayInput(event.target.value);
+                      onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
+                      onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
+                      onSourceFieldChange(
+                        row.id,
+                        "sourceTransliterationIast",
+                        nextPair.sourceTransliterationIast
+                      );
+                    }}
+                    className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                    placeholder={`Source (${sourceDisplayScript})`}
                   />
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase tracking-[0.16em] text-zinc-500">
-                    Source (IAST)
-                  </label>
                   <input
                     type="text"
-                    value={row.sourceTransliterationIast}
-                    onChange={(event) =>
-                      onSourceFieldChange(row.id, "sourceTransliterationIast", event.target.value)
-                    }
-                    className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    value={row.meanings[row.activeMeaningLanguage] || ""}
+                    onChange={(event) => {
+                      onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
+                    }}
+                    className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                    placeholder={`Meaning (${row.activeMeaningLanguage})`}
                   />
                 </div>
               </div>
-
-              <div className="mt-3">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <label className="text-xs uppercase tracking-[0.16em] text-zinc-500">Meanings</label>
-                  {!(row.meanings[requiredLanguage] || "").trim() && (
-                    <span className="text-[11px] font-medium text-red-600">English meaning required</span>
-                  )}
-                </div>
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {[
-                    ...allowedMeaningLanguages,
-                    ...Object.keys(row.meanings).filter(
-                      (language) => !allowedMeaningLanguages.includes(language)
-                    ),
-                  ].map((language) => {
-                    const isActive = row.activeMeaningLanguage === language;
-                    const hasText = Boolean((row.meanings[language] || "").trim());
-                    const isRequired = language === requiredLanguage;
-                    return (
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto rounded-lg border border-black/10 bg-white md:block">
+          <table className="min-w-full border-collapse">
+            <thead>
+              <tr className="bg-zinc-50 text-left text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+                <th className="border-b border-black/10 px-2 py-2">#</th>
+                <th className="border-b border-black/10 px-2 py-2">Source ({effectiveSourceLanguage})</th>
+                <th className="border-b border-black/10 px-2 py-2">
+                  Meaning ({effectiveMeaningLanguage}){effectiveMeaningLanguage === requiredLanguage ? "*" : ""}
+                </th>
+                <th className="border-b border-black/10 px-2 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={row.id} className="align-top">
+                  <td className="border-b border-black/10 px-2 py-2 text-xs text-zinc-500">{index + 1}</td>
+                  <td className="border-b border-black/10 px-2 py-2">
+                    <input
+                      type="text"
+                      value={sourceDisplayValueFromRow(row)}
+                      onChange={(event) => {
+                        const nextPair = sourcePairFromDisplayInput(event.target.value);
+                        onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
+                        onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
+                        onSourceFieldChange(
+                          row.id,
+                          "sourceTransliterationIast",
+                          nextPair.sourceTransliterationIast
+                        );
+                      }}
+                      className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                      placeholder={`Source (${sourceDisplayScript})`}
+                    />
+                  </td>
+                  <td className="border-b border-black/10 px-2 py-2">
+                    <input
+                      type="text"
+                      value={row.meanings[row.activeMeaningLanguage] || ""}
+                      onChange={(event) => {
+                        onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
+                      }}
+                      className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                      placeholder={`Meaning (${row.activeMeaningLanguage})`}
+                    />
+                  </td>
+                  <td className="border-b border-black/10 px-2 py-2">
+                    <div className="flex items-center gap-1">
                       <button
-                        key={`${row.id}_${language}`}
                         type="button"
-                        onClick={() => onSelectMeaningLanguage(row.id, language)}
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] transition ${
-                          isActive
-                            ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
-                            : "border-black/10 bg-white text-zinc-600 hover:bg-zinc-50"
-                        }`}
+                        onClick={() => onMoveRow(row.id, "up")}
+                        disabled={index === 0}
+                        className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {language}
-                        {isRequired ? "*" : ""}
-                        {hasText ? " ✓" : ""}
+                        ↑
                       </button>
-                    );
-                  })}
-                </div>
-                <input
-                  type="text"
-                  value={row.meanings[row.activeMeaningLanguage] || ""}
-                  onChange={(event) =>
-                    onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value)
-                  }
-                  className="mt-1 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  placeholder={`Meaning (${row.activeMeaningLanguage})${
-                    row.activeMeaningLanguage === requiredLanguage ? " — required" : ""
-                  }`}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
+                      <button
+                        type="button"
+                        onClick={() => onMoveRow(row.id, "down")}
+                        disabled={index === rows.length - 1}
+                        className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveRow(row.id)}
+                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 transition hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <div className="mt-1 text-[10px] text-zinc-500">
+                      Src: {row.sourceLanguage} | Meaning langs: {rowMeaningLanguages.filter((lang) => (row.meanings[lang] || "").trim()).join(", ") || "-"}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </>
       )}
     </div>
   );

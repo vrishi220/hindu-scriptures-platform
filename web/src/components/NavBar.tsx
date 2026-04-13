@@ -37,6 +37,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   preview_show_commentary: true,
   preview_transliteration_script: "iast",
   preview_word_meanings_display_mode: "inline",
+  word_meanings_default_source_language: "sa",
+  word_meanings_default_meaning_language: "en",
   preview_translation_languages: "english",
   preview_hidden_levels: "",
   ui_theme: "classic",

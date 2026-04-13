@@ -38,6 +38,14 @@ const SCHEME_BY_OPTION: Record<TransliterationScriptOption, string> = {
 const SCRIPT_SET = new Set<string>(TRANSLITERATION_SCRIPT_OPTIONS);
 const DEVANAGARI_LETTER_PATTERN = /[\u0904-\u0939\u0958-\u0961\u0971-\u097F]/;
 const IAST_DIACRITIC_PATTERN = /[āīūṛṝḷḹṅñṭḍṇśṣṃṁḥ]/i;
+const BENGALI_LETTER_PATTERN = /[\u0980-\u09FF]/;
+const GURMUKHI_LETTER_PATTERN = /[\u0A00-\u0A7F]/;
+const GUJARATI_LETTER_PATTERN = /[\u0A80-\u0AFF]/;
+const ORIYA_LETTER_PATTERN = /[\u0B00-\u0B7F]/;
+const TAMIL_LETTER_PATTERN = /[\u0B80-\u0BFF]/;
+const TELUGU_LETTER_PATTERN = /[\u0C00-\u0C7F]/;
+const KANNADA_LETTER_PATTERN = /[\u0C80-\u0CFF]/;
+const MALAYALAM_LETTER_PATTERN = /[\u0D00-\u0D7F]/;
 
 export const normalizeTransliterationScript = (
   value?: string | null
@@ -61,6 +69,22 @@ export const isRomanScript = (script: TransliterationScriptOption): boolean =>
 export const hasDevanagariLetters = (text: string): boolean => {
   if (!text) return false;
   return DEVANAGARI_LETTER_PATTERN.test(text);
+};
+
+export const inferIndicScriptFromText = (
+  text: string
+): Extract<TransliterationScriptOption, (typeof INDIC_SCRIPT_OPTIONS)[number]> | null => {
+  if (!text) return null;
+  if (DEVANAGARI_LETTER_PATTERN.test(text)) return "devanagari";
+  if (BENGALI_LETTER_PATTERN.test(text)) return "bengali";
+  if (GURMUKHI_LETTER_PATTERN.test(text)) return "gurmukhi";
+  if (GUJARATI_LETTER_PATTERN.test(text)) return "gujarati";
+  if (ORIYA_LETTER_PATTERN.test(text)) return "oriya";
+  if (TAMIL_LETTER_PATTERN.test(text)) return "tamil";
+  if (TELUGU_LETTER_PATTERN.test(text)) return "telugu";
+  if (KANNADA_LETTER_PATTERN.test(text)) return "kannada";
+  if (MALAYALAM_LETTER_PATTERN.test(text)) return "malayalam";
+  return null;
 };
 
 const transliterate = (text: string, from: string, to: string): string => {
@@ -137,6 +161,41 @@ export const transliterateFromIast = (
   }
   const scriptInput = isRomanScript(script) ? normalizedInput : normalizedInput.toLowerCase();
   return transliterate(scriptInput, "iast", targetScheme).normalize("NFC");
+};
+
+export const transliterateBetweenScripts = (
+  text: string,
+  fromScript: TransliterationScriptOption,
+  toScript: TransliterationScriptOption
+): string => {
+  const input = text.trim();
+  if (!input) {
+    return "";
+  }
+  if (fromScript === toScript) {
+    return input.normalize("NFC");
+  }
+
+  const fromScheme = SCHEME_BY_OPTION[fromScript];
+  const toScheme = SCHEME_BY_OPTION[toScript];
+  if (!fromScheme || !toScheme) {
+    return input;
+  }
+
+  const normalizedInput = isRomanScript(fromScript)
+    ? normalizeLegacyIastInput(input)
+    : input;
+
+  // Sanscript can no-op for some direct cross-script pairs; route through
+  // Devanagari as a stable bridge when neither side is Devanagari.
+  if (fromScheme !== "devanagari" && toScheme !== "devanagari") {
+    const viaDevanagari = transliterate(normalizedInput, fromScheme, "devanagari").normalize("NFC");
+    if (hasDevanagariLetters(viaDevanagari)) {
+      return transliterate(viaDevanagari, "devanagari", toScheme).normalize("NFC");
+    }
+  }
+
+  return transliterate(normalizedInput, fromScheme, toScheme).normalize("NFC");
 };
 
 export const transliterateLatinToIast = (text: string): string =>

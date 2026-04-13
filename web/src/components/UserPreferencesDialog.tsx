@@ -32,6 +32,8 @@ export type UserPreferences = {
   preview_show_commentary: boolean;
   preview_transliteration_script: string;
   preview_word_meanings_display_mode: "inline" | "table" | "hide";
+  word_meanings_default_source_language: string;
+  word_meanings_default_meaning_language: string;
   preview_translation_languages: string;
   preview_hidden_levels: string;
   ui_theme: UiThemePreference;
@@ -82,6 +84,8 @@ export const serializeUserPreferencesForComparison = (
       preferences.preview_transliteration_script
     ),
     preview_word_meanings_display_mode: preferences.preview_word_meanings_display_mode,
+    word_meanings_default_source_language: preferences.word_meanings_default_source_language,
+    word_meanings_default_meaning_language: preferences.word_meanings_default_meaning_language,
     preview_translation_languages: preferences.preview_translation_languages,
     preview_hidden_levels: preferences.preview_hidden_levels,
     ui_theme: normalizeUiTheme(preferences.ui_theme),

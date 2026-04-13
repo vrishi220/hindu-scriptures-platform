@@ -918,6 +918,8 @@ class UserPreferenceBase(BaseModel):
     preview_show_commentary: bool = True
     preview_transliteration_script: str = "iast"
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] = "inline"
+    word_meanings_default_source_language: str = "sa"
+    word_meanings_default_meaning_language: str = "en"
     preview_translation_languages: str = "english"
     preview_hidden_levels: str = ""
     scriptures_book_browser_view: Literal["list", "icon"] = "list"
@@ -946,6 +948,8 @@ class UserPreferenceUpdate(BaseModel):
     preview_show_commentary: bool | None = None
     preview_transliteration_script: str | None = None
     preview_word_meanings_display_mode: Literal["inline", "table", "hide"] | None = None
+    word_meanings_default_source_language: str | None = None
+    word_meanings_default_meaning_language: str | None = None
     preview_translation_languages: str | None = None
     preview_hidden_levels: str | None = None
     scriptures_book_browser_view: Literal["list", "icon"] | None = None

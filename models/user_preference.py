@@ -35,6 +35,8 @@ class UserPreference(Base):
     preview_show_commentary = Column(Boolean, default=True, nullable=False)
     preview_transliteration_script = Column(String(20), default="iast", nullable=False)
     preview_word_meanings_display_mode = Column(String(10), default="inline", nullable=False)
+    word_meanings_default_source_language = Column(String(10), default="sa", nullable=False)
+    word_meanings_default_meaning_language = Column(String(10), default="en", nullable=False)
     preview_translation_languages = Column(String(255), default="english", nullable=False)
     preview_hidden_levels = Column(String(2000), default="", nullable=False)
     scriptures_book_browser_view = Column(String(10), default="list", nullable=False)
