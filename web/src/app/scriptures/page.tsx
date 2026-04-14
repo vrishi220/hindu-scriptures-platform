@@ -2811,6 +2811,7 @@ function ScripturesContent() {
   const [bookInlineSubmitting, setBookInlineSubmitting] = useState(false);
   const [bookInfoStatsOpen, setBookInfoStatsOpen] = useState(true);
   const [bookInfoAuthorsOpen, setBookInfoAuthorsOpen] = useState(true);
+  const [treeEditMode, setTreeEditMode] = useState(false);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -11296,7 +11297,7 @@ function ScripturesContent() {
               })()}
             </span>
           </button>
-          {(canContribute || canEditCurrentBook) && (
+          {treeEditMode && (canContribute || canEditCurrentBook) && (
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -11340,7 +11341,7 @@ function ScripturesContent() {
               )}
             </div>
           )}
-          {(canContribute || canEditCurrentBook) && canAddChild(node) && (
+          {treeEditMode && (canContribute || canEditCurrentBook) && canAddChild(node) && (
             <button
               type="button"
               onClick={() => {
@@ -13201,11 +13202,34 @@ function ScripturesContent() {
               } md:flex`}
               style={{ scrollbarGutter: "stable" }}
             >
-              {(treeLoading || treeReorderingNodeId !== null || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
+              {(treeLoading || treeReorderingNodeId !== null || ((canContribute || canEditCurrentBook) && Boolean(bookId)) || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
                 <div className="sticky top-0 z-10 bg-white/90 pb-1">
                   <div className="flex items-center justify-end gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                     {treeLoading && <span>Loading</span>}
                     {treeReorderingNodeId !== null && <span>Reordering</span>}
+                    {(canContribute || canEditCurrentBook) && bookId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTreeEditMode((prev) => {
+                            const next = !prev;
+                            if (!next) {
+                              setTreeReorderModeNodeId(null);
+                            }
+                            return next;
+                          });
+                        }}
+                        title={treeEditMode ? "Disable edit mode" : "Enable edit mode"}
+                        aria-label={treeEditMode ? "Disable edit mode" : "Enable edit mode"}
+                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${
+                          treeEditMode
+                            ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
+                            : "border-black/10 bg-white/80 text-zinc-700 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+                        }`}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    )}
                     {bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1 && (
                       <>
                         <button
