@@ -932,8 +932,7 @@ export default function BasketPanel({
             type="button"
             onPointerDown={handleDragStart}
             onClick={(event) => event.stopPropagation()}
-            className="absolute left-1/2 top-1 z-10 h-4 w-14 -translate-x-1/2 rounded-full border border-black/10 bg-white/95 text-[10px] text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 cursor-grab active:cursor-grabbing"
-            style={{ touchAction: "none" }}
+            className="absolute left-1/2 top-1 z-10 h-4 w-14 -translate-x-1/2 rounded-full border border-black/10 bg-white/95 text-[10px] text-zinc-500 shadow-sm transition hover:bg-white hover:text-zinc-700 cursor-grab touch-none active:cursor-grabbing"
             title="Drag basket"
             aria-label="Drag basket"
           >
@@ -965,9 +964,8 @@ export default function BasketPanel({
           style={{ left: `${panelLeft}px`, top: `${panelTop}px`, width: `${panelWidth}px` }}
         >
           <div
-            className="flex items-center justify-between border-b border-black/10 p-4 cursor-grab active:cursor-grabbing"
+            className="flex items-center justify-between border-b border-black/10 p-4 cursor-grab touch-none active:cursor-grabbing"
             onPointerDown={handleDragStart}
-            style={{ touchAction: "none" }}
             title="Drag basket"
           >
             <h3 className="font-[var(--font-display)] text-lg text-[color:var(--deep)]">

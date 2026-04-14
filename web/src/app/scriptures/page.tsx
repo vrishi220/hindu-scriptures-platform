@@ -3170,10 +3170,10 @@ function ScripturesContent() {
     const lineClassNameForField = (fieldName: string, value: string) => {
       const baseClassName =
         fieldName === "sanskrit"
-          ? "whitespace-pre-wrap text-base leading-relaxed text-[color:var(--deep)]"
+          ? "whitespace-pre-wrap text-[15px] leading-normal text-[color:var(--deep)]"
           : fieldName === "transliteration"
-            ? "whitespace-pre-wrap text-sm italic leading-relaxed text-zinc-700 transliteration-highlight"
-            : "whitespace-pre-wrap text-sm leading-relaxed text-zinc-700";
+            ? "whitespace-pre-wrap text-sm italic leading-normal text-zinc-700 transliteration-highlight"
+            : "whitespace-pre-wrap text-sm leading-normal text-zinc-700";
       const scriptClassName = scriptFontClassName(value);
       return scriptClassName ? `${baseClassName} ${scriptClassName}` : baseClassName;
     };
@@ -11694,24 +11694,24 @@ function ScripturesContent() {
       elements.push(
         <article
           key={`${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`}
-          className="border-b border-black/10 px-1 py-4"
+          className="border-b border-black/10 px-0.5 py-1.5"
         >
           {appliedShowPreviewLevelNumbers && block.content.level_name && block.content.sequence_number != null && block.content.sequence_number !== "" && (
-            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
+            <div className="mb-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
               {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
             </div>
           )}
           {displayTitle && (
             <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
           )}
-          <div className="mt-1">
+          <div className="mt-0.5">
             {nonTranslationLines.map((line, lineIndex) => (
               <div
                 key={`${line.key}-${line.value.slice(0, 24)}`}
                 className={
                   lineIndex === 0 || !line.isFieldStart
                     ? ""
-                    : "mt-2 border-t border-black/10 pt-2"
+                      : "mt-1 border-t border-black/10 pt-1"
                 }
               >
                 {line.label && (
@@ -11722,16 +11722,16 @@ function ScripturesContent() {
             ))}
           </div>
           {wordMeaningRows.length > 0 && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
-            <div className="mt-2 border-t border-black/10 pt-2">
+            <div className="mt-1 border-t border-black/10 pt-1">
               {appliedPreviewWordMeaningsDisplayMode === "table" ? (
                 <div className="overflow-x-auto rounded-lg border border-black/10 bg-white/80">
                   <table className="min-w-full border-collapse text-sm text-zinc-700">
                     <thead className="bg-zinc-50/70 text-xs uppercase tracking-[0.14em] text-zinc-500">
                       <tr>
-                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                        <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
                           Source
                         </th>
-                        <th className="border-b border-black/10 px-2 py-1.5 text-left font-medium">
+                        <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
                           Meaning
                         </th>
                       </tr>
@@ -11739,10 +11739,10 @@ function ScripturesContent() {
                     <tbody>
                       {wordMeaningRows.map((row) => (
                         <tr key={row.key} className="border-b border-black/5 last:border-b-0">
-                          <td className="transliteration-highlight px-2 py-1.5 align-top text-zinc-800">
+                          <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
                             {row.sourceText || "—"}
                           </td>
-                          <td className="px-2 py-1.5 align-top text-zinc-700">
+                          <td className="px-2 py-1 align-top text-zinc-700">
                             {row.meaningText || "—"}
                             {row.fallbackBadgeVisible && row.meaningLanguage ? (
                               <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
@@ -11756,7 +11756,7 @@ function ScripturesContent() {
                   </table>
                 </div>
               ) : (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>
+                <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
                   {wordMeaningRows.map((row, rowIndex) => {
                     const source = row.sourceText || "—";
                     const meaning = row.meaningText || "—";
@@ -11777,14 +11777,14 @@ function ScripturesContent() {
             </div>
           )}
           {translationLines.length > 0 && (
-            <div className="mt-2 border-t border-black/10 pt-2">
+            <div className="mt-1 border-t border-black/10 pt-1">
               {translationLines.map((line, lineIndex) => (
                 <div
                   key={`${line.key}-translation-${line.value.slice(0, 24)}`}
                   className={
                     lineIndex === 0 || !line.isFieldStart
                       ? ""
-                      : "mt-2 border-t border-black/10 pt-2"
+                      : "mt-1 border-t border-black/10 pt-1"
                   }
                 >
                   {line.label && (
@@ -11796,45 +11796,45 @@ function ScripturesContent() {
             </div>
           )}
           {visibleTranslationVariants.length > 0 && (
-            <details className="mt-2 border-t border-black/10 pt-2">
+            <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                 Translations By Authors ({visibleTranslationVariants.length})
               </summary>
-              <div className="mt-2 flex flex-col gap-2">
+              <div className="mt-1 flex flex-col gap-1">
                 {visibleTranslationVariants.map((entry, idx) => (
-                  <div key={`translation-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2">
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                  <div key={`translation-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-1">
+                    <div className="mb-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
                       {(entry.author_slug ? (currentBook?.variant_authors?.[entry.author_slug] || entry.author) : entry.author) || "Unknown Author"}
                       {entry.language ? ` • ${entry.language}` : ""}
                     </div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                    <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
                   </div>
                 ))}
               </div>
             </details>
           )}
           {visibleCommentaryVariants.length > 0 && (
-            <details className="mt-2 border-t border-black/10 pt-2">
+            <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                 Commentaries By Authors ({visibleCommentaryVariants.length})
               </summary>
-              <div className="mt-2 flex flex-col gap-2">
+              <div className="mt-1 flex flex-col gap-1">
                 {visibleCommentaryVariants.map((entry, idx) => (
-                  <div key={`commentary-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-2">
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                  <div key={`commentary-variant-${idx}`} className="rounded-lg border border-black/10 bg-zinc-50/40 p-1">
+                    <div className="mb-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-500">
                       {(entry.author_slug ? (currentBook?.variant_authors?.[entry.author_slug] || entry.author) : entry.author) || "Unknown Author"}
                       {entry.language ? ` • ${entry.language}` : ""}
                     </div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                    <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
                   </div>
                 ))}
               </div>
             </details>
           )}
           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
-            <div className="mt-2 border-t border-black/10 pt-2">
-              <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
-              <div className="flex flex-col gap-3">
+            <div className="mt-1 border-t border-black/10 pt-1">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
+              <div className="flex flex-col gap-1.5">
                 {block.content.media_items.map((media, mediaIndex) => {
                   const mediaType = (media?.media_type || "link").trim().toLowerCase();
                   const mediaUrl = (media?.url || "").trim();
@@ -11855,10 +11855,10 @@ function ScripturesContent() {
                   return (
                     <div
                       key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`}
-                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-1"
                     >
                       {renderInlineMediaPreview(mediaType, mediaUrl, metadataLabel)}
-                      <div className="mt-2 text-xs text-zinc-500">{metadataLabel}</div>
+                      <div className="mt-1 text-xs text-zinc-500">{metadataLabel}</div>
                     </div>
                   );
                 })}
@@ -11866,7 +11866,7 @@ function ScripturesContent() {
             </div>
           )}
           {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
-            <div className="mt-2 text-xs text-zinc-500">
+            <div className="mt-1 text-xs text-zinc-500">
               template: {block.template_key}
               {typeof block.source_node_id === "number" ? ` • source node ${block.source_node_id}` : ""}
               {typeof block.content.sequence_number === "number"
@@ -13288,13 +13288,13 @@ function ScripturesContent() {
 
             {/* Content Section */}
             <div
-              className={`min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-3 shadow-lg sm:p-4 overflow-y-auto overscroll-contain md:min-w-0 md:flex-1 ${
+              className={`min-h-0 h-full rounded-2xl border border-black/10 bg-white/80 p-2.5 shadow-lg sm:p-3 overflow-y-auto overscroll-contain md:min-w-0 md:flex-1 ${
                 mobilePanel === "content" ? "block" : "hidden"
               } md:block`}
               style={{ scrollbarGutter: "stable" }}
             >
               {breadcrumb.length > 0 && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-600">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-600">
                   <div className="flex flex-wrap items-center gap-2">
                     {breadcrumb.map((node, index) => (
                       <span key={node.id} className="flex items-center gap-2">
@@ -13362,7 +13362,7 @@ function ScripturesContent() {
               )}
               {isBookRootSelected && currentBook ? (
                 <>
-                  <div className="mb-4 flex items-center justify-between">
+                  <div className="mb-3 flex items-center justify-between">
                     <div className="min-w-0 flex-1">
                       {bookInlineEditMode ? (
                         <input
@@ -13597,12 +13597,12 @@ function ScripturesContent() {
                     onToggle={(e) => setBookInfoStatsOpen((e.currentTarget as HTMLDetailsElement).open)}
                     className="rounded-2xl border border-black/10 bg-white/90"
                   >
-                    <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                    <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
                       Book Statistics
                       <span className="text-zinc-400">{bookInfoStatsOpen ? "▾" : "▸"}</span>
                     </summary>
-                    <div className="flex flex-col gap-4 px-4 pb-4">
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="flex flex-col gap-2.5 px-4 pb-3">
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
                           <div className="mt-1 text-sm text-zinc-700">
@@ -13616,7 +13616,7 @@ function ScripturesContent() {
                       </div>
                       {currentBook.schema?.levels?.length ? (
                         <div>
-                          <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">Level Counts</div>
+                          <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">Level Counts</div>
                           <div className="flex flex-col gap-1">
                             {currentBook.schema.levels.map((level) => {
                               const displayName = getDisplayLevelName(level) || level;
@@ -13624,7 +13624,7 @@ function ScripturesContent() {
                               return (
                                 <div
                                   key={`stat-${level}`}
-                                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1.5 text-sm"
+                                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
                                 >
                                   <span className="text-zinc-600">{displayName}</span>
                                   <span className="font-medium tabular-nums text-zinc-900">
@@ -13645,13 +13645,13 @@ function ScripturesContent() {
                       onToggle={(e) => setBookInfoAuthorsOpen((e.currentTarget as HTMLDetailsElement).open)}
                       className="rounded-2xl border border-black/10 bg-white/90"
                     >
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
                         Author Registry
                         <span className="text-zinc-400">{bookInfoAuthorsOpen ? "▾" : "▸"}</span>
                       </summary>
-                      <div className="flex flex-col gap-1 px-4 pb-4">
+                      <div className="flex flex-col gap-1 px-4 pb-3">
                         {Object.entries(currentBook.variant_authors ?? {}).map(([slug, name]) => (
-                          <div key={slug} className="flex items-baseline gap-3 rounded-lg bg-zinc-50 px-3 py-2 text-sm">
+                          <div key={slug} className="flex items-baseline gap-3 rounded-lg bg-zinc-50 px-3 py-1.5 text-sm">
                             <span className="font-medium text-zinc-900">{name}</span>
                             <span className="font-mono text-xs text-zinc-400">{slug}</span>
                           </div>
@@ -14040,9 +14040,9 @@ function ScripturesContent() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-3.5">
                     {preferences && (
-                      <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
+                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
                         <div className="flex items-center justify-between gap-3">
                           <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                             Display preferences
@@ -14060,8 +14060,8 @@ function ScripturesContent() {
                     )}
 
                     {nodeContent === null && showMedia && (bookMediaItems.length > 0 || canEditCurrentBook) && (
-                      <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                        <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
                           <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                             Book multimedia
                           </div>
@@ -14081,7 +14081,7 @@ function ScripturesContent() {
                             </button>
                           )}
                         </div>
-                        <div className="group relative mb-2">
+                        <div className="group relative mb-1.5">
                           <input
                             type="text"
                             value={bookBrowseMediaSearchQuery}
@@ -14102,7 +14102,7 @@ function ScripturesContent() {
                           <p className="mb-2 text-xs text-red-600">{propertiesError}</p>
                         )}
                         {bookMediaItems.length > 0 ? (
-                          <div className="flex flex-col gap-4">
+                          <div className="flex flex-col gap-2.5">
                             {Object.entries(
                               bookMediaItems.reduce<Record<string, BookMediaItem[]>>((acc, item) => {
                                 const key = item.media_type || "other";
@@ -14123,20 +14123,20 @@ function ScripturesContent() {
                                 }
 
                                 return (
-                                  <div key={mediaType} className="rounded-xl border border-black/10 bg-white p-3">
-                                    <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">
+                                  <div key={mediaType} className="rounded-xl border border-black/10 bg-white p-2.5">
+                                    <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">
                                       {mediaType}
                                     </div>
-                                    <div className="flex flex-col gap-3">
+                                    <div className="flex flex-col gap-2">
                                       {filteredItems.map((media, index) => {
                                         const label = getBookMediaLabel(media);
                                         return (
                                           <div
                                             key={`${media.media_type}:${media.url}:${media.asset_id || index}`}
-                                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2"
                                           >
                                             {renderInlineMediaPreview(media.media_type, media.url, label)}
-                                            <div className="mt-2 text-xs text-zinc-500">{label}</div>
+                                            <div className="mt-1.5 text-xs text-zinc-500">{label}</div>
                                           </div>
                                         );
                                       })}
@@ -15732,8 +15732,7 @@ function ScripturesContent() {
         {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(bookId) : Boolean(selectedId)))) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
             <div
-              className="w-full max-w-3xl min-w-[320px] max-h-[92dvh] overflow-auto rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
-              style={{ resize: "both" }}
+              className="w-full max-w-3xl min-w-[320px] max-h-[92dvh] resize overflow-auto rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
             >
               <div className="mb-4 flex items-center justify-between">
                 <div>
@@ -17219,15 +17218,15 @@ function ScripturesContent() {
               <div
                 ref={bookPreviewScrollContainerRef}
                 onScroll={handleBookPreviewScroll}
-                className="flex-1 w-full overflow-y-auto px-4 pb-4 pt-2 sm:px-6"
+                className="flex-1 w-full overflow-y-auto px-2.5 pb-1.5 pt-0.5 sm:px-3"
               >
                 {previewLinkMessage && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs text-zinc-700">
+                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs text-zinc-700">
                     {previewLinkMessage}
                   </div>
                 )}
                 {bookPreviewLoading && (
-                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm text-zinc-700">
+                  <div className="mb-1.5 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-sm text-zinc-700">
                     <span
                       aria-hidden
                       className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
@@ -17237,31 +17236,31 @@ function ScripturesContent() {
                 )}
 
                 {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
-                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                  <div className="mb-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-700">
                     {bookPreviewArtifact.warnings.join(" ")}
                   </div>
                 )}
 
                 {showPreviewBookSummary && hasEffectiveBookPreviewSummary && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-[color:var(--paper)] p-3">
-                    <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-700" style={previewBodyTextStyle}>
+                  <div className="mb-1.5 rounded-lg border border-black/10 bg-[color:var(--paper)] p-2">
+                    <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700" style={previewBodyTextStyle}>
                       {bookPreviewArtifact.book_template?.rendered_text?.trim() || ""}
                     </p>
                   </div>
                 )}
 
                 {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
+                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 p-2">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-[color:var(--deep)]">
+                    <div className="mt-0.5 text-sm font-semibold text-[color:var(--deep)]">
                       {bookPreviewArtifact.book_template.template_key}
                     </div>
-                    <div className="mt-1 text-xs text-zinc-500">
+                    <div className="mt-0.5 text-xs text-zinc-500">
                       Children rendered: {bookPreviewArtifact.book_template.child_count}
                     </div>
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700" style={previewBodyTextStyle}>
+                    <p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-zinc-700" style={previewBodyTextStyle}>
                       {bookPreviewArtifact.book_template.rendered_text ||
                         (bookPreviewArtifact.preview_scope === "node"
                           ? "No rendered level summary."
@@ -17271,19 +17270,19 @@ function ScripturesContent() {
                 )}
 
                 {bookPreviewArtifact.preview_scope === "book" && appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
-                  <div className="mb-2 rounded-lg border border-black/10 bg-white/90 p-2.5">
+                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 p-2">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Multimedia</div>
-                    <div className="mt-2 flex flex-col gap-3">
+                    <div className="mt-1.5 flex flex-col gap-2">
                       {(bookPreviewArtifact.book_media_items || []).map((media, index) => {
                         const label = getBookMediaLabel(media);
                         const mediaType = (media.media_type || "link").trim().toLowerCase();
                         return (
                           <div
                             key={`${mediaType}:${media.url}:${media.asset_id || index}`}
-                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2.5"
+                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2"
                           >
                             {renderInlineMediaPreview(mediaType, media.url, label)}
-                            <div className="mt-2 text-xs text-zinc-500">{label}</div>
+                            <div className="mt-1 text-xs text-zinc-500">{label}</div>
                           </div>
                         );
                       })}
@@ -17291,9 +17290,9 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                <div className="space-y-3">
+                <div className="space-y-1.5">
                   {previewBodyBlockElements.length === 0 ? (
-                    <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-sm text-zinc-500">
+                    <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-1.5 text-sm text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node"
                         ? "No previewable content found under this level."
                         : "No previewable content found for this book."}
@@ -17303,7 +17302,7 @@ function ScripturesContent() {
                   )}
 
                   {(bookPreviewLoadingMore || (bookPreviewArtifact.preview_scope === "book" && bookPreviewArtifact.has_more)) && (
-                    <div className="py-3 text-center text-xs text-zinc-500">
+                    <div className="py-1.5 text-center text-xs text-zinc-500">
                       {bookPreviewLoadingMore ? "Loading more…" : "Scroll to load more"}
                     </div>
                   )}

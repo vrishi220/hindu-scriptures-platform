@@ -99,30 +99,30 @@ export const serializeUserPreferencesForComparison = (
 const THEME_PREVIEWS: Array<{
   key: UiThemePreference;
   label: string;
-  bg: string;
-  surface: string;
-  accent: string;
+  bgClassName: string;
+  surfaceClassName: string;
+  accentClassName: string;
 }> = [
   {
     key: "classic",
     label: "Classic",
-    bg: "#f7f4ef",
-    surface: "#ffffff",
-    accent: "#b33a2f",
+    bgClassName: "bg-[#f7f4ef]",
+    surfaceClassName: "bg-white",
+    accentClassName: "bg-[#b33a2f]",
   },
   {
     key: "minimal",
     label: "Minimal",
-    bg: "#faf8f4",
-    surface: "#ffffff",
-    accent: "#a83a31",
+    bgClassName: "bg-[#faf8f4]",
+    surfaceClassName: "bg-white",
+    accentClassName: "bg-[#a83a31]",
   },
   {
     key: "slate",
     label: "Slate",
-    bg: "#f2f4f7",
-    surface: "#ffffff",
-    accent: "#2e5f93",
+    bgClassName: "bg-[#f2f4f7]",
+    surfaceClassName: "bg-white",
+    accentClassName: "bg-[#2e5f93]",
   },
 ];
 
@@ -184,16 +184,13 @@ export function UserPreferencesForm({
               }`}
             >
               <div
-                className="mb-1.5 rounded-md border border-black/10 p-1"
-                style={{ backgroundColor: theme.bg }}
+                className={`mb-1.5 rounded-md border border-black/10 p-1 ${theme.bgClassName}`}
               >
                 <div
-                  className="mb-1 h-1.5 rounded"
-                  style={{ backgroundColor: theme.accent }}
+                  className={`mb-1 h-1.5 rounded ${theme.accentClassName}`}
                 />
                 <div
-                  className="h-4 rounded border border-black/10"
-                  style={{ backgroundColor: theme.surface }}
+                  className={`h-4 rounded border border-black/10 ${theme.surfaceClassName}`}
                 />
               </div>
               <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-700">
