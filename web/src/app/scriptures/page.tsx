@@ -13091,15 +13091,15 @@ function ScripturesContent() {
                       canManageBook;
                     const showSingleBrowseAction = canBrowseBook && !showRowMenu;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
-                    // Smart menu positioning: align top-left with center of button, shift right if needed to stay in viewport
+                    // Smart menu positioning: align top-left corner with center of button, shift right if needed to stay in viewport
                     const getMenuPositionClass = () => {
-                      if (!isBooksGridView) return "left-1/2 -translate-x-1/2"; // List view: center-align
-                      if (booksGridColumns === 1) return "left-1/2 -translate-x-1/2"; // Single column: center-align
-                      // For grid view: center by default, but shift right for rightmost columns to keep menu visible
+                      if (!isBooksGridView) return "left-4"; // List view: align left edge to button center
+                      if (booksGridColumns === 1) return "left-4"; // Single column: align left edge to button center
+                      // For grid view: align to button center by default, but shift right for rightmost columns to keep menu visible
                       if (gridColumnIndex === booksGridColumns - 1) {
-                        return "right-0"; // Right column: align to right edge of button
+                        return "right-4"; // Right column: align to right edge of button center
                       }
-                      return "left-1/2 -translate-x-1/2"; // All other positions: center on button
+                      return "left-4"; // All other positions: align left edge to button center
                     };
                     const menuPositionClass = getMenuPositionClass();
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
