@@ -12523,8 +12523,6 @@ function ScripturesContent() {
     return (
       <div 
         className="relative"
-        onMouseEnter={() => setOpenBookRowShareSubmenuId(book.id)}
-        onMouseLeave={() => setOpenBookRowShareSubmenuId(null)}
       >
         <button
           type="button"
