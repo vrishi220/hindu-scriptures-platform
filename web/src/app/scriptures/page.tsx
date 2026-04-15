@@ -12334,17 +12334,18 @@ function ScripturesContent() {
     }
 
     return (
-      <div className="relative">
+      <div 
+        className="relative"
+        onMouseEnter={() => setOpenBookRowShareSubmenuId(book.id)}
+        onMouseLeave={() => setOpenBookRowShareSubmenuId(null)}
+      >
         <button
           type="button"
-          onClick={() => {
-            setOpenBookRowShareSubmenuId((prev) => (prev === book.id ? null : book.id));
-          }}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
         >
           <Link2 size={14} />
           <span className="flex-1">Share</span>
-          <ChevronRight size={14} className={`transition ${openBookRowShareSubmenuId === book.id ? "rotate-90" : ""}`} />
+          <ChevronRight size={14} />
         </button>
         {openBookRowShareSubmenuId === book.id && (
           <div className="absolute left-full top-0 ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl">
