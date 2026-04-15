@@ -13855,7 +13855,7 @@ function ScripturesContent() {
                                     : []),
                                 ],
                                 panelClassName:
-                                  "invisible absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                                  "invisible absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
                               })}
                               {canContribute && currentBook?.schema && (
                                 <button
@@ -14189,7 +14189,7 @@ function ScripturesContent() {
                                     : []),
                                 ],
                                 panelClassName:
-                                  "invisible absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                                  "invisible absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
                               })}
                               {canAddSelectedNodeToBasket && (
                                 <button
