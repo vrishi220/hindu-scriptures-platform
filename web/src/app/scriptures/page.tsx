@@ -13167,7 +13167,7 @@ function ScripturesContent() {
                             </div>
 
                             </div>
-                            <div className="absolute right-2 top-2 z-10 flex items-center gap-1.5">
+                            <div className="absolute right-2 top-2 z-[9999] flex items-center gap-1.5">
                               {showSingleBrowseAction && (
                                 <button
                                   type="button"
@@ -13188,7 +13188,7 @@ function ScripturesContent() {
                                       bookRowActionsMenuRef.current = element;
                                     }
                                   }}
-                                  className="relative"
+                                  className="relative z-[9999]"
                                 >
                                   <button
                                     type="button"
