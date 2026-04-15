@@ -24,6 +24,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
@@ -2804,6 +2805,7 @@ function ScripturesContent() {
   const [levelTemplateError, setLevelTemplateError] = useState<string | null>(null);
   const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
   const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
+  const [openBookRowShareSubmenuId, setOpenBookRowShareSubmenuId] = useState<number | null>(null);
   const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
@@ -2915,6 +2917,7 @@ function ScripturesContent() {
       const target = event.target as Node;
       if (bookRowActionsMenuRef.current && !bookRowActionsMenuRef.current.contains(target)) {
         setOpenBookRowActionsId(null);
+        setOpenBookRowShareSubmenuId(null);
       }
       if (bookBrowserDensityMenuRef.current && !bookBrowserDensityMenuRef.current.contains(target)) {
         setShowBookBrowserDensityMenu(false);
@@ -2947,6 +2950,7 @@ function ScripturesContent() {
 
   useEffect(() => {
     setOpenBookRowActionsId(null);
+    setOpenBookRowShareSubmenuId(null);
   }, [bookId]);
 
   useEffect(() => {
@@ -7726,12 +7730,13 @@ function ScripturesContent() {
     await browsingHook.loadBooksPage({ reset: true });
   };
 
-  const loadBookShares = async () => {
-    if (!browsingHook.bookId) return;
+  const loadBookShares = async (targetBookId?: string) => {
+    const effectiveBookId = targetBookId ?? browsingHook.bookId;
+    if (!effectiveBookId) return;
     setSharesLoading(true);
     setSharesError(null);
     try {
-      const response = await fetch(`/api/books/${browsingHook.bookId}/shares`, {
+      const response = await fetch(`/api/books/${effectiveBookId}/shares`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -7753,6 +7758,14 @@ function ScripturesContent() {
     } finally {
       setSharesLoading(false);
     }
+  };
+
+  const openShareManagerForBook = async (targetBookId: string) => {
+    const didSelect = handleSelectBook(targetBookId, { syncUrl: false, preserveLayout: true });
+    if (!didSelect) return;
+    setSharesError(null);
+    setShowShareManager(true);
+    await loadBookShares(targetBookId);
   };
 
 
@@ -7778,6 +7791,63 @@ function ScripturesContent() {
     }
     params.set("preview", scope);
     return `/scriptures?${params.toString()}`;
+  };
+
+  const toAbsoluteUrl = (relativePath: string) => {
+    if (typeof window === "undefined") {
+      return relativePath;
+    }
+    return `${window.location.origin}${relativePath}`;
+  };
+
+  const writeClipboardText = async (text: string) => {
+    if (typeof window === "undefined" || !navigator.clipboard) {
+      return false;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const copyShareUrl = async (
+    absoluteUrl: string,
+    target: "book" | "node" | "leaf",
+    onDone?: () => void
+  ) => {
+    onDone?.();
+    const ok = await writeClipboardText(absoluteUrl);
+    if (ok) {
+      setAuthMessage("Link copied.");
+      setCopyTarget(target);
+      window.setTimeout(() => {
+        setAuthMessage(null);
+        setCopyTarget(null);
+      }, 2000);
+    } else {
+      setAuthMessage("Failed to copy link.");
+      setCopyTarget(target);
+      window.setTimeout(() => {
+        setAuthMessage(null);
+        setCopyTarget(null);
+      }, 2000);
+    }
+  };
+
+  const emailShareUrl = (
+    subjectText: string,
+    bodyText: string,
+    onDone?: () => void
+  ) => {
+    onDone?.();
+    if (typeof window === "undefined") {
+      return;
+    }
+    const subject = encodeURIComponent(subjectText);
+    const body = encodeURIComponent(bodyText);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
   };
 
   const buildPreviewRequestKey = (
@@ -8087,16 +8157,16 @@ function ScripturesContent() {
   };
 
   const handleCopyPreviewPath = async (relativePath: string) => {
-    if (typeof window === "undefined" || !navigator.clipboard) {
+    if (typeof window === "undefined") {
       return;
     }
-    try {
-      await navigator.clipboard.writeText(`${window.location.origin}${relativePath}`);
+    const ok = await writeClipboardText(`${window.location.origin}${relativePath}`);
+    if (ok) {
       setPreviewLinkMessage("Link copied.");
       window.setTimeout(() => {
         setPreviewLinkMessage(null);
       }, 2000);
-    } catch {
+    } else {
       setPreviewLinkMessage("Failed to copy link.");
       window.setTimeout(() => {
         setPreviewLinkMessage(null);
@@ -12250,6 +12320,365 @@ function ScripturesContent() {
     }
   };
 
+  const renderBookRowShareSubmenu = (
+    book: BookOption,
+    options: {
+      canPreviewBook: boolean;
+      canCopyPreviewBookLink: boolean;
+      canCopyBrowseBookLink: boolean;
+    }
+  ): ReactElement | null => {
+    const { canPreviewBook, canCopyPreviewBookLink, canCopyBrowseBookLink } = options;
+    if (!canPreviewBook && !canCopyPreviewBookLink && !canCopyBrowseBookLink) {
+      return null;
+    }
+
+    return (
+      <div className="rounded-lg border border-black/10 bg-white/80">
+        <button
+          type="button"
+          onClick={() => {
+            setOpenBookRowShareSubmenuId((prev) => (prev === book.id ? null : book.id));
+          }}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+        >
+          <Link2 size={14} />
+          <span className="flex-1">Share</span>
+          <ChevronRight size={14} className={`transition ${openBookRowShareSubmenuId === book.id ? "rotate-90" : ""}`} />
+        </button>
+        {openBookRowShareSubmenuId === book.id && (
+          <div className="space-y-0.5 border-t border-black/10 p-1">
+            {canCopyPreviewBookLink && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(
+                      buildScripturesPreviewPath("book", book.id.toString())
+                    );
+                    void copyShareUrl(url, "book", () => {
+                      setOpenBookRowActionsId(null);
+                      setOpenBookRowShareSubmenuId(null);
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Copy preview link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(
+                      buildScripturesPreviewPath("book", book.id.toString())
+                    );
+                    emailShareUrl(
+                      `Shared scripture preview: ${book.book_name}`,
+                      `Here is the preview link for ${book.book_name}:\n\n${url}`,
+                      () => {
+                        setOpenBookRowActionsId(null);
+                        setOpenBookRowShareSubmenuId(null);
+                      }
+                    );
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Email preview link
+                </button>
+              </>
+            )}
+            {canCopyBrowseBookLink && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(
+                      buildScripturesBrowsePath(book.id.toString())
+                    );
+                    void copyShareUrl(url, "book", () => {
+                      setOpenBookRowActionsId(null);
+                      setOpenBookRowShareSubmenuId(null);
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Copy browse link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(
+                      buildScripturesBrowsePath(book.id.toString())
+                    );
+                    emailShareUrl(
+                      `Shared scripture browse link: ${book.book_name}`,
+                      `Here is the browse link for ${book.book_name}:\n\n${url}`,
+                      () => {
+                        setOpenBookRowActionsId(null);
+                        setOpenBookRowShareSubmenuId(null);
+                      }
+                    );
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Email browse link
+                </button>
+              </>
+            )}
+            {!canCopyPreviewBookLink && !canCopyBrowseBookLink && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(`/scriptures?book=${book.id}`);
+                    void copyShareUrl(url, "book", () => {
+                      setOpenBookRowActionsId(null);
+                      setOpenBookRowShareSubmenuId(null);
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Copy link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = toAbsoluteUrl(`/scriptures?book=${book.id}`);
+                    emailShareUrl(
+                      `Shared scripture link: ${book.book_name}`,
+                      `Here is the link for ${book.book_name}:\n\n${url}`,
+                      () => {
+                        setOpenBookRowActionsId(null);
+                        setOpenBookRowShareSubmenuId(null);
+                      }
+                    );
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                >
+                  Email link
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBookRowStandardActions = (
+    book: BookOption,
+    options: {
+      canBrowseBook: boolean;
+      canPreviewBook: boolean;
+      canManageBook: boolean;
+      canImport: boolean;
+      canDownloadPdf: boolean;
+      canToggleVisibility: boolean;
+      canDeletePrivateBook: boolean;
+      bookVisibility: unknown;
+    }
+  ): ReactElement => {
+    const {
+      canBrowseBook,
+      canPreviewBook,
+      canManageBook,
+      canImport,
+      canDownloadPdf,
+      canToggleVisibility,
+      canDeletePrivateBook,
+      bookVisibility,
+    } = options;
+
+    return (
+      <>
+        {canBrowseBook && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowShareSubmenuId(null);
+              handleBrowseBookFromRowMenuAction(book);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            <BookOpen size={14} />
+            Browse book
+          </button>
+        )}
+        {canPreviewBook && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void handlePreviewBookFromRow(book);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            <Eye size={14} />
+            Preview book
+          </button>
+        )}
+        {canManageBook && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void openShareManagerForBook(book.id.toString());
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            <Users size={14} />
+            Manage shares
+          </button>
+        )}
+        {canManageBook && (
+          <button
+            type="button"
+            onClick={() => {
+              const didSelect = handleSelectBook(book.id.toString(), {
+                syncUrl: false,
+                preserveLayout: true,
+              });
+              if (!didSelect) return;
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              setMediaManagerScope("book");
+              setShowMediaManagerModal(true);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            <Plus size={14} />
+            Manage multimedia
+          </button>
+        )}
+        {canManageBook && (
+          <button
+            type="button"
+            onClick={() => {
+              const didSelect = handleSelectBook(book.id.toString(), {
+                syncUrl: false,
+                preserveLayout: true,
+              });
+              if (!didSelect) return;
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void openPropertiesModal("book");
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            <SlidersHorizontal size={14} />
+            Book properties
+          </button>
+        )}
+        {canImport && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void handleExportBookJson(book.id, book.book_name);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            Export JSON
+          </button>
+        )}
+        {canDownloadPdf && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              openPdfExportDialog(book.id, book.book_name);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+          >
+            Download PDF
+          </button>
+        )}
+        {canToggleVisibility && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void handleToggleBookVisibility(book);
+            }}
+            disabled={bookVisibilitySubmitting === book.id}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+          >
+            {bookVisibility === "public" ? "Make private" : "Make public"}
+          </button>
+        )}
+        {canDeletePrivateBook && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenBookRowActionsId(null);
+              setOpenBookRowShareSubmenuId(null);
+              void handleDeleteBook(book);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+          >
+            <Trash2 size={14} />
+            Delete book
+          </button>
+        )}
+      </>
+    );
+  };
+
+  const renderBookRowActionsPanel = (
+    book: BookOption,
+    options: {
+      panelClassName: string;
+      canPreviewBook: boolean;
+      canCopyPreviewBookLink: boolean;
+      canCopyBrowseBookLink: boolean;
+      canBrowseBook: boolean;
+      canManageBook: boolean;
+      canImport: boolean;
+      canDownloadPdf: boolean;
+      canToggleVisibility: boolean;
+      canDeletePrivateBook: boolean;
+      bookVisibility: unknown;
+    }
+  ): ReactElement => {
+    const {
+      panelClassName,
+      canPreviewBook,
+      canCopyPreviewBookLink,
+      canCopyBrowseBookLink,
+      canBrowseBook,
+      canManageBook,
+      canImport,
+      canDownloadPdf,
+      canToggleVisibility,
+      canDeletePrivateBook,
+      bookVisibility,
+    } = options;
+
+    return (
+      <div className={panelClassName}>
+        {renderBookRowShareSubmenu(book, {
+          canPreviewBook,
+          canCopyPreviewBookLink,
+          canCopyBrowseBookLink,
+        })}
+        {renderBookRowStandardActions(book, {
+          canBrowseBook,
+          canPreviewBook,
+          canManageBook,
+          canImport,
+          canDownloadPdf,
+          canToggleVisibility,
+          canDeletePrivateBook,
+          bookVisibility,
+        })}
+      </div>
+    );
+  };
+
   const mediaManagerItemsLayoutClass = mediaManagerView === "icon" ? "grid gap-2 p-2" : "divide-y divide-black/5";
   const mediaManagerItemsLayoutStyle =
     mediaManagerView === "icon"
@@ -12649,9 +13078,16 @@ function ScripturesContent() {
                       authUserId !== null &&
                       (book.metadata_json?.owner_id === authUserId ||
                         book.metadata?.owner_id === authUserId);
+                    const canManageBook = canAdmin || isBookOwner;
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
-                    const showRowMenu = canToggleVisibility || canDeletePrivateBook || canImport;
+                    const showRowMenu =
+                      canPreviewBook ||
+                      canBrowseBook ||
+                      canToggleVisibility ||
+                      canDeletePrivateBook ||
+                      canImport ||
+                      canManageBook;
                     const showSingleBrowseAction = canBrowseBook && !showRowMenu;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     const rowMenuPositionClass =
@@ -12695,7 +13131,7 @@ function ScripturesContent() {
                                 >
                                   {thumbnailUrl ? (
                                     <img
-                                      src={thumbnailUrl}
+                                      src={typeof thumbnailUrl === "string" ? thumbnailUrl : ""}
                                       alt={`${book.book_name} thumbnail`}
                                       className="h-full w-full object-contain p-2 transition group-hover:scale-[1.01]"
                                     />
@@ -12707,7 +13143,7 @@ function ScripturesContent() {
                                 </button>
                               ) : thumbnailUrl ? (
                                 <img
-                                  src={thumbnailUrl}
+                                  src={typeof thumbnailUrl === "string" ? thumbnailUrl : ""}
                                   alt={`${book.book_name} thumbnail`}
                                   className="absolute inset-0 h-full w-full object-contain p-2"
                                 />
@@ -12753,6 +13189,7 @@ function ScripturesContent() {
                                   <button
                                     type="button"
                                     onClick={() => {
+                                      setOpenBookRowShareSubmenuId(null);
                                       setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
                                     }}
                                     title="Row actions"
@@ -12762,112 +13199,19 @@ function ScripturesContent() {
                                     ⋮
                                   </button>
                                   {openBookRowActionsId === book.id && (
-                                    <div className={`absolute z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl ${rowMenuPositionClass}`}>
-                                      {canCopyPreviewBookLink && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
-                                            navigator.clipboard.writeText(url);
-                                            setOpenBookRowActionsId(null);
-                                            setAuthMessage("Link copied.");
-                                            setCopyTarget("book");
-                                            setTimeout(() => {
-                                              setAuthMessage(null);
-                                              setCopyTarget(null);
-                                            }, 2000);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                        >
-                                          <Link2 size={14} />
-                                          Copy preview link
-                                        </button>
-                                      )}
-                                      {canCopyBrowseBookLink && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
-                                            navigator.clipboard.writeText(url);
-                                            setOpenBookRowActionsId(null);
-                                            setAuthMessage("Link copied.");
-                                            setCopyTarget("book");
-                                            setTimeout(() => {
-                                              setAuthMessage(null);
-                                              setCopyTarget(null);
-                                            }, 2000);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                        >
-                                          <Link2 size={14} />
-                                          Copy browse link
-                                        </button>
-                                      )}
-                                      {canBrowseBook && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            handleBrowseBookFromRowMenuAction(book);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                        >
-                                          <BookOpen size={14} />
-                                          Browse book
-                                        </button>
-                                      )}
-                                      {canImport && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setOpenBookRowActionsId(null);
-                                            void handleExportBookJson(book.id, book.book_name);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                        >
-                                          Export JSON
-                                        </button>
-                                      )}
-                                      {(Boolean(authEmail) || book.visibility === "public") && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setOpenBookRowActionsId(null);
-                                            openPdfExportDialog(book.id, book.book_name);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                        >
-                                          Download PDF
-                                        </button>
-                                      )}
-                                      {(canAdmin ||
-                                        book.metadata_json?.owner_id === authUserId ||
-                                        book.metadata?.owner_id === authUserId) && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setOpenBookRowActionsId(null);
-                                            void handleToggleBookVisibility(book);
-                                          }}
-                                          disabled={bookVisibilitySubmitting === book.id}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                                        >
-                                            {bookVisibility === "public" ? "Make private" : "Make public"}
-                                        </button>
-                                      )}
-                                      {canDeletePrivateBook && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setOpenBookRowActionsId(null);
-                                            void handleDeleteBook(book);
-                                          }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
-                                        >
-                                          <Trash2 size={14} />
-                                          Delete book
-                                        </button>
-                                      )}
-                                    </div>
+                                    renderBookRowActionsPanel(book, {
+                                      panelClassName: `absolute z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl ${rowMenuPositionClass}`,
+                                      canPreviewBook,
+                                      canCopyPreviewBookLink,
+                                      canCopyBrowseBookLink,
+                                      canBrowseBook,
+                                      canManageBook,
+                                      canImport,
+                                      canDownloadPdf: Boolean(authEmail) || book.visibility === "public",
+                                      canToggleVisibility,
+                                      canDeletePrivateBook,
+                                      bookVisibility,
+                                    })
                                   )}
                                 </div>
                               )}
@@ -12879,7 +13223,7 @@ function ScripturesContent() {
                               <div className="flex min-w-0 items-center gap-2">
                                 {thumbnailUrl ? (
                                   <img
-                                    src={thumbnailUrl}
+                                      src={typeof thumbnailUrl === "string" ? thumbnailUrl : ""}
                                     alt={`${book.book_name} thumbnail`}
                                     className="h-8 w-8 flex-shrink-0 rounded-md border border-black/10 object-cover"
                                   />
@@ -12927,6 +13271,7 @@ function ScripturesContent() {
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    setOpenBookRowShareSubmenuId(null);
                                     setOpenBookRowActionsId((prev) => (prev === book.id ? null : book.id));
                                   }}
                                   title="Row actions"
@@ -12936,112 +13281,19 @@ function ScripturesContent() {
                                   ⋮
                                 </button>
                                 {openBookRowActionsId === book.id && (
-                                  <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
-                                    {canCopyPreviewBookLink && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const url = `${window.location.origin}${buildScripturesPreviewPath("book", book.id.toString())}`;
-                                          navigator.clipboard.writeText(url);
-                                          setOpenBookRowActionsId(null);
-                                          setAuthMessage("Link copied.");
-                                          setCopyTarget("book");
-                                          setTimeout(() => {
-                                            setAuthMessage(null);
-                                            setCopyTarget(null);
-                                          }, 2000);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                      >
-                                        <Link2 size={14} />
-                                        Copy preview link
-                                      </button>
-                                    )}
-                                    {canCopyBrowseBookLink && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const url = `${window.location.origin}${buildScripturesBrowsePath(book.id.toString())}`;
-                                          navigator.clipboard.writeText(url);
-                                          setOpenBookRowActionsId(null);
-                                          setAuthMessage("Link copied.");
-                                          setCopyTarget("book");
-                                          setTimeout(() => {
-                                            setAuthMessage(null);
-                                            setCopyTarget(null);
-                                          }, 2000);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                      >
-                                        <Link2 size={14} />
-                                        Copy browse link
-                                      </button>
-                                    )}
-                                    {canBrowseBook && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          handleBrowseBookFromRowMenuAction(book);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                      >
-                                        <BookOpen size={14} />
-                                        Browse book
-                                      </button>
-                                    )}
-                                    {canImport && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenBookRowActionsId(null);
-                                          void handleExportBookJson(book.id, book.book_name);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                      >
-                                        Export JSON
-                                      </button>
-                                    )}
-                                    {(Boolean(authEmail) || book.visibility === "public") && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenBookRowActionsId(null);
-                                          openPdfExportDialog(book.id, book.book_name);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                      >
-                                        Download PDF
-                                      </button>
-                                    )}
-                                    {(canAdmin ||
-                                      book.metadata_json?.owner_id === authUserId ||
-                                      book.metadata?.owner_id === authUserId) && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenBookRowActionsId(null);
-                                          void handleToggleBookVisibility(book);
-                                        }}
-                                        disabled={bookVisibilitySubmitting === book.id}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
-                                      >
-                                        {bookVisibility === "public" ? "Make private" : "Make public"}
-                                      </button>
-                                    )}
-                                    {canDeletePrivateBook && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOpenBookRowActionsId(null);
-                                          void handleDeleteBook(book);
-                                        }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
-                                      >
-                                        <Trash2 size={14} />
-                                        Delete book
-                                      </button>
-                                    )}
-                                  </div>
+                                  renderBookRowActionsPanel(book, {
+                                    panelClassName: "absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl",
+                                    canPreviewBook,
+                                    canCopyPreviewBookLink,
+                                    canCopyBrowseBookLink,
+                                    canBrowseBook,
+                                    canManageBook,
+                                    canImport,
+                                    canDownloadPdf: Boolean(authEmail) || book.visibility === "public",
+                                    canToggleVisibility,
+                                    canDeletePrivateBook,
+                                    bookVisibility,
+                                  })
                                 )}
                               </div>
                             )}
@@ -13363,14 +13615,8 @@ function ScripturesContent() {
                         <button
                           type="button"
                           onClick={() => {
-                            const url = `${window.location.origin}/scriptures?book=${bookId}&node=${selectedId}`;
-                            navigator.clipboard.writeText(url);
-                            setAuthMessage("Link copied.");
-                            setCopyTarget("node");
-                            setTimeout(() => {
-                              setAuthMessage(null);
-                              setCopyTarget(null);
-                            }, 2000);
+                            const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
+                            void copyShareUrl(url, "node");
                           }}
                           title="Copy shareable link"
                           className="ml-auto rounded-full border border-blue-500/30 bg-blue-50/50 p-1 text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
@@ -13490,15 +13736,10 @@ function ScripturesContent() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId)}`;
-                                    navigator.clipboard.writeText(url);
-                                    setShowBookRootActionsMenu(false);
-                                    setAuthMessage("Link copied.");
-                                    setCopyTarget("book");
-                                    setTimeout(() => {
-                                      setAuthMessage(null);
-                                      setCopyTarget(null);
-                                    }, 2000);
+                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
+                                    void copyShareUrl(url, "book", () => {
+                                      setShowBookRootActionsMenu(false);
+                                    });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
@@ -13808,15 +14049,12 @@ function ScripturesContent() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}${buildScripturesPreviewPath("node", bookId, selectedId)}`;
-                                    navigator.clipboard.writeText(url);
-                                    setShowNodeActionsMenu(false);
-                                    setAuthMessage("Link copied.");
-                                    setCopyTarget(isLeafSelected ? "leaf" : "node");
-                                    setTimeout(() => {
-                                      setAuthMessage(null);
-                                      setCopyTarget(null);
-                                    }, 2000);
+                                    const url = toAbsoluteUrl(
+                                      buildScripturesPreviewPath("node", bookId, selectedId)
+                                    );
+                                    void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
+                                      setShowNodeActionsMenu(false);
+                                    });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
@@ -13844,15 +14082,10 @@ function ScripturesContent() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId, selectedId)}`;
-                                    navigator.clipboard.writeText(url);
-                                    setShowNodeActionsMenu(false);
-                                    setAuthMessage("Link copied.");
-                                    setCopyTarget("leaf");
-                                    setTimeout(() => {
-                                      setAuthMessage(null);
-                                      setCopyTarget(null);
-                                    }, 2000);
+                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
+                                    void copyShareUrl(url, "leaf", () => {
+                                      setShowNodeActionsMenu(false);
+                                    });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
@@ -13864,15 +14097,10 @@ function ScripturesContent() {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const url = `${window.location.origin}${buildScripturesBrowsePath(bookId, selectedId)}`;
-                                    navigator.clipboard.writeText(url);
-                                    setShowNodeActionsMenu(false);
-                                    setAuthMessage("Link copied.");
-                                    setCopyTarget("node");
-                                    setTimeout(() => {
-                                      setAuthMessage(null);
-                                      setCopyTarget(null);
-                                    }, 2000);
+                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
+                                    void copyShareUrl(url, "node", () => {
+                                      setShowNodeActionsMenu(false);
+                                    });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
