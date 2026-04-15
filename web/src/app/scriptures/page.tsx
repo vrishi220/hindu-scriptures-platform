@@ -13054,7 +13054,7 @@ function ScripturesContent() {
                 </div>
               ) : (
                 <div
-                  className={isBooksGridView ? "grid gap-2 p-2" : "divide-y divide-black/5"}
+                  className={isBooksGridView ? "grid gap-2 p-2 overflow-visible" : "divide-y divide-black/5"}
                   style={
                     isBooksGridView
                       ? {
@@ -13112,7 +13112,7 @@ function ScripturesContent() {
                     return (
                       <div
                         key={book.id}
-                        className={`flex items-center gap-2 text-sm transition ${
+                        className={`flex items-center gap-2 text-sm transition overflow-visible ${
                           isBooksGridView
                             ? `relative aspect-square rounded-xl border border-black/10 ${
                                 isSelected
