@@ -20,6 +20,7 @@ import {
   Pencil,
   Printer,
   Plus,
+  Share2,
   ShoppingBasket,
   SlidersHorizontal,
   Trash2,
@@ -2806,6 +2807,7 @@ function ScripturesContent() {
   const [levelTemplateMessage, setLevelTemplateMessage] = useState<string | null>(null);
   const [openBookRowActionsId, setOpenBookRowActionsId] = useState<number | null>(null);
   const [openBookRowShareSubmenuId, setOpenBookRowShareSubmenuId] = useState<number | null>(null);
+  const [openHoverShareSubmenuKey, setOpenHoverShareSubmenuKey] = useState<string | null>(null);
   const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
@@ -2938,9 +2940,11 @@ function ScripturesContent() {
       }
       if (nodeActionsMenuRef.current && !nodeActionsMenuRef.current.contains(target)) {
         setShowNodeActionsMenu(false);
+        setOpenHoverShareSubmenuKey(null);
       }
       if (bookRootActionsMenuRef.current && !bookRootActionsMenuRef.current.contains(target)) {
         setShowBookRootActionsMenu(false);
+        setOpenHoverShareSubmenuKey(null);
       }
       if (previewShareMenuRef.current && !previewShareMenuRef.current.contains(target)) {
         setShowPreviewShareMenu(false);
@@ -2956,6 +2960,7 @@ function ScripturesContent() {
   useEffect(() => {
     setOpenBookRowActionsId(null);
     setOpenBookRowShareSubmenuId(null);
+    setOpenHoverShareSubmenuKey(null);
   }, [bookId]);
 
   useEffect(() => {
@@ -2964,11 +2969,13 @@ function ScripturesContent() {
 
   useEffect(() => {
     setShowNodeActionsMenu(false);
+    setOpenHoverShareSubmenuKey(null);
   }, [selectedId]);
 
   useEffect(() => {
     if (selectedId !== BOOK_ROOT_NODE_ID) {
       setShowBookRootActionsMenu(false);
+      setOpenHoverShareSubmenuKey(null);
       setBookInlineEditMode(false);
       setBookInlineName("");
       setBookInlineSubmitting(false);
@@ -12340,7 +12347,7 @@ function ScripturesContent() {
   ): ReactElement[] => {
     const itemClassName =
       options?.itemClassName ??
-      "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50";
+      "flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left text-base text-zinc-700 transition hover:bg-zinc-50 sm:py-2 sm:text-sm";
 
     return actions.map((action) => (
       <button
@@ -12364,30 +12371,59 @@ function ScripturesContent() {
     triggerClassName?: string;
     triggerLabel?: string;
     hideIcon?: boolean;
+    submenuKey?: string;
   }): ReactElement | null => {
     const {
       actions,
       panelClassName,
       chevron = <ChevronRight size={14} />,
-      triggerClassName = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50",
+      triggerClassName = "flex w-full items-center gap-2 rounded-lg px-3 py-3 text-left text-base text-zinc-700 transition hover:bg-zinc-50 sm:py-2 sm:text-sm",
       triggerLabel = "Share",
       hideIcon = false,
+      submenuKey,
     } = options;
     if (actions.length === 0) {
       return null;
     }
 
+    const isMobileSubmenuOpen = Boolean(submenuKey) && openHoverShareSubmenuKey === submenuKey;
+    const mobileVisibilityClass = submenuKey
+      ? isMobileSubmenuOpen
+        ? "block"
+        : "hidden"
+      : "hidden";
+
     return (
       <div className="group relative">
         <button
           type="button"
+          aria-haspopup="menu"
+          aria-expanded={submenuKey ? isMobileSubmenuOpen : undefined}
+          onClick={() => {
+            if (!submenuKey) {
+              return;
+            }
+            setOpenHoverShareSubmenuKey((previous) =>
+              previous === submenuKey ? null : submenuKey
+            );
+          }}
           className={triggerClassName}
         >
-          {!hideIcon && <Link2 size={14} />}
+          {!hideIcon && <Share2 size={14} />}
           <span className="flex-1">{triggerLabel}</span>
           {chevron}
         </button>
-        <div className={panelClassName}>{renderShareActionButtons(actions)}</div>
+        <div
+          className={`${panelClassName} ${mobileVisibilityClass} sm:block sm:pointer-events-none sm:invisible sm:opacity-0 sm:group-hover:pointer-events-auto sm:group-hover:visible sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:visible sm:group-focus-within:opacity-100`}
+        >
+          {renderShareActionButtons(actions, {
+            onAfterSelect: () => {
+              if (submenuKey) {
+                setOpenHoverShareSubmenuKey(null);
+              }
+            },
+          })}
+        </div>
       </div>
     );
   };
@@ -12492,9 +12528,16 @@ function ScripturesContent() {
       >
         <button
           type="button"
+          aria-haspopup="menu"
+          aria-expanded={openBookRowShareSubmenuId === book.id}
+          onClick={() => {
+            setOpenBookRowShareSubmenuId((previous) =>
+              previous === book.id ? null : book.id
+            );
+          }}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
         >
-          <Link2 size={14} />
+          <Share2 size={14} />
           <span className="flex-1">Share</span>
           {submenuChevron}
         </button>
@@ -13158,8 +13201,8 @@ function ScripturesContent() {
                     const menuPositionClass = getMenuPositionClass();
                     const shouldOpenShareSubmenuLeft = menuPositionClass === "right-4";
                     const shareSubmenuClassName = shouldOpenShareSubmenuLeft
-                      ? "absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl"
-                      : "absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl";
+                      ? "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56"
+                      : "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-56";
                     const shareSubmenuChevron = shouldOpenShareSubmenuLeft
                       ? <ChevronLeft size={14} />
                       : <ChevronRight size={14} />;
@@ -13265,7 +13308,7 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute top-4 ${menuPositionClass} z-[10002] w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
+                                      panelClassName: `absolute top-4 ${menuPositionClass} z-[10002] w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56 sm:max-w-[calc(100vw-2rem)]`,
                                       shareSubmenuClassName,
                                       shareSubmenuChevron,
                                       canPreviewBook,
@@ -13349,8 +13392,8 @@ function ScripturesContent() {
                                 </button>
                                 {openBookRowActionsId === book.id && (
                                   renderBookRowActionsPanel(book, {
-                                    panelClassName: "absolute right-0 z-40 -top-10 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl",
-                                    shareSubmenuClassName: "absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl",
+                                    panelClassName: "absolute right-0 z-40 -top-10 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56",
+                                    shareSubmenuClassName: "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-56",
                                     shareSubmenuChevron: <ChevronRight size={14} />,
                                     canPreviewBook,
                                     canCopyPreviewBookLink,
@@ -13683,6 +13726,7 @@ function ScripturesContent() {
                       {!canEditCurrentBook && canBrowseCurrentNode && (
                         <div className="ml-auto">
                           {renderHoverShareSubmenu({
+                            submenuKey: "browse-node-share-submenu",
                             actions: [
                               {
                                 key: "content-node-copy-browse",
@@ -13708,10 +13752,10 @@ function ScripturesContent() {
                                 : []),
                             ],
                             panelClassName:
-                              "invisible absolute right-0 top-full z-[10002] mt-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                              "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:w-56",
                             chevron: <ChevronDown size={14} />,
                             triggerClassName:
-                              "flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-2 py-1 text-xs text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50",
+                              "flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-3 py-2 text-sm text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50 sm:px-2 sm:py-1 sm:text-xs",
                           })}
                         </div>
                       )}
@@ -13789,7 +13833,10 @@ function ScripturesContent() {
                         <div ref={bookRootActionsMenuRef} className="relative">
                           <button
                             type="button"
-                            onClick={() => setShowBookRootActionsMenu((prev) => !prev)}
+                            onClick={() => {
+                              setOpenHoverShareSubmenuKey(null);
+                              setShowBookRootActionsMenu((prev) => !prev);
+                            }}
                             title="Book tree actions"
                             aria-label="Book tree actions"
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
@@ -13797,7 +13844,7 @@ function ScripturesContent() {
                             <MoreVertical size={16} />
                           </button>
                           {showBookRootActionsMenu && (
-                            <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                            <div className="absolute right-0 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56">
                               {canEditCurrentBook && !bookInlineEditMode && (
                                 <button
                                   type="button"
@@ -13824,6 +13871,7 @@ function ScripturesContent() {
                                 </button>
                               )}
                               {renderHoverShareSubmenu({
+                                submenuKey: "book-root-share-submenu",
                                 actions: [
                                   ...(canPreviewCurrentBook
                                     ? [
@@ -13855,7 +13903,7 @@ function ScripturesContent() {
                                     : []),
                                 ],
                                 panelClassName:
-                                  "invisible absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                                  "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56",
                               })}
                               {canContribute && currentBook?.schema && (
                                 <button
@@ -14133,7 +14181,10 @@ function ScripturesContent() {
                         <div ref={nodeActionsMenuRef} className="relative">
                           <button
                             type="button"
-                            onClick={() => setShowNodeActionsMenu((prev) => !prev)}
+                            onClick={() => {
+                              setOpenHoverShareSubmenuKey(null);
+                              setShowNodeActionsMenu((prev) => !prev);
+                            }}
                             title="Node actions"
                             aria-label="Node actions"
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
@@ -14141,7 +14192,7 @@ function ScripturesContent() {
                             ⋮
                           </button>
                           {showNodeActionsMenu && (
-                            <div className="absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl">
+                            <div className="absolute right-0 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56">
                               {canPreviewCurrentNode && (
                                 <button
                                   type="button"
@@ -14156,6 +14207,7 @@ function ScripturesContent() {
                                 </button>
                               )}
                               {renderHoverShareSubmenu({
+                                submenuKey: "node-actions-share-submenu",
                                 actions: [
                                   ...(canCopyPreviewLink
                                     ? [
@@ -14189,7 +14241,7 @@ function ScripturesContent() {
                                     : []),
                                 ],
                                 panelClassName:
-                                  "invisible absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                                  "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56",
                               })}
                               {canAddSelectedNodeToBasket && (
                                 <button
@@ -17151,10 +17203,10 @@ function ScripturesContent() {
                             aria-label="Share"
                             className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            <Link2 className="h-4 w-4" />
+                            <Share2 className="h-4 w-4" />
                           </button>
                           {showPreviewShareMenu && !showPreviewControls && (
-                            <div className="absolute right-0 top-full z-[10002] mt-2 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl">
+                            <div className="absolute left-0 top-full z-[10002] mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-auto sm:right-0 sm:w-56">
                               {renderShareActionButtons(
                                 [
                                   {
