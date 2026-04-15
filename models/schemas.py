@@ -490,6 +490,7 @@ class BookPublic(BookBase):
 class BookShareCreate(BaseModel):
     email: EmailStr
     permission: Literal["viewer", "contributor", "editor"] = "viewer"
+    send_email: bool = False  # Whether to send invite email to recipient
 
 
 class BookShareUpdate(BaseModel):

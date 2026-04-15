@@ -16,6 +16,7 @@ MEDIA_DIR = os.getenv("MEDIA_DIR", "media")
 MEDIA_DIR_RESOLVED = os.path.abspath(MEDIA_DIR)
 MEDIA_STORAGE_BACKEND = os.getenv("MEDIA_STORAGE_BACKEND", "local").strip().lower()
 LOCAL_MEDIA_BACKENDS = {"local", "filesystem", "railway-volume"}
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://scriptle.org")
 
 
 def _validate_media_storage_config() -> None:

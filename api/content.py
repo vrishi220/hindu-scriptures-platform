@@ -22,6 +22,7 @@ from api.import_parser import ExtractionRules, GenericHTMLImporter, ImportConfig
 from api.pdf_importer import PDFImporter, PDFImportConfig
 from api.json_importer import JSONImporter, JSONImportConfig
 from api.users import get_current_user, get_current_user_optional, require_permission
+from services.email import send_share_invitation
 from models.book import Book
 from models.book_share import BookShare
 from models.content_node import ContentNode
@@ -1353,6 +1354,21 @@ def create_or_update_book_share(
 
     db.commit()
     db.refresh(share)
+
+    # Send invitation email if requested
+    if payload.send_email:
+        app_base_url = os.getenv("APP_BASE_URL", "https://scriptle.org")
+        invite_link = f"{app_base_url}/scriptures?book={book_id}"
+        
+        send_share_invitation(
+            recipient_email=shared_user.email,
+            book_title=book.title or f"Book {book_id}",
+            inviter_name=current_user.username or current_user.email,
+            inviter_email=current_user.email,
+            invite_link=invite_link,
+            permission=payload.permission,
+        )
+
     return _book_share_public_model(share, shared_user)
 
 

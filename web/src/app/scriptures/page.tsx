@@ -2748,6 +2748,7 @@ function ScripturesContent() {
   const [shareEmail, setShareEmail] = useState("");
   const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
   const [sharesSubmitting, setSharesSubmitting] = useState(false);
+  const [sendEmailWithShare, setSendEmailWithShare] = useState(true);
   const [shareUpdatingUserId, setShareUpdatingUserId] = useState<number | null>(null);
   const [shareRemovingUserId, setShareRemovingUserId] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
@@ -8869,6 +8870,7 @@ function ScripturesContent() {
         body: JSON.stringify({
           email: shareEmail.trim(),
           permission: sharePermission,
+          send_email: sendEmailWithShare,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -8883,6 +8885,7 @@ function ScripturesContent() {
       }
       setShareEmail("");
       setSharePermission("viewer");
+      setSendEmailWithShare(true);
       await loadBookShares();
     } catch {
       setSharesError("Failed to add share");
@@ -17550,41 +17553,50 @@ function ScripturesContent() {
                 </button>
               </div>
 
-              <form onSubmit={handleCreateShare} className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <label className="sm:col-span-2 flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Invite user email</span>
-                  <input
-                    type="email"
-                    value={shareEmail}
-                    onChange={(event) => setShareEmail(event.target.value)}
-                    required
-                    className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    placeholder="user@example.com"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Permission</span>
-                  <select
-                    value={sharePermission}
-                    onChange={(event) =>
-                      setSharePermission(event.target.value as SharePermission)
-                    }
-                    className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  >
-                    <option value="viewer">Viewer</option>
-                    <option value="contributor">Contributor</option>
-                    <option value="editor">Editor</option>
-                  </select>
-                </label>
-                <div className="sm:col-span-3">
-                  <button
-                    type="submit"
-                    disabled={sharesSubmitting}
-                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                  >
-                    {sharesSubmitting ? "Adding..." : "Add Share"}
-                  </button>
+              <form onSubmit={handleCreateShare} className="mb-4 flex flex-col gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <label className="sm:col-span-2 flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Invite user email</span>
+                    <input
+                      type="email"
+                      value={shareEmail}
+                      onChange={(event) => setShareEmail(event.target.value)}
+                      required
+                      className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                      placeholder="user@example.com"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Permission</span>
+                    <select
+                      value={sharePermission}
+                      onChange={(event) =>
+                        setSharePermission(event.target.value as SharePermission)
+                      }
+                      className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                    >
+                      <option value="viewer">Viewer</option>
+                      <option value="contributor">Contributor</option>
+                      <option value="editor">Editor</option>
+                    </select>
+                  </label>
                 </div>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={sendEmailWithShare}
+                    onChange={(event) => setSendEmailWithShare(event.target.checked)}
+                    className="h-4 w-4 rounded border-black/10 text-[color:var(--accent)]"
+                  />
+                  <span className="text-sm text-zinc-700">Send invitation email</span>
+                </label>
+                <button
+                  type="submit"
+                  disabled={sharesSubmitting}
+                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                >
+                  {sharesSubmitting ? "Adding..." : "Add Share"}
+                </button>
               </form>
 
               {sharesError && (
