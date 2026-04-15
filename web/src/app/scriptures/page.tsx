@@ -12334,7 +12334,7 @@ function ScripturesContent() {
     }
 
     return (
-      <div className="rounded-lg border border-black/10 bg-white/80">
+      <div className="relative">
         <button
           type="button"
           onClick={() => {
@@ -12347,7 +12347,7 @@ function ScripturesContent() {
           <ChevronRight size={14} className={`transition ${openBookRowShareSubmenuId === book.id ? "rotate-90" : ""}`} />
         </button>
         {openBookRowShareSubmenuId === book.id && (
-          <div className="space-y-0.5 border-t border-black/10 p-1">
+          <div className="absolute left-full top-0 ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl">
             {canCopyPreviewBookLink && (
               <>
                 <button
@@ -12429,7 +12429,7 @@ function ScripturesContent() {
                 <button
                   type="button"
                   onClick={() => {
-                    const url = toAbsoluteUrl(`/scriptures?book=${book.id}`);
+                    const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
                     void copyShareUrl(url, "book", () => {
                       setOpenBookRowActionsId(null);
                       setOpenBookRowShareSubmenuId(null);
@@ -12442,7 +12442,7 @@ function ScripturesContent() {
                 <button
                   type="button"
                   onClick={() => {
-                    const url = toAbsoluteUrl(`/scriptures?book=${book.id}`);
+                    const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
                     emailShareUrl(
                       `Shared scripture link: ${book.book_name}`,
                       `Here is the link for ${book.book_name}:\n\n${url}`,
@@ -13200,7 +13200,7 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute z-40 mt-2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl ${rowMenuPositionClass}`,
+                                      panelClassName: `absolute z-40 -top-10 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl ${rowMenuPositionClass}`,
                                       canPreviewBook,
                                       canCopyPreviewBookLink,
                                       canCopyBrowseBookLink,
@@ -13282,7 +13282,7 @@ function ScripturesContent() {
                                 </button>
                                 {openBookRowActionsId === book.id && (
                                   renderBookRowActionsPanel(book, {
-                                    panelClassName: "absolute right-0 z-40 mt-2 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl",
+                                    panelClassName: "absolute right-0 z-40 -top-10 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl",
                                     canPreviewBook,
                                     canCopyPreviewBookLink,
                                     canCopyBrowseBookLink,
