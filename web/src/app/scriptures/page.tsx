@@ -13091,14 +13091,17 @@ function ScripturesContent() {
                       canManageBook;
                     const showSingleBrowseAction = canBrowseBook && !showRowMenu;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
-                    const rowMenuPositionClass =
-                      isBooksGridView && booksGridColumns > 1
-                        ? gridColumnIndex === 0
-                          ? "left-0"
-                          : gridColumnIndex === booksGridColumns - 1
-                            ? "right-0"
-                            : "left-1/2 -translate-x-1/2"
-                        : "right-0";
+                    // Smart menu positioning: align top-left with button, shift right if needed to stay in viewport
+                    const getMenuPositionClass = () => {
+                      if (!isBooksGridView) return "left-0"; // List view: always left-align
+                      if (booksGridColumns === 1) return "left-0"; // Single column: always left-align
+                      // For grid view: left-align by default, but shift right for rightmost columns to keep menu visible
+                      if (gridColumnIndex === booksGridColumns - 1) {
+                        return "right-0"; // Right column: align to right edge of button
+                      }
+                      return "left-0"; // All other positions: align to left edge of button
+                    };
+                    const menuPositionClass = getMenuPositionClass();
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
                     const isAnonymousPrivate = !authEmail && bookVisibility === "private";
                     // For anonymous users on a private book, show the sign-in gate overlay directly
@@ -13201,7 +13204,7 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute z-50 top-full mt-2 left-1/2 -translate-x-1/2 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
+                                      panelClassName: `absolute z-50 top-full mt-2 ${menuPositionClass} w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
                                       canPreviewBook,
                                       canCopyPreviewBookLink,
                                       canCopyBrowseBookLink,
