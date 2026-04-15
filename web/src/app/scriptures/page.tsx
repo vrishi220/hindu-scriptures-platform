@@ -13097,8 +13097,8 @@ function ScripturesContent() {
                     const canToggleVisibility = canAdmin || isBookOwner;
                     const canDeletePrivateBook = bookVisibility === "private" && (canAdmin || isBookOwner);
                     const showRowMenu =
-                      canPreviewBook ||
-                      canBrowseBook ||
+                      canCopyPreviewBookLink ||
+                      canCopyBrowseBookLink ||
                       canToggleVisibility ||
                       canDeletePrivateBook ||
                       canImport ||
