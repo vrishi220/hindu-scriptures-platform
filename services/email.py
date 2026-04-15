@@ -47,7 +47,7 @@ class MailgunEmailService:
             logger.warning("Mailgun not configured; skipping email send")
             return False
 
-        subject = f"You were invited to view "{book_title}" on Scriptle"
+        subject = f"You were invited to view '{book_title}' on Scriptle"
 
         html_body = self._build_invitation_html(
             book_title=book_title,
