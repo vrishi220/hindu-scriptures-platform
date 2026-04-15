@@ -12326,9 +12326,17 @@ function ScripturesContent() {
       canPreviewBook: boolean;
       canCopyPreviewBookLink: boolean;
       canCopyBrowseBookLink: boolean;
+      submenuClassName: string;
+      submenuChevron: ReactElement;
     }
   ): ReactElement | null => {
-    const { canPreviewBook, canCopyPreviewBookLink, canCopyBrowseBookLink } = options;
+    const {
+      canPreviewBook,
+      canCopyPreviewBookLink,
+      canCopyBrowseBookLink,
+      submenuClassName,
+      submenuChevron,
+    } = options;
     if (!canPreviewBook && !canCopyPreviewBookLink && !canCopyBrowseBookLink) {
       return null;
     }
@@ -12345,10 +12353,10 @@ function ScripturesContent() {
         >
           <Link2 size={14} />
           <span className="flex-1">Share</span>
-          <ChevronRight size={14} />
+          {submenuChevron}
         </button>
         {openBookRowShareSubmenuId === book.id && (
-          <div className="absolute left-full top-0 ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl">
+          <div className={submenuClassName}>
             {canCopyPreviewBookLink && (
               <>
                 <button
@@ -12633,6 +12641,8 @@ function ScripturesContent() {
     book: BookOption,
     options: {
       panelClassName: string;
+      shareSubmenuClassName: string;
+      shareSubmenuChevron: ReactElement;
       canPreviewBook: boolean;
       canCopyPreviewBookLink: boolean;
       canCopyBrowseBookLink: boolean;
@@ -12647,6 +12657,8 @@ function ScripturesContent() {
   ): ReactElement => {
     const {
       panelClassName,
+      shareSubmenuClassName,
+      shareSubmenuChevron,
       canPreviewBook,
       canCopyPreviewBookLink,
       canCopyBrowseBookLink,
@@ -12665,6 +12677,8 @@ function ScripturesContent() {
           canPreviewBook,
           canCopyPreviewBookLink,
           canCopyBrowseBookLink,
+          submenuClassName: shareSubmenuClassName,
+          submenuChevron: shareSubmenuChevron,
         })}
         {renderBookRowStandardActions(book, {
           canBrowseBook,
@@ -13090,6 +13104,7 @@ function ScripturesContent() {
                       canImport ||
                       canManageBook;
                     const showSingleBrowseAction = canBrowseBook && !showRowMenu;
+                    const isBookRowMenuOpen = openBookRowActionsId === book.id;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
                     // Smart menu positioning: align top-left corner with center of button, shift right if needed to stay in viewport
                     const getMenuPositionClass = () => {
@@ -13102,6 +13117,13 @@ function ScripturesContent() {
                       return "left-4"; // All other positions: align left edge to button center
                     };
                     const menuPositionClass = getMenuPositionClass();
+                    const shouldOpenShareSubmenuLeft = menuPositionClass === "right-4";
+                    const shareSubmenuClassName = shouldOpenShareSubmenuLeft
+                      ? "absolute right-full top-0 z-[10002] mr-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl"
+                      : "absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl";
+                    const shareSubmenuChevron = shouldOpenShareSubmenuLeft
+                      ? <ChevronLeft size={14} />
+                      : <ChevronRight size={14} />;
                     // Anonymous users clicking a private book should still be clickable — loadTree will gate
                     const isAnonymousPrivate = !authEmail && bookVisibility === "private";
                     // For anonymous users on a private book, show the sign-in gate overlay directly
@@ -13114,7 +13136,7 @@ function ScripturesContent() {
                         key={book.id}
                         className={`flex items-center gap-2 text-sm transition overflow-visible ${
                           isBooksGridView
-                            ? `relative aspect-square rounded-xl border border-black/10 ${
+                            ? `relative ${isBookRowMenuOpen ? "z-[10000]" : "z-0"} aspect-square rounded-xl border border-black/10 ${
                                 isSelected
                                   ? "bg-[color:var(--sand)]/45 text-[color:var(--accent)]"
                                   : "bg-white text-zinc-700 hover:border-black/20"
@@ -13167,7 +13189,7 @@ function ScripturesContent() {
                             </div>
 
                             </div>
-                            <div className="absolute right-2 top-2 z-[9999] flex items-center gap-1.5">
+                            <div className={`absolute right-2 top-2 flex items-center gap-1.5 ${isBookRowMenuOpen ? "z-[10001]" : "z-10"}`}>
                               {showSingleBrowseAction && (
                                 <button
                                   type="button"
@@ -13184,11 +13206,11 @@ function ScripturesContent() {
                               {showRowMenu && (
                                 <div
                                   ref={(element) => {
-                                    if (openBookRowActionsId === book.id) {
+                                    if (isBookRowMenuOpen) {
                                       bookRowActionsMenuRef.current = element;
                                     }
                                   }}
-                                  className="relative z-[9999]"
+                                  className={`relative ${isBookRowMenuOpen ? "z-[10001]" : "z-10"}`}
                                 >
                                   <button
                                     type="button"
@@ -13204,7 +13226,9 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute z-[9999] top-4 ${menuPositionClass} w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
+                                      panelClassName: `absolute top-4 ${menuPositionClass} z-[10002] w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
+                                      shareSubmenuClassName,
+                                      shareSubmenuChevron,
                                       canPreviewBook,
                                       canCopyPreviewBookLink,
                                       canCopyBrowseBookLink,
@@ -13287,6 +13311,8 @@ function ScripturesContent() {
                                 {openBookRowActionsId === book.id && (
                                   renderBookRowActionsPanel(book, {
                                     panelClassName: "absolute right-0 z-40 -top-10 w-56 rounded-xl border border-black/10 bg-white p-1 shadow-xl",
+                                    shareSubmenuClassName: "absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl",
+                                    shareSubmenuChevron: <ChevronRight size={14} />,
                                     canPreviewBook,
                                     canCopyPreviewBookLink,
                                     canCopyBrowseBookLink,
