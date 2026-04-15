@@ -2809,6 +2809,7 @@ function ScripturesContent() {
   const [showBookTreeActionsMenu, setShowBookTreeActionsMenu] = useState(false);
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
+  const [showPreviewShareMenu, setShowPreviewShareMenu] = useState(false);
   const [bookInlineEditMode, setBookInlineEditMode] = useState(false);
   const [bookInlineName, setBookInlineName] = useState("");
   const [bookInlineSubmitting, setBookInlineSubmitting] = useState(false);
@@ -2820,6 +2821,7 @@ function ScripturesContent() {
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const bookMediaActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const nodeMediaActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const previewShareMenuRef = useRef<HTMLDivElement | null>(null);
   const booksScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const booksLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -2939,6 +2941,9 @@ function ScripturesContent() {
       }
       if (bookRootActionsMenuRef.current && !bookRootActionsMenuRef.current.contains(target)) {
         setShowBookRootActionsMenu(false);
+      }
+      if (previewShareMenuRef.current && !previewShareMenuRef.current.contains(target)) {
+        setShowPreviewShareMenu(false);
       }
     };
 
@@ -12320,6 +12325,73 @@ function ScripturesContent() {
     }
   };
 
+  type ShareActionItem = {
+    key: string;
+    label: string;
+    onSelect: () => void;
+  };
+
+  const renderShareActionButtons = (
+    actions: ShareActionItem[],
+    options?: {
+      onAfterSelect?: () => void;
+      itemClassName?: string;
+    }
+  ): ReactElement[] => {
+    const itemClassName =
+      options?.itemClassName ??
+      "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50";
+
+    return actions.map((action) => (
+      <button
+        key={action.key}
+        type="button"
+        onClick={() => {
+          action.onSelect();
+          options?.onAfterSelect?.();
+        }}
+        className={itemClassName}
+      >
+        {action.label}
+      </button>
+    ));
+  };
+
+  const renderHoverShareSubmenu = (options: {
+    actions: ShareActionItem[];
+    panelClassName: string;
+    chevron?: ReactElement;
+    triggerClassName?: string;
+    triggerLabel?: string;
+    hideIcon?: boolean;
+  }): ReactElement | null => {
+    const {
+      actions,
+      panelClassName,
+      chevron = <ChevronRight size={14} />,
+      triggerClassName = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50",
+      triggerLabel = "Share",
+      hideIcon = false,
+    } = options;
+    if (actions.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="group relative">
+        <button
+          type="button"
+          className={triggerClassName}
+        >
+          {!hideIcon && <Link2 size={14} />}
+          <span className="flex-1">{triggerLabel}</span>
+          {chevron}
+        </button>
+        <div className={panelClassName}>{renderShareActionButtons(actions)}</div>
+      </div>
+    );
+  };
+
   const renderBookRowShareSubmenu = (
     book: BookOption,
     options: {
@@ -12341,6 +12413,77 @@ function ScripturesContent() {
       return null;
     }
 
+    const shareActions: ShareActionItem[] = [];
+    if (canCopyPreviewBookLink) {
+      shareActions.push(
+        {
+          key: "copy-preview",
+          label: "Copy preview link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+            void copyShareUrl(url, "book");
+          },
+        },
+        {
+          key: "email-preview",
+          label: "Email preview link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+            emailShareUrl(
+              `Shared scripture preview: ${book.book_name}`,
+              `Here is the preview link for ${book.book_name}:\n\n${url}`
+            );
+          },
+        }
+      );
+    }
+    if (canCopyBrowseBookLink) {
+      shareActions.push(
+        {
+          key: "copy-browse",
+          label: "Copy browse link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
+            void copyShareUrl(url, "book");
+          },
+        },
+        {
+          key: "email-browse",
+          label: "Email browse link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
+            emailShareUrl(
+              `Shared scripture browse link: ${book.book_name}`,
+              `Here is the browse link for ${book.book_name}:\n\n${url}`
+            );
+          },
+        }
+      );
+    }
+    if (!canCopyPreviewBookLink && !canCopyBrowseBookLink) {
+      shareActions.push(
+        {
+          key: "copy-link",
+          label: "Copy link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+            void copyShareUrl(url, "book");
+          },
+        },
+        {
+          key: "email-link",
+          label: "Email link",
+          onSelect: () => {
+            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+            emailShareUrl(
+              `Shared scripture link: ${book.book_name}`,
+              `Here is the link for ${book.book_name}:\n\n${url}`
+            );
+          },
+        }
+      );
+    }
+
     return (
       <div 
         className="relative"
@@ -12357,116 +12500,12 @@ function ScripturesContent() {
         </button>
         {openBookRowShareSubmenuId === book.id && (
           <div className={submenuClassName}>
-            {canCopyPreviewBookLink && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(
-                      buildScripturesPreviewPath("book", book.id.toString())
-                    );
-                    void copyShareUrl(url, "book", () => {
-                      setOpenBookRowActionsId(null);
-                      setOpenBookRowShareSubmenuId(null);
-                    });
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Copy preview link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(
-                      buildScripturesPreviewPath("book", book.id.toString())
-                    );
-                    emailShareUrl(
-                      `Shared scripture preview: ${book.book_name}`,
-                      `Here is the preview link for ${book.book_name}:\n\n${url}`,
-                      () => {
-                        setOpenBookRowActionsId(null);
-                        setOpenBookRowShareSubmenuId(null);
-                      }
-                    );
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Email preview link
-                </button>
-              </>
-            )}
-            {canCopyBrowseBookLink && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(
-                      buildScripturesBrowsePath(book.id.toString())
-                    );
-                    void copyShareUrl(url, "book", () => {
-                      setOpenBookRowActionsId(null);
-                      setOpenBookRowShareSubmenuId(null);
-                    });
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Copy browse link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(
-                      buildScripturesBrowsePath(book.id.toString())
-                    );
-                    emailShareUrl(
-                      `Shared scripture browse link: ${book.book_name}`,
-                      `Here is the browse link for ${book.book_name}:\n\n${url}`,
-                      () => {
-                        setOpenBookRowActionsId(null);
-                        setOpenBookRowShareSubmenuId(null);
-                      }
-                    );
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Email browse link
-                </button>
-              </>
-            )}
-            {!canCopyPreviewBookLink && !canCopyBrowseBookLink && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-                    void copyShareUrl(url, "book", () => {
-                      setOpenBookRowActionsId(null);
-                      setOpenBookRowShareSubmenuId(null);
-                    });
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Copy link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-                    emailShareUrl(
-                      `Shared scripture link: ${book.book_name}`,
-                      `Here is the link for ${book.book_name}:\n\n${url}`,
-                      () => {
-                        setOpenBookRowActionsId(null);
-                        setOpenBookRowShareSubmenuId(null);
-                      }
-                    );
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                >
-                  Email link
-                </button>
-              </>
-            )}
+            {renderShareActionButtons(shareActions, {
+              onAfterSelect: () => {
+                setOpenBookRowActionsId(null);
+                setOpenBookRowShareSubmenuId(null);
+              },
+            })}
           </div>
         )}
       </div>
@@ -13642,17 +13681,39 @@ function ScripturesContent() {
                   {selectedId && !isLeafSelected && (
                     <>
                       {!canEditCurrentBook && canBrowseCurrentNode && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
-                            void copyShareUrl(url, "node");
-                          }}
-                          title="Copy shareable link"
-                          className="ml-auto rounded-full border border-blue-500/30 bg-blue-50/50 p-1 text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50"
-                        >
-                          🔗
-                        </button>
+                        <div className="ml-auto">
+                          {renderHoverShareSubmenu({
+                            actions: [
+                              {
+                                key: "content-node-copy-browse",
+                                label: "Copy browse link",
+                                onSelect: () => {
+                                  const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
+                                  void copyShareUrl(url, "node");
+                                },
+                              },
+                              ...(canPreviewCurrentNode
+                                ? [
+                                    {
+                                      key: "content-node-copy-preview",
+                                      label: "Copy preview link",
+                                      onSelect: () => {
+                                        const url = toAbsoluteUrl(
+                                          buildScripturesPreviewPath("node", bookId, selectedId)
+                                        );
+                                        void copyShareUrl(url, "node");
+                                      },
+                                    },
+                                  ]
+                                : []),
+                            ],
+                            panelClassName:
+                              "invisible absolute right-0 top-full z-[10002] mt-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                            chevron: <ChevronDown size={14} />,
+                            triggerClassName:
+                              "flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-2 py-1 text-xs text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50",
+                          })}
+                        </div>
                       )}
                       {isCopyMessage && copyTarget === "node" && !showLogin && (
                         <div className="ml-2 rounded-full bg-blue-500 px-3 py-1 text-xs text-white shadow">
@@ -13762,21 +13823,40 @@ function ScripturesContent() {
                                   Preview book
                                 </button>
                               )}
-                              {canCopyBookBrowseLink && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
-                                    void copyShareUrl(url, "book", () => {
-                                      setShowBookRootActionsMenu(false);
-                                    });
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Link2 size={14} />
-                                  Copy browse link
-                                </button>
-                              )}
+                              {renderHoverShareSubmenu({
+                                actions: [
+                                  ...(canPreviewCurrentBook
+                                    ? [
+                                        {
+                                          key: "book-root-copy-preview",
+                                          label: "Copy preview link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", bookId));
+                                            void copyShareUrl(url, "book", () => {
+                                              setShowBookRootActionsMenu(false);
+                                            });
+                                          },
+                                        },
+                                      ]
+                                    : []),
+                                  ...(canCopyBookBrowseLink
+                                    ? [
+                                        {
+                                          key: "book-root-copy-browse",
+                                          label: "Copy browse link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
+                                            void copyShareUrl(url, "book", () => {
+                                              setShowBookRootActionsMenu(false);
+                                            });
+                                          },
+                                        },
+                                      ]
+                                    : []),
+                                ],
+                                panelClassName:
+                                  "invisible absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                              })}
                               {canContribute && currentBook?.schema && (
                                 <button
                                   type="button"
@@ -14075,23 +14155,42 @@ function ScripturesContent() {
                                   {activeNodePreviewLabel}
                                 </button>
                               )}
-                              {canCopyPreviewLink && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const url = toAbsoluteUrl(
-                                      buildScripturesPreviewPath("node", bookId, selectedId)
-                                    );
-                                    void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
-                                      setShowNodeActionsMenu(false);
-                                    });
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Link2 size={14} />
-                                  Copy preview link
-                                </button>
-                              )}
+                              {renderHoverShareSubmenu({
+                                actions: [
+                                  ...(canCopyPreviewLink
+                                    ? [
+                                        {
+                                          key: "node-copy-preview",
+                                          label: "Copy preview link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(
+                                              buildScripturesPreviewPath("node", bookId, selectedId)
+                                            );
+                                            void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
+                                              setShowNodeActionsMenu(false);
+                                            });
+                                          },
+                                        },
+                                      ]
+                                    : []),
+                                  ...(canCopyBrowseLink
+                                    ? [
+                                        {
+                                          key: "node-copy-browse",
+                                          label: "Copy browse link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
+                                            void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
+                                              setShowNodeActionsMenu(false);
+                                            });
+                                          },
+                                        },
+                                      ]
+                                    : []),
+                                ],
+                                panelClassName:
+                                  "invisible absolute left-full top-0 z-[10002] ml-1 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100",
+                              })}
                               {canAddSelectedNodeToBasket && (
                                 <button
                                   type="button"
@@ -14106,36 +14205,6 @@ function ScripturesContent() {
                                   {basketItems.some((item) => item.node_id === nodeContent.id)
                                     ? "Already in basket"
                                     : "Add to basket"}
-                                </button>
-                              )}
-                              {isLeafSelected && canCopyBrowseLink && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
-                                    void copyShareUrl(url, "leaf", () => {
-                                      setShowNodeActionsMenu(false);
-                                    });
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Link2 size={14} />
-                                  Copy browse link
-                                </button>
-                              )}
-                              {!isLeafSelected && canCopyBrowseLink && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
-                                    void copyShareUrl(url, "node", () => {
-                                      setShowNodeActionsMenu(false);
-                                    });
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Link2 size={14} />
-                                  Copy browse link
                                 </button>
                               )}
                               {canEditCurrentBook && (
@@ -17071,18 +17140,53 @@ function ScripturesContent() {
                             </button>
                           </>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleCopyPreviewPath(previewPath);
-                          }}
-                          disabled={showPreviewControls}
-                          title="Copy link"
-                          aria-label="Copy link"
-                          className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <Link2 className="h-4 w-4" />
-                        </button>
+                        <div ref={previewShareMenuRef} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPreviewShareMenu((prev) => !prev);
+                            }}
+                            disabled={showPreviewControls}
+                            title="Share"
+                            aria-label="Share"
+                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </button>
+                          {showPreviewShareMenu && !showPreviewControls && (
+                            <div className="absolute right-0 top-full z-[10002] mt-2 w-56 space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl">
+                              {renderShareActionButtons(
+                                [
+                                  {
+                                    key: "preview-overlay-copy-preview",
+                                    label: "Copy preview link",
+                                    onSelect: () => {
+                                      void handleCopyPreviewPath(previewPath);
+                                    },
+                                  },
+                                  ...(canBrowseCurrentNode
+                                    ? [
+                                        {
+                                          key: "preview-overlay-copy-browse",
+                                          label: "Copy browse link",
+                                          onSelect: () => {
+                                            const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
+                                            const shareTarget = previewScope === "node" ? "node" : "book";
+                                            void copyShareUrl(toAbsoluteUrl(browsePath), shareTarget);
+                                          },
+                                        },
+                                      ]
+                                    : []),
+                                ],
+                                {
+                                  onAfterSelect: () => {
+                                    setShowPreviewShareMenu(false);
+                                  },
+                                }
+                              )}
+                            </div>
+                          )}
+                        </div>
                         {canBrowseCurrentNode && (
                           <button
                             type="button"
