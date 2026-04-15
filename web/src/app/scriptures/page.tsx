@@ -13204,7 +13204,7 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute z-50 top-4 ${menuPositionClass} w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
+                                      panelClassName: `absolute z-[9999] top-4 ${menuPositionClass} w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl`,
                                       canPreviewBook,
                                       canCopyPreviewBookLink,
                                       canCopyBrowseBookLink,
