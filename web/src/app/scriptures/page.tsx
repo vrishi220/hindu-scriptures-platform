@@ -2770,6 +2770,8 @@ function ScripturesContent() {
   const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
   const [sharesSubmitting, setSharesSubmitting] = useState(false);
   const [sendEmailWithShare, setSendEmailWithShare] = useState(true);
+  const [publicShareRecipientEmail, setPublicShareRecipientEmail] = useState("");
+  const [publicShareEmailSending, setPublicShareEmailSending] = useState(false);
   const [shareUpdatingUserId, setShareUpdatingUserId] = useState<number | null>(null);
   const [shareRemovingUserId, setShareRemovingUserId] = useState<number | null>(null);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
@@ -7794,6 +7796,8 @@ function ScripturesContent() {
   const closeShareDialog = () => {
     setShowShareManager(false);
     setSharesError(null);
+    setPublicShareRecipientEmail("");
+    setPublicShareEmailSending(false);
     setShareDialogState(null);
   };
 
@@ -7807,6 +7811,8 @@ function ScripturesContent() {
     });
     if (!didSelect) return;
     setSharesError(null);
+    setPublicShareRecipientEmail("");
+    setPublicShareEmailSending(false);
     setShareDialogState(nextDialogState);
     setShowShareManager(true);
     if (nextDialogState.visibility === "private" && nextDialogState.canManageShares) {
@@ -7887,28 +7893,30 @@ function ScripturesContent() {
   const emailShareUrl = (
     subjectText: string,
     bodyText: string,
+    recipientEmail: string,
     onDone?: () => void
   ) => {
     if (typeof window === "undefined") {
       return;
     }
 
-    // Prompt user for email address
-    const email = window.prompt("Enter your email address:", "");
+    const isValidEmailAddress = (value: string) =>
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+    const email = recipientEmail.trim();
     if (!email) {
       onDone?.();
       return;
     }
 
-    // Validate basic email format
-    if (!email.includes("@")) {
+    if (!isValidEmailAddress(email)) {
       alert("Please enter a valid email address");
       onDone?.();
       return;
     }
 
-    // Call backend email API
     const sendEmail = async () => {
+      setPublicShareEmailSending(true);
       try {
         const response = await fetch("/api/email/send", {
           method: "POST",
@@ -7932,6 +7940,7 @@ function ScripturesContent() {
         console.error("Error sending email:", error);
         alert("Failed to send email. Please try again.");
       } finally {
+        setPublicShareEmailSending(false);
         onDone?.();
       }
     };
@@ -18061,6 +18070,22 @@ function ScripturesContent() {
 
               {shareDialogState.visibility === "public" ? (
                 <div className="space-y-3">
+                  <div className="rounded-2xl border border-black/10 bg-white/80 p-4">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Recipient email</span>
+                      <input
+                        type="email"
+                        value={publicShareRecipientEmail}
+                        onChange={(event) => setPublicShareRecipientEmail(event.target.value)}
+                        className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                        placeholder="user@example.com"
+                      />
+                    </label>
+                    {publicShareRecipientEmail.trim().length > 0 &&
+                      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(publicShareRecipientEmail.trim()) && (
+                        <p className="mt-2 text-xs text-red-600">Enter a valid email address to enable Email link.</p>
+                      )}
+                  </div>
                   {shareDialogState.linkOptions.length === 0 ? (
                     <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-sm text-zinc-600">
                       No shareable links are available for this view.
@@ -18090,11 +18115,19 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={() => {
-                              emailShareUrl(option.emailSubject, option.emailBody);
+                              emailShareUrl(
+                                option.emailSubject,
+                                option.emailBody,
+                                publicShareRecipientEmail
+                              );
                             }}
-                            className="rounded-lg border border-black/10 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                            disabled={
+                              publicShareEmailSending ||
+                              !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(publicShareRecipientEmail.trim())
+                            }
+                            className="rounded-lg border px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:border-zinc-300 disabled:border-dashed disabled:bg-zinc-100 disabled:text-zinc-400 disabled:shadow-none enabled:border-[color:var(--accent)] enabled:bg-[color:var(--accent)] enabled:text-white"
                           >
-                            Email link
+                            {publicShareEmailSending ? "Sending..." : "Email link"}
                           </button>
                         </div>
                       </div>

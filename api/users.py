@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
@@ -16,6 +17,32 @@ ACCESS_TOKEN_COOKIE = os.getenv("ACCESS_TOKEN_COOKIE", "access_token")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+
+def _serialize_user_public(user: User) -> UserPublic:
+    is_invited_user = (not user.is_active) and (not user.password_hash)
+    status = "invited" if is_invited_user else "registered"
+    lifecycle_age_days = None
+    if user.created_at is not None:
+        created_at = user.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        lifecycle_age_days = max((datetime.now(timezone.utc) - created_at).days, 0)
+
+    return UserPublic.model_validate(
+        {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "role": user.role,
+            "permissions": user.permissions,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "account_lifecycle_status": status,
+            "lifecycle_age_days": lifecycle_age_days,
+        }
+    )
 
 
 def get_current_user(
@@ -86,7 +113,7 @@ def require_permission(permission: str):
 
 @router.get("/me", response_model=UserPublic)
 def read_current_user(current_user: User = Depends(get_current_user)) -> UserPublic:
-    return UserPublic.model_validate(current_user)
+    return _serialize_user_public(current_user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -117,7 +144,7 @@ def update_current_user(
 
     db.commit()
     db.refresh(current_user)
-    return UserPublic.model_validate(current_user)
+    return _serialize_user_public(current_user)
 
 
 @router.get("", response_model=list[UserPublic])
@@ -127,7 +154,7 @@ def list_users(
 ) -> list[UserPublic]:
     _ = current_user
     users = db.query(User).order_by(User.id).all()
-    return [UserPublic.model_validate(user) for user in users]
+    return [_serialize_user_public(user) for user in users]
 
 
 @router.post("", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
@@ -214,7 +241,7 @@ def create_user_admin(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user)
+    return _serialize_user_public(user)
 
 
 @router.patch("/{user_id}/permissions", response_model=UserPublic)
@@ -239,7 +266,7 @@ def update_user_permissions(
         user.role = role
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user)
+    return _serialize_user_public(user)
 
 
 @router.patch("/{user_id}/status", response_model=UserPublic)
@@ -257,7 +284,7 @@ def update_user_status(
     user.is_active = is_active
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user)
+    return _serialize_user_public(user)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

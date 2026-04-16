@@ -390,6 +390,9 @@ class UserPublic(BaseModel):
     role: str
     permissions: dict | None = None
     is_active: bool = True
+    created_at: datetime | None = None
+    account_lifecycle_status: Literal["invited", "registered"] = "registered"
+    lifecycle_age_days: int | None = None
 
 
 class UserSelfUpdate(BaseModel):

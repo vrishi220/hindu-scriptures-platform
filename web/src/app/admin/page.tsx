@@ -14,6 +14,9 @@ type User = {
   role: string;
   permissions?: Record<string, boolean> | null;
   is_active: boolean;
+  created_at?: string | null;
+  account_lifecycle_status?: "invited" | "registered";
+  lifecycle_age_days?: number | null;
 };
 
 type PermissionKey =
@@ -99,6 +102,24 @@ const getErrorMessage = (raw: string, fallback: string) => {
   return trimmed ? trimmed : fallback;
 };
 
+const formatLifecycleLabel = (user: User) => {
+  const status = user.account_lifecycle_status === "invited" ? "Invited" : "Registered";
+  const ageDays =
+    typeof user.lifecycle_age_days === "number" && Number.isFinite(user.lifecycle_age_days)
+      ? Math.max(0, Math.floor(user.lifecycle_age_days))
+      : null;
+  if (ageDays === null) {
+    return status;
+  }
+  if (ageDays === 0) {
+    return `${status} today`;
+  }
+  if (ageDays === 1) {
+    return `${status} 1 day ago`;
+  }
+  return `${status} ${ageDays} days ago`;
+};
+
 export default function AdminPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -117,6 +138,7 @@ export default function AdminPage() {
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"all" | string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState<"all" | "invited" | "registered">("all");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>("create");
@@ -144,6 +166,8 @@ export default function AdminPage() {
       if (roleFilter !== "all" && user.role !== roleFilter) return false;
       if (statusFilter === "active" && !user.is_active) return false;
       if (statusFilter === "inactive" && user.is_active) return false;
+      const lifecycleStatus = user.account_lifecycle_status === "invited" ? "invited" : "registered";
+      if (lifecycleFilter !== "all" && lifecycleStatus !== lifecycleFilter) return false;
 
       if (!normalizedQuery) return true;
       const haystack = [
@@ -157,7 +181,7 @@ export default function AdminPage() {
         .toLowerCase();
       return haystack.includes(normalizedQuery);
     });
-  }, [users, query, roleFilter, statusFilter]);
+  }, [users, query, roleFilter, statusFilter, lifecycleFilter]);
 
   const loadAuth = async () => {
     try {
@@ -479,6 +503,17 @@ export default function AdminPage() {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
+            <select
+              value={lifecycleFilter}
+              onChange={(event) =>
+                setLifecycleFilter(event.target.value as "all" | "invited" | "registered")
+              }
+              className="rounded-lg border border-black/10 px-2 py-1.5 text-sm"
+            >
+              <option value="all">All lifecycle</option>
+              <option value="invited">Invited only</option>
+              <option value="registered">Registered only</option>
+            </select>
             <button
               type="button"
               onClick={() => void loadUsers()}
@@ -510,6 +545,7 @@ export default function AdminPage() {
                   <th className="px-3 py-2 font-medium">Email</th>
                   <th className="px-3 py-2 font-medium">Role</th>
                   <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Lifecycle</th>
                   <th className="px-3 py-2 font-medium">Permissions</th>
                   <th className="px-3 py-2 font-medium">Actions</th>
                 </tr>
@@ -530,6 +566,7 @@ export default function AdminPage() {
                     .join(", ");
                   const isCurrentUser = currentUserId !== null && user.id === currentUserId;
                   const isAdminUser = user.role === "admin";
+                  const isInvitedUser = user.account_lifecycle_status === "invited";
                   const actions: Array<{
                     key: "toggle" | "delete";
                     label: string;
@@ -552,6 +589,9 @@ export default function AdminPage() {
                       },
                     });
 
+                  }
+
+                  if (canAdmin && !isCurrentUser && (!isAdminUser || isInvitedUser)) {
                     actions.push({
                       key: "delete",
                       label: deletingId === user.id ? "Deleting…" : "Delete",
@@ -570,6 +610,7 @@ export default function AdminPage() {
                       <td className="px-3 py-2 font-medium text-zinc-900">{user.email}</td>
                       <td className="px-3 py-2 text-zinc-700">{user.role}</td>
                       <td className="px-3 py-2 text-zinc-700">{user.is_active ? "Active" : "Inactive"}</td>
+                      <td className="px-3 py-2 text-zinc-700">{formatLifecycleLabel(user)}</td>
                       <td className="px-3 py-2 text-zinc-700">{permissionSummary || "—"}</td>
                       <td className="px-3 py-2">
                         {actions.length > 1 ? (
