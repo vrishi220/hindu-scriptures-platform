@@ -13199,8 +13199,8 @@ function ScripturesContent() {
                         : "left-4";
                     const shouldOpenShareSubmenuLeft = shouldAnchorMenuRight;
                     const shareSubmenuClassName = shouldOpenShareSubmenuLeft
-                      ? "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56"
-                      : "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-56";
+                      ? "absolute right-0 top-full z-[10002] mt-1 w-[min(12rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-48"
+                      : "absolute right-0 top-full z-[10002] mt-1 w-[min(12rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-48";
                     const shareSubmenuChevron = shouldOpenShareSubmenuLeft
                       ? <ChevronLeft size={14} />
                       : <ChevronRight size={14} />;
@@ -13306,7 +13306,7 @@ function ScripturesContent() {
                                   </button>
                                   {openBookRowActionsId === book.id && (
                                     renderBookRowActionsPanel(book, {
-                                      panelClassName: `absolute top-4 ${menuPositionClass} z-[10002] w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56 sm:max-w-[calc(100vw-2rem)]`,
+                                      panelClassName: `absolute top-4 ${menuPositionClass} z-[10002] w-[min(12rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-48 sm:max-w-[calc(100vw-2rem)]`,
                                       shareSubmenuClassName,
                                       shareSubmenuChevron,
                                       canPreviewBook,
@@ -13390,8 +13390,8 @@ function ScripturesContent() {
                                 </button>
                                 {openBookRowActionsId === book.id && (
                                   renderBookRowActionsPanel(book, {
-                                    panelClassName: "absolute right-0 z-40 -top-10 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56",
-                                    shareSubmenuClassName: "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-56",
+                                    panelClassName: "absolute right-0 z-40 -top-10 w-[min(12rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-48",
+                                    shareSubmenuClassName: "absolute right-0 top-full z-[10002] mt-1 w-[min(12rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-48",
                                     shareSubmenuChevron: <ChevronRight size={14} />,
                                     canPreviewBook,
                                     canCopyPreviewBookLink,
