@@ -9017,12 +9017,16 @@ function ScripturesContent() {
 
   const handleCreateShare = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bookId || !shareEmail.trim()) return;
+    const effectiveBookId = shareDialogState?.bookId || bookId;
+    if (!effectiveBookId || !shareEmail.trim()) {
+      setSharesError("No active book selected for sharing");
+      return;
+    }
 
     setSharesSubmitting(true);
     setSharesError(null);
     try {
-      const response = await fetch(`/api/books/${bookId}/shares`, {
+      const response = await fetch(`/api/books/${effectiveBookId}/shares`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -9045,7 +9049,7 @@ function ScripturesContent() {
       setShareEmail("");
       setSharePermission("viewer");
       setSendEmailWithShare(true);
-      await loadBookShares();
+      await loadBookShares(effectiveBookId);
     } catch {
       setSharesError("Failed to add share");
     } finally {
@@ -9057,13 +9061,17 @@ function ScripturesContent() {
     sharedUserId: number,
     permission: SharePermission
   ) => {
-    if (!bookId) return;
+    const effectiveBookId = shareDialogState?.bookId || bookId;
+    if (!effectiveBookId) {
+      setSharesError("No active book selected for sharing");
+      return;
+    }
 
     setShareUpdatingUserId(sharedUserId);
     setSharesError(null);
     try {
       const response = await fetch(
-        `/api/books/${bookId}/shares/${sharedUserId}`,
+        `/api/books/${effectiveBookId}/shares/${sharedUserId}`,
         {
           method: "PATCH",
           credentials: "include",
@@ -9096,12 +9104,16 @@ function ScripturesContent() {
   };
 
   const handleDeleteShare = async (sharedUserId: number) => {
-    if (!bookId) return;
+    const effectiveBookId = shareDialogState?.bookId || bookId;
+    if (!effectiveBookId) {
+      setSharesError("No active book selected for sharing");
+      return;
+    }
 
     setShareRemovingUserId(sharedUserId);
     setSharesError(null);
     try {
-      const response = await fetch(`/api/books/${bookId}/shares/${sharedUserId}`, {
+      const response = await fetch(`/api/books/${effectiveBookId}/shares/${sharedUserId}`, {
         method: "DELETE",
         credentials: "include",
       });
