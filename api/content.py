@@ -866,8 +866,14 @@ def _book_share_public_model(share: BookShare, shared_user: User) -> BookSharePu
     )
 
 
-def _shared_book_access_path(book_id: int) -> str:
-    return f"/scriptures?book={book_id}&preview=book"
+def _shared_book_access_path(book_id: int, email: str | None = None) -> str:
+    params: dict[str, str] = {
+        "book": str(book_id),
+        "preview": "book",
+    }
+    if email:
+        params["email"] = email
+    return f"/scriptures?{urlencode(params)}"
 
 
 def _registration_invite_link(app_base_url: str, email: str, book_id: int) -> str:
@@ -1378,7 +1384,7 @@ def create_or_update_book_share(
     if payload.send_email:
         app_base_url = os.getenv("APP_BASE_URL", "https://scriptle.org")
         invite_link = (
-            f"{app_base_url}{_shared_book_access_path(book_id)}"
+            f"{app_base_url}{_shared_book_access_path(book_id, shared_user.email)}"
             if shared_user.is_active
             else _registration_invite_link(app_base_url, shared_user.email, book_id)
         )

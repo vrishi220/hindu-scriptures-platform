@@ -6,6 +6,13 @@ import Link from "next/link";
 import InlineClearButton from "../../components/InlineClearButton";
 import { invalidateMeCache } from "../../lib/authClient";
 
+const SIGNIN_DRAFT_STORAGE_KEY = "auth_signin_draft_v1";
+
+type SignInDraft = {
+  email: string;
+  password: string;
+};
+
 function SignInPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -15,6 +22,41 @@ function SignInPageContent() {
   const invitedEmail = searchParams.get("email") || "";
   const returnTo = searchParams.get("returnTo") || searchParams.get("next") || "/";
   const safeReturnTo = returnTo.startsWith("/") ? returnTo : "/";
+  const signUpQuery = new URLSearchParams({ next: safeReturnTo });
+  const signUpEmail = email.trim() || invitedEmail;
+  if (signUpEmail) {
+    signUpQuery.set("email", signUpEmail);
+  }
+  const signUpHref = `/signup?${signUpQuery.toString()}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem(SIGNIN_DRAFT_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const draft = JSON.parse(raw) as Partial<SignInDraft>;
+      if (typeof draft.email === "string") setEmail(draft.email);
+      if (typeof draft.password === "string") setPassword(draft.password);
+    } catch {
+      // Ignore malformed draft payloads.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const draft: SignInDraft = { email, password };
+      window.sessionStorage.setItem(SIGNIN_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [email, password]);
 
   useEffect(() => {
     if (!invitedEmail || email) {
@@ -42,6 +84,9 @@ function SignInPageContent() {
         throw new Error(`Login failed (${response.status}): ${detail}`);
       }
       setAuthMessage("Logged in. Redirecting...");
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(SIGNIN_DRAFT_STORAGE_KEY);
+      }
       setEmail("");
       setPassword("");
       invalidateMeCache();
@@ -147,7 +192,7 @@ function SignInPageContent() {
           <div className="mt-6 border-t border-black/10 pt-4">
             <p className="text-center text-sm text-zinc-600">
               Don&apos;t have an account?{" "}
-              <Link href="/signup" className="font-semibold text-[color:var(--accent)] hover:underline">
+              <Link href={signUpHref} className="font-semibold text-[color:var(--accent)] hover:underline">
                 Create one
               </Link>
             </p>

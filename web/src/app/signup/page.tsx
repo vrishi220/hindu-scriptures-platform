@@ -5,6 +5,16 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import InlineClearButton from "../../components/InlineClearButton";
 
+const SIGNUP_DRAFT_STORAGE_KEY = "auth_signup_draft_v1";
+
+type SignUpDraft = {
+  email: string;
+  username: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+};
+
 function SignUpPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,6 +34,50 @@ function SignUpPageContent() {
   const invitedEmail = searchParams.get("email") || "";
   const nextPath = searchParams.get("next") || "/";
   const safeNextPath = nextPath.startsWith("/") ? nextPath : "/";
+  const signInQuery = new URLSearchParams({ returnTo: safeNextPath });
+  const signInEmail = email.trim() || invitedEmail;
+  if (signInEmail) {
+    signInQuery.set("email", signInEmail);
+  }
+  const signInHref = `/signin?${signInQuery.toString()}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const raw = window.sessionStorage.getItem(SIGNUP_DRAFT_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const draft = JSON.parse(raw) as Partial<SignUpDraft>;
+      if (typeof draft.email === "string") setEmail(draft.email);
+      if (typeof draft.username === "string") setUsername(draft.username);
+      if (typeof draft.fullName === "string") setFullName(draft.fullName);
+      if (typeof draft.password === "string") setPassword(draft.password);
+      if (typeof draft.confirmPassword === "string") setConfirmPassword(draft.confirmPassword);
+    } catch {
+      // Ignore malformed draft payloads.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const draft: SignUpDraft = {
+        email,
+        username,
+        fullName,
+        password,
+        confirmPassword,
+      };
+      window.sessionStorage.setItem(SIGNUP_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore storage write failures.
+    }
+  }, [email, username, fullName, password, confirmPassword]);
 
   useEffect(() => {
     if (!invitedEmail || email) {
@@ -79,6 +133,9 @@ function SignUpPageContent() {
 
       if (!loginResponse.ok) {
         setAuthMessage("Account created. Please sign in.");
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
+        }
         const signInParams = new URLSearchParams({ returnTo: safeNextPath });
         if (email) {
           signInParams.set("email", email);
@@ -88,6 +145,9 @@ function SignUpPageContent() {
       }
 
       setAuthMessage("Account created. Redirecting...");
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
+      }
       setTimeout(() => router.push(safeNextPath), 500);
     } catch (err) {
       setAuthMessage(err instanceof Error ? err.message : "Registration failed");
@@ -257,7 +317,7 @@ function SignUpPageContent() {
           <div className="mt-6 border-t border-black/10 pt-4">
             <p className="text-center text-sm text-zinc-600">
               Already have an account?{" "}
-              <Link href="/signin" className="font-semibold text-[color:var(--accent)] hover:underline">
+              <Link href={signInHref} className="font-semibold text-[color:var(--accent)] hover:underline">
                 Sign in
               </Link>
             </p>

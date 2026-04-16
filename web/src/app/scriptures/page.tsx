@@ -2493,6 +2493,30 @@ function ScripturesContent() {
   };
   const router = useRouter();
   const searchParams = useSearchParams();
+  const inviteEmailFromQuery = useMemo(() => {
+    const raw = (searchParams.get("email") || "").trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw) ? raw : "";
+  }, [searchParams]);
+  const scripturesReturnPath = useMemo(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    return params.toString() ? `/scriptures?${params.toString()}` : "/scriptures";
+  }, [searchParams]);
+  const signInFromShareHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (inviteEmailFromQuery) {
+      params.set("email", inviteEmailFromQuery);
+    }
+    params.set("returnTo", scripturesReturnPath);
+    return `/signin?${params.toString()}`;
+  }, [inviteEmailFromQuery, scripturesReturnPath]);
+  const signUpFromShareHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (inviteEmailFromQuery) {
+      params.set("email", inviteEmailFromQuery);
+    }
+    params.set("next", scripturesReturnPath);
+    return `/signup?${params.toString()}`;
+  }, [inviteEmailFromQuery, scripturesReturnPath]);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [email, setEmail] = useState("");
@@ -6146,6 +6170,11 @@ function ScripturesContent() {
             setSelectedId(null);
             setBreadcrumb([]);
             setNodeContent(null);
+            if (inviteEmailFromQuery) {
+              setPrivateBookGate(true);
+              setUrlInitialized(true);
+              return;
+            }
             setTreeError(ANONYMOUS_BOOK_NOT_FOUND_MESSAGE);
             setUrlInitialized(true);
             return;
@@ -8458,6 +8487,14 @@ function ScripturesContent() {
       }
 
       if (!response.ok) {
+        if (!authEmail && response.status === 404 && inviteEmailFromQuery) {
+          setPrivateBookGate(true);
+          setBookPreviewArtifact(null);
+          if (!append) {
+            setShowBookPreview(false);
+          }
+          throw new Error("Sign in required for this private book.");
+        }
         const failureDetail = (payload as { detail?: string } | null)?.detail || "";
         const resolvedFailureDetail =
           !authEmail && response.status === 404
@@ -13501,13 +13538,13 @@ function ScripturesContent() {
                   <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
                   <div className="mt-5 flex flex-col gap-2">
                     <a
-                      href="/signin"
+                      href={signInFromShareHref}
                       className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
                     >
                       Sign in
                     </a>
                     <a
-                      href="/signup"
+                      href={signUpFromShareHref}
                       className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
                     >
                       Create account
@@ -13680,13 +13717,13 @@ function ScripturesContent() {
                     <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
                     <div className="mt-4 flex flex-col gap-2">
                       <a
-                        href="/signin"
+                        href={signInFromShareHref}
                         className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
                       >
                         Sign in
                       </a>
                       <a
-                        href="/signup"
+                        href={signUpFromShareHref}
                         className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
                       >
                         Create account
@@ -15847,13 +15884,13 @@ function ScripturesContent() {
                     <p className="text-xs text-zinc-500">Sign in or create an account to view private books.</p>
                     <div className="mt-2 flex gap-2">
                       <a
-                        href="/signin"
+                        href={signInFromShareHref}
                         className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
                       >
                         Sign in
                       </a>
                       <a
-                        href="/signup"
+                        href={signUpFromShareHref}
                         className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
                       >
                         Create account

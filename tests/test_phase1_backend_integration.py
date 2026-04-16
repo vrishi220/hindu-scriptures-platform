@@ -5788,6 +5788,65 @@ class TestContentCoverageSprintCOV02:
             f"next=%2Fscriptures%3Fbook%3D{book_id}%26preview%3Dbook"
         )
 
+    def test_create_share_email_for_existing_user_includes_prefilled_email_link(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        existing_suffix = uuid4().hex[:8]
+        existing_email = f"existing_invite_{existing_suffix}@example.com"
+        register_response = client.post(
+            "/api/auth/register",
+            json={
+                "email": existing_email,
+                "password": "StrongPass123!",
+                "username": f"existing_invite_{existing_suffix}",
+                "full_name": "Existing Invite User",
+            },
+        )
+        assert register_response.status_code == status.HTTP_201_CREATED
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Existing Invite Schema {uuid4().hex[:8]}",
+                "description": "Schema for existing invite link coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Existing Invite Book {uuid4().hex[:6]}",
+                "book_code": f"cov-existing-invite-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        def fake_send_share_invitation(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": existing_email, "permission": "viewer", "send_email": True},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+        assert captured["recipient_email"] == existing_email
+        assert f"/scriptures?book={book_id}&preview=book" in captured["invite_link"]
+        assert "&email=" in captured["invite_link"]
+        assert existing_email.replace("@", "%40") in captured["invite_link"]
+
     def test_scriptures_action_permission_matrix_for_shared_roles(self, client):
         admin_headers = _register_and_login_as_admin(client)
         owner_headers = _register_and_login(client)
