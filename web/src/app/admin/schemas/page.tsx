@@ -85,7 +85,7 @@ export default function SchemaBuilderPage() {
   const [toast, setToast] = useState<Toast | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">("used");
+  const [usageFilter, setUsageFilter] = useState<"all" | "used" | "unused">("all");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<ModalMode>("create");
