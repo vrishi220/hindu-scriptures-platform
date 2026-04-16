@@ -13186,18 +13186,18 @@ function ScripturesContent() {
                     const showSingleBrowseAction = canBrowseBook && !showRowMenu;
                     const isBookRowMenuOpen = openBookRowActionsId === book.id;
                     const gridColumnIndex = isBooksGridView ? bookIndex % booksGridColumns : 0;
-                    // Smart menu positioning: align top-left corner with center of button, shift right if needed to stay in viewport
-                    const getMenuPositionClass = () => {
-                      if (!isBooksGridView) return "left-4"; // List view: align left edge to button center
-                      if (booksGridColumns === 1) return "left-4"; // Single column: align left edge to button center
-                      // For grid view: align to button center by default, but shift right for rightmost columns to keep menu visible
-                      if (gridColumnIndex === booksGridColumns - 1) {
-                        return "right-4"; // Right column: align to right edge of button center
-                      }
-                      return "left-4"; // All other positions: align left edge to button center
-                    };
-                    const menuPositionClass = getMenuPositionClass();
-                    const shouldOpenShareSubmenuLeft = menuPositionClass === "right-4";
+                    const shouldAnchorMenuRight =
+                      isBooksGridView &&
+                      (booksGridColumns === 1 ||
+                        gridColumnIndex >= Math.ceil(booksGridColumns / 2));
+                    // Keep single-column grid right-anchored so the panel opens into the viewport.
+                    // For 2+ columns, columns on the left half open right; right half open left.
+                    const menuPositionClass = !isBooksGridView
+                      ? "left-4"
+                      : shouldAnchorMenuRight
+                        ? "right-4"
+                        : "left-4";
+                    const shouldOpenShareSubmenuLeft = shouldAnchorMenuRight;
                     const shareSubmenuClassName = shouldOpenShareSubmenuLeft
                       ? "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56"
                       : "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-full sm:right-auto sm:top-0 sm:mt-0 sm:ml-1 sm:w-56";
@@ -13734,6 +13734,17 @@ function ScripturesContent() {
                                   void copyShareUrl(url, "node");
                                 },
                               },
+                              {
+                                key: "content-node-email-browse",
+                                label: "Email browse link",
+                                onSelect: () => {
+                                  const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
+                                  emailShareUrl(
+                                    "Shared scripture browse link",
+                                    `Here is the browse link:\n\n${url}`
+                                  );
+                                },
+                              },
                               ...(canPreviewCurrentNode
                                 ? [
                                     {
@@ -13744,6 +13755,19 @@ function ScripturesContent() {
                                           buildScripturesPreviewPath("node", bookId, selectedId)
                                         );
                                         void copyShareUrl(url, "node");
+                                      },
+                                    },
+                                    {
+                                      key: "content-node-email-preview",
+                                      label: "Email preview link",
+                                      onSelect: () => {
+                                        const url = toAbsoluteUrl(
+                                          buildScripturesPreviewPath("node", bookId, selectedId)
+                                        );
+                                        emailShareUrl(
+                                          "Shared scripture preview link",
+                                          `Here is the preview link:\n\n${url}`
+                                        );
                                       },
                                     },
                                   ]
@@ -13883,6 +13907,18 @@ function ScripturesContent() {
                                             });
                                           },
                                         },
+                                        {
+                                          key: "book-root-email-preview",
+                                          label: "Email preview link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", bookId));
+                                            setShowBookRootActionsMenu(false);
+                                            emailShareUrl(
+                                              `Shared scripture preview: ${currentBook.book_name}`,
+                                              `Here is the preview link for ${currentBook.book_name}:\n\n${url}`
+                                            );
+                                          },
+                                        },
                                       ]
                                     : []),
                                   ...(canCopyBookBrowseLink
@@ -13895,6 +13931,18 @@ function ScripturesContent() {
                                             void copyShareUrl(url, "book", () => {
                                               setShowBookRootActionsMenu(false);
                                             });
+                                          },
+                                        },
+                                        {
+                                          key: "book-root-email-browse",
+                                          label: "Email browse link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
+                                            setShowBookRootActionsMenu(false);
+                                            emailShareUrl(
+                                              `Shared scripture browse link: ${currentBook.book_name}`,
+                                              `Here is the browse link for ${currentBook.book_name}:\n\n${url}`
+                                            );
                                           },
                                         },
                                       ]
@@ -14221,6 +14269,20 @@ function ScripturesContent() {
                                             });
                                           },
                                         },
+                                        {
+                                          key: "node-email-preview",
+                                          label: "Email preview link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(
+                                              buildScripturesPreviewPath("node", bookId, selectedId)
+                                            );
+                                            setShowNodeActionsMenu(false);
+                                            emailShareUrl(
+                                              "Shared scripture preview link",
+                                              `Here is the preview link:\n\n${url}`
+                                            );
+                                          },
+                                        },
                                       ]
                                     : []),
                                   ...(canCopyBrowseLink
@@ -14233,6 +14295,18 @@ function ScripturesContent() {
                                             void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
                                               setShowNodeActionsMenu(false);
                                             });
+                                          },
+                                        },
+                                        {
+                                          key: "node-email-browse",
+                                          label: "Email browse link",
+                                          onSelect: () => {
+                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
+                                            setShowNodeActionsMenu(false);
+                                            emailShareUrl(
+                                              "Shared scripture browse link",
+                                              `Here is the browse link:\n\n${url}`
+                                            );
                                           },
                                         },
                                       ]
@@ -17214,6 +17288,16 @@ function ScripturesContent() {
                                       void handleCopyPreviewPath(previewPath);
                                     },
                                   },
+                                  {
+                                    key: "preview-overlay-email-preview",
+                                    label: "Email preview link",
+                                    onSelect: () => {
+                                      emailShareUrl(
+                                        "Shared scripture preview link",
+                                        `Here is the preview link:\n\n${toAbsoluteUrl(previewPath)}`
+                                      );
+                                    },
+                                  },
                                   ...(canBrowseCurrentNode
                                     ? [
                                         {
@@ -17223,6 +17307,17 @@ function ScripturesContent() {
                                             const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
                                             const shareTarget = previewScope === "node" ? "node" : "book";
                                             void copyShareUrl(toAbsoluteUrl(browsePath), shareTarget);
+                                          },
+                                        },
+                                        {
+                                          key: "preview-overlay-email-browse",
+                                          label: "Email browse link",
+                                          onSelect: () => {
+                                            const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
+                                            emailShareUrl(
+                                              "Shared scripture browse link",
+                                              `Here is the browse link:\n\n${toAbsoluteUrl(browsePath)}`
+                                            );
                                           },
                                         },
                                       ]
