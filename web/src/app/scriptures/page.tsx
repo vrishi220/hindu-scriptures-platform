@@ -3275,6 +3275,23 @@ function ScripturesContent() {
       fieldName: string;
       isFieldStart: boolean;
     }> = [];
+    const normalizedLevelName = (block.content.level_name || "").trim().toLowerCase();
+    const normalizedBlockTitle = normalizeTextForDisplay((block.title || "").trim()).toLowerCase();
+    const isLeafPreviewLevel =
+      normalizedLevelName === "entry" ||
+      normalizedLevelName === "rik" ||
+      normalizedLevelName === "verse" ||
+      normalizedLevelName === "shloka";
+    const isSyntheticEnglishTitleLine = (fieldName: string, value: string): boolean => {
+      if (fieldName !== "english" || !isLeafPreviewLevel) {
+        return false;
+      }
+      const normalizedValue = normalizeTextForDisplay((value || "").trim()).toLowerCase();
+      if (!normalizedValue || !normalizedBlockTitle) {
+        return false;
+      }
+      return normalizedValue === normalizedBlockTitle;
+    };
     const renderedLines = Array.isArray(block.content.rendered_lines) ? block.content.rendered_lines : [];
     const blockTranslations = toTranslationRecord(block.content.translations);
     const primaryPreviewTranslationLanguage =
@@ -3292,6 +3309,9 @@ function ScripturesContent() {
         }
         const value = pickTranslationTextForLanguageOnly(blockTranslations, language);
         if (!value || existingValues.has(value)) {
+          continue;
+        }
+        if (isSyntheticEnglishTitleLine("english", value)) {
           continue;
         }
         lines.push({
@@ -3313,6 +3333,9 @@ function ScripturesContent() {
           primaryPreviewTranslationLanguage,
         );
         if (fallbackValue && !existingValues.has(fallbackValue)) {
+          if (isSyntheticEnglishTitleLine("english", fallbackValue)) {
+            return;
+          }
           lines.push({
             key: "translation-fallback",
             label: appliedShowPreviewLabels ? metadataLabelForField("english") : "",
@@ -3345,6 +3368,9 @@ function ScripturesContent() {
               ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
               : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
             : rawValue;
+        if (isSyntheticEnglishTitleLine(fieldName, value)) {
+          continue;
+        }
 
         const rawLabel = (line?.label || "").trim();
         const baseLabel = metadataLabelForField(fieldName);
@@ -3381,6 +3407,9 @@ function ScripturesContent() {
             ? transliterateFromDevanagari(rawValue, appliedPreviewTransliterationScript)
             : transliterateFromIast(rawValue, appliedPreviewTransliterationScript)
           : rawValue;
+      if (isSyntheticEnglishTitleLine(key, value)) {
+        continue;
+      }
       if (!value || !visibleByKey[key]) {
         continue;
       }
@@ -8247,7 +8276,13 @@ function ScripturesContent() {
           return;
         }
 
-        clearBrowseUrl();
+        const nextParams = new URLSearchParams(searchParams.toString());
+        nextParams.delete("browse");
+        nextParams.delete("preview");
+        nextParams.delete("book");
+        nextParams.delete("node");
+        nextParams.delete("searchContext");
+        updateScripturesUrl(nextParams, "replace");
       });
     });
   };
