@@ -480,6 +480,10 @@ test.describe('Scripture Browser', () => {
 
     const previewHeading = page.getByRole('heading', { name: 'Book Preview' });
     await expect(previewHeading).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole('button', { name: 'Close preview' }).click();
+    await expect(previewHeading).toBeHidden();
+    await expect(page).toHaveURL('http://localhost:3000/scriptures');
   });
 
   test('preview and browse links deep-link to each other with correct URL intent', async ({ page }) => {
@@ -612,6 +616,273 @@ test.describe('Scripture Browser', () => {
     await browsePreviewLink.click();
 
     await expect(page).toHaveURL(/\/scriptures\?.*book=101.*preview=book/);
+  });
+
+  test('node reader preview renders Mandala, Anuvaka, Sukta, and Rik hierarchy by default', async ({ page }) => {
+    await page.route('**/api/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const method = request.method();
+      const path = url.pathname;
+
+      if (path === '/api/me') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 42,
+            email: 'rigveda-preview@example.com',
+            role: 'viewer',
+            permissions: { can_view: true, can_admin: false },
+          }),
+        });
+        return;
+      }
+
+      if (path === '/api/preferences' && method === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+        return;
+      }
+
+      if (path === '/api/preferences' && method === 'PATCH') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
+
+      if (path === '/api/cart/me') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [] }) });
+        return;
+      }
+
+      if (path === '/api/metadata/categories') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+        return;
+      }
+
+      if (path === '/api/books' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: 201,
+              book_name: 'Rigveda Mock',
+              schema_id: 7,
+              visibility: 'private',
+              level_name_overrides: {
+                Book: 'Mandala',
+                Part: 'Anuvaka',
+                Section: 'Sukta',
+                Entry: 'Rik',
+              },
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (path === '/api/books/201' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 201,
+            book_name: 'Rigveda Mock',
+            schema_id: 7,
+            visibility: 'private',
+            schema: {
+              id: 7,
+              name: 'Rigveda Schema',
+              levels: ['Book', 'Part', 'Section', 'Entry'],
+            },
+            level_name_overrides: {
+              Book: 'Mandala',
+              Part: 'Anuvaka',
+              Section: 'Sukta',
+              Entry: 'Rik',
+            },
+          }),
+        });
+        return;
+      }
+
+      if (path === '/api/books/201/tree' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: 301,
+              level_name: 'Book',
+              level_order: 1,
+              sequence_number: '10',
+              title_english: '',
+              children: [
+                {
+                  id: 302,
+                  level_name: 'Part',
+                  level_order: 2,
+                  sequence_number: '1',
+                  title_english: '',
+                  children: [
+                    {
+                      id: 303,
+                      level_name: 'Section',
+                      level_order: 3,
+                      sequence_number: '90',
+                      title_english: '',
+                      children: [
+                        {
+                          id: 304,
+                          level_name: 'Entry',
+                          level_order: 4,
+                          sequence_number: '1',
+                          title_english: '',
+                          children: [],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ]),
+        });
+        return;
+      }
+
+      if (path === '/api/content/nodes/304' && method === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 304,
+            level_name: 'Entry',
+            level_order: 4,
+            sequence_number: '1',
+            title_english: '',
+            has_content: true,
+            content_data: {
+              basic: {
+                sanskrit: 'सहस्रशीर्षा पुरुषः',
+                transliteration: 'sahasrasirsa purusah',
+                translation: 'The Cosmic Being has a thousand heads.',
+              },
+              translations: {
+                english: 'The Cosmic Being has a thousand heads.',
+              },
+            },
+            tags: [],
+          }),
+        });
+        return;
+      }
+
+      if (path === '/api/books/201/preview/render' && method === 'POST') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            book_id: 201,
+            book_name: 'Rigveda Mock',
+            preview_scope: 'node',
+            root_node_id: 304,
+            root_title: null,
+            reader_hierarchy_path: '10.1.90.1',
+            section_order: ['body'],
+            sections: {
+              body: [
+                {
+                  section: 'body',
+                  order: 1,
+                  template_key: 'default',
+                  source_node_id: 301,
+                  title: '',
+                  content: {
+                    level_name: 'Book',
+                    sequence_number: '10',
+                    rendered_lines: [],
+                  },
+                },
+                {
+                  section: 'body',
+                  order: 2,
+                  template_key: 'default',
+                  source_node_id: 302,
+                  title: '',
+                  content: {
+                    level_name: 'Part',
+                    sequence_number: '1',
+                    rendered_lines: [],
+                  },
+                },
+                {
+                  section: 'body',
+                  order: 3,
+                  template_key: 'default',
+                  source_node_id: 303,
+                  title: '',
+                  content: {
+                    level_name: 'Section',
+                    sequence_number: '90',
+                    rendered_lines: [],
+                  },
+                },
+                {
+                  section: 'body',
+                  order: 4,
+                  template_key: 'default',
+                  source_node_id: 304,
+                  title: '',
+                  content: {
+                    level_name: 'Entry',
+                    sequence_number: '1',
+                    rendered_lines: [
+                      {
+                        field: 'sanskrit',
+                        label: 'Sanskrit',
+                        value: 'सहस्रशीर्षा पुरुषः',
+                      },
+                      {
+                        field: 'english',
+                        label: 'English',
+                        value: 'The Cosmic Being has a thousand heads.',
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            render_settings: {
+              show_sanskrit: true,
+              show_transliteration: false,
+              show_english: true,
+              show_metadata: false,
+              show_media: false,
+              text_order: ['sanskrit', 'english'],
+            },
+            warnings: [],
+            offset: 0,
+            limit: 50,
+            total_blocks: 4,
+            has_more: false,
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    });
+
+    await page.goto('http://localhost:3000/scriptures?book=201&node=304&preview=node');
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.getByRole('heading', { name: 'Reader View (10.1.90.1)' })).toBeVisible();
+    await expect(page.getByText('Mandala 10', { exact: true })).toBeVisible();
+    await expect(page.getByText('Anuvaka 1', { exact: true })).toBeVisible();
+    await expect(page.getByText('Sukta 90', { exact: true })).toBeVisible();
+    await expect(page.getByText('Rik 1', { exact: true })).toBeVisible();
+    await expect(page.getByText('सहस्रशीर्षा पुरुषः', { exact: true })).toBeVisible();
   });
 
   test('book media manager attaches audio from repo and renders controls inline', async ({ page }) => {

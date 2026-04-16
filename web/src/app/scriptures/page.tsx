@@ -8246,6 +8246,25 @@ function ScripturesContent() {
           return;
         }
 
+        if (showBrowseBookModal && bookId) {
+          syncBrowseUrl(bookId, selectedId, "replace");
+          return;
+        }
+
+        if (
+          searchParams.get("preview") === "book" &&
+          !searchParams.has("browse") &&
+          !searchParams.has("node")
+        ) {
+          const nextParams = new URLSearchParams(searchParams.toString());
+          nextParams.delete("preview");
+          nextParams.delete("book");
+          nextParams.delete("node");
+          nextParams.delete("searchContext");
+          updateScripturesUrl(nextParams, "replace");
+          return;
+        }
+
         clearPreviewUrl();
       });
     });
@@ -10399,6 +10418,66 @@ function ScripturesContent() {
     return counts;
   }, [selectedId, treeData, currentBook?.schema?.levels]);
 
+  const selectedNodeDescendantLevelCounts = useMemo<Record<string, number>>(() => {
+    if (!selectedId || selectedId === BOOK_ROOT_NODE_ID || treeData.length === 0) {
+      return {};
+    }
+    const selectedNode = findNodeById(treeData, selectedId);
+    const schemaLevels = currentBook?.schema?.levels;
+    if (!selectedNode?.children || selectedNode.children.length === 0 || !schemaLevels?.length) {
+      return {};
+    }
+
+    const resolveSchemaLevelIndex = (levelName: string | null | undefined, levelOrder?: number | null) => {
+      if (
+        typeof levelOrder === "number" &&
+        levelOrder > 0 &&
+        levelOrder <= schemaLevels.length
+      ) {
+        return levelOrder - 1;
+      }
+
+      const normalized = (levelName || "").trim().toLowerCase();
+      if (!normalized) {
+        return -1;
+      }
+
+      const exactIndex = schemaLevels.findIndex(
+        (level) => level.trim().toLowerCase() === normalized
+      );
+      if (exactIndex >= 0) {
+        return exactIndex;
+      }
+
+      return schemaLevels.findIndex((level) => {
+        const display = currentBookLevelNameOverrides[level];
+        return typeof display === "string" && display.trim().toLowerCase() === normalized;
+      });
+    };
+
+    const selectedLevelIndex = resolveSchemaLevelIndex(
+      selectedNode.level_name,
+      selectedNode.level_order
+    );
+    const counts: Record<string, number> = {};
+
+    const traverse = (nodes: TreeNode[]) => {
+      nodes.forEach((child) => {
+        const levelIndex = resolveSchemaLevelIndex(child.level_name, child.level_order);
+        const canonicalLevel = levelIndex >= 0 ? schemaLevels[levelIndex] : (child.level_name || "").trim();
+        if (canonicalLevel && (selectedLevelIndex < 0 || levelIndex > selectedLevelIndex)) {
+          counts[canonicalLevel] = (counts[canonicalLevel] || 0) + 1;
+        }
+        if (child.children?.length) {
+          traverse(child.children);
+        }
+      });
+    };
+
+    traverse(selectedNode.children);
+    return counts;
+  }, [selectedId, treeData, currentBook?.schema?.levels, currentBookLevelNameOverrides]);
+
   useEffect(() => {
     if (!currentBook || currentBookSchemaLevels.length === 0) {
       setLevelNameOverridesDraft({});
@@ -11512,16 +11591,19 @@ function ScripturesContent() {
     return sorted.map((node, index) => (
       <div key={node.id} className="mt-2">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          {node.children && node.children.length > 0 && (
-            <button
-              type="button"
-              onClick={() => browsingHook.toggleNode(node.id)}
-              className="h-6 w-6 rounded-full border border-black/10 bg-white/80 text-xs text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-              style={{ marginLeft: `${depth * 12}px` }}
-            >
-              {expandedIds.has(node.id) ? "-" : "+"}
-            </button>
-          )}
+          <span className="shrink-0">
+            {node.children && node.children.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => browsingHook.toggleNode(node.id)}
+                className="h-6 w-6 rounded-full border border-black/10 bg-white/80 text-xs text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+              >
+                {expandedIds.has(node.id) ? "-" : "+"}
+              </button>
+            ) : (
+              <span aria-hidden className="block h-6 w-6" />
+            )}
+          </span>
           <button
             type="button"
             onClick={() => selectNode(node.id, true, false)}
@@ -11953,8 +12035,23 @@ function ScripturesContent() {
       const wordMeaningRows = resolvePreviewWordMeanings(block);
       const rawTitle = block.title || "";
       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
-      const displayTitle = appliedShowPreviewTitles && !hideNodeFallback ? rawTitle : "";
-      if (nonTranslationLines.length === 0 && translationLines.length === 0) {
+      const isStructuralOnlyBlock =
+        nonTranslationLines.length === 0 && translationLines.length === 0;
+      const structuralHeading =
+        block.content.level_name &&
+        block.content.sequence_number != null &&
+        block.content.sequence_number !== ""
+          ? `${getDisplayLevelName(block.content.level_name)} ${block.content.sequence_number}`
+          : "";
+      const shouldForceStructuralHeading = isStructuralOnlyBlock && Boolean(structuralHeading);
+      const displayTitle = shouldForceStructuralHeading
+        ? structuralHeading
+        : appliedShowPreviewTitles
+          ? !hideNodeFallback && rawTitle
+            ? rawTitle
+            : structuralHeading
+          : "";
+      if (isStructuralOnlyBlock && !displayTitle) {
         return;
       }
 
@@ -11963,7 +12060,11 @@ function ScripturesContent() {
           key={`${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`}
           className="border-b border-black/10 px-0.5 py-1.5"
         >
-          {appliedShowPreviewLevelNumbers && block.content.level_name && block.content.sequence_number != null && block.content.sequence_number !== "" && (
+          {appliedShowPreviewLevelNumbers &&
+            !shouldForceStructuralHeading &&
+            block.content.level_name &&
+            block.content.sequence_number != null &&
+            block.content.sequence_number !== "" && (
             <div className="mb-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
               {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
             </div>
@@ -11971,23 +12072,25 @@ function ScripturesContent() {
           {displayTitle && (
             <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
           )}
-          <div className="mt-0.5">
-            {nonTranslationLines.map((line, lineIndex) => (
-              <div
-                key={`${line.key}-${line.value.slice(0, 24)}`}
-                className={
-                  lineIndex === 0 || !line.isFieldStart
-                    ? ""
-                      : "mt-1 border-t border-black/10 pt-1"
-                }
-              >
-                {line.label && (
-                  <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
-                )}
-                <p className={line.className} style={previewBodyTextStyle}>{line.value}</p>
-              </div>
-            ))}
-          </div>
+          {nonTranslationLines.length > 0 && (
+            <div className="mt-0.5">
+              {nonTranslationLines.map((line, lineIndex) => (
+                <div
+                  key={`${line.key}-${line.value.slice(0, 24)}`}
+                  className={
+                    lineIndex === 0 || !line.isFieldStart
+                      ? ""
+                        : "mt-1 border-t border-black/10 pt-1"
+                  }
+                >
+                  {line.label && (
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
+                  )}
+                  <p className={line.className} style={previewBodyTextStyle}>{line.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
           {wordMeaningRows.length > 0 && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
             <div className="mt-1 border-t border-black/10 pt-1">
               {appliedPreviewWordMeaningsDisplayMode === "table" ? (
@@ -13620,7 +13723,9 @@ function ScripturesContent() {
           {showBrowseBookModal && bookId && isExploreVisible && (
           <div
             ref={browseBookOverlayRef}
-            className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
+            className={`fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px] ${
+              showBookPreview ? "pointer-events-none" : ""
+            }`}
           >
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
               <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
@@ -14605,6 +14710,35 @@ function ScripturesContent() {
                             <SlidersHorizontal size={14} />
                             Open
                           </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {Object.keys(selectedNodeDescendantLevelCounts).length > 0 && (
+                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                        <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                          Level Counts
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          {[
+                            ...currentBookSchemaLevels.filter((level) => selectedNodeDescendantLevelCounts[level] != null),
+                            ...Object.keys(selectedNodeDescendantLevelCounts).filter(
+                              (level) => !currentBookSchemaLevels.includes(level)
+                            ),
+                          ].map((level) => {
+                            const count = selectedNodeDescendantLevelCounts[level] ?? 0;
+                            return (
+                              <div
+                                key={`node-stat-${selectedId}-${level}`}
+                                className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
+                              >
+                                <span className="text-zinc-600">{getDisplayLevelName(level) || level}</span>
+                                <span className="font-medium tabular-nums text-zinc-900">
+                                  {count.toLocaleString()}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
