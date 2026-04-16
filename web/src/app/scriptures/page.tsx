@@ -196,7 +196,26 @@ type BookShare = {
   shared_with_user_id: number;
   shared_with_email: string;
   shared_with_username?: string | null;
+  shared_with_is_active?: boolean;
   permission: SharePermission;
+};
+
+type ShareDialogLinkOption = {
+  key: string;
+  label: string;
+  url: string;
+  emailSubject: string;
+  emailBody: string;
+  target: "book" | "node" | "leaf";
+};
+
+type ShareDialogState = {
+  bookId: string;
+  bookName: string;
+  visibility: "private" | "public";
+  canManageShares: boolean;
+  description: string;
+  linkOptions: ShareDialogLinkOption[];
 };
 
 type ImportResult = {
@@ -206,7 +225,6 @@ type ImportResult = {
   detail?: string;
   error?: string;
 };
-
 type ImportJobStatus = {
   job_id?: string;
   status?: ImportJobLifecycleStatus;
@@ -2722,6 +2740,7 @@ function ScripturesContent() {
     useState<TransliterationScriptOption>("iast");
   const [bookBrowseMediaSearchQuery, setBookBrowseMediaSearchQuery] = useState("");
   const [showShareManager, setShowShareManager] = useState(false);
+  const [shareDialogState, setShareDialogState] = useState<ShareDialogState | null>(null);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
   const [modalTranslationDrafts, setModalTranslationDrafts] =
@@ -7772,14 +7791,31 @@ function ScripturesContent() {
     }
   };
 
-  const openShareManagerForBook = async (targetBookId: string) => {
-    const didSelect = handleSelectBook(targetBookId, { syncUrl: false, preserveLayout: true });
-    if (!didSelect) return;
+  const closeShareDialog = () => {
+    setShowShareManager(false);
     setSharesError(null);
-    setShowShareManager(true);
-    await loadBookShares(targetBookId);
+    setShareDialogState(null);
   };
 
+  const resolveBookVisibility = (value: unknown): "private" | "public" =>
+    String(value || "").trim().toLowerCase() === "public" ? "public" : "private";
+
+  const openShareDialogForBook = async (nextDialogState: ShareDialogState) => {
+    const didSelect = handleSelectBook(nextDialogState.bookId, {
+      syncUrl: false,
+      preserveLayout: true,
+    });
+    if (!didSelect) return;
+    setSharesError(null);
+    setShareDialogState(nextDialogState);
+    setShowShareManager(true);
+    if (nextDialogState.visibility === "private" && nextDialogState.canManageShares) {
+      await loadBookShares(nextDialogState.bookId);
+      return;
+    }
+    setBookShares([]);
+    setSharesLoading(false);
+  };
 
   const buildScripturesBrowsePath = (targetBookId: string, targetNodeId?: number | null) => {
     const params = new URLSearchParams();
@@ -12477,120 +12513,83 @@ function ScripturesContent() {
       canCopyBrowseBookLink: boolean;
       submenuClassName: string;
       submenuChevron: ReactElement;
+      canManageBook: boolean;
     }
   ): ReactElement | null => {
     const {
       canPreviewBook,
       canCopyPreviewBookLink,
       canCopyBrowseBookLink,
-      submenuClassName,
-      submenuChevron,
+      canManageBook,
     } = options;
-    if (!canPreviewBook && !canCopyPreviewBookLink && !canCopyBrowseBookLink) {
+    const visibility = resolveBookVisibility(
+      book.visibility ?? book.metadata_json?.visibility ?? book.metadata?.visibility
+    );
+    const isPublicBook = visibility === "public";
+    const linkOptions: ShareDialogLinkOption[] = [];
+
+    if (isPublicBook && canCopyPreviewBookLink) {
+      const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+      linkOptions.push({
+        key: "preview",
+        label: "Preview link",
+        url,
+        emailSubject: `Shared scripture preview: ${book.book_name}`,
+        emailBody: `Here is the preview link for ${book.book_name}:\n\n${url}`,
+        target: "book",
+      });
+    }
+    if (isPublicBook && canCopyBrowseBookLink) {
+      const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
+      linkOptions.push({
+        key: "browse",
+        label: "Browse link",
+        url,
+        emailSubject: `Shared scripture browse link: ${book.book_name}`,
+        emailBody: `Here is the browse link for ${book.book_name}:\n\n${url}`,
+        target: "book",
+      });
+    }
+    if (isPublicBook && !canCopyPreviewBookLink && !canCopyBrowseBookLink && canPreviewBook) {
+      const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
+      linkOptions.push({
+        key: "default",
+        label: "Book link",
+        url,
+        emailSubject: `Shared scripture link: ${book.book_name}`,
+        emailBody: `Here is the link for ${book.book_name}:\n\n${url}`,
+        target: "book",
+      });
+    }
+    if (!isPublicBook && !canManageBook) {
+      return null;
+    }
+    if (isPublicBook && linkOptions.length === 0) {
       return null;
     }
 
-    const shareActions: ShareActionItem[] = [];
-    if (canCopyPreviewBookLink) {
-      shareActions.push(
-        {
-          key: "copy-preview",
-          label: "Copy preview link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-            void copyShareUrl(url, "book");
-          },
-        },
-        {
-          key: "email-preview",
-          label: "Email preview link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-            emailShareUrl(
-              `Shared scripture preview: ${book.book_name}`,
-              `Here is the preview link for ${book.book_name}:\n\n${url}`
-            );
-          },
-        }
-      );
-    }
-    if (canCopyBrowseBookLink) {
-      shareActions.push(
-        {
-          key: "copy-browse",
-          label: "Copy browse link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
-            void copyShareUrl(url, "book");
-          },
-        },
-        {
-          key: "email-browse",
-          label: "Email browse link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
-            emailShareUrl(
-              `Shared scripture browse link: ${book.book_name}`,
-              `Here is the browse link for ${book.book_name}:\n\n${url}`
-            );
-          },
-        }
-      );
-    }
-    if (!canCopyPreviewBookLink && !canCopyBrowseBookLink) {
-      shareActions.push(
-        {
-          key: "copy-link",
-          label: "Copy link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-            void copyShareUrl(url, "book");
-          },
-        },
-        {
-          key: "email-link",
-          label: "Email link",
-          onSelect: () => {
-            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
-            emailShareUrl(
-              `Shared scripture link: ${book.book_name}`,
-              `Here is the link for ${book.book_name}:\n\n${url}`
-            );
-          },
-        }
-      );
-    }
-
     return (
-      <div 
-        className="relative"
+      <button
+        type="button"
+        onClick={() => {
+          setOpenBookRowActionsId(null);
+          setOpenBookRowShareSubmenuId(null);
+          void openShareDialogForBook({
+            bookId: book.id.toString(),
+            bookName: book.book_name,
+            visibility,
+            canManageShares: !isPublicBook && canManageBook,
+            description: isPublicBook
+              ? "Copy or email a public link for this book."
+              : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
+            linkOptions,
+          });
+        }}
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
       >
-        <button
-          type="button"
-          aria-haspopup="menu"
-          aria-expanded={openBookRowShareSubmenuId === book.id}
-          onClick={() => {
-            setOpenBookRowShareSubmenuId((previous) =>
-              previous === book.id ? null : book.id
-            );
-          }}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-        >
-          <Share2 size={14} />
-          <span className="flex-1">Share</span>
-          {submenuChevron}
-        </button>
-        {openBookRowShareSubmenuId === book.id && (
-          <div className={submenuClassName}>
-            {renderShareActionButtons(shareActions, {
-              onAfterSelect: () => {
-                setOpenBookRowActionsId(null);
-                setOpenBookRowShareSubmenuId(null);
-              },
-            })}
-          </div>
-        )}
-      </div>
+        <Share2 size={14} />
+        <span className="flex-1">Share</span>
+      </button>
     );
   };
 
@@ -12645,20 +12644,6 @@ function ScripturesContent() {
           >
             <Eye size={14} />
             Preview book
-          </button>
-        )}
-        {canManageBook && (
-          <button
-            type="button"
-            onClick={() => {
-              setOpenBookRowActionsId(null);
-              setOpenBookRowShareSubmenuId(null);
-              void openShareManagerForBook(book.id.toString());
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-          >
-            <Users size={14} />
-            Manage shares
           </button>
         )}
         {canManageBook && (
@@ -12800,6 +12785,7 @@ function ScripturesContent() {
           canCopyBrowseBookLink,
           submenuClassName: shareSubmenuClassName,
           submenuChevron: shareSubmenuChevron,
+          canManageBook,
         })}
         {renderBookRowStandardActions(book, {
           canBrowseBook,
@@ -13762,64 +13748,53 @@ function ScripturesContent() {
                   </div>
                   {selectedId && !isLeafSelected && (
                     <>
-                      {!canEditCurrentBook && canBrowseCurrentNode && (
+                      {!canEditCurrentBook && canBrowseCurrentNode &&
+                        resolveBookVisibility(currentBook?.visibility) === "public" && (
                         <div className="ml-auto">
-                          {renderHoverShareSubmenu({
-                            submenuKey: "browse-node-share-submenu",
-                            actions: [
-                              {
-                                key: "content-node-copy-browse",
-                                label: "Copy browse link",
-                                onSelect: () => {
-                                  const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
-                                  void copyShareUrl(url, "node");
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const browseUrl = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
+                              const linkOptions: ShareDialogLinkOption[] = [
+                                {
+                                  key: "browse",
+                                  label: "Browse link",
+                                  url: browseUrl,
+                                  emailSubject: "Shared scripture browse link",
+                                  emailBody: `Here is the browse link:\n\n${browseUrl}`,
+                                  target: "node",
                                 },
-                              },
-                              {
-                                key: "content-node-email-browse",
-                                label: "Email browse link",
-                                onSelect: () => {
-                                  const url = toAbsoluteUrl(`/scriptures?book=${bookId}&node=${selectedId}`);
-                                  emailShareUrl(
-                                    "Shared scripture browse link",
-                                    `Here is the browse link:\n\n${url}`
-                                  );
-                                },
-                              },
-                              ...(canPreviewCurrentNode
-                                ? [
-                                    {
-                                      key: "content-node-copy-preview",
-                                      label: "Copy preview link",
-                                      onSelect: () => {
-                                        const url = toAbsoluteUrl(
+                                ...(canPreviewCurrentNode
+                                  ? [
+                                      {
+                                        key: "preview",
+                                        label: "Preview link",
+                                        url: toAbsoluteUrl(
                                           buildScripturesPreviewPath("node", bookId, selectedId)
-                                        );
-                                        void copyShareUrl(url, "node");
-                                      },
-                                    },
-                                    {
-                                      key: "content-node-email-preview",
-                                      label: "Email preview link",
-                                      onSelect: () => {
-                                        const url = toAbsoluteUrl(
+                                        ),
+                                        emailSubject: "Shared scripture preview link",
+                                        emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(
                                           buildScripturesPreviewPath("node", bookId, selectedId)
-                                        );
-                                        emailShareUrl(
-                                          "Shared scripture preview link",
-                                          `Here is the preview link:\n\n${url}`
-                                        );
+                                        )}`,
+                                        target: "node" as const,
                                       },
-                                    },
-                                  ]
-                                : []),
-                            ],
-                            panelClassName:
-                              "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:w-56",
-                            chevron: <ChevronDown size={14} />,
-                            triggerClassName:
-                              "flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-3 py-2 text-sm text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50 sm:px-2 sm:py-1 sm:text-xs",
-                          })}
+                                    ]
+                                  : []),
+                              ];
+                              void openShareDialogForBook({
+                                bookId,
+                                bookName: currentBook?.book_name || "Book",
+                                visibility: "public",
+                                canManageShares: false,
+                                description: "Copy or email a public link for this section.",
+                                linkOptions,
+                              });
+                            }}
+                            className="flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-3 py-2 text-sm text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50 sm:px-2 sm:py-1 sm:text-xs"
+                          >
+                            <Share2 size={14} />
+                            Share
+                          </button>
                         </div>
                       )}
                       {isCopyMessage && copyTarget === "node" && !showLogin && (
@@ -13933,65 +13908,57 @@ function ScripturesContent() {
                                   Preview book
                                 </button>
                               )}
-                              {renderHoverShareSubmenu({
-                                submenuKey: "book-root-share-submenu",
-                                actions: [
-                                  ...(canPreviewCurrentBook
-                                    ? [
-                                        {
-                                          key: "book-root-copy-preview",
-                                          label: "Copy preview link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", bookId));
-                                            void copyShareUrl(url, "book", () => {
-                                              setShowBookRootActionsMenu(false);
-                                            });
-                                          },
-                                        },
-                                        {
-                                          key: "book-root-email-preview",
-                                          label: "Email preview link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesPreviewPath("book", bookId));
-                                            setShowBookRootActionsMenu(false);
-                                            emailShareUrl(
-                                              `Shared scripture preview: ${currentBook.book_name}`,
-                                              `Here is the preview link for ${currentBook.book_name}:\n\n${url}`
-                                            );
-                                          },
-                                        },
-                                      ]
-                                    : []),
-                                  ...(canCopyBookBrowseLink
-                                    ? [
-                                        {
-                                          key: "book-root-copy-browse",
-                                          label: "Copy browse link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
-                                            void copyShareUrl(url, "book", () => {
-                                              setShowBookRootActionsMenu(false);
-                                            });
-                                          },
-                                        },
-                                        {
-                                          key: "book-root-email-browse",
-                                          label: "Email browse link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId));
-                                            setShowBookRootActionsMenu(false);
-                                            emailShareUrl(
-                                              `Shared scripture browse link: ${currentBook.book_name}`,
-                                              `Here is the browse link for ${currentBook.book_name}:\n\n${url}`
-                                            );
-                                          },
-                                        },
-                                      ]
-                                    : []),
-                                ],
-                                panelClassName:
-                                  "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56",
-                              })}
+                              {(resolveBookVisibility(currentBook.visibility) === "public" || canEditCurrentBook) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const visibility = resolveBookVisibility(currentBook.visibility);
+                                    const linkOptions: ShareDialogLinkOption[] = visibility === "public"
+                                      ? [
+                                          ...(canPreviewCurrentBook
+                                            ? [
+                                                {
+                                                  key: "preview",
+                                                  label: "Preview link",
+                                                  url: toAbsoluteUrl(buildScripturesPreviewPath("book", bookId)),
+                                                  emailSubject: `Shared scripture preview: ${currentBook.book_name}`,
+                                                  emailBody: `Here is the preview link for ${currentBook.book_name}:\n\n${toAbsoluteUrl(buildScripturesPreviewPath("book", bookId))}`,
+                                                  target: "book" as const,
+                                                },
+                                              ]
+                                            : []),
+                                          ...(canCopyBookBrowseLink
+                                            ? [
+                                                {
+                                                  key: "browse",
+                                                  label: "Browse link",
+                                                  url: toAbsoluteUrl(buildScripturesBrowsePath(bookId)),
+                                                  emailSubject: `Shared scripture browse link: ${currentBook.book_name}`,
+                                                  emailBody: `Here is the browse link for ${currentBook.book_name}:\n\n${toAbsoluteUrl(buildScripturesBrowsePath(bookId))}`,
+                                                  target: "book" as const,
+                                                },
+                                              ]
+                                            : []),
+                                        ]
+                                      : [];
+                                    setShowBookRootActionsMenu(false);
+                                    void openShareDialogForBook({
+                                      bookId,
+                                      bookName: currentBook.book_name,
+                                      visibility,
+                                      canManageShares: visibility === "private" && canEditCurrentBook,
+                                      description: visibility === "public"
+                                        ? "Copy or email a public link for this book."
+                                        : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
+                                      linkOptions,
+                                    });
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Share2 size={14} />
+                                  Share
+                                </button>
+                              )}
                               {canContribute && currentBook?.schema && (
                                 <button
                                   type="button"
@@ -14293,69 +14260,64 @@ function ScripturesContent() {
                                   {activeNodePreviewLabel}
                                 </button>
                               )}
-                              {renderHoverShareSubmenu({
-                                submenuKey: "node-actions-share-submenu",
-                                actions: [
-                                  ...(canCopyPreviewLink
-                                    ? [
-                                        {
-                                          key: "node-copy-preview",
-                                          label: "Copy preview link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(
-                                              buildScripturesPreviewPath("node", bookId, selectedId)
-                                            );
-                                            void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
-                                              setShowNodeActionsMenu(false);
-                                            });
-                                          },
-                                        },
-                                        {
-                                          key: "node-email-preview",
-                                          label: "Email preview link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(
-                                              buildScripturesPreviewPath("node", bookId, selectedId)
-                                            );
-                                            setShowNodeActionsMenu(false);
-                                            emailShareUrl(
-                                              "Shared scripture preview link",
-                                              `Here is the preview link:\n\n${url}`
-                                            );
-                                          },
-                                        },
-                                      ]
-                                    : []),
-                                  ...(canCopyBrowseLink
-                                    ? [
-                                        {
-                                          key: "node-copy-browse",
-                                          label: "Copy browse link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
-                                            void copyShareUrl(url, isLeafSelected ? "leaf" : "node", () => {
-                                              setShowNodeActionsMenu(false);
-                                            });
-                                          },
-                                        },
-                                        {
-                                          key: "node-email-browse",
-                                          label: "Email browse link",
-                                          onSelect: () => {
-                                            const url = toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId));
-                                            setShowNodeActionsMenu(false);
-                                            emailShareUrl(
-                                              "Shared scripture browse link",
-                                              `Here is the browse link:\n\n${url}`
-                                            );
-                                          },
-                                        },
-                                      ]
-                                    : []),
-                                ],
-                                panelClassName:
-                                  "absolute right-0 top-full z-[10002] mt-1 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:right-full sm:top-0 sm:mt-0 sm:mr-1 sm:w-56",
-                              })}
+                              {(resolveBookVisibility(currentBook?.visibility) === "public" || canEditCurrentBook) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const visibility = resolveBookVisibility(currentBook?.visibility);
+                                    const shareTarget: ShareDialogLinkOption["target"] = isLeafSelected
+                                      ? "leaf"
+                                      : "node";
+                                    const linkOptions: ShareDialogLinkOption[] = visibility === "public"
+                                      ? [
+                                          ...(canCopyPreviewLink
+                                            ? [
+                                                {
+                                                  key: "preview",
+                                                  label: "Preview link",
+                                                  url: toAbsoluteUrl(
+                                                    buildScripturesPreviewPath("node", bookId, selectedId)
+                                                  ),
+                                                  emailSubject: "Shared scripture preview link",
+                                                  emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(
+                                                    buildScripturesPreviewPath("node", bookId, selectedId)
+                                                  )}`,
+                                                  target: shareTarget,
+                                                },
+                                              ]
+                                            : []),
+                                          ...(canCopyBrowseLink
+                                            ? [
+                                                {
+                                                  key: "browse",
+                                                  label: "Browse link",
+                                                  url: toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId)),
+                                                  emailSubject: "Shared scripture browse link",
+                                                  emailBody: `Here is the browse link:\n\n${toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId))}`,
+                                                  target: shareTarget,
+                                                },
+                                              ]
+                                            : []),
+                                        ]
+                                      : [];
+                                    setShowNodeActionsMenu(false);
+                                    void openShareDialogForBook({
+                                      bookId,
+                                      bookName: currentBook?.book_name || "Book",
+                                      visibility,
+                                      canManageShares: visibility === "private" && canEditCurrentBook,
+                                      description: visibility === "public"
+                                        ? "Copy or email a public link for this section."
+                                        : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
+                                      linkOptions,
+                                    });
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
+                                >
+                                  <Share2 size={14} />
+                                  Share
+                                </button>
+                              )}
                               {canAddSelectedNodeToBasket && (
                                 <button
                                   type="button"
@@ -17309,7 +17271,45 @@ function ScripturesContent() {
                           <button
                             type="button"
                             onClick={() => {
-                              setShowPreviewShareMenu((prev) => !prev);
+                              const visibility = resolveBookVisibility(currentBook?.visibility);
+                              const shareTarget: ShareDialogLinkOption["target"] = previewScope === "node"
+                                ? "node"
+                                : "book";
+                              const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
+                              const linkOptions: ShareDialogLinkOption[] = visibility === "public"
+                                ? [
+                                    {
+                                      key: "preview",
+                                      label: "Preview link",
+                                      url: toAbsoluteUrl(previewPath),
+                                      emailSubject: "Shared scripture preview link",
+                                      emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(previewPath)}`,
+                                      target: shareTarget,
+                                    },
+                                    ...(canBrowseCurrentNode
+                                      ? [
+                                          {
+                                            key: "browse",
+                                            label: "Browse link",
+                                            url: toAbsoluteUrl(browsePath),
+                                            emailSubject: "Shared scripture browse link",
+                                            emailBody: `Here is the browse link:\n\n${toAbsoluteUrl(browsePath)}`,
+                                            target: shareTarget,
+                                          },
+                                        ]
+                                      : []),
+                                  ]
+                                : [];
+                              void openShareDialogForBook({
+                                bookId,
+                                bookName: currentBook?.book_name || "Book",
+                                visibility,
+                                canManageShares: visibility === "private" && canEditCurrentBook,
+                                description: visibility === "public"
+                                  ? "Copy or email a public link for this view."
+                                  : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
+                                linkOptions,
+                              });
                             }}
                             disabled={showPreviewControls}
                             title="Share"
@@ -17318,60 +17318,6 @@ function ScripturesContent() {
                           >
                             <Share2 className="h-4 w-4" />
                           </button>
-                          {showPreviewShareMenu && !showPreviewControls && (
-                            <div className="absolute left-0 top-full z-[10002] mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] space-y-0.5 rounded-lg border border-black/10 bg-white p-1 shadow-xl sm:left-auto sm:right-0 sm:w-56">
-                              {renderShareActionButtons(
-                                [
-                                  {
-                                    key: "preview-overlay-copy-preview",
-                                    label: "Copy preview link",
-                                    onSelect: () => {
-                                      void handleCopyPreviewPath(previewPath);
-                                    },
-                                  },
-                                  {
-                                    key: "preview-overlay-email-preview",
-                                    label: "Email preview link",
-                                    onSelect: () => {
-                                      emailShareUrl(
-                                        "Shared scripture preview link",
-                                        `Here is the preview link:\n\n${toAbsoluteUrl(previewPath)}`
-                                      );
-                                    },
-                                  },
-                                  ...(canBrowseCurrentNode
-                                    ? [
-                                        {
-                                          key: "preview-overlay-copy-browse",
-                                          label: "Copy browse link",
-                                          onSelect: () => {
-                                            const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
-                                            const shareTarget = previewScope === "node" ? "node" : "book";
-                                            void copyShareUrl(toAbsoluteUrl(browsePath), shareTarget);
-                                          },
-                                        },
-                                        {
-                                          key: "preview-overlay-email-browse",
-                                          label: "Email browse link",
-                                          onSelect: () => {
-                                            const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
-                                            emailShareUrl(
-                                              "Shared scripture browse link",
-                                              `Here is the browse link:\n\n${toAbsoluteUrl(browsePath)}`
-                                            );
-                                          },
-                                        },
-                                      ]
-                                    : []),
-                                ],
-                                {
-                                  onAfterSelect: () => {
-                                    setShowPreviewShareMenu(false);
-                                  },
-                                }
-                              )}
-                            </div>
-                          )}
                         </div>
                         {canBrowseCurrentNode && (
                           <button
@@ -18081,127 +18027,186 @@ function ScripturesContent() {
           message={preferencesMessage}
         />
 
-        {/* Share Manager Modal */}
-        {showShareManager && (
+        {/* Share Dialog */}
+        {showShareManager && shareDialogState && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
             <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                  Manage Book Shares
-                </h2>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    Share {shareDialogState.bookName}
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-600">{shareDialogState.description}</p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowShareManager(false);
-                    setSharesError(null);
-                  }}
+                  onClick={closeShareDialog}
                   className="text-2xl text-zinc-400 hover:text-zinc-600"
                 >
                   ✕
                 </button>
               </div>
 
-              <form onSubmit={handleCreateShare} className="mb-4 flex flex-col gap-3">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <label className="sm:col-span-2 flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Invite user email</span>
-                    <input
-                      type="email"
-                      value={shareEmail}
-                      onChange={(event) => setShareEmail(event.target.value)}
-                      required
-                      className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder="user@example.com"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Permission</span>
-                    <select
-                      value={sharePermission}
-                      onChange={(event) =>
-                        setSharePermission(event.target.value as SharePermission)
-                      }
-                      className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                    >
-                      <option value="viewer">Viewer</option>
-                      <option value="contributor">Contributor</option>
-                      <option value="editor">Editor</option>
-                    </select>
-                  </label>
-                </div>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={sendEmailWithShare}
-                    onChange={(event) => setSendEmailWithShare(event.target.checked)}
-                    className="h-4 w-4 rounded border-black/10 text-[color:var(--accent)]"
-                  />
-                  <span className="text-sm text-zinc-700">Send invitation email</span>
-                </label>
-                <button
-                  type="submit"
-                  disabled={sharesSubmitting}
-                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                >
-                  {sharesSubmitting ? "Adding..." : "Add Share"}
-                </button>
-              </form>
-
-              {sharesError && (
-                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {sharesError}
-                </div>
-              )}
-
-              <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10">
-                {sharesLoading ? (
-                  <div className="p-4 text-sm text-zinc-600">Loading shares...</div>
-                ) : bookShares.length === 0 ? (
-                  <div className="p-4 text-sm text-zinc-500">No shared users yet.</div>
-                ) : (
-                  <div className="divide-y divide-black/10">
-                    {bookShares.map((share) => (
-                      <div key={share.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-[color:var(--deep)]">
-                            {share.shared_with_email}
-                          </p>
-                          {share.shared_with_username && (
-                            <p className="text-xs text-zinc-500">{share.shared_with_username}</p>
-                          )}
+              {shareDialogState.visibility === "public" ? (
+                <div className="space-y-3">
+                  {shareDialogState.linkOptions.length === 0 ? (
+                    <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-sm text-zinc-600">
+                      No shareable links are available for this view.
+                    </div>
+                  ) : (
+                    shareDialogState.linkOptions.map((option) => (
+                      <div
+                        key={option.key}
+                        className="rounded-2xl border border-black/10 bg-white/80 p-4"
+                      >
+                        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-[color:var(--deep)]">{option.label}</p>
+                            <p className="text-xs text-zinc-500">{option.url}</p>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <select
-                            value={share.permission}
-                            onChange={(event) =>
-                              void handleUpdateSharePermission(
-                                share.shared_with_user_id,
-                                event.target.value as SharePermission
-                              )
-                            }
-                            disabled={shareUpdatingUserId === share.shared_with_user_id}
-                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs uppercase tracking-[0.15em] outline-none focus:border-[color:var(--accent)] disabled:opacity-50"
-                          >
-                            <option value="viewer">Viewer</option>
-                            <option value="contributor">Contributor</option>
-                            <option value="editor">Editor</option>
-                          </select>
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             onClick={() => {
-                              void handleDeleteShare(share.shared_with_user_id);
+                              void copyShareUrl(option.url, option.target);
                             }}
-                            disabled={shareRemovingUserId === share.shared_with_user_id}
-                            className="rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.15em] text-red-700 transition hover:border-red-400 disabled:opacity-50"
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition"
                           >
-                            Remove
+                            Copy link
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              emailShareUrl(option.emailSubject, option.emailBody);
+                            }}
+                            className="rounded-lg border border-black/10 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                          >
+                            Email link
                           </button>
                         </div>
                       </div>
-                    ))}
+                    ))
+                  )}
+                </div>
+              ) : shareDialogState.canManageShares ? (
+                <>
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Invite an existing user or a new email address. New invitees must finish registration with the invited email before they can open this private book.
                   </div>
-                )}
-              </div>
+
+                  <form onSubmit={handleCreateShare} className="mb-4 flex flex-col gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <label className="sm:col-span-2 flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Invite user email</span>
+                        <input
+                          type="email"
+                          value={shareEmail}
+                          onChange={(event) => setShareEmail(event.target.value)}
+                          required
+                          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder="user@example.com"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Permission</span>
+                        <select
+                          value={sharePermission}
+                          onChange={(event) =>
+                            setSharePermission(event.target.value as SharePermission)
+                          }
+                          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                        >
+                          <option value="viewer">Viewer</option>
+                          <option value="contributor">Contributor</option>
+                          <option value="editor">Editor</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={sendEmailWithShare}
+                        onChange={(event) => setSendEmailWithShare(event.target.checked)}
+                        className="h-4 w-4 rounded border-black/10 text-[color:var(--accent)]"
+                      />
+                      <span className="text-sm text-zinc-700">Send invitation email</span>
+                    </label>
+                    <button
+                      type="submit"
+                      disabled={sharesSubmitting}
+                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                    >
+                      {sharesSubmitting ? "Adding..." : "Add Share"}
+                    </button>
+                  </form>
+
+                  {sharesError && (
+                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {sharesError}
+                    </div>
+                  )}
+
+                  <div className="max-h-[45dvh] overflow-y-auto rounded-2xl border border-black/10">
+                    {sharesLoading ? (
+                      <div className="p-4 text-sm text-zinc-600">Loading shares...</div>
+                    ) : bookShares.length === 0 ? (
+                      <div className="p-4 text-sm text-zinc-500">No invited users yet.</div>
+                    ) : (
+                      <div className="divide-y divide-black/10">
+                        {bookShares.map((share) => (
+                          <div key={share.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-[color:var(--deep)]">
+                                {share.shared_with_email}
+                              </p>
+                              {share.shared_with_username && (
+                                <p className="text-xs text-zinc-500">{share.shared_with_username}</p>
+                              )}
+                              {!share.shared_with_is_active && (
+                                <p className="text-xs font-medium uppercase tracking-[0.14em] text-amber-700">
+                                  Invited - registration required
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={share.permission}
+                                onChange={(event) =>
+                                  void handleUpdateSharePermission(
+                                    share.shared_with_user_id,
+                                    event.target.value as SharePermission
+                                  )
+                                }
+                                disabled={shareUpdatingUserId === share.shared_with_user_id}
+                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs uppercase tracking-[0.15em] outline-none focus:border-[color:var(--accent)] disabled:opacity-50"
+                              >
+                                <option value="viewer">Viewer</option>
+                                <option value="contributor">Contributor</option>
+                                <option value="editor">Editor</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleDeleteShare(share.shared_with_user_id);
+                                }}
+                                disabled={shareRemovingUserId === share.shared_with_user_id}
+                                className="rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.15em] text-red-700 transition hover:border-red-400 disabled:opacity-50"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-black/10 bg-white/80 p-4 text-sm text-zinc-600">
+                  Private books can only be shared by their owner or an administrator.
+                </div>
+              )}
             </div>
           </div>
         )}

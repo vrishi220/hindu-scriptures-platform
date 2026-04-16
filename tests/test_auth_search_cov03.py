@@ -43,6 +43,44 @@ def _register_and_login(client):
 
 
 class TestAuthCoverageCOV03:
+    def test_register_upgrades_inactive_invited_user(self, client):
+        email = f"invite_{uuid4().hex[:8]}@example.com"
+
+        db = SessionLocal()
+        try:
+            invited_user = User(
+                email=email,
+                is_active=False,
+                is_verified=False,
+                password_hash=None,
+            )
+            db.add(invited_user)
+            db.commit()
+            invited_user_id = invited_user.id
+        finally:
+            db.close()
+
+        register_response = client.post(
+            "/api/auth/register",
+            json={
+                "email": email,
+                "password": "StrongPass123!",
+                "username": f"invite_{uuid4().hex[:8]}",
+                "full_name": "Invited User",
+            },
+        )
+        assert register_response.status_code == status.HTTP_201_CREATED
+        payload = register_response.json()
+        assert payload["id"] == invited_user_id
+        assert payload["email"] == email
+        assert payload["is_active"] is True
+
+        login_response = client.post(
+            "/api/auth/login",
+            json={"email": email, "password": "StrongPass123!"},
+        )
+        assert login_response.status_code == status.HTTP_200_OK
+
     def test_register_rejects_duplicate_username(self, client):
         first = _register_and_login(client)
 

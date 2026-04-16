@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import InlineClearButton from "../../components/InlineClearButton";
 
-export default function SignUpPage() {
+function SignUpPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
@@ -20,6 +21,17 @@ export default function SignUpPage() {
     /[0-9]/.test(value) &&
     /[^A-Za-z0-9]/.test(value) &&
     value.length >= 8;
+
+  const invitedEmail = searchParams.get("email") || "";
+  const nextPath = searchParams.get("next") || "/";
+  const safeNextPath = nextPath.startsWith("/") ? nextPath : "/";
+
+  useEffect(() => {
+    if (!invitedEmail || email) {
+      return;
+    }
+    setEmail(invitedEmail);
+  }, [email, invitedEmail]);
 
   const handleSignup = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -68,12 +80,16 @@ export default function SignUpPage() {
 
       if (!loginResponse.ok) {
         setAuthMessage("Account created. Please sign in.");
-        setTimeout(() => router.push("/signin"), 800);
+        const signInParams = new URLSearchParams({ returnTo: safeNextPath });
+        if (email) {
+          signInParams.set("email", email);
+        }
+        setTimeout(() => router.push(`/signin?${signInParams.toString()}`), 800);
         return;
       }
 
       setAuthMessage("Account created. Redirecting...");
-      setTimeout(() => router.push("/"), 500);
+      setTimeout(() => router.push(safeNextPath), 500);
     } catch (err) {
       setAuthMessage(err instanceof Error ? err.message : "Registration failed");
     }
@@ -250,5 +266,23 @@ export default function SignUpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
+          <div className="w-full max-w-md">
+            <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg text-sm text-zinc-600">
+              Loading sign up...
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <SignUpPageContent />
+    </Suspense>
   );
 }

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
@@ -859,8 +859,15 @@ def _book_share_public_model(share: BookShare, shared_user: User) -> BookSharePu
             "shared_by_user_id": share.shared_by_user_id,
             "shared_with_email": shared_user.email,
             "shared_with_username": shared_user.username,
+            "shared_with_is_active": bool(shared_user.is_active),
         }
     )
+
+
+def _registration_invite_link(app_base_url: str, email: str, book_id: int) -> str:
+    next_path = f"/scriptures?book={book_id}"
+    query = urlencode({"email": email, "next": next_path})
+    return f"{app_base_url}/signup?{query}"
 
 
 def _clean_optional_text(value: object) -> str | None:
@@ -1329,7 +1336,13 @@ def create_or_update_book_share(
 
     shared_user = db.query(User).filter(User.email == payload.email).first()
     if not shared_user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        shared_user = User(
+            email=payload.email,
+            is_active=False,
+            is_verified=False,
+        )
+        db.add(shared_user)
+        db.flush()
 
     owner_id = _book_owner_id(book)
     if owner_id is not None and shared_user.id == owner_id:
@@ -1358,7 +1371,11 @@ def create_or_update_book_share(
     # Send invitation email if requested
     if payload.send_email:
         app_base_url = os.getenv("APP_BASE_URL", "https://scriptle.org")
-        invite_link = f"{app_base_url}/scriptures?book={book_id}"
+        invite_link = (
+            f"{app_base_url}/scriptures?book={book_id}"
+            if shared_user.is_active
+            else _registration_invite_link(app_base_url, shared_user.email, book_id)
+        )
         
         send_share_invitation(
             recipient_email=shared_user.email,
@@ -1367,6 +1384,7 @@ def create_or_update_book_share(
             inviter_email=current_user.email,
             invite_link=invite_link,
             permission=payload.permission,
+            recipient_has_account=bool(shared_user.is_active),
         )
 
     return _book_share_public_model(share, shared_user)

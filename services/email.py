@@ -28,6 +28,7 @@ class MailgunEmailService:
         inviter_email: str,
         invite_link: str,
         permission: str = "viewer",
+        recipient_has_account: bool = True,
     ) -> bool:
         """
         Send a book share invitation email.
@@ -55,12 +56,14 @@ class MailgunEmailService:
             inviter_email=inviter_email,
             invite_link=invite_link,
             permission=permission,
+            recipient_has_account=recipient_has_account,
         )
 
         text_body = self._build_invitation_text(
             book_title=book_title,
             inviter_name=inviter_name,
             invite_link=invite_link,
+            recipient_has_account=recipient_has_account,
         )
 
         try:
@@ -90,6 +93,7 @@ class MailgunEmailService:
         inviter_email: str,
         invite_link: str,
         permission: str,
+        recipient_has_account: bool,
     ) -> str:
         """Build HTML email body for invitation."""
         permission_text = {
@@ -97,6 +101,13 @@ class MailgunEmailService:
             "contributor": "view and contribute to",
             "editor": "edit",
         }.get(permission, "view")
+
+        cta_text = "Open in Scriptle" if recipient_has_account else "Create your Scriptle account"
+        helper_text = (
+            "Sign in with your existing Scriptle account to access the shared book."
+            if recipient_has_account
+            else "Finish creating your Scriptle account with this email address to unlock the private book invite."
+        )
 
         return f"""
         <html>
@@ -115,15 +126,14 @@ class MailgunEmailService:
                                style="display: inline-block; background-color: #4CAF50; color: white; 
                                       padding: 12px 24px; text-decoration: none; border-radius: 4px; 
                                       font-weight: bold;">
-                                View on Scriptle
+                                {cta_text}
                             </a>
                         </p>
                     </div>
                     
                     <p>
                         <small>
-                            If you don't have a Scriptle account, you'll be able to create one 
-                            or sign in when you click the link above.
+                            {helper_text}
                         </small>
                     </p>
                     
@@ -139,9 +149,18 @@ class MailgunEmailService:
         """
 
     def _build_invitation_text(
-        self, book_title: str, inviter_name: str, invite_link: str
+        self,
+        book_title: str,
+        inviter_name: str,
+        invite_link: str,
+        recipient_has_account: bool,
     ) -> str:
         """Build plain text email body for invitation."""
+        helper_text = (
+            "Sign in with your existing Scriptle account to access the shared book."
+            if recipient_has_account
+            else "Create your Scriptle account with this email address to activate the invitation and access the private book."
+        )
         return f"""
 You're invited to Scriptle!
 
@@ -150,7 +169,7 @@ You're invited to Scriptle!
 Click the link below to access the book:
 {invite_link}
 
-If you don't have a Scriptle account, you'll be able to create one or sign in when you click the link above.
+{helper_text}
 
 ---
 About Scriptle: Scriptle is a platform for exploring Hindu scriptures with collaborative annotation and translation features.
@@ -168,6 +187,7 @@ def send_share_invitation(
     inviter_email: str,
     invite_link: str,
     permission: str = "viewer",
+    recipient_has_account: bool = True,
 ) -> bool:
     """
     Public function to send share invitation email.
@@ -182,4 +202,5 @@ def send_share_invitation(
         inviter_email=inviter_email,
         invite_link=invite_link,
         permission=permission,
+        recipient_has_account=recipient_has_account,
     )

@@ -5690,7 +5690,7 @@ class TestContentCoverageSprintCOV02:
         )
         assert editor_visibility_patch.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_create_share_rejects_unknown_user_email(self, client):
+    def test_create_share_creates_pending_invite_for_unknown_user_email(self, client):
         headers = _register_and_login(client)
 
         schema_response = client.post(
@@ -5723,8 +5723,22 @@ class TestContentCoverageSprintCOV02:
             json={"email": f"missing_{uuid4().hex[:8]}@example.com", "permission": "viewer"},
             headers=headers,
         )
-        assert share_response.status_code == status.HTTP_404_NOT_FOUND
-        assert "user not found" in share_response.json()["detail"].lower()
+        assert share_response.status_code == status.HTTP_201_CREATED
+        payload = share_response.json()
+        assert payload["book_id"] == book_id
+        assert payload["permission"] == "viewer"
+        assert payload["shared_with_email"].startswith("missing_")
+        assert payload["shared_with_is_active"] is False
+
+        db = SessionLocal()
+        try:
+            invited_user = db.query(User).filter(User.email == payload["shared_with_email"]).first()
+            assert invited_user is not None
+            assert invited_user.id == payload["shared_with_user_id"]
+            assert invited_user.is_active is False
+            assert invited_user.password_hash is None
+        finally:
+            db.close()
 
     def test_scriptures_action_permission_matrix_for_shared_roles(self, client):
         admin_headers = _register_and_login_as_admin(client)

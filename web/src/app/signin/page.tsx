@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import InlineClearButton from "../../components/InlineClearButton";
@@ -12,6 +12,16 @@ function SignInPageContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const invitedEmail = searchParams.get("email") || "";
+  const returnTo = searchParams.get("returnTo") || searchParams.get("next") || "/";
+  const safeReturnTo = returnTo.startsWith("/") ? returnTo : "/";
+
+  useEffect(() => {
+    if (!invitedEmail || email) {
+      return;
+    }
+    setEmail(invitedEmail);
+  }, [email, invitedEmail]);
 
   const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -35,9 +45,8 @@ function SignInPageContent() {
       setEmail("");
       setPassword("");
       invalidateMeCache();
-      const returnTo = searchParams.get("returnTo") || "/";
       setTimeout(() => {
-        router.replace(returnTo);
+        router.replace(safeReturnTo);
         router.refresh();
       }, 500);
     } catch (err) {

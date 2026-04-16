@@ -507,6 +507,7 @@ class BookSharePublic(BaseModel):
     shared_by_user_id: int | None = None
     shared_with_email: EmailStr
     shared_with_username: str | None = None
+    shared_with_is_active: bool = True
 
 
 class ContentNodeBase(BaseModel):

@@ -93,17 +93,34 @@ def clear_auth_cookies(response: Response) -> None:
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserPublic:
     existing_email = db.query(User).filter(User.email == payload.email).first()
-    if existing_email:
+    if existing_email and existing_email.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email in use")
 
     if payload.username:
         existing_username = (
             db.query(User).filter(User.username == payload.username).first()
         )
-        if existing_username:
+        if existing_username and (
+            existing_email is None or existing_username.id != existing_email.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Username in use"
             )
+
+    if existing_email and not existing_email.is_active:
+        existing_email.username = payload.username
+        existing_email.full_name = payload.full_name
+        existing_email.password_hash = hash_password(payload.password)
+        existing_email.is_active = True
+        existing_email.is_verified = False
+        existing_email.email_verified_at = None
+        if not existing_email.role:
+            existing_email.role = "viewer"
+        if existing_email.permissions is None:
+            existing_email.permissions = DEFAULT_PERMISSIONS
+        db.commit()
+        db.refresh(existing_email)
+        return UserPublic.model_validate(existing_email)
 
     user = User(
         email=payload.email,
