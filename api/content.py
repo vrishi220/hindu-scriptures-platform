@@ -2,6 +2,7 @@ import os
 import random
 import re
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -105,6 +106,7 @@ from services.media_storage import FileTooLargeError, get_media_storage_from_env
 from services.transliteration import contains_devanagari, devanagari_to_iast, latin_to_devanagari
 
 router = APIRouter(prefix="/content", tags=["content"])
+logger = logging.getLogger(__name__)
 
 _NODES_LIST_HARD_LIMIT = int(os.getenv("NODES_LIST_HARD_LIMIT", "50"))
 _DISABLE_CONTENT_DATA_LIST_SEARCH = os.getenv("DISABLE_CONTENT_DATA_LIST_SEARCH", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -1376,16 +1378,24 @@ def create_or_update_book_share(
             if shared_user.is_active
             else _registration_invite_link(app_base_url, shared_user.email, book_id)
         )
-        
-        send_share_invitation(
-            recipient_email=shared_user.email,
-            book_title=book.title or f"Book {book_id}",
-            inviter_name=current_user.username or current_user.email,
-            inviter_email=current_user.email,
-            invite_link=invite_link,
-            permission=payload.permission,
-            recipient_has_account=bool(shared_user.is_active),
-        )
+
+        try:
+            send_share_invitation(
+                recipient_email=shared_user.email,
+                book_title=book.book_name or f"Book {book_id}",
+                inviter_name=current_user.username or current_user.email,
+                inviter_email=current_user.email,
+                invite_link=invite_link,
+                permission=payload.permission,
+                recipient_has_account=bool(shared_user.is_active),
+            )
+        except Exception:
+            # Share is already committed; email failure should not fail the API response.
+            logger.exception(
+                "Book share invitation email failed for book_id=%s recipient=%s",
+                book_id,
+                shared_user.email,
+            )
 
     return _book_share_public_model(share, shared_user)
 
