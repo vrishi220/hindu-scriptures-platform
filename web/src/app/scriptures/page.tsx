@@ -7853,13 +7853,54 @@ function ScripturesContent() {
     bodyText: string,
     onDone?: () => void
   ) => {
-    onDone?.();
     if (typeof window === "undefined") {
       return;
     }
-    const subject = encodeURIComponent(subjectText);
-    const body = encodeURIComponent(bodyText);
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+
+    // Prompt user for email address
+    const email = window.prompt("Enter your email address:", "");
+    if (!email) {
+      onDone?.();
+      return;
+    }
+
+    // Validate basic email format
+    if (!email.includes("@")) {
+      alert("Please enter a valid email address");
+      onDone?.();
+      return;
+    }
+
+    // Call backend email API
+    const sendEmail = async () => {
+      try {
+        const response = await fetch("/api/email/send", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            to: email,
+            subject: subjectText,
+            body: bodyText,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          alert("Failed to send email: " + (errorData.detail || "Unknown error"));
+        } else {
+          alert("Email sent successfully!");
+        }
+      } catch (error) {
+        console.error("Error sending email:", error);
+        alert("Failed to send email. Please try again.");
+      } finally {
+        onDone?.();
+      }
+    };
+
+    sendEmail();
   };
 
   const buildPreviewRequestKey = (

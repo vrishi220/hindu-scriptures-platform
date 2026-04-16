@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books, metadata, templates
+from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email
 from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -90,6 +90,7 @@ app.include_router(collection_cart.router, prefix="/api")
 app.include_router(draft_books.router, prefix="/api")
 app.include_router(metadata.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
+app.include_router(email.router, prefix="/api")
 
 if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
     app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
