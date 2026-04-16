@@ -70,11 +70,11 @@ Current behavior:
 - Cannot access another user’s draft directly
 
 ### Owner review checklist
-- [ ] Can owner edit own private book from Scriptures UI?
-- [ ] Can owner publish and unpublish own book?
-- [ ] Can owner delete private book but blocked from deleting public book directly?
-- [ ] Can owner manage shares for own book?
-- [ ] Can owner access only own draft books?
+- [x] Can owner edit own private book from Scriptures UI?
+- [x] Can owner publish and unpublish own book?
+- [x] Can owner delete private book but blocked from deleting public book directly?
+- [x] Can owner manage shares for own book? **YES - Full CRUD with email invitations**
+- [x] Can owner access only own draft books?
 
 ---
 
