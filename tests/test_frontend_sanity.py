@@ -289,14 +289,14 @@ class TestModalCloseSourceAwareNavigation:
         assert 'onClick={' in scriptures_page and 'handleCloseBrowseModal()' in scriptures_page
 
     def test_all_modal_closes_have_source_aware_fallback(self):
-        """All modal closes should fall back to clearPreviewUrl/clearBrowseUrl if no source."""
+        """All modal closes should clear URL state when no source context is present."""
         repo_root = Path(__file__).resolve().parents[1]
         scriptures_page = (repo_root / "web" / "src" / "app" / "scriptures" / "page.tsx").read_text(
             encoding="utf-8"
         )
 
         assert 'clearPreviewUrl();' in scriptures_page
-        assert 'clearBrowseUrl();' in scriptures_page
+        assert 'updateScripturesUrl(nextParams, "replace");' in scriptures_page
 
 
 # Note: This file contains test stubs. To run these tests, install playwright:
