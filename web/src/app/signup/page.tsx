@@ -18,7 +18,6 @@ function SignUpPageContent() {
   const isStrongPassword = (value: string) =>
     /[A-Z]/.test(value) &&
     /[a-z]/.test(value) &&
-    /[0-9]/.test(value) &&
     /[^A-Za-z0-9]/.test(value) &&
     value.length >= 8;
 
@@ -39,7 +38,7 @@ function SignUpPageContent() {
 
     if (!isStrongPassword(password)) {
       setAuthMessage(
-        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+        "Password must be at least 8 characters and include uppercase, lowercase, and special character."
       );
       return;
     }
@@ -221,7 +220,7 @@ function SignUpPageContent() {
                 />
               </div>
               <p className="mt-1 text-xs text-zinc-500">
-                Use at least 8 characters with uppercase, lowercase, number, and special character.
+                Use at least 8 characters with uppercase, lowercase, and special character.
               </p>
             </div>
 

@@ -5740,6 +5740,54 @@ class TestContentCoverageSprintCOV02:
         finally:
             db.close()
 
+    def test_create_share_email_for_pending_invite_uses_preview_link(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Invite Preview Schema {uuid4().hex[:8]}",
+                "description": "Schema for invite preview link coverage",
+                "levels": ["Chapter"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Invite Preview Book {uuid4().hex[:6]}",
+                "book_code": f"cov-invite-preview-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        def fake_send_share_invitation(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+
+        invite_email = f"invite_preview_{uuid4().hex[:8]}@example.com"
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": invite_email, "permission": "viewer", "send_email": True},
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+        assert captured["recipient_email"] == invite_email
+        assert "/signup?email=" in captured["invite_link"]
+        assert captured["invite_link"].endswith(
+            f"next=%2Fscriptures%3Fbook%3D{book_id}%26preview%3Dbook"
+        )
+
     def test_scriptures_action_permission_matrix_for_shared_roles(self, client):
         admin_headers = _register_and_login_as_admin(client)
         owner_headers = _register_and_login(client)

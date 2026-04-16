@@ -146,7 +146,11 @@ export default function AdminPage() {
 
   const [createEmail, setCreateEmail] = useState("");
   const [createPassword, setCreatePassword] = useState("");
+  const [createConfirmPassword, setCreateConfirmPassword] = useState("");
   const [createRole, setCreateRole] = useState("viewer");
+
+  const isStrongPassword = (value: string) =>
+    /[A-Z]/.test(value) && /[a-z]/.test(value) && /[^A-Za-z0-9]/.test(value) && value.length >= 8;
 
   const [selectedRole, setSelectedRole] = useState("viewer");
 
@@ -257,6 +261,7 @@ export default function AdminPage() {
   const resetCreateForm = () => {
     setCreateEmail("");
     setCreatePassword("");
+    setCreateConfirmPassword("");
     setCreateRole("viewer");
   };
 
@@ -277,6 +282,20 @@ export default function AdminPage() {
   const handleCreateUser = async () => {
     if (!createEmail.trim() || !createPassword.trim()) {
       setToast({ type: "error", message: "Email and password are required." });
+      return;
+    }
+
+    if (!isStrongPassword(createPassword)) {
+      setToast({
+        type: "error",
+        message:
+          "Password must be at least 8 characters and include uppercase, lowercase, and special character.",
+      });
+      return;
+    }
+
+    if (createPassword !== createConfirmPassword) {
+      setToast({ type: "error", message: "Password and confirm password do not match." });
       return;
     }
 
@@ -717,6 +736,18 @@ export default function AdminPage() {
                     className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
                   />
                 </label>
+                <p className="-mt-1 text-xs text-zinc-500">
+                  Use at least 8 characters with uppercase, lowercase, and special character.
+                </p>
+                <label className="block text-sm text-zinc-700">
+                  Confirm password
+                  <input
+                    value={createConfirmPassword}
+                    onChange={(event) => setCreateConfirmPassword(event.target.value)}
+                    type="password"
+                    className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
+                  />
+                </label>
                 <label className="block text-sm text-zinc-700">
                   Role
                   <select
@@ -736,7 +767,14 @@ export default function AdminPage() {
                   <button
                     type="button"
                     onClick={() => void handleCreateUser()}
-                    disabled={saving || !createEmail.trim() || !createPassword.trim()}
+                    disabled={
+                      saving ||
+                      !createEmail.trim() ||
+                      !createPassword.trim() ||
+                      !createConfirmPassword.trim() ||
+                      createPassword !== createConfirmPassword ||
+                      !isStrongPassword(createPassword)
+                    }
                     className="rounded-lg border border-black/10 bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   >
                     {saving ? "Saving…" : "Create"}

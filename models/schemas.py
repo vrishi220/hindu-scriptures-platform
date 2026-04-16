@@ -26,8 +26,6 @@ def _validate_password_strength(value: str) -> str:
         raise ValueError("Password must include at least one uppercase letter")
     if not re.search(r"[a-z]", value):
         raise ValueError("Password must include at least one lowercase letter")
-    if not re.search(r"[0-9]", value):
-        raise ValueError("Password must include at least one number")
     if not re.search(r"[^A-Za-z0-9]", value):
         raise ValueError("Password must include at least one special character")
     return value

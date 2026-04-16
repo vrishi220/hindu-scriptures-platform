@@ -10,11 +10,27 @@ function ResetPasswordContent() {
 
   const [token, setToken] = useState(initialToken);
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+
+  const isStrongPassword = (value: string) =>
+    /[A-Z]/.test(value) && /[a-z]/.test(value) && /[^A-Za-z0-9]/.test(value) && value.length >= 8;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage(null);
+
+    if (!isStrongPassword(newPassword)) {
+      setMessage(
+        "Password must be at least 8 characters and include uppercase, lowercase, and special character."
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage("Password and confirm password do not match.");
+      return;
+    }
 
     try {
       const response = await fetch("/api/auth/reset-password", {
@@ -33,6 +49,7 @@ function ResetPasswordContent() {
 
       setMessage(payload?.message || "Password reset successful");
       setNewPassword("");
+      setConfirmPassword("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to reset password");
     }
@@ -94,6 +111,32 @@ function ResetPasswordContent() {
                   visible={Boolean(newPassword)}
                   onClear={() => setNewPassword("")}
                   ariaLabel="Clear new password"
+                />
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                Use at least 8 characters with uppercase, lowercase, and special character.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="confirm-password" className="block text-sm font-medium text-zinc-700 mb-2">
+                Confirm new password
+              </label>
+              <div className="group relative">
+                <input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  minLength={8}
+                  required
+                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
+                  placeholder="••••••••"
+                />
+                <InlineClearButton
+                  visible={Boolean(confirmPassword)}
+                  onClear={() => setConfirmPassword("")}
+                  ariaLabel="Clear confirm password"
                 />
               </div>
             </div>

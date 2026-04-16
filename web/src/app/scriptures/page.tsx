@@ -2,7 +2,7 @@
 
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { flushSync } from "react-dom";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import {
   BookOpen,
   ChevronDown,
@@ -699,6 +699,19 @@ const getLayoutDeviceBucket = (): LayoutDeviceBucket => {
 
 const getDeviceScopedStorageKey = (baseKey: string): string =>
   `${baseKey}_${getLayoutDeviceBucket()}`;
+
+const resolvePreviewQueryScope = (
+  params: URLSearchParams | ReadonlyURLSearchParams
+): "book" | "node" | null => {
+  const previewParam = params.get("preview");
+  if (previewParam === "book" || previewParam === "node") {
+    return previewParam;
+  }
+  if (params.get("browse") === "1") {
+    return null;
+  }
+  return params.get("book") ? "book" : null;
+};
 
 const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
   if (typeof window === "undefined") {
@@ -5474,9 +5487,7 @@ function ScripturesContent() {
     bookPreviewLoadingScope === "node" ? "Building reader view..." : "Building book preview...";
   const previewLoadingElapsedSeconds = Math.floor(bookPreviewLoadingElapsedMs / 1000);
   const previewLoadingMessageWithElapsed = `${previewLoadingMessage} ${previewLoadingElapsedSeconds}s`;
-  const previewParam = searchParams.get("preview");
-  const previewIntentScope =
-    previewParam === "book" || previewParam === "node" ? previewParam : null;
+  const previewIntentScope = resolvePreviewQueryScope(searchParams);
   const previewIntentNodeId =
     previewIntentScope === "node"
       ? Number.parseInt(searchParams.get("node") || "", 10)
@@ -8858,8 +8869,8 @@ function ScripturesContent() {
   ]);
 
   useEffect(() => {
-    const previewParam = searchParams.get("preview");
-    if (previewParam !== "book" && previewParam !== "node") {
+    const previewScope = resolvePreviewQueryScope(searchParams);
+    if (previewScope !== "book" && previewScope !== "node") {
       lastHandledPreviewRequestKey.current = null;
       lastFailedPreviewRequestKey.current = null;
       activePreviewRequestKey.current = null;
@@ -8872,11 +8883,11 @@ function ScripturesContent() {
     }
 
     const previewNodeId =
-      previewParam === "node"
+      previewScope === "node"
         ? Number.parseInt(searchParams.get("node") || "", 10)
         : null;
     const currentPreviewRequestKey = buildPreviewRequestKey(
-      previewParam,
+      previewScope,
       previewBookId,
       Number.isFinite(previewNodeId ?? NaN) ? previewNodeId : null
     );
@@ -8897,8 +8908,8 @@ function ScripturesContent() {
   }, [searchParams, bookId]);
 
   useEffect(() => {
-    const previewParam = searchParams.get("preview");
-    if (previewParam !== "book" && previewParam !== "node") {
+    const previewScopeFromQuery = resolvePreviewQueryScope(searchParams);
+    if (previewScopeFromQuery !== "book" && previewScopeFromQuery !== "node") {
       return;
     }
     if (!urlInitialized || !bookId) {
@@ -8914,7 +8925,7 @@ function ScripturesContent() {
 
     let previewScope: "book" | "node" = "book";
     let requestNodeId: number | null = null;
-    if (previewParam === "node") {
+    if (previewScopeFromQuery === "node") {
       const nodeParam = searchParams.get("node");
       const requestedNodeId = nodeParam ? Number.parseInt(nodeParam, 10) : NaN;
       if (!Number.isFinite(requestedNodeId) || selectedId !== requestedNodeId) {
@@ -12560,18 +12571,7 @@ function ScripturesContent() {
         target: "book",
       });
     }
-    if (isPublicBook && canCopyBrowseBookLink) {
-      const url = toAbsoluteUrl(buildScripturesBrowsePath(book.id.toString()));
-      linkOptions.push({
-        key: "browse",
-        label: "Browse link",
-        url,
-        emailSubject: `Shared scripture browse link: ${book.book_name}`,
-        emailBody: `Here is the browse link for ${book.book_name}:\n\n${url}`,
-        target: "book",
-      });
-    }
-    if (isPublicBook && !canCopyPreviewBookLink && !canCopyBrowseBookLink && canPreviewBook) {
+    if (isPublicBook && !canCopyPreviewBookLink && canPreviewBook) {
       const url = toAbsoluteUrl(buildScripturesPreviewPath("book", book.id.toString()));
       linkOptions.push({
         key: "default",
@@ -13948,18 +13948,6 @@ function ScripturesContent() {
                                                 },
                                               ]
                                             : []),
-                                          ...(canCopyBookBrowseLink
-                                            ? [
-                                                {
-                                                  key: "browse",
-                                                  label: "Browse link",
-                                                  url: toAbsoluteUrl(buildScripturesBrowsePath(bookId)),
-                                                  emailSubject: `Shared scripture browse link: ${currentBook.book_name}`,
-                                                  emailBody: `Here is the browse link for ${currentBook.book_name}:\n\n${toAbsoluteUrl(buildScripturesBrowsePath(bookId))}`,
-                                                  target: "book" as const,
-                                                },
-                                              ]
-                                            : []),
                                         ]
                                       : [];
                                     setShowBookRootActionsMenu(false);
@@ -14303,18 +14291,6 @@ function ScripturesContent() {
                                                   emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(
                                                     buildScripturesPreviewPath("node", bookId, selectedId)
                                                   )}`,
-                                                  target: shareTarget,
-                                                },
-                                              ]
-                                            : []),
-                                          ...(canCopyBrowseLink
-                                            ? [
-                                                {
-                                                  key: "browse",
-                                                  label: "Browse link",
-                                                  url: toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId)),
-                                                  emailSubject: "Shared scripture browse link",
-                                                  emailBody: `Here is the browse link:\n\n${toAbsoluteUrl(buildScripturesBrowsePath(bookId, selectedId))}`,
                                                   target: shareTarget,
                                                 },
                                               ]
@@ -17296,7 +17272,6 @@ function ScripturesContent() {
                               const shareTarget: ShareDialogLinkOption["target"] = previewScope === "node"
                                 ? "node"
                                 : "book";
-                              const browsePath = buildScripturesBrowsePath(bookId, targetNodeId ?? undefined);
                               const linkOptions: ShareDialogLinkOption[] = visibility === "public"
                                 ? [
                                     {
@@ -17307,18 +17282,6 @@ function ScripturesContent() {
                                       emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(previewPath)}`,
                                       target: shareTarget,
                                     },
-                                    ...(canBrowseCurrentNode
-                                      ? [
-                                          {
-                                            key: "browse",
-                                            label: "Browse link",
-                                            url: toAbsoluteUrl(browsePath),
-                                            emailSubject: "Shared scripture browse link",
-                                            emailBody: `Here is the browse link:\n\n${toAbsoluteUrl(browsePath)}`,
-                                            target: shareTarget,
-                                          },
-                                        ]
-                                      : []),
                                   ]
                                 : [];
                               void openShareDialogForBook({
@@ -18177,13 +18140,27 @@ function ScripturesContent() {
                       />
                       <span className="text-sm text-zinc-700">Send invitation email</span>
                     </label>
-                    <button
-                      type="submit"
-                      disabled={sharesSubmitting}
-                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                    >
-                      {sharesSubmitting ? "Adding..." : "Add Share"}
-                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const privateShareUrl = toAbsoluteUrl(
+                            buildScripturesPreviewPath("book", String(shareDialogState.bookId))
+                          );
+                          void copyShareUrl(privateShareUrl, "book");
+                        }}
+                        className="rounded-lg border border-black/15 bg-white/85 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white"
+                      >
+                        Copy link
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={sharesSubmitting}
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+                      >
+                        {sharesSubmitting ? "Adding..." : "Add Share"}
+                      </button>
+                    </div>
                   </form>
 
                   {sharesError && (
