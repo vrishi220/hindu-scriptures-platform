@@ -39,6 +39,8 @@ from models.property_system import MetadataBinding
 from models.database import SessionLocal
 from models.provenance_record import ProvenanceRecord
 from models.schemas import (
+    BookOwnershipTransferRequest,
+    BookOwnershipTransferResponse,
     BookExchangePayloadV1,
     BookCreate,
     BookPublic,
@@ -77,6 +79,7 @@ from models.schemas import (
     ScriptureSchemaPublic,
     ScriptureSchemaUpdate,
     TreeNodeImportItem,
+    UserOwnedBookSummary,
     _validate_word_meanings_content_data,
 )
 from models.scripture_schema import ScriptureSchema
@@ -657,6 +660,11 @@ def _book_public_model(book: Book) -> BookPublic:
     return BookPublic.model_validate(payload)
 
 
+def _owned_books_for_user(db: Session, user_id: int) -> list[Book]:
+    candidate_books = db.query(Book).all()
+    return [book for book in candidate_books if _book_owner_id(book) == user_id]
+
+
 def _normalize_variant_author_slug(value: object) -> str:
     if not isinstance(value, str):
         return ""
@@ -1105,6 +1113,7 @@ def create_book(
     if not isinstance(metadata_json, dict):
         metadata_json = {}
     metadata_json["owner_id"] = current_user.id
+    metadata_json["owner_email"] = current_user.email
     metadata_json["status"] = BOOK_STATUS_DRAFT
     metadata_json["visibility"] = BOOK_VISIBILITY_PRIVATE
 
@@ -1277,6 +1286,8 @@ def update_book(
 
     if _book_owner_id(book) is None:
         metadata["owner_id"] = current_user.id
+    if "owner_email" not in metadata and isinstance(current_user.email, str):
+        metadata["owner_email"] = current_user.email
     if "status" not in metadata:
         metadata["status"] = BOOK_STATUS_DRAFT
     if "visibility" not in metadata:
@@ -1341,6 +1352,88 @@ def list_book_shares(
         for share in shares
         if share.shared_with_user_id in users_by_id
     ]
+
+
+@router.get("/books/ownership/me", response_model=list[UserOwnedBookSummary])
+def list_owned_books_for_current_user(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[UserOwnedBookSummary]:
+    owned_books = _owned_books_for_user(db, current_user.id)
+    result: list[UserOwnedBookSummary] = []
+    for book in owned_books:
+        visibility = _book_visibility(book)
+        status_value = _book_status(book)
+        result.append(
+            UserOwnedBookSummary(
+                id=book.id,
+                book_name=book.book_name,
+                book_code=book.book_code,
+                visibility="public" if visibility == BOOK_VISIBILITY_PUBLIC else "private",
+                status="published" if status_value == BOOK_STATUS_PUBLISHED else "draft",
+            )
+        )
+    return result
+
+
+@router.post("/books/ownership/transfer", response_model=BookOwnershipTransferResponse)
+def transfer_owned_books_to_user(
+    payload: BookOwnershipTransferRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookOwnershipTransferResponse:
+    source_user_id = current_user.id
+    owned_books = _owned_books_for_user(db, source_user_id)
+    if not owned_books:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You do not own any books")
+
+    target_email = payload.target_email.strip().lower()
+    target_user = db.query(User).filter(func.lower(User.email) == target_email).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+    if not target_user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target user must be active")
+    if target_user.id == source_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and target users must be different",
+        )
+
+    owned_by_id = {book.id: book for book in owned_books}
+    if payload.transfer_all_owned:
+        selected_books = list(owned_by_id.values())
+    else:
+        requested_ids = [int(book_id) for book_id in payload.book_ids if int(book_id) > 0]
+        if not requested_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select at least one book")
+        unique_ids = list(dict.fromkeys(requested_ids))
+        missing_ids = [book_id for book_id in unique_ids if book_id not in owned_by_id]
+        if missing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only transfer books that you own",
+            )
+        selected_books = [owned_by_id[book_id] for book_id in unique_ids]
+
+    transferred_book_ids: list[int] = []
+    for book in selected_books:
+        metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+        metadata_out = dict(metadata)
+        metadata_out["owner_id"] = target_user.id
+        metadata_out["owner_email"] = target_user.email
+        book.metadata_json = metadata_out
+        flag_modified(book, "metadata_json")
+        transferred_book_ids.append(book.id)
+
+    db.commit()
+
+    return BookOwnershipTransferResponse(
+        source_user_id=source_user_id,
+        target_user_id=target_user.id,
+        target_email=target_user.email,
+        transferred_book_ids=transferred_book_ids,
+        transferred_count=len(transferred_book_ids),
+    )
 
 
 @router.post("/books/{book_id}/shares", response_model=BookSharePublic, status_code=status.HTTP_201_CREATED)

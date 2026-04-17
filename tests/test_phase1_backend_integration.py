@@ -6273,6 +6273,251 @@ class TestUsersCoverageSprintCOV03:
         non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
         assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
 
+    def test_owner_transfer_ownership_allows_user_deletion(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        source_headers = _register_and_login(client)
+        target_headers = _register_and_login(client)
+
+        source_me = client.get("/api/users/me", headers=source_headers)
+        assert source_me.status_code == status.HTTP_200_OK
+        source_user_id = source_me.json()["id"]
+
+        target_me = client.get("/api/users/me", headers=target_headers)
+        assert target_me.status_code == status.HTTP_200_OK
+        target_user_id = target_me.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Transfer Ownership Schema {uuid4().hex[:8]}",
+                "description": "Schema for transfer-ownership coverage",
+                "levels": ["Chapter"],
+            },
+            headers=source_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Transfer Ownership Book {uuid4().hex[:6]}",
+                "book_code": f"cov-transfer-own-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=source_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        node_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Transfer Source Node",
+                "has_content": False,
+            },
+            headers=source_headers,
+        )
+        assert node_response.status_code == status.HTTP_201_CREATED
+
+        forbidden_transfer_response = client.post(
+            f"/api/users/{source_user_id}/transfer-ownership",
+            json={"target_user_id": target_user_id},
+            headers=admin_headers,
+        )
+        assert forbidden_transfer_response.status_code == status.HTTP_403_FORBIDDEN
+
+        transfer_response = client.post(
+            f"/api/users/{source_user_id}/transfer-ownership",
+            json={"target_user_id": target_user_id},
+            headers=source_headers,
+        )
+        assert transfer_response.status_code == status.HTTP_200_OK
+        transfer_payload = transfer_response.json()
+        assert transfer_payload["source_user_id"] == source_user_id
+        assert transfer_payload["target_user_id"] == target_user_id
+        assert transfer_payload["created_by_updated"] >= 1
+        assert transfer_payload["last_modified_by_updated"] >= 1
+
+        delete_response = client.delete(f"/api/users/{source_user_id}", headers=admin_headers)
+        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
+
+    def test_admin_can_list_books_owned_by_user(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        owner_headers = _register_and_login(client)
+
+        owner_me = client.get("/api/users/me", headers=owner_headers)
+        assert owner_me.status_code == status.HTTP_200_OK
+        owner_id = owner_me.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Owned Books Schema {uuid4().hex[:8]}",
+                "description": "Schema for user-owned books listing coverage",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Owned Book {uuid4().hex[:6]}",
+                "book_code": f"cov-owned-book-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        created_book_id = book_response.json()["id"]
+
+        owned_books_response = client.get(f"/api/users/{owner_id}/books", headers=admin_headers)
+        assert owned_books_response.status_code == status.HTTP_200_OK
+        payload = owned_books_response.json()
+        assert isinstance(payload, list)
+        assert any(book.get("id") == created_book_id for book in payload)
+
+        unauthorized_response = client.get(f"/api/users/{owner_id}/books")
+        assert unauthorized_response.status_code in (
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_owner_can_transfer_selected_book_ownership(self, client):
+        owner_headers = _register_and_login(client)
+        target_headers = _register_and_login(client)
+
+        owner_me = client.get("/api/users/me", headers=owner_headers)
+        assert owner_me.status_code == status.HTTP_200_OK
+        owner_id = owner_me.json()["id"]
+
+        target_me = client.get("/api/users/me", headers=target_headers)
+        assert target_me.status_code == status.HTTP_200_OK
+        target_id = target_me.json()["id"]
+        target_email = target_me.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Book Ownership Transfer Schema {uuid4().hex[:8]}",
+                "description": "Schema for selected book ownership transfer coverage",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_one_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Ownership Book One {uuid4().hex[:6]}",
+                "book_code": f"cov-own-one-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_one_response.status_code == status.HTTP_201_CREATED
+        book_one_id = book_one_response.json()["id"]
+
+        book_two_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Ownership Book Two {uuid4().hex[:6]}",
+                "book_code": f"cov-own-two-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert book_two_response.status_code == status.HTTP_201_CREATED
+        book_two_id = book_two_response.json()["id"]
+
+        transfer_response = client.post(
+            "/api/content/books/ownership/transfer",
+            json={
+                "target_email": target_email,
+                "book_ids": [book_one_id],
+            },
+            headers=owner_headers,
+        )
+        assert transfer_response.status_code == status.HTTP_200_OK
+        transfer_payload = transfer_response.json()
+        assert transfer_payload["source_user_id"] == owner_id
+        assert transfer_payload["target_user_id"] == target_id
+        assert transfer_payload["transferred_count"] == 1
+        assert transfer_payload["transferred_book_ids"] == [book_one_id]
+
+        transferred_book = client.get(f"/api/content/books/{book_one_id}", headers=owner_headers)
+        assert transferred_book.status_code == status.HTTP_200_OK
+        transferred_metadata = transferred_book.json().get("metadata_json") or {}
+        assert transferred_metadata.get("owner_id") == target_id
+
+        untouched_book = client.get(f"/api/content/books/{book_two_id}", headers=owner_headers)
+        assert untouched_book.status_code == status.HTTP_200_OK
+        untouched_metadata = untouched_book.json().get("metadata_json") or {}
+        assert untouched_metadata.get("owner_id") == owner_id
+
+    def test_non_owner_cannot_transfer_unowned_books(self, client):
+        owner_headers = _register_and_login(client)
+        other_headers = _register_and_login(client)
+        target_headers = _register_and_login(client)
+
+        target_me = client.get("/api/users/me", headers=target_headers)
+        assert target_me.status_code == status.HTTP_200_OK
+        target_email = target_me.json()["email"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Book Ownership Guard Schema {uuid4().hex[:8]}",
+                "description": "Schema for ownership transfer guard coverage",
+                "levels": ["Chapter"],
+            },
+            headers=owner_headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        owned_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Ownership Guard Book {uuid4().hex[:6]}",
+                "book_code": f"cov-own-guard-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=owner_headers,
+        )
+        assert owned_book_response.status_code == status.HTTP_201_CREATED
+        owned_book_id = owned_book_response.json()["id"]
+
+        forbidden_transfer_response = client.post(
+            "/api/content/books/ownership/transfer",
+            json={
+                "target_email": target_email,
+                "book_ids": [owned_book_id],
+            },
+            headers=other_headers,
+        )
+        assert forbidden_transfer_response.status_code in (
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_403_FORBIDDEN,
+        )
+        detail = forbidden_transfer_response.json().get("detail", "").lower()
+        assert "do not own any books" in detail or "you can only transfer books that you own" in detail
+
 class TestWordMeaningsValidation:
     def _create_leaf_parent(self, client, headers, book_metadata: dict | None = None):
         unique_suffix = uuid4().hex[:12]

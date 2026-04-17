@@ -422,6 +422,39 @@ class UserPermissionsUpdate(BaseModel):
     role: str | None = None
 
 
+class UserTransferOwnershipRequest(BaseModel):
+    target_user_id: int = Field(gt=0)
+
+
+class UserTransferOwnershipResponse(BaseModel):
+    source_user_id: int
+    target_user_id: int
+    created_by_updated: int
+    last_modified_by_updated: int
+
+
+class UserOwnedBookSummary(BaseModel):
+    id: int
+    book_name: str
+    book_code: str | None = None
+    visibility: Literal["private", "public"]
+    status: Literal["draft", "published"]
+
+
+class BookOwnershipTransferRequest(BaseModel):
+    target_email: EmailStr
+    book_ids: list[int] = Field(default_factory=list)
+    transfer_all_owned: bool = False
+
+
+class BookOwnershipTransferResponse(BaseModel):
+    source_user_id: int
+    target_user_id: int
+    target_email: EmailStr
+    transferred_book_ids: list[int] = Field(default_factory=list)
+    transferred_count: int
+
+
 class ScriptureSchemaBase(BaseModel):
     name: str
     description: str | None = None

@@ -200,6 +200,22 @@ type BookShare = {
   permission: SharePermission;
 };
 
+type OwnedBookSummary = {
+  id: number;
+  book_name: string;
+  book_code?: string | null;
+  visibility: "private" | "public";
+  status: "draft" | "published";
+};
+
+type BookOwnershipTransferResponse = {
+  source_user_id: number;
+  target_user_id: number;
+  target_email: string;
+  transferred_book_ids: number[];
+  transferred_count: number;
+};
+
 type ShareDialogLinkOption = {
   key: string;
   label: string;
@@ -2895,6 +2911,13 @@ function ScripturesContent() {
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
+  const [ownershipTargetEmail, setOwnershipTargetEmail] = useState("");
+  const [ownedBooksForTransfer, setOwnedBooksForTransfer] = useState<OwnedBookSummary[]>([]);
+  const [ownedBooksForTransferLoading, setOwnedBooksForTransferLoading] = useState(false);
+  const [selectedOwnedBookIds, setSelectedOwnedBookIds] = useState<number[]>([]);
+  const [ownershipTransferSubmitting, setOwnershipTransferSubmitting] = useState(false);
+  const [ownershipTransferError, setOwnershipTransferError] = useState<string | null>(null);
+  const [ownershipTransferMessage, setOwnershipTransferMessage] = useState<string | null>(null);
   const [propertiesWordMeaningsEnabledLevels, setPropertiesWordMeaningsEnabledLevels] = useState<string[]>([]);
   const [propertiesWordMeaningsDefaultSourceLanguage, setPropertiesWordMeaningsDefaultSourceLanguage] =
     useState<string>(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
@@ -4056,6 +4079,15 @@ function ScripturesContent() {
       );
       setVariantAuthorsError(null);
       setVariantAuthorsMessage(null);
+      setOwnershipTransferError(null);
+      setOwnershipTransferMessage(null);
+      setOwnershipTargetEmail("");
+      if (isCurrentBookOwner) {
+        void loadOwnedBooksForTransfer();
+      } else {
+        setOwnedBooksForTransfer([]);
+        setSelectedOwnedBookIds([]);
+      }
     } else {
       setPropertiesBookAuthor("");
       setPropertiesBookTitleEnglish("");
@@ -4065,6 +4097,11 @@ function ScripturesContent() {
       setPropertiesWordMeaningsDefaultSourceLanguage(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
       setPropertiesWordMeaningsDefaultMeaningLanguage(WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE);
       setVariantAuthorsRegistry([]);
+      setOwnedBooksForTransfer([]);
+      setSelectedOwnedBookIds([]);
+      setOwnershipTargetEmail("");
+      setOwnershipTransferError(null);
+      setOwnershipTransferMessage(null);
     }
     setPropertiesLoading(true);
     setPropertiesSaving(false);
@@ -4990,6 +5027,20 @@ function ScripturesContent() {
     parsedCurrentBookOwnerId;
   const isCurrentBookOwner =
     authUserId !== null && currentBookOwnerId !== null && currentBookOwnerId === authUserId;
+  const currentBookOwnerLabel = (() => {
+    const ownerEmailCandidate =
+      typeof currentBookMetadata?.owner_email === "string" ? currentBookMetadata.owner_email.trim() : "";
+    if (isCurrentBookOwner) {
+      return authEmail ? `You (${authEmail})` : "You";
+    }
+    if (ownerEmailCandidate) {
+      return ownerEmailCandidate;
+    }
+    if (currentBookOwnerId !== null) {
+      return `User ${currentBookOwnerId}`;
+    }
+    return "Unknown";
+  })();
   const canEditCurrentBook = Boolean(currentBook) && (canEdit || canAdmin || isCurrentBookOwner);
   const canExploreStructure = Boolean(bookId) && authUserId !== null && canView;
   const isExploreVisible = canExploreStructure && showExploreStructure;
@@ -7942,6 +7993,140 @@ function ScripturesContent() {
       setSharesError("Failed to load shares");
     } finally {
       setSharesLoading(false);
+    }
+  };
+
+  const loadOwnedBooksForTransfer = async () => {
+    if (!isCurrentBookOwner) {
+      setOwnedBooksForTransfer([]);
+      setSelectedOwnedBookIds([]);
+      return;
+    }
+
+    setOwnedBooksForTransferLoading(true);
+    setOwnershipTransferError(null);
+    try {
+      const response = await fetch("/api/books/owned-by-me", {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | OwnedBookSummary[]
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load owned books");
+      }
+
+      const books = Array.isArray(payload) ? payload : [];
+      setOwnedBooksForTransfer(books);
+      setSelectedOwnedBookIds((prev) => {
+        if (prev.length > 0) {
+          const validIds = new Set(books.map((book) => book.id));
+          return prev.filter((id) => validIds.has(id));
+        }
+        const currentId = currentBook?.id;
+        if (typeof currentId === "number" && books.some((book) => book.id === currentId)) {
+          return [currentId];
+        }
+        return [];
+      });
+    } catch (err) {
+      setOwnedBooksForTransfer([]);
+      setSelectedOwnedBookIds([]);
+      setOwnershipTransferError(err instanceof Error ? err.message : "Failed to load owned books");
+    } finally {
+      setOwnedBooksForTransferLoading(false);
+    }
+  };
+
+  const handleTransferBookOwnership = async () => {
+    const targetEmail = ownershipTargetEmail.trim().toLowerCase();
+    if (!targetEmail) {
+      setOwnershipTransferError("Target email is required");
+      return;
+    }
+    if (selectedOwnedBookIds.length === 0) {
+      setOwnershipTransferError("Select at least one book");
+      return;
+    }
+
+    const selectedBookNames = ownedBooksForTransfer
+      .filter((book) => selectedOwnedBookIds.includes(book.id))
+      .map((book) => book.book_name);
+    const previewList = selectedBookNames.slice(0, 3).join(", ");
+    const plusMore = selectedBookNames.length > 3 ? ` +${selectedBookNames.length - 3} more` : "";
+    if (
+      !window.confirm(
+        `Transfer ownership of ${selectedOwnedBookIds.length} selected book(s) to ${targetEmail}? ${previewList}${plusMore}`
+      )
+    ) {
+      return;
+    }
+
+    setOwnershipTransferSubmitting(true);
+    setOwnershipTransferError(null);
+    setOwnershipTransferMessage(null);
+    try {
+      const response = await fetch("/api/books/transfer-ownership", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_email: targetEmail,
+          book_ids: selectedOwnedBookIds,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | BookOwnershipTransferResponse
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string } | null)?.detail || "Ownership transfer failed");
+      }
+
+      const result = payload as BookOwnershipTransferResponse;
+      const transferredIds = new Set(result.transferred_book_ids || []);
+      const patchOwnerMetadata = (metadata: BookMetadata | null | undefined): BookMetadata => ({
+        ...(metadata || {}),
+        owner_id: result.target_user_id,
+        owner_email: result.target_email,
+      });
+
+      setBooks((prev) =>
+        prev.map((book) =>
+          transferredIds.has(book.id)
+            ? {
+                ...book,
+                metadata_json: patchOwnerMetadata(book.metadata_json),
+                metadata: patchOwnerMetadata(book.metadata),
+              }
+            : book
+        )
+      );
+      setCurrentBook((prev) =>
+        prev && transferredIds.has(prev.id)
+          ? {
+              ...prev,
+              metadata_json: patchOwnerMetadata(prev.metadata_json),
+              metadata: patchOwnerMetadata(prev.metadata),
+            }
+          : prev
+      );
+
+      setOwnershipTransferMessage(
+        `Transferred ${result.transferred_count} book(s) to ${result.target_email}.`
+      );
+      setSelectedOwnedBookIds([]);
+      setOwnershipTargetEmail("");
+      await loadBooksRefresh();
+      await loadOwnedBooksForTransfer();
+    } catch (err) {
+      setOwnershipTransferError(err instanceof Error ? err.message : "Ownership transfer failed");
+    } finally {
+      setOwnershipTransferSubmitting(false);
     }
   };
 
@@ -16447,6 +16632,127 @@ function ScripturesContent() {
                     void assignLevelTemplate();
                   }}
                 />
+              )}
+
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Ownership</div>
+                  <p className="mb-2 text-sm text-zinc-700">
+                    Current owner: <span className="font-medium">{currentBookOwnerLabel}</span>
+                  </p>
+
+                  {isCurrentBookOwner ? (
+                    <>
+                      <p className="mb-3 text-sm text-zinc-600">
+                        Transfer ownership for selected books you currently own.
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <input
+                          type="email"
+                          value={ownershipTargetEmail}
+                          onChange={(event) => {
+                            setOwnershipTargetEmail(event.target.value);
+                            setOwnershipTransferError(null);
+                            setOwnershipTransferMessage(null);
+                          }}
+                          placeholder="Target owner email"
+                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleTransferBookOwnership();
+                          }}
+                          disabled={ownershipTransferSubmitting || selectedOwnedBookIds.length === 0}
+                          className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                        >
+                          {ownershipTransferSubmitting ? "Transferring..." : "Transfer Selected"}
+                        </button>
+                      </div>
+
+                      <div className="mt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedOwnedBookIds(ownedBooksForTransfer.map((book) => book.id));
+                            setOwnershipTransferError(null);
+                            setOwnershipTransferMessage(null);
+                          }}
+                          disabled={ownedBooksForTransferLoading || ownedBooksForTransfer.length === 0}
+                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedOwnedBookIds([]);
+                            setOwnershipTransferError(null);
+                            setOwnershipTransferMessage(null);
+                          }}
+                          disabled={ownedBooksForTransferLoading || selectedOwnedBookIds.length === 0}
+                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                        >
+                          Select none
+                        </button>
+                        <span className="text-xs text-zinc-500">
+                          {selectedOwnedBookIds.length} selected
+                        </span>
+                      </div>
+
+                      <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-black/10 bg-white">
+                        {ownedBooksForTransferLoading ? (
+                          <div className="px-3 py-3 text-sm text-zinc-500">Loading owned books...</div>
+                        ) : ownedBooksForTransfer.length === 0 ? (
+                          <div className="px-3 py-3 text-sm text-zinc-500">No owned books found.</div>
+                        ) : (
+                          <div className="divide-y divide-black/10">
+                            {ownedBooksForTransfer.map((book) => {
+                              const checked = selectedOwnedBookIds.includes(book.id);
+                              return (
+                                <label
+                                  key={`owned-transfer-book-${book.id}`}
+                                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-zinc-700"
+                                >
+                                  <span className="flex min-w-0 items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        setSelectedOwnedBookIds((prev) => {
+                                          if (event.target.checked) {
+                                            return prev.includes(book.id) ? prev : [...prev, book.id];
+                                          }
+                                          return prev.filter((id) => id !== book.id);
+                                        });
+                                        setOwnershipTransferError(null);
+                                        setOwnershipTransferMessage(null);
+                                      }}
+                                      className="rounded border-black/20"
+                                    />
+                                    <span className="min-w-0 truncate">{book.book_name}</span>
+                                  </span>
+                                  <span className="text-xs text-zinc-500">
+                                    {(book.book_code || "-")} · {book.visibility} · {book.status}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {ownershipTransferError && (
+                        <p className="mt-2 text-sm text-red-700">{ownershipTransferError}</p>
+                      )}
+                      {ownershipTransferMessage && (
+                        <p className="mt-2 text-sm text-emerald-700">{ownershipTransferMessage}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-zinc-500">Only the current owner can transfer ownership.</p>
+                  )}
+                </div>
               )}
 
               {propertiesScope === "book" && (

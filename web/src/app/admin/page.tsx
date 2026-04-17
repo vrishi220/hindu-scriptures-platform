@@ -32,6 +32,14 @@ type Toast = {
   message: string;
 };
 
+type UserOwnedBook = {
+  id: number;
+  book_name: string;
+  book_code?: string | null;
+  visibility: "private" | "public";
+  status: "draft" | "published";
+};
+
 type ModalMode = "create" | "edit" | "view";
 
 const permissionLabels: Record<PermissionKey, string> = {
@@ -132,6 +140,8 @@ export default function AdminPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [userOwnedBooks, setUserOwnedBooks] = useState<UserOwnedBook[]>([]);
+  const [userOwnedBooksLoading, setUserOwnedBooksLoading] = useState(false);
   const [openUserActionsId, setOpenUserActionsId] = useState<number | null>(null);
   const userActionsMenuRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
@@ -241,6 +251,56 @@ export default function AdminPage() {
     const timer = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!modalOpen || !selectedUserId || !canAdmin || modalMode === "create") {
+      setUserOwnedBooks([]);
+      setUserOwnedBooksLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadUserOwnedBooks = async () => {
+      setUserOwnedBooksLoading(true);
+      try {
+        const response = await fetch(`/api/admin/users/${selectedUserId}/books`, {
+          credentials: "include",
+        });
+        const raw = await response.text();
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            setAccessDenied(true);
+            return;
+          }
+          throw new Error(`(${response.status}) ${getErrorMessage(raw, "Failed to load user books")}`);
+        }
+
+        const payload = parsePayload(raw) as UserOwnedBook[] | null;
+        if (!cancelled) {
+          setUserOwnedBooks(Array.isArray(payload) ? payload : []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setUserOwnedBooks([]);
+          setToast({
+            type: "error",
+            message: err instanceof Error ? err.message : "Failed to load user books",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setUserOwnedBooksLoading(false);
+        }
+      }
+    };
+
+    void loadUserOwnedBooks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [modalOpen, modalMode, selectedUserId, canAdmin]);
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
@@ -834,6 +894,38 @@ export default function AdminPage() {
                       </span>
                     ))}
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-black/10 p-3">
+                  <p className="text-sm font-medium text-zinc-900">User books</p>
+                  {userOwnedBooksLoading ? (
+                    <p className="mt-2 text-sm text-zinc-600">Loading books...</p>
+                  ) : userOwnedBooks.length === 0 ? (
+                    <p className="mt-2 text-sm text-zinc-600">No owned books.</p>
+                  ) : (
+                    <div className="mt-2 max-h-48 overflow-auto rounded-md border border-black/5">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-black/10 bg-zinc-50 text-left text-zinc-600">
+                            <th className="px-2 py-1.5 font-medium">Book</th>
+                            <th className="px-2 py-1.5 font-medium">Code</th>
+                            <th className="px-2 py-1.5 font-medium">Visibility</th>
+                            <th className="px-2 py-1.5 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userOwnedBooks.map((book) => (
+                            <tr key={book.id} className="border-b border-black/5 last:border-0 text-zinc-700">
+                              <td className="px-2 py-1.5">{book.book_name}</td>
+                              <td className="px-2 py-1.5">{book.book_code || "-"}</td>
+                              <td className="px-2 py-1.5">{book.visibility}</td>
+                              <td className="px-2 py-1.5">{book.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
 
                 {canAdmin && modalMode !== "view" ? (
