@@ -40,7 +40,23 @@ def book_owner_id(book: Book) -> int | None:
         return None
     owner_id = metadata.get("owner_id")
     try:
-        return int(owner_id) if owner_id is not None else None
+        if owner_id is None:
+            return None
+        if isinstance(owner_id, bool):
+            return None
+        if isinstance(owner_id, (int, float)):
+            numeric_owner = float(owner_id)
+        elif isinstance(owner_id, str):
+            raw = owner_id.strip()
+            if not raw:
+                return None
+            numeric_owner = float(raw)
+        else:
+            return None
+
+        if not numeric_owner.is_integer():
+            return None
+        return int(numeric_owner)
     except (TypeError, ValueError):
         return None
 

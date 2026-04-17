@@ -660,9 +660,26 @@ def _book_public_model(book: Book) -> BookPublic:
     return BookPublic.model_validate(payload)
 
 
-def _owned_books_for_user(db: Session, user_id: int) -> list[Book]:
+def _owned_books_for_user(db: Session, user: User) -> list[Book]:
+    user_id = user.id
+    user_email = (user.email or "").strip().lower()
     candidate_books = db.query(Book).all()
-    return [book for book in candidate_books if _book_owner_id(book) == user_id]
+
+    owned: list[Book] = []
+    for book in candidate_books:
+        owner_id = _book_owner_id(book)
+        if owner_id == user_id:
+            owned.append(book)
+            continue
+
+        # Backward-compatible ownership resolution for older records that
+        # persisted owner_email but not owner_id.
+        metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+        owner_email = str(metadata.get("owner_email") or "").strip().lower()
+        if owner_id is None and user_email and owner_email == user_email:
+            owned.append(book)
+
+    return owned
 
 
 def _normalize_variant_author_slug(value: object) -> str:
@@ -1359,7 +1376,7 @@ def list_owned_books_for_current_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[UserOwnedBookSummary]:
-    owned_books = _owned_books_for_user(db, current_user.id)
+    owned_books = _owned_books_for_user(db, current_user)
     result: list[UserOwnedBookSummary] = []
     for book in owned_books:
         visibility = _book_visibility(book)
@@ -1383,7 +1400,7 @@ def transfer_owned_books_to_user(
     current_user: User = Depends(get_current_user),
 ) -> BookOwnershipTransferResponse:
     source_user_id = current_user.id
-    owned_books = _owned_books_for_user(db, source_user_id)
+    owned_books = _owned_books_for_user(db, current_user)
     if not owned_books:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You do not own any books")
 

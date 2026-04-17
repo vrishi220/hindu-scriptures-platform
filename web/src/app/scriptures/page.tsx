@@ -2915,6 +2915,7 @@ function ScripturesContent() {
   const [ownedBooksForTransfer, setOwnedBooksForTransfer] = useState<OwnedBookSummary[]>([]);
   const [ownedBooksForTransferLoading, setOwnedBooksForTransferLoading] = useState(false);
   const [selectedOwnedBookIds, setSelectedOwnedBookIds] = useState<number[]>([]);
+  const [showOwnershipTransferDialog, setShowOwnershipTransferDialog] = useState(false);
   const [ownershipTransferSubmitting, setOwnershipTransferSubmitting] = useState(false);
   const [ownershipTransferError, setOwnershipTransferError] = useState<string | null>(null);
   const [ownershipTransferMessage, setOwnershipTransferMessage] = useState<string | null>(null);
@@ -3239,6 +3240,7 @@ function ScripturesContent() {
   useEffect(() => {
     const shouldLockBodyScroll =
       showPropertiesModal ||
+      showOwnershipTransferDialog ||
       showBookPreview ||
       showPdfExportDialog ||
       showShareManager ||
@@ -3283,6 +3285,7 @@ function ScripturesContent() {
     };
   }, [
     showPropertiesModal,
+    showOwnershipTransferDialog,
     showBookPreview,
     showPdfExportDialog,
     showShareManager,
@@ -4082,12 +4085,9 @@ function ScripturesContent() {
       setOwnershipTransferError(null);
       setOwnershipTransferMessage(null);
       setOwnershipTargetEmail("");
-      if (isCurrentBookOwner) {
-        void loadOwnedBooksForTransfer();
-      } else {
-        setOwnedBooksForTransfer([]);
-        setSelectedOwnedBookIds([]);
-      }
+      setOwnedBooksForTransfer([]);
+      setSelectedOwnedBookIds([]);
+      setShowOwnershipTransferDialog(false);
     } else {
       setPropertiesBookAuthor("");
       setPropertiesBookTitleEnglish("");
@@ -8117,15 +8117,34 @@ function ScripturesContent() {
       setOwnershipTransferMessage(
         `Transferred ${result.transferred_count} book(s) to ${result.target_email}.`
       );
+      setShowOwnershipTransferDialog(false);
       setSelectedOwnedBookIds([]);
       setOwnershipTargetEmail("");
+      setOwnedBooksForTransfer([]);
       await loadBooksRefresh();
-      await loadOwnedBooksForTransfer();
     } catch (err) {
       setOwnershipTransferError(err instanceof Error ? err.message : "Ownership transfer failed");
     } finally {
       setOwnershipTransferSubmitting(false);
     }
+  };
+
+  const openOwnershipTransferDialog = async () => {
+    if (!isCurrentBookOwner) return;
+    setOwnershipTransferError(null);
+    setOwnershipTransferMessage(null);
+    setOwnershipTargetEmail("");
+    setSelectedOwnedBookIds([]);
+    setShowOwnershipTransferDialog(true);
+    await loadOwnedBooksForTransfer();
+  };
+
+  const closeOwnershipTransferDialog = () => {
+    setShowOwnershipTransferDialog(false);
+    setOwnershipTransferError(null);
+    setOwnershipTargetEmail("");
+    setOwnedBooksForTransfer([]);
+    setSelectedOwnedBookIds([]);
   };
 
   const closeShareDialog = () => {
@@ -16434,6 +16453,7 @@ function ScripturesContent() {
           values={propertiesValues}
           onClose={() => {
             setShowPropertiesModal(false);
+            setShowOwnershipTransferDialog(false);
             setPropertiesMessage(null);
             setPropertiesError(null);
           }}
@@ -16521,6 +16541,34 @@ function ScripturesContent() {
                       />
                     </label>
                   </div>
+                </div>
+              )}
+
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Ownership</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm text-zinc-700">
+                      Owner: <span className="font-medium">{currentBookOwnerLabel}</span>
+                    </p>
+                    {isCurrentBookOwner ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void openOwnershipTransferDialog();
+                        }}
+                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.14em] text-white"
+                      >
+                        Transfer ownership
+                      </button>
+                    ) : null}
+                  </div>
+                  {!isCurrentBookOwner && (
+                    <p className="mt-1 text-sm text-zinc-500">Only the current owner can transfer ownership.</p>
+                  )}
+                  {ownershipTransferMessage && (
+                    <p className="mt-2 text-sm text-emerald-700">{ownershipTransferMessage}</p>
+                  )}
                 </div>
               )}
 
@@ -16634,127 +16682,6 @@ function ScripturesContent() {
 
               {propertiesScope === "book" && (
                 <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
-                  <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">Ownership</div>
-                  <p className="mb-2 text-sm text-zinc-700">
-                    Current owner: <span className="font-medium">{currentBookOwnerLabel}</span>
-                  </p>
-
-                  {isCurrentBookOwner ? (
-                    <>
-                      <p className="mb-3 text-sm text-zinc-600">
-                        Transfer ownership for selected books you currently own.
-                      </p>
-                      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                        <input
-                          type="email"
-                          value={ownershipTargetEmail}
-                          onChange={(event) => {
-                            setOwnershipTargetEmail(event.target.value);
-                            setOwnershipTransferError(null);
-                            setOwnershipTransferMessage(null);
-                          }}
-                          placeholder="Target owner email"
-                          className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void handleTransferBookOwnership();
-                          }}
-                          disabled={ownershipTransferSubmitting || selectedOwnedBookIds.length === 0}
-                          className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                        >
-                          {ownershipTransferSubmitting ? "Transferring..." : "Transfer Selected"}
-                        </button>
-                      </div>
-
-                      <div className="mt-2 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedOwnedBookIds(ownedBooksForTransfer.map((book) => book.id));
-                            setOwnershipTransferError(null);
-                            setOwnershipTransferMessage(null);
-                          }}
-                          disabled={ownedBooksForTransferLoading || ownedBooksForTransfer.length === 0}
-                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
-                        >
-                          Select all
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedOwnedBookIds([]);
-                            setOwnershipTransferError(null);
-                            setOwnershipTransferMessage(null);
-                          }}
-                          disabled={ownedBooksForTransferLoading || selectedOwnedBookIds.length === 0}
-                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
-                        >
-                          Select none
-                        </button>
-                        <span className="text-xs text-zinc-500">
-                          {selectedOwnedBookIds.length} selected
-                        </span>
-                      </div>
-
-                      <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-black/10 bg-white">
-                        {ownedBooksForTransferLoading ? (
-                          <div className="px-3 py-3 text-sm text-zinc-500">Loading owned books...</div>
-                        ) : ownedBooksForTransfer.length === 0 ? (
-                          <div className="px-3 py-3 text-sm text-zinc-500">No owned books found.</div>
-                        ) : (
-                          <div className="divide-y divide-black/10">
-                            {ownedBooksForTransfer.map((book) => {
-                              const checked = selectedOwnedBookIds.includes(book.id);
-                              return (
-                                <label
-                                  key={`owned-transfer-book-${book.id}`}
-                                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-zinc-700"
-                                >
-                                  <span className="flex min-w-0 items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(event) => {
-                                        setSelectedOwnedBookIds((prev) => {
-                                          if (event.target.checked) {
-                                            return prev.includes(book.id) ? prev : [...prev, book.id];
-                                          }
-                                          return prev.filter((id) => id !== book.id);
-                                        });
-                                        setOwnershipTransferError(null);
-                                        setOwnershipTransferMessage(null);
-                                      }}
-                                      className="rounded border-black/20"
-                                    />
-                                    <span className="min-w-0 truncate">{book.book_name}</span>
-                                  </span>
-                                  <span className="text-xs text-zinc-500">
-                                    {(book.book_code || "-")} · {book.visibility} · {book.status}
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {ownershipTransferError && (
-                        <p className="mt-2 text-sm text-red-700">{ownershipTransferError}</p>
-                      )}
-                      {ownershipTransferMessage && (
-                        <p className="mt-2 text-sm text-emerald-700">{ownershipTransferMessage}</p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-zinc-500">Only the current owner can transfer ownership.</p>
-                  )}
-                </div>
-              )}
-
-              {propertiesScope === "book" && (
-                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
                       Variant Authors Registry
@@ -16857,6 +16784,125 @@ function ScripturesContent() {
             </>
           }
         />
+
+        {showOwnershipTransferDialog && isCurrentBookOwner && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
+            <div className="w-full max-w-2xl rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                    Transfer Ownership
+                  </h2>
+                  <p className="text-sm text-zinc-600">
+                    Transfer ownership for selected books you currently own.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeOwnershipTransferDialog}
+                  className="text-2xl text-zinc-400 hover:text-zinc-600"
+                  aria-label="Close transfer ownership dialog"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  type="email"
+                  value={ownershipTargetEmail}
+                  onChange={(event) => {
+                    setOwnershipTargetEmail(event.target.value);
+                    setOwnershipTransferError(null);
+                  }}
+                  placeholder="Target owner email"
+                  className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleTransferBookOwnership();
+                  }}
+                  disabled={ownershipTransferSubmitting || selectedOwnedBookIds.length === 0}
+                  className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {ownershipTransferSubmitting ? "Transferring..." : "Transfer Selected"}
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOwnedBookIds(ownedBooksForTransfer.map((book) => book.id));
+                    setOwnershipTransferError(null);
+                  }}
+                  disabled={ownedBooksForTransferLoading || ownedBooksForTransfer.length === 0}
+                  className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOwnedBookIds([]);
+                    setOwnershipTransferError(null);
+                  }}
+                  disabled={ownedBooksForTransferLoading || selectedOwnedBookIds.length === 0}
+                  className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs uppercase tracking-[0.14em] text-zinc-700 disabled:opacity-50"
+                >
+                  Select none
+                </button>
+                <span className="text-xs text-zinc-500">{selectedOwnedBookIds.length} selected</span>
+              </div>
+
+              <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-black/10 bg-white">
+                {ownedBooksForTransferLoading ? (
+                  <div className="px-3 py-3 text-sm text-zinc-500">Loading owned books...</div>
+                ) : ownedBooksForTransfer.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-zinc-500">No owned books found.</div>
+                ) : (
+                  <div className="divide-y divide-black/10">
+                    {ownedBooksForTransfer.map((book) => {
+                      const checked = selectedOwnedBookIds.includes(book.id);
+                      return (
+                        <label
+                          key={`owned-transfer-book-${book.id}`}
+                          className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-zinc-700"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => {
+                                setSelectedOwnedBookIds((prev) => {
+                                  if (event.target.checked) {
+                                    return prev.includes(book.id) ? prev : [...prev, book.id];
+                                  }
+                                  return prev.filter((id) => id !== book.id);
+                                });
+                                setOwnershipTransferError(null);
+                              }}
+                              className="rounded border-black/20"
+                            />
+                            <span className="min-w-0 truncate">{book.book_name}</span>
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            {(book.book_code || "-")} · {book.visibility} · {book.status}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {ownershipTransferError && (
+                <p className="mt-2 text-sm text-red-700">{ownershipTransferError}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(resolvedCurrentBookId) : Boolean(selectedId)))) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">

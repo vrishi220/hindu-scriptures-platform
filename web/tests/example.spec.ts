@@ -1002,6 +1002,65 @@ test.describe('Scripture Browser', () => {
     await expect(page.getByRole('heading', { name: 'Book Properties' })).toBeVisible();
   });
 
+  test('ownership transfer dialog lazily loads owned books', async ({ page }) => {
+    let ownedBooksRequestCount = 0;
+
+    await setupEditableScripturesMocks(page, {
+      initialBookMetadata: {
+        owner_id: 1,
+        owner_email: 'admin@example.com',
+      },
+    });
+
+    await page.route('**/api/books/owned-by-me', async route => {
+      ownedBooksRequestCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 101,
+            book_name: 'Mock Multimedia Book',
+            book_code: 'mock-multimedia-book',
+            visibility: 'private',
+            status: 'draft',
+          },
+        ]),
+      });
+    });
+
+    await page.route('**/api/books/transfer-ownership', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          source_user_id: 1,
+          target_user_id: 2,
+          target_email: 'new-owner@example.com',
+          transferred_book_ids: [101],
+          transferred_count: 1,
+        }),
+      });
+    });
+
+    await page.goto('http://localhost:3000/scriptures?book=101&browse=1');
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.getByRole('button', { name: 'Book tree actions' })).toBeVisible();
+    await page.getByRole('button', { name: 'Book tree actions' }).click();
+    await page.getByRole('button', { name: 'Book properties' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Book Properties' })).toBeVisible();
+    await expect(page.getByText('Owner:', { exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Transfer ownership' })).toBeVisible();
+    expect(ownedBooksRequestCount).toBe(0);
+
+    await page.getByRole('button', { name: 'Transfer ownership' }).click();
+    await expect(page.getByRole('heading', { name: 'Transfer Ownership' })).toBeVisible();
+    await expect(page.getByRole('checkbox').first()).toBeVisible();
+    expect(ownedBooksRequestCount).toBe(1);
+  });
+
   test('non-leaf node media manager attaches video from repo and renders for the parent node', async ({ page }) => {
     await setupEditableScripturesMocks(page, {
       assets: [
