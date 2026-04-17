@@ -8106,15 +8106,13 @@ function ScripturesContent() {
             : book
         )
       );
-      setCurrentBook((prev) =>
-        prev && transferredIds.has(prev.id)
-          ? {
-              ...prev,
-              metadata_json: patchOwnerMetadata(prev.metadata_json),
-              metadata: patchOwnerMetadata(prev.metadata),
-            }
-          : prev
-      );
+      if (currentBook && transferredIds.has(currentBook.id)) {
+        setCurrentBook({
+          ...currentBook,
+          metadata_json: patchOwnerMetadata(currentBook.metadata_json),
+          metadata: patchOwnerMetadata(currentBook.metadata),
+        });
+      }
 
       setOwnershipTransferMessage(
         `Transferred ${result.transferred_count} book(s) to ${result.target_email}.`
