@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS compilations (
 
 CREATE INDEX IF NOT EXISTS idx_compilations_creator ON compilations(creator_id);
 CREATE INDEX IF NOT EXISTS idx_compilations_status ON compilations(status);
+CREATE INDEX IF NOT EXISTS idx_compilations_public_published_created_at
+  ON compilations(created_at DESC)
+  WHERE is_public = true AND status = 'published';
 
 CREATE TABLE IF NOT EXISTS draft_books (
   id SERIAL PRIMARY KEY,
@@ -309,6 +312,8 @@ CREATE INDEX IF NOT EXISTS idx_content_nodes_status ON content_nodes(status);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_visibility ON content_nodes(visibility);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_language ON content_nodes(language_code);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_book_status ON content_nodes(book_id, status);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_book_parent ON content_nodes(book_id, parent_node_id);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_book_level_order_id ON content_nodes(book_id, level_order, id);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_created_by ON content_nodes(created_by);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_metadata_gin ON content_nodes USING GIN (metadata_json);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_tags_gin ON content_nodes USING GIN (tags);
@@ -323,6 +328,8 @@ CREATE TABLE IF NOT EXISTS media_files (
   metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_media_files_node_id ON media_files(node_id);
 
 CREATE TABLE IF NOT EXISTS media_assets (
   id SERIAL PRIMARY KEY,

@@ -2947,6 +2947,8 @@ function ScripturesContent() {
     const selectedId = browsingHook.selectedId;
     const urlInitialized = browsingHook.urlInitialized;
     const breadcrumb = browsingHook.breadcrumb;
+    const resolvedCurrentBookId =
+      currentBook && typeof currentBook.id === "number" ? String(currentBook.id) : bookId;
 
     // Create setters for backward compatibility
     const setBookId = browsingHook.setBookId;
@@ -3585,16 +3587,16 @@ function ScripturesContent() {
   };
 
   const propertiesEndpoint = (scope: PropertiesScope, nodeId: number | null) => {
-    if (!bookId) {
+    if (!resolvedCurrentBookId) {
       throw new Error("Book is required");
     }
     if (scope === "book") {
-      return `/api/books/${bookId}/metadata-binding`;
+      return `/api/books/${resolvedCurrentBookId}/metadata-binding`;
     }
     if (!nodeId) {
       throw new Error("Node is required");
     }
-    return `/api/books/${bookId}/nodes/${nodeId}/metadata-binding`;
+    return `/api/books/${resolvedCurrentBookId}/nodes/${nodeId}/metadata-binding`;
   };
 
   const toRecord = (value: unknown): Record<string, unknown> => {
@@ -7035,7 +7037,7 @@ function ScripturesContent() {
     successMessage: string,
     failureMessage: string
   ): Promise<boolean> => {
-    if (!bookId) {
+    if (!resolvedCurrentBookId) {
       setPropertiesError("Select a book first.");
       return false;
     }
@@ -7045,7 +7047,7 @@ function ScripturesContent() {
     setPropertiesMessage(null);
 
     try {
-      const response = await fetch(`/api/books/${bookId}`, {
+      const response = await fetch(`/api/books/${resolvedCurrentBookId}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -7198,7 +7200,7 @@ function ScripturesContent() {
   };
 
   const handleUploadBookMediaViaBank = async (file: File) => {
-    if (!bookId) {
+    if (!resolvedCurrentBookId) {
       setPropertiesError("Select a book first.");
       return;
     }
@@ -10164,6 +10166,54 @@ function ScripturesContent() {
     return null;
   };
 
+  const applySavedNodeToTree = (nodes: TreeNode[], savedNode: NodeContent): TreeNode[] =>
+    nodes.map((node) => {
+      const nextChildren = node.children ? applySavedNodeToTree(node.children, savedNode) : node.children;
+      if (node.id !== savedNode.id) {
+        return nextChildren !== node.children ? { ...node, children: nextChildren } : node;
+      }
+
+      return {
+        ...node,
+        sequence_number: savedNode.sequence_number ?? null,
+        title_english: savedNode.title_english ?? null,
+        title_hindi: savedNode.title_hindi ?? null,
+        title_sanskrit: savedNode.title_sanskrit ?? null,
+        title_transliteration: savedNode.title_transliteration ?? null,
+        has_content: savedNode.has_content ?? null,
+        children: nextChildren,
+      };
+    });
+
+  const syncSavedNodeState = (savedNode: NodeContent) => {
+    const nextTree = applySavedNodeToTree(treeData, savedNode);
+    setTreeData(nextTree);
+
+    const path = findPath(nextTree, savedNode.id);
+    if (path) {
+      setBreadcrumb(path);
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        path.forEach((node) => next.add(node.id));
+        return next;
+      });
+    }
+
+    if (selectedId === savedNode.id || nodeContent?.id === savedNode.id) {
+      setNodeContent((prev) => ({ ...(prev || {}), ...savedNode }));
+    }
+  };
+
+  const isNodeContentPayload = (value: unknown): value is NodeContent =>
+    Boolean(
+      value &&
+        typeof value === "object" &&
+        "id" in value &&
+        typeof value.id === "number" &&
+        "level_name" in value &&
+        typeof value.level_name === "string"
+    );
+
   const buildFormDataFromNode = (node: NodeContent) => {
     const contentBasic = node.content_data?.basic;
     const contentTranslations = toTranslationRecord(node.content_data?.translations);
@@ -10981,7 +11031,7 @@ function ScripturesContent() {
       );
 
       if (response.ok) {
-        const savedNode = (await response.json().catch(() => null)) as { id?: number } | null;
+        const savedNode = (await response.json().catch(() => null)) as NodeContent | null;
         const savedNodeId = typeof savedNode?.id === "number" ? savedNode.id : null;
         const shouldCreateNext = action === "add" && createNextOnSubmit;
         const preservedNodeId =
@@ -11047,8 +11097,8 @@ function ScripturesContent() {
           setModalTranslationVariants([]);
           setModalCommentaryVariants([]);
         }
-        // Refresh tree without losing context
-        if (bookId) {
+        // Refresh tree only when structure changed. Edit saves can update local state.
+        if (action === "add" && bookId) {
           try {
             const response = await fetch(`/api/books/${bookId}/tree`, {
               credentials: "include",
@@ -11083,7 +11133,9 @@ function ScripturesContent() {
             setTreeLoading(false);
           }
         }
-        if (preservedNodeId) {
+        if (action === "edit" && savedNode) {
+          syncSavedNodeState(savedNode);
+        } else if (preservedNodeId) {
           await loadNodeContent(preservedNodeId, true);
         }
       } else {
@@ -11220,46 +11272,21 @@ function ScripturesContent() {
         body: JSON.stringify(payload),
       });
 
+      const savedNode = (await response.json().catch(() => null)) as NodeContent | { detail?: string } | null;
+
       if (!response.ok) {
-        const errorText = await response.text();
-        const errData = errorText
-          ? (() => {
-              try {
-                return JSON.parse(errorText);
-              } catch {
-                return errorText;
-              }
-            })()
-          : null;
         const detail =
-          typeof errData === "string"
-            ? errData
-            : errData?.detail || response.statusText;
+          savedNode && typeof savedNode === "object" && "detail" in savedNode
+            ? savedNode.detail || response.statusText
+            : response.statusText;
         setInlineMessage(`Save failed (${response.status}): ${detail}`);
         return;
       }
 
-      if (bookId) {
-        const treeResponse = await fetch(`/api/books/${bookId}/tree`, {
-          credentials: "include",
-        });
-        if (treeResponse.ok) {
-          const flatData = (await treeResponse.json()) as TreeNode[];
-          const data = nestFlatTreeNodes(flatData);
-          setTreeData(data);
-          const path = findPath(data, selectedId);
-          if (path) {
-            setBreadcrumb(path);
-            setExpandedIds((prev) => {
-              const next = new Set(prev);
-              path.forEach((node) => next.add(node.id));
-              return next;
-            });
-          }
-        }
+      const savedNodePayload = isNodeContentPayload(savedNode) ? savedNode : null;
+      if (savedNodePayload) {
+        syncSavedNodeState(savedNodePayload);
       }
-
-      await loadNodeContent(selectedId, true);
       setInlineMessage("Details saved.");
       setTimeout(() => setInlineMessage(null), 2000);
     } catch (err) {
@@ -16413,7 +16440,7 @@ function ScripturesContent() {
           }
         />
 
-        {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(bookId) : Boolean(selectedId)))) && (
+        {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(resolvedCurrentBookId) : Boolean(selectedId)))) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
             <div
               className="w-full max-w-3xl min-w-[320px] max-h-[92dvh] resize overflow-auto rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
@@ -16481,7 +16508,7 @@ function ScripturesContent() {
                       <button
                         type="button"
                         onClick={() => setBookMediaActionsOpen((prev) => !prev)}
-                        disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
+                        disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !resolvedCurrentBookId}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                         aria-label="More media actions"
                       >
@@ -16495,7 +16522,7 @@ function ScripturesContent() {
                               setBookMediaActionsOpen(false);
                               bookMediaUploadInputRef.current?.click();
                             }}
-                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !resolvedCurrentBookId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Upload
@@ -16506,7 +16533,7 @@ function ScripturesContent() {
                               setBookMediaActionsOpen(false);
                               openMediaLinkForm("book");
                             }}
-                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !bookId}
+                            disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !resolvedCurrentBookId}
                             className="w-full rounded-md px-2.5 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                           >
                             Add external

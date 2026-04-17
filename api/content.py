@@ -1033,13 +1033,11 @@ def list_books(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[BookPublic]:
-    books = db.query(Book).all()
-    visible_books = [book for book in books if _book_is_visible_to_user(db, book, current_user)]
-
     query_text = (q or "").strip()
     if query_text:
+        books = db.query(Book).all()
         ranked_books = []
-        for book in visible_books:
+        for book in books:
             score = _book_relevance_score(book, query_text)
             if score > 0:
                 ranked_books.append((book, score))
@@ -1054,14 +1052,14 @@ def list_books(
         page = [pair[0] for pair in ranked_books[offset : offset + limit]]
         return [_book_public_model(item) for item in page]
 
-    visible_books.sort(
-        key=lambda book: (
-            -(book.created_at.timestamp() if book.created_at else 0),
-            -book.id,
-        )
+    books = (
+        db.query(Book)
+        .order_by(Book.created_at.desc(), Book.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
-    page = visible_books[offset : offset + limit]
-    return [_book_public_model(item) for item in page]
+    return [_book_public_model(item) for item in books]
 
 
 @router.post("/books", response_model=BookPublic, status_code=status.HTTP_201_CREATED)
@@ -2940,15 +2938,6 @@ def list_nodes(
         _ensure_book_view_access(db, book, current_user)
         target_book = book
         query = query.filter(ContentNode.book_id == book_id)
-    else:
-        visible_book_ids = [
-            book.id
-            for book in db.query(Book).all()
-            if _book_is_visible_to_user(db, book, current_user)
-        ]
-        if not visible_book_ids:
-            return []
-        query = query.filter(ContentNode.book_id.in_(visible_book_ids))
     
     nodes = query.order_by(ContentNode.id).limit(safe_limit).all()
     if target_book is not None:
