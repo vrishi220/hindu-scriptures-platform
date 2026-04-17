@@ -10297,6 +10297,13 @@ function ScripturesContent() {
         return false;
       }
 
+      // Open window synchronously to preserve user gesture context
+      const targetWindow = window.open("", "_blank");
+      if (!targetWindow) {
+        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
+        return false;
+      }
+
       const blob = await response.blob();
       const safeName = (targetBookName || `book-${targetBookId}`)
         .trim()
@@ -10307,18 +10314,13 @@ function ScripturesContent() {
 
       if (options?.outputMode === "print") {
         const printUrl = window.URL.createObjectURL(blob);
-        const printWindow = window.open(printUrl, "_blank");
-        if (!printWindow) {
-          window.URL.revokeObjectURL(printUrl);
-          alert("Unable to open print preview. Please allow pop-ups and try again.");
-          return false;
-        }
+        targetWindow.location.href = printUrl;
 
         // Delay print slightly to allow built-in PDF viewer to fully initialize.
         window.setTimeout(() => {
           try {
-            printWindow.focus();
-            printWindow.print();
+            targetWindow.focus();
+            targetWindow.print();
           } catch {
             // No-op; user can still print manually from the opened tab.
           }
@@ -10331,12 +10333,7 @@ function ScripturesContent() {
       }
 
       const url = window.URL.createObjectURL(blob);
-      const openedWindow = window.open(url, "_blank", "noopener,noreferrer");
-      if (!openedWindow) {
-        window.URL.revokeObjectURL(url);
-        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
-        return false;
-      }
+      targetWindow.location.href = url;
 
       window.setTimeout(() => {
         window.URL.revokeObjectURL(url);
