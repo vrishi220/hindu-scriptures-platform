@@ -20,6 +20,8 @@ from models.schemas import ContentNodeCreate, _validate_word_meanings_content_da
 from models.scripture_schema import ScriptureSchema
 from models.user import User
 import pytest
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 
 _WORD_MEANINGS_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "word_meanings"
@@ -6272,6 +6274,27 @@ class TestUsersCoverageSprintCOV03:
 
         non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
         assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_admin_delete_user_returns_400_when_other_fk_records_exist(self, client, monkeypatch):
+        admin_headers = _register_and_login_as_admin(client)
+        contributor_headers = _register_and_login(client)
+
+        contributor_me = client.get("/api/users/me", headers=contributor_headers)
+        assert contributor_me.status_code == status.HTTP_200_OK
+        contributor_id = contributor_me.json()["id"]
+
+        original_commit = Session.commit
+
+        def commit_with_integrity_error(self, *args, **kwargs):
+            if getattr(self, "deleted", None):
+                raise IntegrityError("delete blocked", {}, Exception("fk constraint"))
+            return original_commit(self, *args, **kwargs)
+
+        monkeypatch.setattr(Session, "commit", commit_with_integrity_error)
+
+        delete_response = client.delete(f"/api/users/{contributor_id}", headers=admin_headers)
+        assert delete_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "related records" in delete_response.json()["detail"].lower()
 
     def test_book_ownership_transfer_does_not_allow_user_deletion_with_contributions(self, client):
         admin_headers = _register_and_login_as_admin(client)

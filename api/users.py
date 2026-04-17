@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -322,7 +323,17 @@ def delete_user(
         )
 
     db.delete(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot delete user because related records still exist. "
+                "Deactivate instead."
+            ),
+        )
 
 
 @router.get("/{user_id}/books", response_model=list[UserOwnedBookSummary])
