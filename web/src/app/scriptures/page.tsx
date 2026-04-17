@@ -3635,17 +3635,22 @@ function ScripturesContent() {
     return (payload as CategoryEffectiveProperties).properties || [];
   };
 
-  const propertiesEndpoint = (scope: PropertiesScope, nodeId: number | null) => {
-    if (!resolvedCurrentBookId) {
+  const propertiesEndpoint = (
+    scope: PropertiesScope,
+    nodeId: number | null,
+    bookIdOverride: string | null = null
+  ) => {
+    const activeBookId = bookIdOverride || resolvedCurrentBookId;
+    if (!activeBookId) {
       throw new Error("Book is required");
     }
     if (scope === "book") {
-      return `/api/books/${resolvedCurrentBookId}/metadata-binding`;
+      return `/api/books/${activeBookId}/metadata-binding`;
     }
     if (!nodeId) {
       throw new Error("Node is required");
     }
-    return `/api/books/${resolvedCurrentBookId}/nodes/${nodeId}/metadata-binding`;
+    return `/api/books/${activeBookId}/nodes/${nodeId}/metadata-binding`;
   };
 
   const toRecord = (value: unknown): Record<string, unknown> => {
@@ -3971,8 +3976,14 @@ function ScripturesContent() {
     }
   };
 
-  const openPropertiesModal = async (scope: PropertiesScope, nodeId: number | null = null) => {
-    if (!bookId) return;
+  const openPropertiesModal = async (
+    scope: PropertiesScope,
+    nodeId: number | null = null,
+    bookIdOverride: string | null = null,
+    bookNameOverride: string | null = null
+  ) => {
+    const activeBookId = bookIdOverride || resolvedCurrentBookId;
+    if (!activeBookId) return;
     if (scope === "node" && !nodeId) return;
 
     setShowPropertiesModal(true);
@@ -3980,7 +3991,7 @@ function ScripturesContent() {
     setPropertiesNodeId(nodeId);
     setPropertiesName(
       scope === "book"
-        ? currentBook?.book_name || ""
+        ? bookNameOverride || currentBook?.book_name || ""
         : nodeContent?.title_english ||
             nodeContent?.title_sanskrit ||
             nodeContent?.title_transliteration ||
@@ -4067,7 +4078,7 @@ function ScripturesContent() {
     }
 
     try {
-      const endpoint = propertiesEndpoint(scope, nodeId);
+      const endpoint = propertiesEndpoint(scope, nodeId, activeBookId);
       const scopedMetadataSnapshot =
         scope === "node" && nodeId
           ? await loadNodeMetadataSnapshot(nodeId)
@@ -12564,6 +12575,8 @@ function ScripturesContent() {
       } else {
         router.push("/scriptures", { scroll: false });
       }
+    } else {
+      setBookId(value || null);
     }
     setSelectedId(null);
     setBreadcrumb([]);
@@ -12992,7 +13005,7 @@ function ScripturesContent() {
               if (!didSelect) return;
               setOpenBookRowActionsId(null);
               setOpenBookRowShareSubmenuId(null);
-              void openPropertiesModal("book");
+              void openPropertiesModal("book", null, book.id.toString(), book.book_name);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
           >

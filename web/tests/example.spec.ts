@@ -988,6 +988,20 @@ test.describe('Scripture Browser', () => {
     await expect(page.locator('audio')).toBeVisible();
   });
 
+  test('book properties opens from row actions when no book is preselected', async ({ page }) => {
+    await setupEditableScripturesMocks(page);
+
+    await page.goto('http://localhost:3000/scriptures');
+    await page.waitForLoadState('domcontentloaded');
+
+    const rowActionsButton = page.getByRole('button', { name: 'Row actions' }).first();
+    await expect(rowActionsButton).toBeVisible();
+    await rowActionsButton.click();
+
+    await page.getByRole('button', { name: 'Book properties' }).click();
+    await expect(page.getByRole('heading', { name: 'Book Properties' })).toBeVisible();
+  });
+
   test('non-leaf node media manager attaches video from repo and renders for the parent node', async ({ page }) => {
     await setupEditableScripturesMocks(page, {
       assets: [
