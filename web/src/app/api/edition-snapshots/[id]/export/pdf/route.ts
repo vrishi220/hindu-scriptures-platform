@@ -256,7 +256,7 @@ export async function GET(
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="edition-${id}.pdf"`,
+        "Content-Disposition": `inline; filename="edition-${id}.pdf"`,
         "Cache-Control": "no-store",
       },
     });
@@ -290,7 +290,7 @@ export async function GET(
           status: 200,
           headers: {
             "Content-Type": "application/pdf",
-            "Content-Disposition": `attachment; filename="edition-${id}.pdf"`,
+            "Content-Disposition": `inline; filename="edition-${id}.pdf"`,
             "Cache-Control": "no-store",
           },
         });
@@ -306,7 +306,7 @@ export async function GET(
   const arrayBuffer = await response.arrayBuffer();
   const pdfBytes = new Uint8Array(arrayBuffer);
   SNAPSHOT_PDF_CACHE.set(id, pdfBytes);
-  const contentDisposition = response.headers.get("content-disposition") || `attachment; filename="edition-${id}.pdf"`;
+  const contentDisposition = response.headers.get("content-disposition") || `inline; filename="edition-${id}.pdf"`;
 
   return new NextResponse(new Uint8Array(pdfBytes), {
     status: 200,

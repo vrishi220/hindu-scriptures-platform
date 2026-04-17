@@ -12,6 +12,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   Download,
+  FileText,
   Eye,
   LayoutGrid,
   List,
@@ -10184,7 +10185,7 @@ function ScripturesContent() {
     targetBookName?: string,
     options?: {
       respectCurrentPreviewScope?: boolean;
-      outputMode?: "download" | "print";
+      outputMode?: "open" | "print";
       pdfSettings?: {
         page_break_mode?: "none" | "between_level" | "between_leaf";
         page_size?: "A4" | "Letter";
@@ -10330,13 +10331,16 @@ function ScripturesContent() {
       }
 
       const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
+      const openedWindow = window.open(url, "_blank", "noopener,noreferrer");
+      if (!openedWindow) {
+        window.URL.revokeObjectURL(url);
+        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
+        return false;
+      }
+
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 60_000);
       return true;
     } catch {
       alert("Failed to export book PDF");
@@ -13238,7 +13242,7 @@ function ScripturesContent() {
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
           >
-            Download PDF
+            View PDF
           </button>
         )}
         {canToggleVisibility && (
@@ -14062,16 +14066,29 @@ function ScripturesContent() {
             }`}
           >
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
-              <div className="flex items-center justify-between border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
-                <div>
+              <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
                     Browse Book
                   </h2>
                   <p className="text-xs text-zinc-600 sm:text-sm">
                     {currentBook?.book_name || books.find((b) => b.id.toString() === bookId)?.book_name || "Selected book"}
                   </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleCloseBrowseModal();
+                    }}
+                    className="shrink-0 rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600"
+                    title="Close browse"
+                    aria-label="Close browse"
+                  >
+                    <X className="h-6 w-6 sm:h-7 sm:w-7" />
+                  </button>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="mt-2 flex flex-wrap items-center justify-start gap-2 sm:justify-end">
                   {canBrowseCurrentNode && (
                     <a
                       href={buildScripturesPreviewPath("book", bookId)}
@@ -14094,15 +14111,6 @@ function ScripturesContent() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setMobilePanel("content")}
-                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
-                        mobilePanel === "content"
-                          ? "bg-[color:var(--accent)] text-white"
-                          : "text-zinc-600 hover:text-zinc-800"
-                      }`}
-                    >
-                      Content
-                    </button>
                   </div>
                   <button
                     type="button"
@@ -14550,8 +14558,8 @@ function ScripturesContent() {
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
                                 >
-                                  <Download size={14} />
-                                  Download PDF
+                                  <FileText size={14} />
+                                  View PDF
                                 </button>
                               )}
                               {selectedBookOption && canToggleCurrentBookVisibility && (
@@ -17904,8 +17912,9 @@ function ScripturesContent() {
             className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
           >
             <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
-              <div className="flex flex-col gap-2 border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-0 sm:px-4 sm:py-2.5">
-                <div className="flex-1">
+              <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
                   <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
                     {bookPreviewArtifact.preview_scope === "node"
                       ? (() => {
@@ -17917,8 +17926,19 @@ function ScripturesContent() {
                   <p className="text-xs text-zinc-600 sm:text-sm">
                     {getPreviewBreadcrumbTitle(bookPreviewArtifact)}
                   </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClosePreview}
+                    disabled={showPreviewControls}
+                    title="Close preview"
+                    aria-label="Close preview"
+                    className="shrink-0 rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <X className="h-6 w-6 sm:h-7 sm:w-7" />
+                  </button>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2 sm:justify-end">
                   {(() => {
                     const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
                     const targetNodeId =
@@ -17982,16 +18002,6 @@ function ScripturesContent() {
                                   ]
                                 : [];
                               void openShareDialogForBook({
-                                bookId,
-                                bookName: currentBook?.book_name || "Book",
-                                visibility,
-                                canManageShares: visibility === "private" && canEditCurrentBook,
-                                description: visibility === "public"
-                                  ? "Copy or email a public link for this view."
-                                  : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
-                                linkOptions,
-                              });
-                            }}
                             disabled={showPreviewControls}
                             title="Share"
                             aria-label="Share"
@@ -18049,11 +18059,11 @@ function ScripturesContent() {
                       });
                     }}
                     disabled={showPreviewControls}
-                    title="Download PDF"
-                    aria-label="Download PDF"
+                    title="View PDF"
+                    aria-label="View PDF"
                     className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <Download className="h-4 w-4" />
+                    <FileText className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
@@ -18691,7 +18701,7 @@ function ScripturesContent() {
                   disabled={pdfExportSubmitting}
                   className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {pdfExportSubmitting ? "Exporting..." : "Download PDF"}
+                  {pdfExportSubmitting ? "Exporting..." : "View PDF"}
                 </button>
               </div>
             </div>

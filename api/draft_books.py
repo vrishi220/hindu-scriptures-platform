@@ -4255,7 +4255,7 @@ def export_snapshot_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{filename}"',
             "X-Backend-PDF-Fonts": ";".join(
                 f"{key}={value}" for key, value in font_diagnostics.items()
             ),
@@ -4389,7 +4389,7 @@ def _export_book_pdf_with_options(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{filename}"',
             "X-Backend-PDF-Fonts": ";".join(
                 f"{key}={value}" for key, value in font_diagnostics.items()
             ),
