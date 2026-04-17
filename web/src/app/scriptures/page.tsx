@@ -1282,6 +1282,48 @@ const mapWordMeaningsRowsFromContent = (node: NodeContent): WordMeaningRow[] => 
   }));
 };
 
+const resolveCanonicalLevelName = (
+  levelName: string,
+  levelNameOverrides: Record<string, unknown> | null | undefined,
+): string => {
+  const trimmed = levelName.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (!levelNameOverrides || typeof levelNameOverrides !== "object") {
+    return trimmed;
+  }
+
+  const normalizedInput = trimmed.toLowerCase();
+  for (const [canonicalRaw, displayRaw] of Object.entries(levelNameOverrides)) {
+    if (typeof canonicalRaw !== "string") {
+      continue;
+    }
+
+    const canonical = canonicalRaw.trim();
+    if (!canonical) {
+      continue;
+    }
+    if (canonical.toLowerCase() === normalizedInput) {
+      return canonical;
+    }
+
+    if (typeof displayRaw !== "string") {
+      continue;
+    }
+    const display = displayRaw.trim();
+    if (!display) {
+      continue;
+    }
+    if (display.toLowerCase() === normalizedInput) {
+      return canonical;
+    }
+  }
+
+  return trimmed;
+};
+
 const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<string> => {
   if (!book) {
     return new Set();
@@ -1306,10 +1348,16 @@ const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<str
     return new Set();
   }
 
+  const levelNameOverrides =
+    book.level_name_overrides && typeof book.level_name_overrides === "object"
+      ? (book.level_name_overrides as Record<string, unknown>)
+      : null;
+
   return new Set(
     enabledLevels
       .filter((level): level is string => typeof level === "string" && level.trim().length > 0)
-      .map((level) => level.trim().toLowerCase())
+      .map((level) => resolveCanonicalLevelName(level, levelNameOverrides).toLowerCase())
+      .filter(Boolean)
   );
 };
 
@@ -3959,8 +4007,22 @@ function ScripturesContent() {
             (level): level is string => typeof level === "string" && level.trim().length > 0
           )
         : [];
+      const canonicalSchemaLevels = Array.from(
+        new Set(
+          schemaLevels
+            .map((level) =>
+              resolveCanonicalLevelName(
+                level,
+                currentBook?.level_name_overrides && typeof currentBook.level_name_overrides === "object"
+                  ? (currentBook.level_name_overrides as Record<string, unknown>)
+                  : null
+              )
+            )
+            .filter(Boolean)
+        )
+      );
       setPropertiesWordMeaningsEnabledLevels(
-        schemaLevels.filter((level) => enabledLevels.has(level.trim().toLowerCase()))
+        canonicalSchemaLevels.filter((level) => enabledLevels.has(level.trim().toLowerCase()))
       );
       setPropertiesWordMeaningsDefaultSourceLanguage(
         getWordMeaningsDefaultSourceLanguageFromBook(currentBook) || wordMeaningsGlobalSourceLanguage
@@ -4537,7 +4599,14 @@ function ScripturesContent() {
 
     const currentWordMeaningsEnabledLevels = Array.from(getWordMeaningsEnabledLevelsFromBook(currentBook));
     const nextWordMeaningsEnabledLevels = normalizeWordMeaningsEnabledLevels(
-      propertiesWordMeaningsEnabledLevels
+      propertiesWordMeaningsEnabledLevels.map((level) =>
+        resolveCanonicalLevelName(
+          level,
+          currentBook?.level_name_overrides && typeof currentBook.level_name_overrides === "object"
+            ? (currentBook.level_name_overrides as Record<string, unknown>)
+            : null
+        )
+      )
     );
     const currentWordMeaningsDefaultSourceLanguage =
       getWordMeaningsDefaultSourceLanguageFromBook(currentBook) || "";
@@ -10358,7 +10427,12 @@ function ScripturesContent() {
 
   const wordMeaningsEnabledLevels = getWordMeaningsEnabledLevelsFromBook(currentBook);
   const isWordMeaningsEnabledForLevel = (levelName: string | null | undefined) => {
-    const normalizedLevel = (levelName || "").trim().toLowerCase();
+    const normalizedLevel = resolveCanonicalLevelName(
+      levelName || "",
+      currentBook?.level_name_overrides && typeof currentBook.level_name_overrides === "object"
+        ? (currentBook.level_name_overrides as Record<string, unknown>)
+        : null
+    ).toLowerCase();
     if (!normalizedLevel || wordMeaningsEnabledLevels.size === 0) {
       return false;
     }
@@ -10445,6 +10519,16 @@ function ScripturesContent() {
     }
     return normalized;
   }, [currentBook?.level_name_overrides]);
+
+  const canonicalBookSchemaLevels = useMemo<string[]>(() =>
+    Array.from(
+      new Set(
+        currentBookSchemaLevels
+          .map((level) => resolveCanonicalLevelName(level, currentBookLevelNameOverrides))
+          .filter(Boolean)
+      )
+    )
+  , [currentBookSchemaLevels, currentBookLevelNameOverrides]);
 
   // Keep preview controls independent of preview artifact size.
   const availablePreviewLevels = useMemo<string[]>(() => {
@@ -12070,7 +12154,10 @@ function ScripturesContent() {
         block.content.sequence_number !== ""
           ? `${getDisplayLevelName(block.content.level_name)} ${block.content.sequence_number}`
           : "";
-      const shouldForceStructuralHeading = isStructuralOnlyBlock && Boolean(structuralHeading);
+      const shouldForceStructuralHeading =
+        Boolean(structuralHeading) &&
+        (isStructuralOnlyBlock ||
+          (bookPreviewArtifact.preview_scope === "node" && !(rawTitle || "").trim()));
       const displayTitle = shouldForceStructuralHeading
         ? structuralHeading
         : appliedShowPreviewTitles
@@ -13955,6 +14042,15 @@ function ScripturesContent() {
                                 node.sequence_number || node.id,
                                 isLeaf
                               ) || node.id;
+                            const canonicalLevel = getSchemaMatchedLevelName(
+                              formatValue(node.level_name) || "",
+                              typeof node.level_order === "number" ? node.level_order : null
+                            );
+                            const levelLabel =
+                              getDisplayLevelName(canonicalLevel || formatValue(node.level_name) || "") ||
+                              canonicalLevel ||
+                              formatValue(node.level_name) ||
+                              "Level";
                             const titleText =
                               formatValue(node.title_english) ||
                               formatValue(node.title_sanskrit) ||
@@ -13962,9 +14058,9 @@ function ScripturesContent() {
                             if (isLeaf) {
                               return titleText
                                 ? titleText
-                                : `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
+                                : `${levelLabel} ${displaySeq}`;
                             }
-                            return titleText || `Verse ${displaySeq}`;
+                            return titleText || `${levelLabel} ${displaySeq}`;
                           })()}
                         </button>
                         {index < breadcrumb.length - 1 && <span>/</span>}
@@ -16275,16 +16371,16 @@ function ScripturesContent() {
                       </select>
                     </label>
                   </div>
-                  {currentBookSchemaLevels.length > 0 ? (
+                  {canonicalBookSchemaLevels.length > 0 ? (
                     <div className="flex flex-col gap-2">
-                      {currentBookSchemaLevels.map((level) => {
+                      {canonicalBookSchemaLevels.map((level) => {
                         const checked = propertiesWordMeaningsEnabledLevels.includes(level);
                         return (
                           <label
                             key={level}
                             className="flex items-center justify-between gap-3 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700"
                           >
-                            <span>{level}</span>
+                            <span>{getDisplayLevelName(level) || level}</span>
                             <input
                               type="checkbox"
                               checked={checked}

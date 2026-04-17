@@ -882,6 +882,15 @@ test.describe('Scripture Browser', () => {
     await expect(page.getByText('Anuvaka 1', { exact: true })).toBeVisible();
     await expect(page.getByText('Sukta 90', { exact: true })).toBeVisible();
     await expect(page.getByText('Rik 1', { exact: true })).toBeVisible();
+    const hierarchyItems = page
+      .locator('article > div')
+      .filter({ hasText: /^(Mandala|Anuvaka|Sukta|Rik)\s/ });
+    await expect(hierarchyItems).toHaveText([
+      'Mandala 10',
+      'Anuvaka 1',
+      'Sukta 90',
+      'Rik 1',
+    ]);
     await expect(page.getByText('सहस्रशीर्षा पुरुषः', { exact: true })).toBeVisible();
   });
 
