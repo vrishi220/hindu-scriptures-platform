@@ -6275,26 +6275,53 @@ class TestUsersCoverageSprintCOV03:
         non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
         assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_admin_delete_user_returns_400_when_other_fk_records_exist(self, client, monkeypatch):
+    def test_admin_delete_user_returns_400_when_user_has_import_jobs(self, client):
         admin_headers = _register_and_login_as_admin(client)
-        contributor_headers = _register_and_login(client)
+        user_headers = _register_and_login(client)
 
-        contributor_me = client.get("/api/users/me", headers=contributor_headers)
-        assert contributor_me.status_code == status.HTTP_200_OK
-        contributor_id = contributor_me.json()["id"]
+        me = client.get("/api/users/me", headers=user_headers)
+        assert me.status_code == status.HTTP_200_OK
+        user_id = me.json()["id"]
 
-        original_commit = Session.commit
+        from models.import_job import ImportJob
 
-        def commit_with_integrity_error(self, *args, **kwargs):
-            if getattr(self, "deleted", None):
-                raise IntegrityError("delete blocked", {}, Exception("fk constraint"))
-            return original_commit(self, *args, **kwargs)
+        db = SessionLocal()
+        try:
+            db.add(
+                ImportJob(
+                    job_id=f"import-guard-{uuid4().hex[:8]}",
+                    status="completed",
+                    requested_by=user_id,
+                    payload_json={"source": "test"},
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
 
-        monkeypatch.setattr(Session, "commit", commit_with_integrity_error)
-
-        delete_response = client.delete(f"/api/users/{contributor_id}", headers=admin_headers)
+        delete_response = client.delete(f"/api/users/{user_id}", headers=admin_headers)
         assert delete_response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "related records" in delete_response.json()["detail"].lower()
+        assert "import job" in delete_response.json()["detail"].lower()
+
+    def test_admin_delete_user_succeeds_when_only_search_queries_exist(self, client):
+        admin_headers = _register_and_login_as_admin(client)
+        user_headers = _register_and_login(client)
+
+        me = client.get("/api/users/me", headers=user_headers)
+        assert me.status_code == status.HTTP_200_OK
+        user_id = me.json()["id"]
+
+        from models.search_query import SearchQuery
+
+        db = SessionLocal()
+        try:
+            db.add(SearchQuery(user_id=user_id, query_text="test query"))
+            db.commit()
+        finally:
+            db.close()
+
+        delete_response = client.delete(f"/api/users/{user_id}", headers=admin_headers)
+        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
 
     def test_book_ownership_transfer_does_not_allow_user_deletion_with_contributions(self, client):
         admin_headers = _register_and_login_as_admin(client)

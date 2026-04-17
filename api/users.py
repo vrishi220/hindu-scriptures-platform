@@ -307,8 +307,11 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    # Check if user has contributions
+    # Check if user has content node contributions
     from models.content_node import ContentNode
+    from models.import_job import ImportJob
+    from models.search_query import SearchQuery
+
     has_contributions = (
         db.query(ContentNode)
         .filter(
@@ -321,6 +324,24 @@ def delete_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete user with existing contributions. Deactivate instead.",
         )
+
+    # Import jobs record who requested each import — block deletion if any exist
+    has_import_jobs = (
+        db.query(ImportJob).filter(ImportJob.requested_by == user_id).first()
+    )
+    if has_import_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot delete user because they have existing import job records. "
+                "Deactivate instead."
+            ),
+        )
+
+    # Search query logs are ephemeral — nullify the user reference before deleting
+    db.query(SearchQuery).filter(SearchQuery.user_id == user_id).update(
+        {"user_id": None}, synchronize_session=False
+    )
 
     db.delete(user)
     try:
