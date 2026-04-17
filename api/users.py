@@ -7,8 +7,16 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from models.schemas import UserAdminCreate, UserPermissionsUpdate, UserPublic, UserSelfUpdate
+from models.book import Book
+from models.schemas import (
+    UserOwnedBookSummary,
+    UserAdminCreate,
+    UserPermissionsUpdate,
+    UserPublic,
+    UserSelfUpdate,
+)
 from models.user import User
+from services.book_permissions import book_owner_id
 from services import decode_token, get_db, hash_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -315,3 +323,37 @@ def delete_user(
 
     db.delete(user)
     db.commit()
+
+
+@router.get("/{user_id}/books", response_model=list[UserOwnedBookSummary])
+def list_user_owned_books(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("can_admin")),
+) -> list[UserOwnedBookSummary]:
+    _ = current_user
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    owned_books: list[UserOwnedBookSummary] = []
+    books = db.query(Book).order_by(Book.created_at.desc(), Book.id.desc()).all()
+    for book in books:
+        if book_owner_id(book) != user_id:
+            continue
+        metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+        raw_visibility = str(metadata.get("visibility") or "private").strip().lower()
+        visibility = "public" if raw_visibility == "public" else "private"
+        raw_status = str(metadata.get("status") or "draft").strip().lower()
+        status_value = "published" if raw_status == "published" else "draft"
+        owned_books.append(
+            UserOwnedBookSummary(
+                id=book.id,
+                book_name=book.book_name,
+                book_code=book.book_code,
+                visibility=visibility,
+                status=status_value,
+            )
+        )
+
+    return owned_books
