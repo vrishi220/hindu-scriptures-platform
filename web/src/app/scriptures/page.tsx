@@ -14111,16 +14111,16 @@ function ScripturesContent() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setMobilePanel("content")}
+                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
+                        mobilePanel === "content"
+                          ? "bg-[color:var(--accent)] text-white"
+                          : "text-zinc-600 hover:text-zinc-800"
+                      }`}
+                    >
+                      Content
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleCloseBrowseModal();
-                    }}
-                    className="text-xl text-zinc-400 transition hover:text-zinc-600 sm:text-2xl"
-                  >
-                    ✕
-                  </button>
                 </div>
               </div>
 
@@ -18002,6 +18002,16 @@ function ScripturesContent() {
                                   ]
                                 : [];
                               void openShareDialogForBook({
+                                  bookId,
+                                  bookName: currentBook?.book_name || "Book",
+                                  visibility,
+                                  canManageShares: visibility === "private" && canEditCurrentBook,
+                                  description: visibility === "public"
+                                    ? "Copy or email a public link for this view."
+                                    : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
+                                  linkOptions,
+                                });
+                              }}
                             disabled={showPreviewControls}
                             title="Share"
                             aria-label="Share"
