@@ -1356,15 +1356,26 @@ def create_or_update_book_share(
 
     ensure_book_owner_or_edit_any(current_user, book)
 
-    shared_user = db.query(User).filter(User.email == payload.email).first()
+    normalized_email = payload.email.strip().lower()
+    shared_user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if not shared_user:
         shared_user = User(
-            email=payload.email,
+            email=normalized_email,
             is_active=False,
             is_verified=False,
         )
         db.add(shared_user)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            # Another request may have created the same email concurrently.
+            db.rollback()
+            shared_user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
+            if not shared_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Could not resolve shared user for this email",
+                )
 
     owner_id = _book_owner_id(book)
     if owner_id is not None and shared_user.id == owner_id:
@@ -1387,7 +1398,22 @@ def create_or_update_book_share(
         )
         db.add(share)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Handle races on (book_id, shared_with_user_id) unique constraint.
+        db.rollback()
+        existing_share = (
+            db.query(BookShare)
+            .filter(BookShare.book_id == book_id, BookShare.shared_with_user_id == shared_user.id)
+            .first()
+        )
+        if not existing_share:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Share already exists")
+        existing_share.permission = payload.permission
+        existing_share.shared_by_user_id = current_user.id
+        db.commit()
+        share = existing_share
     db.refresh(share)
 
     # Send invitation email if requested
