@@ -1035,7 +1035,19 @@ def list_books(
 ) -> list[BookPublic]:
     query_text = (q or "").strip()
     if query_text:
-        books = db.query(Book).all()
+        # Pre-filter at DB level: only load books containing at least one search term,
+        # then let Python scoring rank them precisely.
+        terms = [t for t in query_text.lower().split() if t]
+        if terms:
+            from sqlalchemy import String
+            candidate_filters = []
+            for term in terms:
+                like_term = f"%{term}%"
+                candidate_filters.append(Book.book_name.ilike(like_term))
+                candidate_filters.append(cast(Book.metadata_json, String).ilike(like_term))
+            books = db.query(Book).filter(or_(*candidate_filters)).all()
+        else:
+            books = db.query(Book).all()
         ranked_books = []
         for book in books:
             score = _book_relevance_score(book, query_text)
@@ -2993,7 +3005,6 @@ def list_book_tree(
             )
         )
         .filter(ContentNode.book_id == book_id)
-        .order_by(ContentNode.level_order)
         .all()
     )
 
@@ -3132,7 +3143,6 @@ def export_book_json(
             )
         )
         .filter(ContentNode.book_id == book_id)
-        .order_by(ContentNode.level_order)
         .all()
     )
     nodes = sorted(nodes, key=lambda node: (node.level_order, _node_sequence_sort_key(node)))
@@ -3298,7 +3308,6 @@ def list_book_tree_nested(
             )
         )
         .filter(ContentNode.book_id == book_id)
-        .order_by(ContentNode.level_order)
         .all()
     )
     

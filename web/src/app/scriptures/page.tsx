@@ -2672,6 +2672,7 @@ function ScripturesContent() {
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const lastFailedPreviewRequestKey = useRef<string | null>(null);
   const activePreviewRequestKey = useRef<string | null>(null);
+  const activePreviewAbortController = useRef<AbortController | null>(null);
   const previewPrefetchInFlightKeysRef = useRef<Set<string>>(new Set());
   const nodeContentCacheRef = useRef<Map<number, { cachedAt: number; data: NodeContent }>>(new Map());
   const bookPreviewCacheRef = useRef<Map<string, { cachedAt: number; artifact: BookPreviewArtifact }>>(new Map());
@@ -8455,6 +8456,9 @@ function ScripturesContent() {
     const requestKey = buildPreviewRequestKey(scope, previewBookId, previewNodeId);
 
     if (!append) {
+      activePreviewAbortController.current?.abort();
+      const previewAbortController = new AbortController();
+      activePreviewAbortController.current = previewAbortController;
       activePreviewRequestKey.current = requestKey;
     }
 
@@ -8585,6 +8589,7 @@ function ScripturesContent() {
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
+          signal: activePreviewAbortController.current?.signal,
         });
         const payload = (await response.json().catch(() => null)) as
           | BookPreviewArtifact
