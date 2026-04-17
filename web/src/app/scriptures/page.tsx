@@ -10196,6 +10196,7 @@ function ScripturesContent() {
       };
     }
   ): Promise<boolean> => {
+    let targetWindow: Window | null = null;
     try {
       const useAppliedPreviewSettings = Boolean(showBookPreview && bookPreviewArtifact);
       const activeTranslationLanguages = useAppliedPreviewSettings
@@ -10227,6 +10228,17 @@ function ScripturesContent() {
         typeof bookPreviewArtifact.root_node_id === "number"
           ? bookPreviewArtifact.root_node_id
           : undefined;
+
+      // Open window immediately to preserve user gesture context for large exports.
+      targetWindow = window.open("", "_blank");
+      if (!targetWindow) {
+        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
+        return false;
+      }
+      targetWindow.document.write(
+        "<html><body style=\"font-family: system-ui; padding: 24px; color: #444;\">Preparing PDF preview...</body></html>"
+      );
+      targetWindow.document.close();
 
       const response = await fetch(`/api/books/${targetBookId}/export/pdf`, {
         method: "POST",
@@ -10293,14 +10305,10 @@ function ScripturesContent() {
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (targetWindow && !targetWindow.closed) {
+          targetWindow.close();
+        }
         alert(payload?.detail || "Failed to export book PDF");
-        return false;
-      }
-
-      // Open window synchronously to preserve user gesture context
-      const targetWindow = window.open("", "_blank");
-      if (!targetWindow) {
-        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
         return false;
       }
 
@@ -10310,17 +10318,21 @@ function ScripturesContent() {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "") || `book-${targetBookId}`;
-      const fileName = `${safeName}.pdf`;
+      const openedWindow = targetWindow;
+      if (!openedWindow || openedWindow.closed) {
+        alert("Unable to open PDF preview. Please allow pop-ups and try again.");
+        return false;
+      }
 
       if (options?.outputMode === "print") {
         const printUrl = window.URL.createObjectURL(blob);
-        targetWindow.location.href = printUrl;
+        openedWindow.location.href = printUrl;
 
         // Delay print slightly to allow built-in PDF viewer to fully initialize.
         window.setTimeout(() => {
           try {
-            targetWindow.focus();
-            targetWindow.print();
+            openedWindow.focus();
+            openedWindow.print();
           } catch {
             // No-op; user can still print manually from the opened tab.
           }
@@ -10333,13 +10345,16 @@ function ScripturesContent() {
       }
 
       const url = window.URL.createObjectURL(blob);
-      targetWindow.location.href = url;
+  openedWindow.location.href = url;
 
       window.setTimeout(() => {
         window.URL.revokeObjectURL(url);
       }, 60_000);
       return true;
     } catch {
+      if (targetWindow && !targetWindow.closed) {
+        targetWindow.close();
+      }
       alert("Failed to export book PDF");
       return false;
     }
