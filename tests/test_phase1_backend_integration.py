@@ -6273,7 +6273,7 @@ class TestUsersCoverageSprintCOV03:
         non_existent_delete = client.delete("/api/users/999999", headers=admin_headers)
         assert non_existent_delete.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_owner_transfer_ownership_allows_user_deletion(self, client):
+    def test_book_ownership_transfer_does_not_allow_user_deletion_with_contributions(self, client):
         admin_headers = _register_and_login_as_admin(client)
         source_headers = _register_and_login(client)
         target_headers = _register_and_login(client)
@@ -6326,27 +6326,33 @@ class TestUsersCoverageSprintCOV03:
         )
         assert node_response.status_code == status.HTTP_201_CREATED
 
+        target_email = target_me.json()["email"]
+
         forbidden_transfer_response = client.post(
-            f"/api/users/{source_user_id}/transfer-ownership",
-            json={"target_user_id": target_user_id},
+            "/api/content/books/ownership/transfer",
+            json={"target_email": target_email, "book_ids": [book_id]},
             headers=admin_headers,
         )
-        assert forbidden_transfer_response.status_code == status.HTTP_403_FORBIDDEN
+        assert forbidden_transfer_response.status_code in (
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_403_FORBIDDEN,
+        )
 
         transfer_response = client.post(
-            f"/api/users/{source_user_id}/transfer-ownership",
-            json={"target_user_id": target_user_id},
+            "/api/content/books/ownership/transfer",
+            json={"target_email": target_email, "book_ids": [book_id]},
             headers=source_headers,
         )
         assert transfer_response.status_code == status.HTTP_200_OK
         transfer_payload = transfer_response.json()
         assert transfer_payload["source_user_id"] == source_user_id
         assert transfer_payload["target_user_id"] == target_user_id
-        assert transfer_payload["created_by_updated"] >= 1
-        assert transfer_payload["last_modified_by_updated"] >= 1
+        assert transfer_payload["transferred_count"] == 1
+        assert transfer_payload["transferred_book_ids"] == [book_id]
 
         delete_response = client.delete(f"/api/users/{source_user_id}", headers=admin_headers)
-        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
+        assert delete_response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Cannot delete user with existing contributions" in delete_response.json()["detail"]
 
     def test_admin_can_list_books_owned_by_user(self, client):
         admin_headers = _register_and_login_as_admin(client)
