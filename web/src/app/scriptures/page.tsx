@@ -18081,16 +18081,6 @@ function ScripturesContent() {
                   >
                     <FileText className="h-4 w-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleClosePreview}
-                    disabled={showPreviewControls}
-                    title="Close preview"
-                    aria-label="Close preview"
-                    className="rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <X className="h-6 w-6 sm:h-7 sm:w-7" />
-                  </button>
                 </div>
               </div>
 
