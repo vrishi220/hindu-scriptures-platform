@@ -14092,33 +14092,39 @@ function ScripturesContent() {
                   {canBrowseCurrentNode && (
                     <a
                       href={buildScripturesPreviewPath("book", bookId)}
-                      className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 sm:text-xs"
+                      title="Preview"
+                      aria-label="Preview"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/90 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800"
                     >
-                      Preview
+                      <Eye size={14} />
                     </a>
                   )}
                   <div className="inline-flex rounded-full border border-black/10 bg-white/90 p-0.5 md:hidden">
                     <button
                       type="button"
                       onClick={() => setMobilePanel("tree")}
-                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
+                      title="Tree"
+                      aria-label="Tree"
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
                         mobilePanel === "tree"
                           ? "bg-[color:var(--accent)] text-white"
                           : "text-zinc-600 hover:text-zinc-800"
                       }`}
                     >
-                      Tree
+                      <LayoutGrid size={14} />
                     </button>
                     <button
                       type="button"
                       onClick={() => setMobilePanel("content")}
-                      className={`rounded-full px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] transition ${
+                      title="Content"
+                      aria-label="Content"
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition ${
                         mobilePanel === "content"
                           ? "bg-[color:var(--accent)] text-white"
                           : "text-zinc-600 hover:text-zinc-800"
                       }`}
                     >
-                      Content
+                      <List size={14} />
                     </button>
                   </div>
                 </div>
