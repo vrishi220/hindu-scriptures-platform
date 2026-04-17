@@ -1641,6 +1641,69 @@ class TestBookSharesPhase2:
         post_delete_view = client.get(f"/api/content/books/{book_id}", headers=headers_viewer)
         assert post_delete_view.status_code == status.HTTP_200_OK
 
+    def test_share_create_is_case_insensitive_and_updates_existing_share(self, client):
+        headers_owner = _register_and_login(client)
+        headers_viewer = _register_and_login(client)
+
+        owner_me = client.get("/api/users/me", headers=headers_owner)
+        viewer_me = client.get("/api/users/me", headers=headers_viewer)
+        assert owner_me.status_code == status.HTTP_200_OK
+        assert viewer_me.status_code == status.HTTP_200_OK
+
+        viewer_email = viewer_me.json()["email"]
+        viewer_id = viewer_me.json()["id"]
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Share Case Schema {uuid4().hex[:8]}",
+                "description": "Schema for share case-insensitive tests",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers_owner,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Share Case Book {uuid4().hex[:6]}",
+                "book_code": f"share-case-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers_owner,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        mixed_case_email = viewer_email.upper()
+        first_share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": mixed_case_email, "permission": "viewer"},
+            headers=headers_owner,
+        )
+        assert first_share_response.status_code == status.HTTP_201_CREATED
+
+        second_share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={"email": viewer_email.lower(), "permission": "editor"},
+            headers=headers_owner,
+        )
+        assert second_share_response.status_code == status.HTTP_201_CREATED
+
+        list_shares_response = client.get(
+            f"/api/content/books/{book_id}/shares",
+            headers=headers_owner,
+        )
+        assert list_shares_response.status_code == status.HTTP_200_OK
+
+        shares = list_shares_response.json()
+        viewer_shares = [share for share in shares if share["shared_with_user_id"] == viewer_id]
+        assert len(viewer_shares) == 1
+        assert viewer_shares[0]["permission"] == "editor"
+
     def test_create_node_copy_populates_variant_author_registry_from_author_name(self, client):
         headers = _register_and_login_as_admin(client)
 

@@ -66,6 +66,14 @@ type MockMediaFile = {
   created_at?: string;
 };
 
+type MockBookShare = {
+  id: number;
+  shared_with_user_id: number;
+  shared_with_email: string;
+  permission: 'viewer' | 'contributor' | 'editor';
+  shared_with_is_active: boolean;
+};
+
 const setupEditableScripturesMocks = async (
   page: import('@playwright/test').Page,
   options?: {
@@ -78,6 +86,7 @@ const setupEditableScripturesMocks = async (
   const nodeMedia = new Map<number, MockMediaFile[]>(
     Object.entries(options?.initialNodeMedia ?? {}).map(([key, value]) => [Number(key), value])
   );
+  const bookShares: MockBookShare[] = [];
 
   const tree = [
     {
@@ -146,6 +155,8 @@ const setupEditableScripturesMocks = async (
   };
 
   let nextNodeMediaId = 900;
+  let nextShareId = 300;
+  let nextSharedUserId = 700;
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -221,6 +232,46 @@ const setupEditableScripturesMocks = async (
 
     if (path === '/api/books/101/tree' && method === 'GET') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(tree) });
+      return;
+    }
+
+    if (path === '/api/books/101/shares' && method === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(bookShares) });
+      return;
+    }
+
+    if (path === '/api/books/101/shares' && method === 'POST') {
+      const payload = JSON.parse(request.postData() || '{}') as {
+        email?: string;
+        permission?: 'viewer' | 'contributor' | 'editor';
+      };
+      const normalizedEmail = (payload.email || '').trim().toLowerCase();
+      if (!normalizedEmail) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Invalid email' }),
+        });
+        return;
+      }
+
+      const permission = payload.permission || 'viewer';
+      const existingShare = bookShares.find((share) => share.shared_with_email === normalizedEmail);
+      if (existingShare) {
+        existingShare.permission = permission;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(existingShare) });
+        return;
+      }
+
+      const createdShare: MockBookShare = {
+        id: nextShareId++,
+        shared_with_user_id: nextSharedUserId++,
+        shared_with_email: normalizedEmail,
+        permission,
+        shared_with_is_active: false,
+      };
+      bookShares.push(createdShare);
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(createdShare) });
       return;
     }
 
@@ -1021,6 +1072,32 @@ test.describe('Scripture Browser', () => {
         page_ranges: '1-3, 5',
       },
     });
+  });
+
+  test('private book share dialog creates invite and shows invited user', async ({ page }) => {
+    await setupEditableScripturesMocks(page);
+
+    await page.goto('http://localhost:3000/scriptures?book=101&browse=1');
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.getByRole('heading', { name: 'Browse Book' })).toBeVisible();
+    const treeActionsButton = page.getByRole('button', { name: 'Book tree actions' });
+    const browseBookButton = page.getByRole('button', { name: 'Browse book' }).first();
+    if (!(await treeActionsButton.isVisible())) {
+      if (await browseBookButton.count()) {
+        await browseBookButton.click();
+      }
+    }
+
+    await expect(treeActionsButton).toBeVisible({ timeout: 10000 });
+    await treeActionsButton.click();
+    await page.getByRole('button', { name: 'Share' }).first().click();
+
+    await expect(page.getByRole('heading', { name: /Share Mock Multimedia Book/ })).toBeVisible();
+    await page.getByPlaceholder('user@example.com').fill('Invited.User@Example.com');
+    await page.getByRole('button', { name: 'Add Share' }).click();
+
+    await expect(page.getByText('invited.user@example.com', { exact: true })).toBeVisible();
   });
 });
 
