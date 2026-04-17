@@ -2871,7 +2871,7 @@ class TestDraftBookAndEditionSnapshotIntegration:
         )
         assert owner_export_response.status_code == status.HTTP_200_OK
         assert owner_export_response.headers.get("content-type", "").startswith("application/pdf")
-        assert "attachment; filename=" in owner_export_response.headers.get("content-disposition", "")
+        assert "inline; filename=" in owner_export_response.headers.get("content-disposition", "")
         assert owner_export_response.headers.get("x-backend-pdf-fonts") is not None
         assert owner_export_response.content.startswith(b"%PDF")
 
