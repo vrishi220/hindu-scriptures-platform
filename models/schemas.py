@@ -607,6 +607,27 @@ class ContentNodeUpdate(BaseModel):
         return _validate_word_meanings_content_data(value)
 
 
+class ContentNodeFieldPatch(BaseModel):
+    field_path: str
+    value: str | None = None
+    edit_reason: str | None = None
+
+    @field_validator("field_path")
+    @classmethod
+    def validate_field_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("field_path is required")
+
+        if re.fullmatch(
+            r"(title_english|title_sanskrit|title_transliteration|sequence_number|content_data\.basic\.(sanskrit|transliteration|translation)|content_data\.translations\.[A-Za-z0-9_-]+|content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text|content_data\.(translation_variants|commentary_variants)\.\d+\.(text|author|language))",
+            normalized,
+        ):
+            return normalized
+
+        raise ValueError("Unsupported field_path for single-field patch")
+
+
 class ContentNodePublic(ContentNodeBase):
     model_config = ConfigDict(from_attributes=True)
 
