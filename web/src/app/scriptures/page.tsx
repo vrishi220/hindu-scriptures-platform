@@ -2704,6 +2704,7 @@ function ScripturesContent() {
   const browseBookOverlayRef = useRef<HTMLDivElement | null>(null);
   const previewCloseInProgressRef = useRef(false);
   const browseCloseInProgressRef = useRef(false);
+  const editorOpenedFromPreviewRef = useRef(false);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
   const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
@@ -8660,9 +8661,8 @@ function ScripturesContent() {
         return;
       }
 
-      handleBrowseFromPreview(bookId, nodeId);
+      editorOpenedFromPreviewRef.current = true;
       setActionMessage(null);
-      setSelectedId(nodeId);
 
       try {
         const response = await fetch(contentPath(`/nodes/${nodeId}`), {
@@ -11891,6 +11891,12 @@ function ScripturesContent() {
         }
         if (action === "edit" && savedNode) {
           syncSavedNodeState(savedNode);
+          if (editorOpenedFromPreviewRef.current) {
+            editorOpenedFromPreviewRef.current = false;
+            const refreshScope = bookPreviewArtifact?.preview_scope === "node" ? "node" : "book";
+            const refreshNodeId = typeof bookPreviewArtifact?.root_node_id === "number" ? bookPreviewArtifact.root_node_id : null;
+            void handlePreviewBook(refreshScope, undefined, "replace", 0, false, refreshNodeId);
+          }
         } else if (preservedNodeId) {
           await loadNodeContent(preservedNodeId, true);
         }
@@ -12858,24 +12864,25 @@ function ScripturesContent() {
               {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
             </div>
           )}
-          {(displayTitle || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
+          {(displayTitle || (previewQuickEditEnabled && canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <div className="mb-0.5 flex items-center justify-between gap-2">
               {displayTitle ? (
                 <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
               ) : (
                 <span />
               )}
-              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+              {previewQuickEditEnabled && canEditCurrentBook && typeof quickEditNodeId === "number" && (
                 <button
                   type="button"
                   onClick={() => {
                     void openPreviewNodeInFullEditor(quickEditNodeId);
                   }}
-                  className="rounded-md border border-black/10 bg-white/90 px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600 transition hover:border-black/20 hover:text-zinc-800"
-                  title="Open full node editor"
-                  aria-label="Open full node editor"
+                  className="flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800"
+                  title="Edit all fields for this node"
+                  aria-label="Edit all fields for this node"
                 >
-                  Edit node
+                  <Pencil className="h-3 w-3" />
+                  <Pencil className="h-3 w-3" />
                 </button>
               )}
             </div>
@@ -20600,6 +20607,7 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => {
+                      editorOpenedFromPreviewRef.current = false;
                       setAction(null);
                       setActionNode(null);
                       setCreateParentNodeIdOverride(null);
@@ -21123,6 +21131,7 @@ function ScripturesContent() {
                     <button
                       type="button"
                       onClick={() => {
+                        editorOpenedFromPreviewRef.current = false;
                         setAction(null);
                         setActionNode(null);
                         setCreateParentNodeIdOverride(null);
