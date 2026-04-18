@@ -8779,7 +8779,7 @@ function ScripturesContent() {
                 fallback_order: ["user_preference", "en", "first_available"],
               },
               rendering: {
-                show_language_badge_when_fallback_used: true,
+                show_language_badge_when_fallback_used: false,
               },
             },
             translation_language: translationLanguageToCode(
@@ -9085,7 +9085,7 @@ function ScripturesContent() {
                   fallback_order: ["user_preference", "en", "first_available"],
                 },
                 rendering: {
-                  show_language_badge_when_fallback_used: true,
+                  show_language_badge_when_fallback_used: false,
                 },
               },
               translation_language: translationLanguageToCode(
@@ -10270,7 +10270,7 @@ function ScripturesContent() {
                   fallback_order: ["user_preference", "en", "first_available"],
                 },
                 rendering: {
-                  show_language_badge_when_fallback_used: true,
+                  show_language_badge_when_fallback_used: false,
                 },
               },
               translation_language: translationLanguageToCode(

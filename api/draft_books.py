@@ -1670,7 +1670,7 @@ def _resolve_word_meanings_meaning_config(
 ) -> tuple[str, list[str], bool]:
     preferred_language = "en"
     fallback_order = ["user_preference", "en", "first_available"]
-    show_badge_when_fallback_used = True
+    show_badge_when_fallback_used = False
 
     if not isinstance(resolved_metadata, dict):
         return preferred_language, fallback_order, show_badge_when_fallback_used
