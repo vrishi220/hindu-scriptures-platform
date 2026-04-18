@@ -9009,6 +9009,103 @@ function ScripturesContent() {
     };
   };
 
+  const applySavedNodeToPreviewArtifact = (
+    artifact: BookPreviewArtifact,
+    savedNode: NodeContent
+  ): BookPreviewArtifact => {
+    const basic =
+      savedNode.content_data?.basic && typeof savedNode.content_data.basic === "object"
+        ? savedNode.content_data.basic
+        : undefined;
+    const translations = toTranslationRecord(savedNode.content_data?.translations);
+    const preferredTranslation = pickPreferredTranslationText(
+      translations,
+      sourceLanguage,
+      basic?.translation
+    );
+
+    let matched = false;
+    const nextBody = artifact.sections.body.map((block) => {
+      const blockNodeId =
+        typeof block.source_node_id === "number"
+          ? block.source_node_id
+          : typeof (block.content as { node_id?: unknown }).node_id === "number"
+            ? ((block.content as { node_id?: number }).node_id ?? null)
+            : artifact.preview_scope === "node" && typeof artifact.root_node_id === "number"
+              ? artifact.root_node_id
+              : null;
+
+      if (blockNodeId !== savedNode.id) {
+        return block;
+      }
+
+      matched = true;
+      const nextContent: BookPreviewBlock["content"] = {
+        ...block.content,
+        level_name: savedNode.level_name,
+        sequence_number: savedNode.sequence_number,
+        sanskrit: basic?.sanskrit || "",
+        transliteration: basic?.transliteration || "",
+        english: preferredTranslation,
+        translations,
+        translation_variants: Array.isArray(savedNode.content_data?.translation_variants)
+          ? savedNode.content_data?.translation_variants
+          : undefined,
+        commentary_variants: Array.isArray(savedNode.content_data?.commentary_variants)
+          ? savedNode.content_data?.commentary_variants
+          : undefined,
+        word_meanings_rows: Array.isArray(savedNode.content_data?.word_meanings_rows)
+          ? savedNode.content_data?.word_meanings_rows
+          : undefined,
+      };
+
+      if (Array.isArray(nextContent.rendered_lines)) {
+        nextContent.rendered_lines = nextContent.rendered_lines.map((line) => {
+          if (!line || typeof line !== "object") {
+            return line;
+          }
+          const lineField =
+            typeof (line as { field?: unknown }).field === "string"
+              ? (line as { field: string }).field.trim().toLowerCase()
+              : "";
+
+          if (lineField === "sanskrit") {
+            return { ...line, value: basic?.sanskrit || "" };
+          }
+          if (lineField === "transliteration") {
+            return { ...line, value: basic?.transliteration || "" };
+          }
+          if (lineField === "english" || lineField === "translation") {
+            return { ...line, value: preferredTranslation || "" };
+          }
+          return line;
+        });
+      }
+
+      return {
+        ...block,
+        title: savedNode.title_english || block.title,
+        content: nextContent,
+      };
+    });
+
+    if (!matched) {
+      return artifact;
+    }
+
+    return {
+      ...artifact,
+      root_title:
+        artifact.preview_scope === "node" && artifact.root_node_id === savedNode.id
+          ? savedNode.title_english || artifact.root_title || null
+          : artifact.root_title,
+      sections: {
+        ...artifact.sections,
+        body: nextBody,
+      },
+    };
+  };
+
   const handleSavePreviewQuickEdit = async () => {
     if (!previewQuickEditDraft || !bookPreviewArtifact) {
       return;
@@ -11899,9 +11996,9 @@ function ScripturesContent() {
           syncSavedNodeState(savedNode);
           if (editorOpenedFromPreviewRef.current) {
             editorOpenedFromPreviewRef.current = false;
-            const refreshScope = bookPreviewArtifact?.preview_scope === "node" ? "node" : "book";
-            const refreshNodeId = typeof bookPreviewArtifact?.root_node_id === "number" ? bookPreviewArtifact.root_node_id : null;
-            void handlePreviewBook(refreshScope, undefined, "replace", 0, false, refreshNodeId);
+            setBookPreviewArtifact((prev) =>
+              prev ? applySavedNodeToPreviewArtifact(prev, savedNode) : prev
+            );
           }
         } else if (preservedNodeId) {
           await loadNodeContent(preservedNodeId, true);
