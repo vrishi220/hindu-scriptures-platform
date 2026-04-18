@@ -9106,6 +9106,15 @@ function ScripturesContent() {
     };
   };
 
+  const focusPreviewQuickEditFieldStart = (
+    event: React.FocusEvent<HTMLTextAreaElement>
+  ) => {
+    const element = event.currentTarget;
+    element.setSelectionRange(0, 0);
+    element.scrollTop = 0;
+    element.scrollLeft = 0;
+  };
+
   const handleSavePreviewQuickEdit = async () => {
     if (!previewQuickEditDraft || !bookPreviewArtifact) {
       return;
@@ -13053,13 +13062,15 @@ function ScripturesContent() {
                       {isActiveField && isFirstForField && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           <textarea
-                            rows={3}
+                            rows={10}
+                            autoFocus
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
                                 prev ? { ...prev, value: event.target.value, error: null } : prev
                               )
                             }
+                            onFocus={focusPreviewQuickEditFieldStart}
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                           />
@@ -13155,13 +13166,15 @@ function ScripturesContent() {
                               {isActiveSource && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                                   <textarea
-                                    rows={2}
+                                    rows={10}
+                                    autoFocus
                                     value={previewQuickEditDraft?.value || ""}
                                     onChange={(event) =>
                                       setPreviewQuickEditDraft((prev) =>
                                         prev ? { ...prev, value: event.target.value, error: null } : prev
                                       )
                                     }
+                                    onFocus={focusPreviewQuickEditFieldStart}
                                     disabled={Boolean(previewQuickEditDraft?.saving)}
                                     className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                                   />
@@ -13225,13 +13238,15 @@ function ScripturesContent() {
                               {isActiveMeaning && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                                   <textarea
-                                    rows={2}
+                                    rows={10}
+                                    autoFocus
                                     value={previewQuickEditDraft?.value || ""}
                                     onChange={(event) =>
                                       setPreviewQuickEditDraft((prev) =>
                                         prev ? { ...prev, value: event.target.value, error: null } : prev
                                       )
                                     }
+                                    onFocus={focusPreviewQuickEditFieldStart}
                                     disabled={Boolean(previewQuickEditDraft?.saving)}
                                     className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                                   />
@@ -13341,13 +13356,15 @@ function ScripturesContent() {
                         {isActiveSource && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                             <textarea
-                              rows={2}
+                                rows={10}
+                                autoFocus
                               value={previewQuickEditDraft?.value || ""}
                               onChange={(event) =>
                                 setPreviewQuickEditDraft((prev) =>
                                   prev ? { ...prev, value: event.target.value, error: null } : prev
                                 )
                               }
+                                onFocus={focusPreviewQuickEditFieldStart}
                               disabled={Boolean(previewQuickEditDraft?.saving)}
                               className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                             />
@@ -13379,13 +13396,15 @@ function ScripturesContent() {
                         {isActiveMeaning && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                             <textarea
-                              rows={2}
+                              rows={10}
+                              autoFocus
                               value={previewQuickEditDraft?.value || ""}
                               onChange={(event) =>
                                 setPreviewQuickEditDraft((prev) =>
                                   prev ? { ...prev, value: event.target.value, error: null } : prev
                                 )
                               }
+                              onFocus={focusPreviewQuickEditFieldStart}
                               disabled={Boolean(previewQuickEditDraft?.saving)}
                               className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                             />
@@ -13488,13 +13507,15 @@ function ScripturesContent() {
                       {isActiveField && isFirstForField && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           <textarea
-                            rows={3}
+                            rows={10}
+                            autoFocus
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
                                 prev ? { ...prev, value: event.target.value, error: null } : prev
                               )
                             }
+                            onFocus={focusPreviewQuickEditFieldStart}
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                           />
@@ -13709,13 +13730,15 @@ function ScripturesContent() {
                       {isActiveText && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           <textarea
-                            rows={3}
+                            rows={10}
+                            autoFocus
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
                                 prev ? { ...prev, value: event.target.value, error: null } : prev
                               )
                             }
+                            onFocus={focusPreviewQuickEditFieldStart}
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                           />
@@ -13930,13 +13953,15 @@ function ScripturesContent() {
                       {isActiveText && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           <textarea
-                            rows={3}
+                            rows={10}
+                            autoFocus
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
                                 prev ? { ...prev, value: event.target.value, error: null } : prev
                               )
                             }
+                            onFocus={focusPreviewQuickEditFieldStart}
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                           />
