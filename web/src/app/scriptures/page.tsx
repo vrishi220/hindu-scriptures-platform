@@ -2590,6 +2590,10 @@ function ScripturesContent() {
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
+  const [shareDialogCopyFeedback, setShareDialogCopyFeedback] = useState<{
+    key: string;
+    ok: boolean;
+  } | null>(null);
   const [, setAuthStatus] = useState<string | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
@@ -2687,6 +2691,7 @@ function ScripturesContent() {
   const activeNodeCommentsRequestId = useRef(0);
   const activeNodeCommentsAbortController = useRef<AbortController | null>(null);
   const activeNodeCommentsNodeId = useRef<number | null>(null);
+  const shareDialogCopyFeedbackTimerRef = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const lastFailedPreviewRequestKey = useRef<string | null>(null);
@@ -8151,6 +8156,11 @@ function ScripturesContent() {
   };
 
   const closeShareDialog = () => {
+    if (shareDialogCopyFeedbackTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(shareDialogCopyFeedbackTimerRef.current);
+      shareDialogCopyFeedbackTimerRef.current = null;
+    }
+    setShareDialogCopyFeedback(null);
     setShowShareManager(false);
     setSharesError(null);
     setPublicShareRecipientEmail("");
@@ -8234,7 +8244,7 @@ function ScripturesContent() {
     absoluteUrl: string,
     target: "book" | "node" | "leaf",
     onDone?: () => void
-  ) => {
+  ): Promise<boolean> => {
     onDone?.();
     const ok = await writeClipboardText(absoluteUrl);
     if (ok) {
@@ -8251,6 +8261,21 @@ function ScripturesContent() {
         setAuthMessage(null);
         setCopyTarget(null);
       }, 2000);
+    }
+    return ok;
+  };
+
+  const showShareDialogCopyFeedback = (key: string, ok: boolean) => {
+    if (shareDialogCopyFeedbackTimerRef.current !== null && typeof window !== "undefined") {
+      window.clearTimeout(shareDialogCopyFeedbackTimerRef.current);
+      shareDialogCopyFeedbackTimerRef.current = null;
+    }
+    setShareDialogCopyFeedback({ key, ok });
+    if (typeof window !== "undefined") {
+      shareDialogCopyFeedbackTimerRef.current = window.setTimeout(() => {
+        setShareDialogCopyFeedback(null);
+        shareDialogCopyFeedbackTimerRef.current = null;
+      }, 1800);
     }
   };
 
@@ -18816,12 +18841,17 @@ function ScripturesContent() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              void copyShareUrl(option.url, option.target);
+                            onClick={async () => {
+                              const copied = await copyShareUrl(option.url, option.target);
+                              showShareDialogCopyFeedback(`public:${option.key}`, copied);
                             }}
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-sm font-medium text-white transition"
                           >
-                            Copy link
+                            {shareDialogCopyFeedback?.key === `public:${option.key}`
+                              ? shareDialogCopyFeedback.ok
+                                ? "Copied"
+                                : "Copy failed"
+                              : "Copy link"}
                           </button>
                           <button
                             type="button"
@@ -18891,13 +18921,21 @@ function ScripturesContent() {
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           const privateShareUrl = toAbsoluteUrl(shareDialogState.privateAccessPath);
-                          void copyShareUrl(privateShareUrl, shareDialogState.privateCopyTarget);
+                          const copied = await copyShareUrl(
+                            privateShareUrl,
+                            shareDialogState.privateCopyTarget
+                          );
+                          showShareDialogCopyFeedback("private:main", copied);
                         }}
                         className="rounded-lg border border-black/15 bg-white/85 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white"
                       >
-                        Copy link
+                        {shareDialogCopyFeedback?.key === "private:main"
+                          ? shareDialogCopyFeedback.ok
+                            ? "Copied"
+                            : "Copy failed"
+                          : "Copy link"}
                       </button>
                       <button
                         type="submit"
