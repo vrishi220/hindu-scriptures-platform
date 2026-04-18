@@ -1121,7 +1121,7 @@ test.describe('Scripture Browser', () => {
       .click();
     await expect(page.getByRole('button', { name: 'Book tree actions' })).toBeVisible();
     await page.getByRole('button', { name: 'Book tree actions' }).click();
-    await page.getByRole('button', { name: 'Download PDF' }).click();
+    await page.getByRole('button', { name: 'View PDF' }).click();
 
     await expect(page.getByRole('heading', { name: 'Export PDF' })).toBeVisible();
     await page.getByPlaceholder('All pages (or e.g. 1-3, 5, 8-10)').fill('1-3, 5');
@@ -1131,7 +1131,7 @@ test.describe('Scripture Browser', () => {
     await page.getByLabel('Page Breaks').selectOption('between_leaf');
     await page.getByLabel('Horizontal Margin (mm)').fill('99');
     await page.getByLabel('Include cover page').uncheck();
-    await page.getByRole('button', { name: 'Download PDF' }).click();
+    await page.getByRole('button', { name: 'View PDF' }).click();
 
     await expect(page.getByRole('heading', { name: 'Export PDF' })).not.toBeVisible();
     expect(exportRequestBody).not.toBeNull();

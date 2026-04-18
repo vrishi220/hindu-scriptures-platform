@@ -241,7 +241,7 @@ test('closing browse modal returns to base scriptures page (no implicit preview)
   const browseHeading = page.getByRole('heading', { name: 'Browse Book' });
   await expect(browseHeading).toBeVisible();
 
-  await page.locator('button:has-text("✕")').first().click();
+  await page.getByRole('button', { name: 'Close browse' }).click();
 
   await expect(browseHeading).toBeHidden();
   await expect(page).toHaveURL((url) => {
