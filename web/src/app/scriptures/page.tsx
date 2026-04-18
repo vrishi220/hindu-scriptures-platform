@@ -233,6 +233,8 @@ type ShareDialogState = {
   canManageShares: boolean;
   description: string;
   linkOptions: ShareDialogLinkOption[];
+  privateAccessPath: string;
+  privateCopyTarget: "book" | "node" | "leaf";
 };
 
 type ImportResult = {
@@ -8168,7 +8170,14 @@ function ScripturesContent() {
     setSharesError(null);
     setPublicShareRecipientEmail("");
     setPublicShareEmailSending(false);
-    setShareDialogState(nextDialogState);
+    const effectivePrivateAccessPath =
+      nextDialogState.privateAccessPath ||
+      buildScripturesPreviewPath("book", nextDialogState.bookId);
+    setShareDialogState({
+      ...nextDialogState,
+      privateAccessPath: effectivePrivateAccessPath,
+      privateCopyTarget: nextDialogState.privateCopyTarget || "book",
+    });
     setShowShareManager(true);
     if (nextDialogState.visibility === "private" && nextDialogState.canManageShares) {
       await loadBookShares(nextDialogState.bookId);
@@ -9435,6 +9444,7 @@ function ScripturesContent() {
           email: shareEmail.trim(),
           permission: sharePermission,
           send_email: sendEmailWithShare,
+          access_path: shareDialogState?.privateAccessPath,
         }),
       });
       const payload = (await response.json().catch(() => null)) as
@@ -13129,6 +13139,8 @@ function ScripturesContent() {
               ? "Copy or email a public link for this book."
               : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
             linkOptions,
+            privateAccessPath: buildScripturesPreviewPath("book", book.id.toString()),
+            privateCopyTarget: "book",
           });
         }}
         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -14355,6 +14367,8 @@ function ScripturesContent() {
                                 canManageShares: false,
                                 description: "Copy or email a public link for this section.",
                                 linkOptions,
+                                privateAccessPath: buildScripturesPreviewPath("node", bookId, selectedId),
+                                privateCopyTarget: "node",
                               });
                             }}
                             className="flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-50/50 px-3 py-2 text-sm text-blue-700 transition hover:border-blue-500/60 hover:bg-blue-50 sm:px-2 sm:py-1 sm:text-xs"
@@ -14506,6 +14520,8 @@ function ScripturesContent() {
                                         ? "Copy or email a public link for this book."
                                         : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
                                       linkOptions,
+                                      privateAccessPath: buildScripturesPreviewPath("book", bookId),
+                                      privateCopyTarget: "book",
                                     });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -14853,6 +14869,8 @@ function ScripturesContent() {
                                         ? "Copy or email a public link for this section."
                                         : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
                                       linkOptions,
+                                      privateAccessPath: buildScripturesPreviewPath("node", bookId, selectedId),
+                                      privateCopyTarget: shareTarget,
                                     });
                                   }}
                                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
@@ -18028,6 +18046,11 @@ function ScripturesContent() {
                                     ? "Copy or email a public link for this view."
                                     : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
                                   linkOptions,
+                                  privateAccessPath:
+                                    previewScope === "node"
+                                      ? buildScripturesPreviewPath("node", bookId, targetNodeId)
+                                      : buildScripturesPreviewPath("book", bookId),
+                                  privateCopyTarget: shareTarget,
                                 });
                               }}
                             disabled={showPreviewControls}
@@ -18869,10 +18892,8 @@ function ScripturesContent() {
                       <button
                         type="button"
                         onClick={() => {
-                          const privateShareUrl = toAbsoluteUrl(
-                            buildScripturesPreviewPath("book", String(shareDialogState.bookId))
-                          );
-                          void copyShareUrl(privateShareUrl, "book");
+                          const privateShareUrl = toAbsoluteUrl(shareDialogState.privateAccessPath);
+                          void copyShareUrl(privateShareUrl, shareDialogState.privateCopyTarget);
                         }}
                         className="rounded-lg border border-black/15 bg-white/85 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-white"
                       >

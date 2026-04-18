@@ -525,6 +525,7 @@ class BookShareCreate(BaseModel):
     email: EmailStr
     permission: Literal["viewer", "contributor", "editor"] = "viewer"
     send_email: bool = False  # Whether to send invite email to recipient
+    access_path: str | None = None  # Optional scriptures path to preserve node-level context in invites
 
 
 class BookShareUpdate(BaseModel):

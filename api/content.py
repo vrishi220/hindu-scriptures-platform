@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
@@ -901,10 +901,53 @@ def _shared_book_access_path(book_id: int, email: str | None = None) -> str:
     return f"/scriptures?{urlencode(params)}"
 
 
-def _registration_invite_link(app_base_url: str, email: str, book_id: int) -> str:
-    next_path = _shared_book_access_path(book_id)
+def _normalize_shared_access_path(access_path: str | None, book_id: int) -> str:
+    fallback_path = _shared_book_access_path(book_id)
+    if not access_path:
+        return fallback_path
+
+    candidate = access_path.strip()
+    if not candidate:
+        return fallback_path
+
+    parsed = urlparse(candidate)
+    if parsed.scheme or parsed.netloc:
+        return fallback_path
+
+    if parsed.path != "/scriptures":
+        return fallback_path
+
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=False)
+    params: dict[str, str] = {}
+    for key, value in query_pairs:
+        if key not in params and value.strip():
+            params[key] = value.strip()
+
+    params["book"] = str(book_id)
+    node_value = params.get("node", "").strip()
+    if node_value:
+        params["preview"] = "node"
+    else:
+        params.pop("node", None)
+        params["preview"] = "book"
+
+    return f"/scriptures?{urlencode(params)}"
+
+
+def _registration_invite_link(app_base_url: str, email: str, next_path: str) -> str:
     query = urlencode({"email": email, "next": next_path})
     return f"{app_base_url}/signup?{query}"
+
+
+def _append_email_to_share_path(access_path: str, email: str) -> str:
+    parsed = urlparse(access_path)
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=False)
+    params: dict[str, str] = {}
+    for key, value in query_pairs:
+        if key not in params and value.strip():
+            params[key] = value.strip()
+    params["email"] = email
+    return f"{parsed.path}?{urlencode(params)}"
 
 
 def _clean_optional_text(value: object) -> str | None:
@@ -1529,10 +1572,11 @@ def create_or_update_book_share(
     # Send invitation email if requested
     if payload.send_email:
         app_base_url = os.getenv("APP_BASE_URL", "https://scriptle.org")
+        share_access_path = _normalize_shared_access_path(payload.access_path, book_id)
         invite_link = (
-            f"{app_base_url}{_shared_book_access_path(book_id, shared_user.email)}"
+            f"{app_base_url}{_append_email_to_share_path(share_access_path, shared_user.email)}"
             if shared_user.is_active
-            else _registration_invite_link(app_base_url, shared_user.email, book_id)
+            else _registration_invite_link(app_base_url, shared_user.email, share_access_path)
         )
 
         try:

@@ -5853,6 +5853,59 @@ class TestContentCoverageSprintCOV02:
             f"next=%2Fscriptures%3Fbook%3D{book_id}%26preview%3Dbook"
         )
 
+    def test_create_share_email_for_pending_invite_preserves_node_access_path(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Invite Node Schema {uuid4().hex[:8]}",
+                "description": "Schema for invite node link coverage",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Invite Node Book {uuid4().hex[:6]}",
+                "book_code": f"cov-invite-node-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        def fake_send_share_invitation(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+
+        invite_email = f"invite_node_{uuid4().hex[:8]}@example.com"
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={
+                "email": invite_email,
+                "permission": "viewer",
+                "send_email": True,
+                "access_path": f"/scriptures?book={book_id}&node=108&preview=node",
+            },
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+        assert captured["recipient_email"] == invite_email
+        assert "/signup?email=" in captured["invite_link"]
+        assert captured["invite_link"].endswith(
+            f"next=%2Fscriptures%3Fbook%3D{book_id}%26node%3D108%26preview%3Dnode"
+        )
+
     def test_create_share_email_for_existing_user_includes_prefilled_email_link(self, client, monkeypatch):
         headers = _register_and_login(client)
 
@@ -5909,6 +5962,70 @@ class TestContentCoverageSprintCOV02:
         assert share_response.status_code == status.HTTP_201_CREATED
         assert captured["recipient_email"] == existing_email
         assert f"/scriptures?book={book_id}&preview=book" in captured["invite_link"]
+        assert "&email=" in captured["invite_link"]
+        assert existing_email.replace("@", "%40") in captured["invite_link"]
+
+    def test_create_share_email_for_existing_user_preserves_node_access_path(self, client, monkeypatch):
+        headers = _register_and_login(client)
+
+        existing_suffix = uuid4().hex[:8]
+        existing_email = f"existing_node_invite_{existing_suffix}@example.com"
+        register_response = client.post(
+            "/api/auth/register",
+            json={
+                "email": existing_email,
+                "password": "StrongPass123!",
+                "username": f"existing_node_invite_{existing_suffix}",
+                "full_name": "Existing Node Invite User",
+            },
+        )
+        assert register_response.status_code == status.HTTP_201_CREATED
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"COV Existing Node Invite Schema {uuid4().hex[:8]}",
+                "description": "Schema for existing invite node link coverage",
+                "levels": ["Chapter", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        create_book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"COV Existing Node Invite Book {uuid4().hex[:6]}",
+                "book_code": f"cov-existing-node-invite-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert create_book_response.status_code == status.HTTP_201_CREATED
+        book_id = create_book_response.json()["id"]
+
+        captured: dict[str, str] = {}
+
+        def fake_send_share_invitation(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+
+        share_response = client.post(
+            f"/api/content/books/{book_id}/shares",
+            json={
+                "email": existing_email,
+                "permission": "viewer",
+                "send_email": True,
+                "access_path": f"/scriptures?book={book_id}&node=305&preview=node",
+            },
+            headers=headers,
+        )
+        assert share_response.status_code == status.HTTP_201_CREATED
+        assert captured["recipient_email"] == existing_email
+        assert f"/scriptures?book={book_id}&node=305&preview=node" in captured["invite_link"]
         assert "&email=" in captured["invite_link"]
         assert existing_email.replace("@", "%40") in captured["invite_link"]
 
