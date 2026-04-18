@@ -103,7 +103,7 @@ test.describe('preview node field PATCH proxy route', () => {
     expect(response.status()).toBe(422);
   });
 
-  test('returns 400 for unsupported field_path', async ({ request }) => {
+  test('returns 422 for unsupported field_path schema validation', async ({ request }) => {
     const identity = uniqueIdentity();
     await registerAndLogin(request, identity);
 
@@ -113,7 +113,7 @@ test.describe('preview node field PATCH proxy route', () => {
       const resp = await request.patch(`/api/content/nodes/${nodeId}/field`, {
         data: { field_path: 'some_unknown_field', value: 'test' },
       });
-      expect(resp.status()).toBe(400);
+      expect(resp.status()).toBe(422);
     } finally {
       await cleanup(request, [bookId], [schemaId]);
     }

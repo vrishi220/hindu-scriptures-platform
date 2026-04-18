@@ -186,9 +186,12 @@ test.describe('preview Edit node button visibility', () => {
     // Wait for at least one preview block to render
     await expect(page.getByText('Sample verse content.')).toBeVisible({ timeout: 10000 });
 
-    // The "Edit node" button should appear in the block header
+    // Edit-all controls are shown only when quick edit mode is enabled.
+    await page.getByRole('button', { name: 'Enable quick edit' }).click();
+
+    // The Edit-all button should appear in the block header.
     await expect(
-      page.getByRole('button', { name: 'Open full node editor' }),
+      page.getByRole('button', { name: 'Edit all fields for this node' }),
     ).toBeVisible({ timeout: 5000 });
   });
 
@@ -201,9 +204,9 @@ test.describe('preview Edit node button visibility', () => {
     // Wait for preview content to render
     await expect(page.getByText('Sample verse content.')).toBeVisible({ timeout: 10000 });
 
-    // No edit button for viewers
+    // No edit-all button for viewers
     await expect(
-      page.getByRole('button', { name: 'Open full node editor' }),
+      page.getByRole('button', { name: 'Edit all fields for this node' }),
     ).toHaveCount(0);
   });
 });
