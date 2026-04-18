@@ -2705,6 +2705,7 @@ function ScripturesContent() {
   const previewCloseInProgressRef = useRef(false);
   const browseCloseInProgressRef = useRef(false);
   const editorOpenedFromPreviewRef = useRef(false);
+  const suppressNextAutoPreviewRef = useRef(false);
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
   const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
@@ -8662,8 +8663,9 @@ function ScripturesContent() {
       }
 
       editorOpenedFromPreviewRef.current = true;
+      suppressNextAutoPreviewRef.current = false;
       setActionMessage(null);
-
+      
       try {
         const response = await fetch(contentPath(`/nodes/${nodeId}`), {
           credentials: "include",
@@ -9761,6 +9763,10 @@ function ScripturesContent() {
       return;
     }
     if (activePreviewRequestKey.current === requestKey) {
+      return;
+    }
+    if (suppressNextAutoPreviewRef.current) {
+      suppressNextAutoPreviewRef.current = false;
       return;
     }
 
@@ -20607,6 +20613,9 @@ function ScripturesContent() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (editorOpenedFromPreviewRef.current) {
+                        suppressNextAutoPreviewRef.current = true;
+                      }
                       editorOpenedFromPreviewRef.current = false;
                       setAction(null);
                       setActionNode(null);
@@ -21131,6 +21140,9 @@ function ScripturesContent() {
                     <button
                       type="button"
                       onClick={() => {
+                        if (editorOpenedFromPreviewRef.current) {
+                          suppressNextAutoPreviewRef.current = true;
+                        }
                         editorOpenedFromPreviewRef.current = false;
                         setAction(null);
                         setActionNode(null);
