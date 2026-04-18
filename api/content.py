@@ -51,6 +51,7 @@ from models.schemas import (
     BulkTreeImportRequest,
     BulkTreeImportResponse,
     ContentNodeCreate,
+    ContentNodeFieldPatch,
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeTreeItem,
@@ -4131,6 +4132,179 @@ def update_node(
     payload_out = ContentNodePublic.model_validate(node).model_dump()
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
+
+
+@router.patch("/nodes/{node_id}/field", response_model=ContentNodePublic)
+def update_node_single_field(
+    node_id: int,
+    payload: ContentNodeFieldPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentNodePublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+
+    field_path = payload.field_path.strip()
+    next_value = payload.value.strip() if isinstance(payload.value, str) else None
+    if next_value == "":
+        next_value = None
+
+    patch_updates: dict[str, object] = {}
+
+    if field_path in {"title_english", "title_sanskrit", "title_transliteration", "sequence_number"}:
+        patch_updates[field_path] = next_value
+    elif field_path.startswith("content_data."):
+        content_target = source_node if source_node is not None else node
+        content_data = json.loads(json.dumps(content_target.content_data or {}))
+
+        if field_path in {
+            "content_data.basic.sanskrit",
+            "content_data.basic.transliteration",
+            "content_data.basic.translation",
+        }:
+            basic = content_data.get("basic")
+            if not isinstance(basic, dict):
+                basic = {}
+            basic_key = field_path.rsplit(".", 1)[1]
+            if next_value is None:
+                basic.pop(basic_key, None)
+            else:
+                basic[basic_key] = next_value
+            if basic:
+                content_data["basic"] = basic
+            else:
+                content_data.pop("basic", None)
+        elif field_path.startswith("content_data.translations."):
+            translation_key = field_path[len("content_data.translations.") :].strip()
+            translations = content_data.get("translations")
+            if not isinstance(translations, dict):
+                translations = {}
+            if next_value is None:
+                translations.pop(translation_key, None)
+            else:
+                translations[translation_key] = next_value
+                if translation_key == "en":
+                    translations["english"] = next_value
+                elif translation_key == "english":
+                    translations["en"] = next_value
+            if translations:
+                content_data["translations"] = translations
+            else:
+                content_data.pop("translations", None)
+        elif field_path.startswith("content_data.word_meanings_rows."):
+            match = re.fullmatch(
+                r"content_data\.word_meanings_rows\.(\d+)\.resolved_(meaning|source)\.text",
+                field_path,
+            )
+            if not match:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unsupported field_path for single-field patch",
+                )
+
+            row_index = int(match.group(1))
+            resolved_kind = match.group(2)
+            rows = content_data.get("word_meanings_rows")
+            if not isinstance(rows, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="word_meanings_rows not available on this node",
+                )
+            if row_index < 0 or row_index >= len(rows):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="word_meanings_rows index out of bounds",
+                )
+
+            row = rows[row_index]
+            if not isinstance(row, dict):
+                row = {}
+                rows[row_index] = row
+
+            resolved_key = f"resolved_{resolved_kind}"
+            resolved_entry = row.get(resolved_key)
+            if not isinstance(resolved_entry, dict):
+                resolved_entry = {}
+                row[resolved_key] = resolved_entry
+
+            resolved_entry["text"] = next_value or ""
+        elif field_path.startswith("content_data.translation_variants.") or field_path.startswith("content_data.commentary_variants."):
+            match = re.fullmatch(
+                r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.(text|author|language)",
+                field_path,
+            )
+            if not match:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unsupported field_path for single-field patch",
+                )
+
+            variants_key = match.group(1)
+            variant_index = int(match.group(2))
+            variant_field = match.group(3)
+            variants = content_data.get(variants_key)
+            if not isinstance(variants, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{variants_key} not available on this node",
+                )
+            if variant_index < 0 or variant_index >= len(variants):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{variants_key} index out of bounds",
+                )
+
+            variant = variants[variant_index]
+            if not isinstance(variant, dict):
+                variant = {}
+                variants[variant_index] = variant
+            if variant_field == "language":
+                variant[variant_field] = (next_value or "").strip().lower()
+            elif variant_field == "author":
+                variant[variant_field] = (next_value or "").strip()
+            else:
+                variant[variant_field] = next_value or ""
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported field_path for single-field patch",
+            )
+
+        normalized_content_data = _validate_word_meanings_content_data(content_data)
+        patch_updates["content_data"] = normalized_content_data
+        patch_updates["has_content"] = bool(normalized_content_data)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported field_path for single-field patch",
+        )
+
+    if payload.edit_reason:
+        patch_updates["edit_reason"] = payload.edit_reason
+
+    update_payload = ContentNodeUpdate(**patch_updates)
+    return update_node(
+        node_id=node_id,
+        payload=update_payload,
+        db=db,
+        current_user=current_user,
+    )
+
+
 @router.post("/nodes/{node_id}/repair-level", response_model=ContentNodePublic)
 def repair_node_level(
     node_id: int,
