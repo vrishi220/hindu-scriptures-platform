@@ -13297,6 +13297,10 @@ function ScripturesContent() {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
               return;
             }
+            // If an edit field is open, don't toggle — user may be scrolling to see the field
+            if (previewQuickEditDraft) {
+              return;
+            }
             const target = event.target as HTMLElement | null;
             if (target?.closest("button,input,textarea,select,a,summary,label")) {
               return;
@@ -13314,6 +13318,10 @@ function ScripturesContent() {
             }
             // Skip if this click was synthesized from a touch event (already handled in onTouchStart)
             if (Date.now() - lastPreviewTouchTime.current < 600) {
+              return;
+            }
+            // If an edit field is open, don't toggle
+            if (previewQuickEditDraft) {
               return;
             }
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
