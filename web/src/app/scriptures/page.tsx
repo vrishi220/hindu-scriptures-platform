@@ -13274,6 +13274,9 @@ function ScripturesContent() {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
               return;
             }
+            if (event.pointerType === "touch") {
+              return;
+            }
             const target = event.target as HTMLElement | null;
             if (target?.closest("button,input,textarea,select,a,summary,label")) {
               return;
@@ -13487,7 +13490,7 @@ function ScripturesContent() {
                       {appliedShowPreviewLabels && line.label && (
                         <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                       )}
-                      <div className="group flex items-start gap-2">
+                      <div className="group relative">
                         <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle}>{line.value}</p>
                         {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
@@ -13502,7 +13505,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit field"
                             title="Edit field"
                           >
@@ -13605,7 +13608,7 @@ function ScripturesContent() {
                         return (
                           <tr key={row.key} className="border-b border-black/5 last:border-b-0">
                             <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
-                              <div className="group flex items-start gap-2">
+                              <div className="group relative">
                                 <span>{row.sourceText || "—"}</span>
                                 {canQuickEditWordMeaning && !isActiveSource && showQuickEditAffordances && (
                                   <button
@@ -13620,7 +13623,7 @@ function ScripturesContent() {
                                         error: null,
                                       });
                                     }}
-                                    className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                                    className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                                     aria-label="Edit word source"
                                     title="Edit word source"
                                   >
@@ -13660,7 +13663,7 @@ function ScripturesContent() {
                               )}
                             </td>
                             <td className="px-2 py-1 align-top text-zinc-700">
-                              <div className="group flex items-start gap-2">
+                              <div className="group relative">
                                 <span>
                                   {row.meaningText || "—"}
                                   {row.fallbackBadgeVisible && row.meaningLanguage ? (
@@ -13682,7 +13685,7 @@ function ScripturesContent() {
                                         error: null,
                                       });
                                     }}
-                                    className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                                    className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                                     aria-label="Edit word meaning"
                                     title="Edit word meaning"
                                   >
@@ -13752,49 +13755,53 @@ function ScripturesContent() {
 
                     return (
                       <div key={row.key} className="rounded-md border border-black/5 bg-white/60 px-2 py-1">
-                        <div className="group flex items-start gap-2 whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
+                        <div className="group relative whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
                           <span className="transliteration-highlight">{source}</span>
                           <span>{` : ${meaning}${fallbackLabel}`}</span>
                           {rowIndex < wordMeaningRows.length - 1 ? <span>;</span> : null}
-                          {canQuickEditWordMeaning && !isActiveSource && showQuickEditAffordances && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewQuickEditDraft({
-                                  nodeId: quickEditNodeId as number,
-                                  fieldPath: sourceFieldPath,
-                                  lineKey: `wm-source-inline-${row.rowIndex}`,
-                                  value: row.sourceRawText || "",
-                                  saving: false,
-                                  error: null,
-                                });
-                              }}
-                              className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                              aria-label="Edit word source"
-                              title="Edit word source"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                          {canQuickEditWordMeaning && !isActiveMeaning && showQuickEditAffordances && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewQuickEditDraft({
-                                  nodeId: quickEditNodeId as number,
-                                  fieldPath: meaningFieldPath,
-                                  lineKey: `wm-meaning-inline-${row.rowIndex}`,
-                                  value: row.meaningText || "",
-                                  saving: false,
-                                  error: null,
-                                });
-                              }}
-                              className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                              aria-label="Edit word meaning"
-                              title="Edit word meaning"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
+                          {(canQuickEditWordMeaning && showQuickEditAffordances && (!isActiveSource || !isActiveMeaning)) && (
+                            <div className={`absolute right-0 top-0 z-10 flex items-center gap-1 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}>
+                              {!isActiveSource && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewQuickEditDraft({
+                                      nodeId: quickEditNodeId as number,
+                                      fieldPath: sourceFieldPath,
+                                      lineKey: `wm-source-inline-${row.rowIndex}`,
+                                      value: row.sourceRawText || "",
+                                      saving: false,
+                                      error: null,
+                                    });
+                                  }}
+                                  className="rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700"
+                                  aria-label="Edit word source"
+                                  title="Edit word source"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                              {!isActiveMeaning && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewQuickEditDraft({
+                                      nodeId: quickEditNodeId as number,
+                                      fieldPath: meaningFieldPath,
+                                      lineKey: `wm-meaning-inline-${row.rowIndex}`,
+                                      value: row.meaningText || "",
+                                      saving: false,
+                                      error: null,
+                                    });
+                                  }}
+                                  className="rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700"
+                                  aria-label="Edit word meaning"
+                                  title="Edit word meaning"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                         {isActiveSource && (
@@ -13923,7 +13930,7 @@ function ScripturesContent() {
                       {appliedShowPreviewLabels && line.label && (
                         <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                       )}
-                      <div className="group flex items-start gap-2">
+                      <div className="group relative">
                         <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle} lang={scriptLangForText(line.value)}>{line.value}</p>
                         {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
@@ -13938,7 +13945,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit field"
                             title="Edit field"
                           >
@@ -14084,7 +14091,7 @@ function ScripturesContent() {
                           </button>
                         )}
                       </div>
-                      <div className="group flex items-start gap-2">
+                      <div className="group relative">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
                         {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
@@ -14099,7 +14106,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit translation variant"
                             title="Edit translation variant"
                           >
@@ -14307,7 +14314,7 @@ function ScripturesContent() {
                           </button>
                         )}
                       </div>
-                      <div className="group flex items-start gap-2">
+                      <div className="group relative">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
                         {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
@@ -14322,7 +14329,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit commentary variant"
                             title="Edit commentary variant"
                           >
