@@ -4220,15 +4220,10 @@ def update_node_single_field(
             resolved_kind = match.group(2)
             rows = content_data.get("word_meanings_rows")
             if not isinstance(rows, list):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="word_meanings_rows not available on this node",
-                )
-            if row_index < 0 or row_index >= len(rows):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="word_meanings_rows index out of bounds",
-                )
+                rows = []
+            if row_index >= len(rows):
+                rows.extend({} for _ in range(row_index - len(rows) + 1))
+            content_data["word_meanings_rows"] = rows
 
             row = rows[row_index]
             if not isinstance(row, dict):
