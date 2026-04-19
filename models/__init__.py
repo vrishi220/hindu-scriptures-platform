@@ -3,6 +3,7 @@ from models.book import Book
 from models.book_share import BookShare
 from models.collection_cart import CollectionCart, CollectionCartItem
 from models.draft_book import DraftBook, EditionSnapshot
+from models.email_verification_token import EmailVerificationToken
 from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
@@ -39,6 +40,7 @@ __all__ = [
 	"CommentaryWork",
 	"CommentaryEntry",
 	"ContentRendition",
+	"EmailVerificationToken",
 	"NodeComment",
 	"Category",
 	"CategoryParent",

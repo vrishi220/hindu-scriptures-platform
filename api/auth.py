@@ -1,30 +1,37 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from jose import JWTError
 from sqlalchemy.orm import Session
 
 from api.users import get_current_user
+from models.email_verification_token import EmailVerificationToken
 from models.schemas import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
     LogoutRequest,
     MessageResponse,
+    RegistrationResponse,
     ResetPasswordRequest,
     RefreshRequest,
+    ResendVerificationRequest,
     TokenResponse,
     UserCreate,
     UserLogin,
     UserPublic,
+    VerifyEmailRequest,
 )
 from models.session import UserSession
 from models.user import User
 from services import (
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS,
     create_access_token,
+    create_email_verification_token_value,
     create_password_reset_token,
     create_refresh_token,
     decode_token,
+    email_verification_token_signature,
     get_db,
     get_token_subject,
     hash_password,
@@ -32,6 +39,7 @@ from services import (
     verify_password_reset_token,
     verify_password,
 )
+from services.email_service import send_registration_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -51,6 +59,15 @@ def include_reset_token_in_response() -> bool:
     app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
     return app_env != "production"
 
+
+def email_verification_required() -> bool:
+    explicit_value = os.getenv("EMAIL_VERIFICATION_REQUIRED")
+    if explicit_value is not None:
+        return explicit_value.lower() == "true"
+
+    app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
+    return app_env == "production"
+
 DEFAULT_PERMISSIONS = {
     "can_view": True,
     "can_contribute": True,
@@ -58,6 +75,24 @@ DEFAULT_PERMISSIONS = {
     "can_moderate": False,
     "can_admin": False,
 }
+
+
+def _issue_email_verification_token(db: Session, user: User) -> str:
+    now = datetime.now(timezone.utc)
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+
+    raw_token = create_email_verification_token_value()
+    db.add(
+        EmailVerificationToken(
+            user_id=user.id,
+            token_hash=email_verification_token_signature(raw_token),
+            expires_at=now + timedelta(hours=EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS),
+        )
+    )
+    return raw_token
 
 
 def set_auth_cookies(
@@ -90,8 +125,8 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(REFRESH_TOKEN_COOKIE, domain=COOKIE_DOMAIN, path=COOKIE_PATH)
 
 
-@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserPublic:
+@router.post("/register", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
+def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> RegistrationResponse:
     existing_email = db.query(User).filter(User.email == payload.email).first()
     if existing_email and existing_email.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email in use")
@@ -107,6 +142,8 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserPub
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Username in use"
             )
 
+    verification_required = email_verification_required()
+
     if existing_email and not existing_email.is_active:
         existing_email.username = payload.username
         existing_email.full_name = payload.full_name
@@ -118,9 +155,30 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserPub
             existing_email.role = "viewer"
         if existing_email.permissions is None:
             existing_email.permissions = DEFAULT_PERMISSIONS
+        db.flush()
+        verification_email_sent = False
+        if verification_required:
+            verification_token = _issue_email_verification_token(db, existing_email)
+            try:
+                send_registration_verification_email(existing_email.email, verification_token)
+            except RuntimeError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Verification email failed: {exc}",
+                ) from exc
+            verification_email_sent = True
         db.commit()
         db.refresh(existing_email)
-        return UserPublic.model_validate(existing_email)
+        return RegistrationResponse.model_validate(existing_email).model_copy(
+            update={
+                "requires_email_verification": verification_required,
+                "verification_email_sent": verification_email_sent,
+                "message": "Account created. Check your email to confirm your account."
+                if verification_required
+                else "Account created.",
+            }
+        )
 
     user = User(
         email=payload.email,
@@ -129,11 +187,34 @@ def register_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserPub
         password_hash=hash_password(payload.password),
         role="viewer",
         permissions=DEFAULT_PERMISSIONS,
+        is_verified=False,
+        email_verified_at=None,
     )
     db.add(user)
+    db.flush()
+    verification_email_sent = False
+    if verification_required:
+        verification_token = _issue_email_verification_token(db, user)
+        try:
+            send_registration_verification_email(user.email, verification_token)
+        except RuntimeError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Verification email failed: {exc}",
+            ) from exc
+        verification_email_sent = True
     db.commit()
     db.refresh(user)
-    return UserPublic.model_validate(user)
+    return RegistrationResponse.model_validate(user).model_copy(
+        update={
+            "requires_email_verification": verification_required,
+            "verification_email_sent": verification_email_sent,
+            "message": "Account created. Check your email to confirm your account."
+            if verification_required
+            else "Account created.",
+        }
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -151,6 +232,12 @@ def login_user(
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
+
+    if email_verification_required() and not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before signing in",
+        )
 
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
@@ -260,6 +347,80 @@ def logout_all(
     db.commit()
     clear_auth_cookies(response)
     return MessageResponse(message="Logged out all sessions")
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+def verify_email(
+    payload: VerifyEmailRequest,
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    now = datetime.now(timezone.utc)
+    verification_record = (
+        db.query(EmailVerificationToken)
+        .filter(EmailVerificationToken.token_hash == email_verification_token_signature(payload.token))
+        .first()
+    )
+
+    if not verification_record or verification_record.used_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link",
+        )
+
+    expires_at = verification_record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link",
+        )
+
+    user = db.query(User).filter(User.id == verification_record.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification link",
+        )
+
+    user.is_verified = True
+    user.email_verified_at = now
+    verification_record.used_at = now
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.id != verification_record.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    db.commit()
+
+    return MessageResponse(message="Email verified. You can now sign in.")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+def resend_verification_email(
+    payload: ResendVerificationRequest,
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    generic_message = "If an account exists for that email, a verification email has been sent."
+    if not email_verification_required():
+        return MessageResponse(message="Email verification is not required in this environment.")
+
+    user = db.query(User).filter(User.email == payload.email).first()
+    if not user or not user.is_active or user.is_verified:
+        return MessageResponse(message=generic_message)
+
+    verification_token = _issue_email_verification_token(db, user)
+    try:
+        send_registration_verification_email(user.email, verification_token)
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Verification email failed: {exc}",
+        ) from exc
+
+    db.commit()
+    return MessageResponse(message=generic_message)
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)

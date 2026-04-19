@@ -345,6 +345,10 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
 class ForgotPasswordResponse(BaseModel):
     message: str
     reset_token: str | None = None
@@ -378,6 +382,10 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
 class UserPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -388,9 +396,17 @@ class UserPublic(BaseModel):
     role: str
     permissions: dict | None = None
     is_active: bool = True
+    is_verified: bool = False
+    email_verified_at: datetime | None = None
     created_at: datetime | None = None
     account_lifecycle_status: Literal["invited", "registered"] = "registered"
     lifecycle_age_days: int | None = None
+
+
+class RegistrationResponse(UserPublic):
+    requires_email_verification: bool = False
+    verification_email_sent: bool = False
+    message: str | None = None
 
 
 class UserSelfUpdate(BaseModel):

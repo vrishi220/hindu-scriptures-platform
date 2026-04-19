@@ -15,6 +15,13 @@ type SignUpDraft = {
   confirmPassword: string;
 };
 
+type RegistrationResponse = {
+  detail?: string;
+  message?: string;
+  requires_email_verification?: boolean;
+  verification_email_sent?: boolean;
+};
+
 function SignUpPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,6 +31,9 @@ function SignUpPageContent() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [isResendingVerification, setIsResendingVerification] = useState(false);
 
   const isStrongPassword = (value: string) =>
     /[A-Z]/.test(value) &&
@@ -89,6 +99,7 @@ function SignUpPageContent() {
   const handleSignup = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setAuthMessage(null);
+    setResendMessage(null);
 
     if (!isStrongPassword(password)) {
       setAuthMessage(
@@ -115,13 +126,29 @@ function SignUpPageContent() {
         }),
       });
 
+      const registerPayload = (await registerResponse.json().catch(async () => {
+        const text = await registerResponse.text().catch(() => "");
+        return text ? { detail: text } : null;
+      })) as RegistrationResponse | null;
+
       if (!registerResponse.ok) {
-        const payload = (await registerResponse.json().catch(async () => {
-          const text = await registerResponse.text().catch(() => "");
-          return text ? { detail: text } : null;
-        })) as { detail?: string; message?: string } | null;
-        const detail = payload?.detail || payload?.message || "Registration failed";
+        const detail = registerPayload?.detail || registerPayload?.message || "Registration failed";
         throw new Error(`Registration failed (${registerResponse.status}): ${detail}`);
+      }
+
+      const requiresEmailVerification = Boolean(registerPayload?.requires_email_verification);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
+      }
+
+      if (requiresEmailVerification) {
+        setPendingVerificationEmail(email);
+        setPassword("");
+        setConfirmPassword("");
+        setAuthMessage(
+          registerPayload?.message || "Account created. Check your email to confirm your account."
+        );
+        return;
       }
 
       const loginResponse = await fetch("/api/auth/login", {
@@ -132,10 +159,8 @@ function SignUpPageContent() {
       });
 
       if (!loginResponse.ok) {
+        setPendingVerificationEmail(null);
         setAuthMessage("Account created. Please sign in.");
-        if (typeof window !== "undefined") {
-          window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
-        }
         const signInParams = new URLSearchParams({ returnTo: safeNextPath });
         if (email) {
           signInParams.set("email", email);
@@ -144,13 +169,40 @@ function SignUpPageContent() {
         return;
       }
 
+      setPendingVerificationEmail(null);
       setAuthMessage("Account created. Redirecting...");
-      if (typeof window !== "undefined") {
-        window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
-      }
       setTimeout(() => router.push(safeNextPath), 500);
     } catch (err) {
+      setPendingVerificationEmail(null);
       setAuthMessage(err instanceof Error ? err.message : "Registration failed");
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!pendingVerificationEmail || isResendingVerification) {
+      return;
+    }
+    setIsResendingVerification(true);
+    setResendMessage(null);
+    try {
+      const response = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: pendingVerificationEmail }),
+      });
+      const payload = (await response.json().catch(async () => {
+        const text = await response.text().catch(() => "");
+        return text ? { detail: text } : null;
+      })) as { message?: string; detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || payload?.message || "Failed to resend verification email.");
+      }
+      setResendMessage(payload?.message || "Verification email sent.");
+    } catch (err) {
+      setResendMessage(err instanceof Error ? err.message : "Failed to resend verification email.");
+    } finally {
+      setIsResendingVerification(false);
     }
   };
 
@@ -191,6 +243,26 @@ function SignUpPageContent() {
               }`}
             >
               {authMessage}
+            </div>
+          )}
+
+          {pendingVerificationEmail && (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <div>Finish registration from the confirmation email sent to {pendingVerificationEmail}.</div>
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={isResendingVerification}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isResendingVerification ? "Sending..." : "Resend confirmation email"}
+                </button>
+                <Link href={signInHref} className="font-semibold text-[color:var(--accent)] hover:underline">
+                  Go to sign in
+                </Link>
+              </div>
+              {resendMessage && <div className="mt-2 text-xs text-amber-900">{resendMessage}</div>}
             </div>
           )}
 

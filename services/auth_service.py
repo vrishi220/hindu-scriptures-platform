@@ -1,4 +1,5 @@
 import os
+import secrets
 from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(
     os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30")
+)
+EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS = int(
+    os.getenv("EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS", "24")
 )
 
 
@@ -61,6 +65,14 @@ def get_token_subject(token: str) -> int:
 
 def password_hash_signature(password_hash: str) -> str:
     return sha256(password_hash.encode("utf-8")).hexdigest()
+
+
+def create_email_verification_token_value() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def email_verification_token_signature(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
 
 
 def create_password_reset_token(user_id: int, password_hash: str) -> str:

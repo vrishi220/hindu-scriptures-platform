@@ -46,6 +46,7 @@ if (
         "Override only if intentional with ALLOW_NON_TEST_DB_FOR_PYTEST=1."
     )
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ.setdefault("EMAIL_VERIFICATION_REQUIRED", "false")
 
 from main import app
 import models.database
