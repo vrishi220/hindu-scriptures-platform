@@ -11271,6 +11271,65 @@ function ScripturesContent() {
         typeof value.level_name === "string"
     );
 
+  const resolveEditorLevelName = (
+    rawLevelName: string | null | undefined,
+    levelOrder: number | null | undefined
+  ): string => {
+    const schemaLevels = Array.isArray(currentBook?.schema?.levels)
+      ? currentBook.schema.levels.filter((level): level is string => typeof level === "string")
+      : [];
+    const trimmedRaw = (rawLevelName || "").trim();
+
+    if (!schemaLevels.length) {
+      return trimmedRaw;
+    }
+
+    if (
+      typeof levelOrder === "number" &&
+      Number.isFinite(levelOrder) &&
+      levelOrder >= 1 &&
+      levelOrder <= schemaLevels.length
+    ) {
+      return schemaLevels[levelOrder - 1];
+    }
+
+    const normalizedRaw = trimmedRaw.toLowerCase();
+    if (!normalizedRaw) {
+      return "";
+    }
+
+    const directMatch = schemaLevels.find((level) => level.trim().toLowerCase() === normalizedRaw);
+    if (directMatch) {
+      return directMatch;
+    }
+
+    const rawOverrides = currentBook?.level_name_overrides;
+    const levelNameOverrides =
+      rawOverrides && typeof rawOverrides === "object"
+        ? (rawOverrides as Record<string, unknown>)
+        : null;
+    if (levelNameOverrides) {
+      for (const [canonicalRaw, displayRaw] of Object.entries(levelNameOverrides)) {
+        const canonical = canonicalRaw.trim();
+        if (!canonical) {
+          continue;
+        }
+        const display = typeof displayRaw === "string" ? displayRaw.trim() : "";
+        if (
+          canonical.toLowerCase() === normalizedRaw ||
+          (display && display.toLowerCase() === normalizedRaw)
+        ) {
+          const canonicalSchemaMatch = schemaLevels.find(
+            (level) => level.trim().toLowerCase() === canonical.toLowerCase()
+          );
+          return canonicalSchemaMatch || canonical;
+        }
+      }
+    }
+
+    return trimmedRaw;
+  };
+
   const buildFormDataFromNode = (node: NodeContent) => {
     const contentBasic = node.content_data?.basic;
     const contentTranslations = toTranslationRecord(node.content_data?.translations);
@@ -11292,7 +11351,7 @@ function ScripturesContent() {
     );
 
     return {
-      levelName: node.level_name || "",
+      levelName: resolveEditorLevelName(node.level_name, node.level_order),
       titleSanskrit: node.title_sanskrit || "",
       titleTransliteration: node.title_transliteration || "",
       titleEnglish: node.title_english || "",
