@@ -13274,6 +13274,9 @@ function ScripturesContent() {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
               return;
             }
+            if (previewQuickEditDraft) {
+              return;
+            }
             if (event.pointerType === "touch") {
               return;
             }
@@ -13285,6 +13288,9 @@ function ScripturesContent() {
           }}
           onMouseEnter={(event) => {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+              return;
+            }
+            if (previewQuickEditDraft) {
               return;
             }
             const target = event.target as HTMLElement | null;
