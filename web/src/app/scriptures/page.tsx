@@ -2664,6 +2664,7 @@ function ScripturesContent() {
   const [createInsertAfterNodeId, setCreateInsertAfterNodeId] = useState<number | null>(null);
   const [createNextOnSubmit, setCreateNextOnSubmit] = useState(false);
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
+  const lastPreviewTouchTime = useRef<number>(0);
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
   const lastLoadedNodeId = useRef<number | null>(null);
@@ -9177,8 +9178,12 @@ function ScripturesContent() {
     return "opacity-0 pointer-events-none";
   };
 
-  const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number): void => {
+  const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number, toggle = false): void => {
     setPreviewQuickEditGestureBlockKey((prev) => {
+      if (toggle && prev === blockGestureKey) {
+        setPreviewQuickEditDraft(null);
+        return null;
+      }
       if (prev !== blockGestureKey) {
         setPreviewQuickEditDraft(null);
       }
@@ -13293,7 +13298,8 @@ function ScripturesContent() {
             if (target?.closest("button,input,textarea,select,a,summary,label")) {
               return;
             }
-            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
+            lastPreviewTouchTime.current = Date.now();
+            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId, true);
           }}
           onClick={(event) => {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
@@ -13301,6 +13307,10 @@ function ScripturesContent() {
             }
             const target = event.target as HTMLElement | null;
             if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            // Skip if this click was synthesized from a touch event (already handled in onTouchStart)
+            if (Date.now() - lastPreviewTouchTime.current < 600) {
               return;
             }
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
