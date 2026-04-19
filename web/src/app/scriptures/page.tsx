@@ -9107,12 +9107,74 @@ function ScripturesContent() {
   };
 
   const focusPreviewQuickEditFieldStart = (
-    event: React.FocusEvent<HTMLTextAreaElement>
+    event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement>
   ) => {
     const element = event.currentTarget;
-    element.setSelectionRange(0, 0);
-    element.scrollTop = 0;
-    element.scrollLeft = 0;
+    if (typeof element.setSelectionRange === "function") {
+      element.setSelectionRange(0, 0);
+    }
+    if (element instanceof HTMLTextAreaElement) {
+      element.scrollTop = 0;
+      element.scrollLeft = 0;
+    }
+    const editorContainer = element.parentElement;
+    if (editorContainer instanceof HTMLElement) {
+      editorContainer.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+    }
+  };
+
+  const isPreviewQuickEditSingleLineField = (fieldPath: string): boolean => {
+    if (!fieldPath) {
+      return false;
+    }
+    if (
+      fieldPath === "title_english" ||
+      fieldPath === "title_sanskrit" ||
+      fieldPath === "title_transliteration" ||
+      fieldPath === "sequence_number"
+    ) {
+      return true;
+    }
+    if (/^content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text$/.test(fieldPath)) {
+      return true;
+    }
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.(author|language)$/.test(fieldPath)) {
+      return true;
+    }
+    return false;
+  };
+
+  const getPreviewQuickEditSelectOptions = (
+    fieldPath: string
+  ): Array<{ value: string; label: string }> | null => {
+    if (!fieldPath) {
+      return null;
+    }
+
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.language$/.test(fieldPath)) {
+      return [
+        { value: "", label: "Select language" },
+        ...SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => ({
+          value: language,
+          label: translationLanguageLabel(language),
+        })),
+      ];
+    }
+
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.author$/.test(fieldPath)) {
+      const registry = currentBook?.variant_authors;
+      const authorOptions = registry
+        ? Object.entries(registry)
+            .map(([slug, name]) => ({
+              value: slug,
+              label: typeof name === "string" && name.trim() ? name.trim() : slug,
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label))
+        : [];
+      return [{ value: "", label: "Select author" }, ...authorOptions];
+    }
+
+    return null;
   };
 
   const handleSavePreviewQuickEdit = async () => {
@@ -13020,6 +13082,9 @@ function ScripturesContent() {
                     : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : line.value; })()
                     : line.value;
                   const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenNonTransFields.has(fieldPath ?? "");
+                  const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                  const useSingleLineInput =
+                    fieldPath ? isPreviewQuickEditSingleLineField(fieldPath) && !selectOptions : false;
                   if (line.isFieldStart && fieldPath) {
                     seenNonTransFields.add(fieldPath);
                   }
@@ -13061,19 +13126,53 @@ function ScripturesContent() {
                       </div>
                       {isActiveField && isFirstForField && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <textarea
-                            rows={10}
-                            autoFocus
-                            value={previewQuickEditDraft?.value || ""}
-                            onChange={(event) =>
-                              setPreviewQuickEditDraft((prev) =>
-                                prev ? { ...prev, value: event.target.value, error: null } : prev
-                              )
-                            }
-                            onFocus={focusPreviewQuickEditFieldStart}
-                            disabled={Boolean(previewQuickEditDraft?.saving)}
-                            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                          />
+                          {selectOptions ? (
+                            <select
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            >
+                              {selectOptions.map((option) => (
+                                <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : useSingleLineInput ? (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              onFocus={focusPreviewQuickEditFieldStart}
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                          ) : (
+                            <textarea
+                              rows={10}
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              onFocus={focusPreviewQuickEditFieldStart}
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                          )}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13165,8 +13264,8 @@ function ScripturesContent() {
                               </div>
                               {isActiveSource && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  <textarea
-                                    rows={10}
+                                  <input
+                                    type="text"
                                     autoFocus
                                     value={previewQuickEditDraft?.value || ""}
                                     onChange={(event) =>
@@ -13237,8 +13336,8 @@ function ScripturesContent() {
                               </div>
                               {isActiveMeaning && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  <textarea
-                                    rows={10}
+                                  <input
+                                    type="text"
                                     autoFocus
                                     value={previewQuickEditDraft?.value || ""}
                                     onChange={(event) =>
@@ -13355,16 +13454,16 @@ function ScripturesContent() {
                         </div>
                         {isActiveSource && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            <textarea
-                                rows={10}
-                                autoFocus
+                            <input
+                              type="text"
+                              autoFocus
                               value={previewQuickEditDraft?.value || ""}
                               onChange={(event) =>
                                 setPreviewQuickEditDraft((prev) =>
                                   prev ? { ...prev, value: event.target.value, error: null } : prev
                                 )
                               }
-                                onFocus={focusPreviewQuickEditFieldStart}
+                              onFocus={focusPreviewQuickEditFieldStart}
                               disabled={Boolean(previewQuickEditDraft?.saving)}
                               className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                             />
@@ -13395,8 +13494,8 @@ function ScripturesContent() {
                         )}
                         {isActiveMeaning && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            <textarea
-                              rows={10}
+                            <input
+                              type="text"
                               autoFocus
                               value={previewQuickEditDraft?.value || ""}
                               onChange={(event) =>
@@ -13465,6 +13564,9 @@ function ScripturesContent() {
                     : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : line.value; })()
                     : line.value;
                   const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenTranslationFields.has(fieldPath ?? "");
+                  const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                  const useSingleLineInput =
+                    fieldPath ? isPreviewQuickEditSingleLineField(fieldPath) && !selectOptions : false;
                   if (line.isFieldStart && fieldPath) {
                     seenTranslationFields.add(fieldPath);
                   }
@@ -13506,19 +13608,53 @@ function ScripturesContent() {
                       </div>
                       {isActiveField && isFirstForField && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <textarea
-                            rows={10}
-                            autoFocus
-                            value={previewQuickEditDraft?.value || ""}
-                            onChange={(event) =>
-                              setPreviewQuickEditDraft((prev) =>
-                                prev ? { ...prev, value: event.target.value, error: null } : prev
-                              )
-                            }
-                            onFocus={focusPreviewQuickEditFieldStart}
-                            disabled={Boolean(previewQuickEditDraft?.saving)}
-                            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                          />
+                          {selectOptions ? (
+                            <select
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            >
+                              {selectOptions.map((option) => (
+                                <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : useSingleLineInput ? (
+                            <input
+                              type="text"
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              onFocus={focusPreviewQuickEditFieldStart}
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                          ) : (
+                            <textarea
+                              rows={10}
+                              autoFocus
+                              value={previewQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              onFocus={focusPreviewQuickEditFieldStart}
+                              disabled={Boolean(previewQuickEditDraft?.saving)}
+                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                            />
+                          )}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13653,7 +13789,7 @@ function ScripturesContent() {
                       </div>
                       {isActiveAuthor && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <input
+                          <select
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
@@ -13662,8 +13798,13 @@ function ScripturesContent() {
                             }
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            placeholder="Author"
-                          />
+                          >
+                            {(getPreviewQuickEditSelectOptions(authorFieldPath) || []).map((option) => (
+                              <option key={`translation-author-${entry.originalIndex}-${option.value || "empty"}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13691,7 +13832,7 @@ function ScripturesContent() {
                       )}
                       {isActiveLanguage && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <input
+                          <select
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
@@ -13700,8 +13841,13 @@ function ScripturesContent() {
                             }
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            placeholder="Language code (for example en, te)"
-                          />
+                          >
+                            {(getPreviewQuickEditSelectOptions(languageFieldPath) || []).map((option) => (
+                              <option key={`translation-language-${entry.originalIndex}-${option.value || "empty"}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13876,7 +14022,7 @@ function ScripturesContent() {
                       </div>
                       {isActiveAuthor && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <input
+                          <select
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
@@ -13885,8 +14031,13 @@ function ScripturesContent() {
                             }
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            placeholder="Author"
-                          />
+                          >
+                            {(getPreviewQuickEditSelectOptions(authorFieldPath) || []).map((option) => (
+                              <option key={`commentary-author-${entry.originalIndex}-${option.value || "empty"}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13914,7 +14065,7 @@ function ScripturesContent() {
                       )}
                       {isActiveLanguage && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <input
+                          <select
                             value={previewQuickEditDraft?.value || ""}
                             onChange={(event) =>
                               setPreviewQuickEditDraft((prev) =>
@@ -13923,8 +14074,13 @@ function ScripturesContent() {
                             }
                             disabled={Boolean(previewQuickEditDraft?.saving)}
                             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            placeholder="Language code (for example en, te)"
-                          />
+                          >
+                            {(getPreviewQuickEditSelectOptions(languageFieldPath) || []).map((option) => (
+                              <option key={`commentary-language-${entry.originalIndex}-${option.value || "empty"}`} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
