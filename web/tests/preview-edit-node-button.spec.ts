@@ -186,13 +186,23 @@ test.describe('preview Edit node button visibility', () => {
     // Wait for at least one preview block to render
     await expect(page.getByText('Sample verse content.')).toBeVisible({ timeout: 10000 });
 
-    // Edit-all controls are shown only when quick edit mode is enabled.
-    await page.getByRole('button', { name: 'Enable quick edit' }).click();
+    const previewBlock = page.locator('article', { hasText: 'Sample verse content.' }).first();
+    const editAllButton = page.getByRole('button', { name: 'Edit all fields for this node' });
 
-    // The Edit-all button should appear in the block header.
-    await expect(
-      page.getByRole('button', { name: 'Edit all fields for this node' }),
-    ).toBeVisible({ timeout: 5000 });
+    // Hidden by default before any hover/tap gesture (opacity-based affordance).
+    await expect(editAllButton).toHaveCSS('opacity', '0');
+    await expect(editAllButton).toHaveCSS('pointer-events', 'none');
+
+    // Desktop gesture: hover reveals affordances.
+    await previewBlock.hover();
+    await expect(editAllButton).toBeVisible({ timeout: 5000 });
+
+    // Touch-style gesture: click block background also reveals affordances.
+    await previewBlock.click();
+    await expect(editAllButton).toBeVisible({ timeout: 5000 });
+
+    // The Edit-all button remains available once the block is activated.
+    await expect(editAllButton).toBeVisible({ timeout: 5000 });
   });
 
   test('Edit node button is absent in preview blocks for a viewer', async ({ page }) => {

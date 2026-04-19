@@ -2780,7 +2780,7 @@ function ScripturesContent() {
   const [bookPreviewLoadingElapsedMs, setBookPreviewLoadingElapsedMs] = useState(0);
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
   const [previewLinkMessage, setPreviewLinkMessage] = useState<string | null>(null);
-  const [previewQuickEditEnabled, setPreviewQuickEditEnabled] = useState(false);
+  const [previewQuickEditGestureBlockKey, setPreviewQuickEditGestureBlockKey] = useState<string | null>(null);
   const [previewQuickEditDraft, setPreviewQuickEditDraft] = useState<{
     nodeId: number;
     fieldPath: string;
@@ -3475,7 +3475,7 @@ function ScripturesContent() {
             ? `${baseLabel} (${transliterationScriptLabel(appliedPreviewTransliterationScript)})`
             : rawLabel || baseLabel;
         const isFieldStart = fieldName !== previousFieldName;
-        const label = appliedShowPreviewLabels && isFieldStart ? computedLabel : "";
+        const label = isFieldStart ? computedLabel : "";
 
         lines.push({
           key: `${fieldName || "line"}-${index}`,
@@ -5037,17 +5037,27 @@ function ScripturesContent() {
 
   const currentBookMetadata =
     currentBook?.metadata_json || currentBook?.metadata || null;
-  const parsedCurrentBookOwnerId = (() => {
-    const owner = currentBookMetadata?.owner_id;
+  const selectedBookForPermissions =
+    books.find((book) => book.id.toString() === bookId) || null;
+  const selectedBookMetadataForPermissions =
+    selectedBookForPermissions?.metadata_json || selectedBookForPermissions?.metadata || null;
+  const parseOwnerId = (owner: unknown): number | null => {
     if (typeof owner === "number") return owner;
     if (typeof owner === "string") {
       const parsed = Number.parseInt(owner, 10);
       return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
+  };
+  const parsedCurrentBookOwnerId = (() => {
+    return parseOwnerId(currentBookMetadata?.owner_id);
   })();
-  const currentBookOwnerId =
-    parsedCurrentBookOwnerId;
+  const parsedSelectedBookOwnerId = parseOwnerId(selectedBookMetadataForPermissions?.owner_id);
+  const isCurrentBookInSyncWithSelection =
+    Boolean(currentBook && bookId && currentBook.id.toString() === bookId);
+  const currentBookOwnerId = isCurrentBookInSyncWithSelection
+    ? parsedCurrentBookOwnerId
+    : parsedSelectedBookOwnerId;
   const isCurrentBookOwner =
     authUserId !== null && currentBookOwnerId !== null && currentBookOwnerId === authUserId;
   const currentBookOwnerLabel = (() => {
@@ -5064,7 +5074,7 @@ function ScripturesContent() {
     }
     return "Unknown";
   })();
-  const canEditCurrentBook = Boolean(currentBook) && (canEdit || canAdmin || isCurrentBookOwner);
+  const canEditCurrentBook = Boolean(bookId) && (canEdit || canAdmin || isCurrentBookOwner);
   const canExploreStructure = Boolean(bookId) && authUserId !== null && canView;
   const isExploreVisible = canExploreStructure && showExploreStructure;
   const activeNodeLevelLabel = formatValue(nodeContent?.level_name) || "Node";
@@ -8565,7 +8575,7 @@ function ScripturesContent() {
     hideOverlayImmediately(bookPreviewOverlayRef.current);
     setPreviewLinkMessage(null);
     setPreviewQuickEditDraft(null);
-    setPreviewQuickEditEnabled(false);
+    setPreviewQuickEditGestureBlockKey(null);
 
     const fromParam = searchParams.get("from");
     deferUntilNextPaint(() => {
@@ -8648,7 +8658,7 @@ function ScripturesContent() {
     setShowBookPreview(false);
     setPreviewLinkMessage(null);
     setPreviewQuickEditDraft(null);
-    setPreviewQuickEditEnabled(false);
+    setPreviewQuickEditGestureBlockKey(null);
     browsingHook.setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
@@ -8763,6 +8773,7 @@ function ScripturesContent() {
   const resolvePreviewQuickEditFieldPath = (fieldName: string, label?: string): string | null => {
     const normalizedField = (fieldName || "").trim().toLowerCase();
     const normalizedLabel = (label || "").trim().toLowerCase();
+    const combinedFieldContext = `${normalizedField} ${normalizedLabel}`.trim();
 
     const languageKeyByName: Record<string, string> = {
       english: "en",
@@ -8791,6 +8802,31 @@ function ScripturesContent() {
       }
       return null;
     };
+
+    if (
+      normalizedLabel.includes("title") ||
+      normalizedField.startsWith("title_") ||
+      normalizedField === "title" ||
+      normalizedField.includes("title")
+    ) {
+      if (
+        normalizedField === "title_sanskrit" ||
+        combinedFieldContext.includes("sanskrit")
+      ) {
+        return "title_sanskrit";
+      }
+      if (
+        normalizedField === "title_transliteration" ||
+        combinedFieldContext.includes("transliteration")
+      ) {
+        return "title_transliteration";
+      }
+      return "title_english";
+    }
+
+    if (normalizedField === "sequence" || normalizedField === "sequence_number" || normalizedLabel.includes("sequence")) {
+      return "sequence_number";
+    }
 
     if (normalizedField === "sanskrit") {
       return "content_data.basic.sanskrit";
@@ -8844,10 +8880,6 @@ function ScripturesContent() {
       return contentNodeId;
     }
 
-    if (bookPreviewArtifact?.preview_scope === "node" && typeof selectedId === "number") {
-      return selectedId;
-    }
-
     return null;
   };
 
@@ -8864,9 +8896,7 @@ function ScripturesContent() {
           ? block.source_node_id
           : typeof (block.content as { node_id?: unknown }).node_id === "number"
             ? ((block.content as { node_id?: number }).node_id ?? null)
-            : artifact.preview_scope === "node" && typeof selectedId === "number"
-              ? selectedId
-              : null;
+            : null;
       if (blockNodeId !== nodeId) {
         return block;
       }
@@ -8882,7 +8912,13 @@ function ScripturesContent() {
                 ? new Set(["english", "translation"])
                 : fieldPath === "content_data.translations.en" || fieldPath === "content_data.translations.english"
                   ? new Set(["english", "translation"])
-                  : null;
+                  : fieldPath === "title_english"
+                    ? new Set(["title_english"])
+                    : fieldPath === "title_sanskrit"
+                      ? new Set(["title_sanskrit"])
+                      : fieldPath === "title_transliteration"
+                        ? new Set(["title_transliteration"])
+                        : null;
 
         if (targetRenderedFields) {
           nextContent.rendered_lines = nextContent.rendered_lines.map((line) => {
@@ -8996,6 +9032,7 @@ function ScripturesContent() {
 
       return {
         ...block,
+        title: fieldPath === "title_english" ? normalizedValue : block.title,
         content: nextContent,
       };
     });
@@ -9078,6 +9115,15 @@ function ScripturesContent() {
           if (lineField === "english" || lineField === "translation") {
             return { ...line, value: preferredTranslation || "" };
           }
+          if (lineField === "title_english") {
+            return { ...line, value: savedNode.title_english || "" };
+          }
+          if (lineField === "title_sanskrit") {
+            return { ...line, value: savedNode.title_sanskrit || "" };
+          }
+          if (lineField === "title_transliteration") {
+            return { ...line, value: savedNode.title_transliteration || "" };
+          }
           return line;
         });
       }
@@ -9118,27 +9164,69 @@ function ScripturesContent() {
       element.scrollLeft = 0;
     }
     const editorContainer = element.parentElement;
-    if (editorContainer instanceof HTMLElement) {
+    const isTouchDevice = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+    if (!isTouchDevice && editorContainer instanceof HTMLElement) {
       editorContainer.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
     }
+  };
+
+  const previewQuickEditAffordanceClass = (isVisible: boolean): string => {
+    if (isVisible) {
+      return "opacity-100 pointer-events-auto";
+    }
+    return "opacity-0 pointer-events-none";
+  };
+
+  const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number): void => {
+    setPreviewQuickEditGestureBlockKey((prev) => {
+      if (prev !== blockGestureKey) {
+        setPreviewQuickEditDraft(null);
+      }
+      return blockGestureKey;
+    });
+  };
+
+  const isPreviewQuickEditMultiLineField = (fieldPath: string): boolean => {
+    if (!fieldPath) {
+      return false;
+    }
+    const normalizedPath = fieldPath.trim().toLowerCase();
+    if (
+      normalizedPath === "content_data.basic.sanskrit" ||
+      normalizedPath === "content_data.basic.transliteration" ||
+      normalizedPath === "content_data.basic.translation"
+    ) {
+      return true;
+    }
+    if (/^content_data\.translations\./.test(normalizedPath)) {
+      return true;
+    }
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.text$/.test(normalizedPath)) {
+      return true;
+    }
+    return false;
   };
 
   const isPreviewQuickEditSingleLineField = (fieldPath: string): boolean => {
     if (!fieldPath) {
       return false;
     }
+    const normalizedPath = fieldPath.trim().toLowerCase();
+    if (/(^|[._])title([._]|$)/.test(normalizedPath)) {
+      return true;
+    }
     if (
-      fieldPath === "title_english" ||
-      fieldPath === "title_sanskrit" ||
-      fieldPath === "title_transliteration" ||
-      fieldPath === "sequence_number"
+      normalizedPath === "title_english" ||
+      normalizedPath === "title_sanskrit" ||
+      normalizedPath === "title_transliteration" ||
+      normalizedPath === "sequence_number"
     ) {
       return true;
     }
-    if (/^content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text$/.test(fieldPath)) {
+    if (/^content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text$/.test(normalizedPath)) {
       return true;
     }
-    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.(author|language)$/.test(fieldPath)) {
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.(author|language)$/.test(normalizedPath)) {
       return true;
     }
     return false;
@@ -9175,6 +9263,57 @@ function ScripturesContent() {
     }
 
     return null;
+  };
+
+  const updatePreviewQuickEditDraftValue = (value: string) => {
+    setPreviewQuickEditDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            value,
+            error: null,
+          }
+        : prev
+    );
+  };
+
+  const renderPreviewQuickEditTextControl = (options: {
+    multiline?: boolean;
+    clearAriaLabel: string;
+  }) => {
+    const multiline = options.multiline ?? false;
+
+    return (
+      <div className="group relative">
+        {multiline ? (
+          <textarea
+            rows={6}
+            autoFocus
+            value={previewQuickEditDraft?.value || ""}
+            onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
+            onFocus={focusPreviewQuickEditFieldStart}
+            disabled={Boolean(previewQuickEditDraft?.saving)}
+            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+          />
+        ) : (
+          <input
+            type="text"
+            autoFocus
+            value={previewQuickEditDraft?.value || ""}
+            onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
+            onFocus={focusPreviewQuickEditFieldStart}
+            disabled={Boolean(previewQuickEditDraft?.saving)}
+            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+          />
+        )}
+        <InlineClearButton
+          visible={Boolean(previewQuickEditDraft?.value)}
+          onClear={() => updatePreviewQuickEditDraftValue("")}
+          ariaLabel={options.clearAriaLabel}
+          position={multiline ? "top" : "center"}
+        />
+      </div>
+    );
   };
 
   const handleSavePreviewQuickEdit = async () => {
@@ -9241,6 +9380,7 @@ function ScripturesContent() {
       }
 
       setPreviewQuickEditDraft(null);
+      setPreviewQuickEditGestureBlockKey(null);
       setPreviewLinkMessage("Saved.");
       window.setTimeout(() => {
         setPreviewLinkMessage(null);
@@ -9281,6 +9421,8 @@ function ScripturesContent() {
       const previewAbortController = new AbortController();
       activePreviewAbortController.current = previewAbortController;
       activePreviewRequestKey.current = requestKey;
+      setPreviewQuickEditGestureBlockKey(null);
+      setPreviewQuickEditDraft(null);
     }
 
     const nextLanguageSettings = append
@@ -9348,8 +9490,8 @@ function ScripturesContent() {
         if (lastFailedPreviewRequestKey.current === requestKey) {
           lastFailedPreviewRequestKey.current = null;
         }
-        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
         setShowBookPreview(true);
+        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
         activePreviewRequestKey.current = null;
         return;
       }
@@ -9609,8 +9751,8 @@ function ScripturesContent() {
         if (lastFailedPreviewRequestKey.current === requestKey) {
           lastFailedPreviewRequestKey.current = null;
         }
-        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
         setShowBookPreview(true);
+        syncPreviewUrl(scope, previewBookId, previewNodeId, historyMode);
       }
     } catch (err) {
       if (!append) {
@@ -12998,7 +13140,39 @@ function ScripturesContent() {
           })
         : [];
       const wordMeaningRows = resolvePreviewWordMeanings(block);
-      const rawTitle = block.title || "";
+      const quickEditNodeId = resolvePreviewQuickEditNodeId(block);
+      const previewSourceNode =
+        typeof quickEditNodeId === "number" ? findNodeById(treeData, quickEditNodeId) : null;
+      const rawTitle = previewSourceNode
+        ? resolvePreviewTitleBySettings(
+            formatValue(previewSourceNode.title_sanskrit),
+            formatValue(previewSourceNode.title_transliteration),
+            formatValue(previewSourceNode.title_english),
+            formatValue(previewSourceNode.title_hindi)
+          ) || block.title || ""
+        : block.title || "";
+      const titleQuickEditFields = previewSourceNode
+        ? [
+            {
+              fieldPath: "title_sanskrit",
+              shortLabel: "SA",
+              label: "Title (Sanskrit)",
+              value: formatValue(previewSourceNode.title_sanskrit),
+            },
+            {
+              fieldPath: "title_transliteration",
+              shortLabel: "TR",
+              label: "Title (Transliteration)",
+              value: formatValue(previewSourceNode.title_transliteration),
+            },
+            {
+              fieldPath: "title_english",
+              shortLabel: "EN",
+              label: "Title (English)",
+              value: formatValue(previewSourceNode.title_english),
+            },
+          ]
+        : [];
       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
       const isStructuralOnlyBlock =
         nonTranslationLines.length === 0 && translationLines.length === 0;
@@ -13019,15 +13193,59 @@ function ScripturesContent() {
             ? rawTitle
             : structuralHeading
           : "";
-      const quickEditNodeId = resolvePreviewQuickEditNodeId(block);
+      const blockGestureKey = `${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`;
+      const showQuickEditAffordances =
+        canEditCurrentBook &&
+        typeof quickEditNodeId === "number" &&
+        previewQuickEditGestureBlockKey === blockGestureKey;
       if (isStructuralOnlyBlock && !displayTitle) {
         return;
       }
 
       elements.push(
         <article
-          key={`${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`}
-          className="border-b border-black/10 px-0.5 py-1.5"
+          key={blockGestureKey}
+          className="group/preview-block min-w-0 border-b border-black/10 px-0.5 py-1.5"
+          onPointerDown={(event) => {
+            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+              return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
+          }}
+          onMouseEnter={(event) => {
+            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+              return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
+          }}
+          onTouchStart={(event) => {
+            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+              return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
+          }}
+          onClick={(event) => {
+            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+              return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
+          }}
         >
           {appliedShowPreviewLevelNumbers &&
             !shouldForceStructuralHeading &&
@@ -13038,20 +13256,104 @@ function ScripturesContent() {
               {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
             </div>
           )}
-          {(displayTitle || (previewQuickEditEnabled && canEditCurrentBook && typeof quickEditNodeId === "number")) && (
+          {(displayTitle || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <div className="mb-0.5 flex items-center justify-between gap-2">
               {displayTitle ? (
-                <div className="text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <div className="min-w-0 truncate text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
+                    {canEditCurrentBook && typeof quickEditNodeId === "number" && titleQuickEditFields.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        {titleQuickEditFields.map((field) => {
+                          const isActiveTitleField =
+                            previewQuickEditDraft?.nodeId === quickEditNodeId &&
+                            previewQuickEditDraft?.fieldPath === field.fieldPath;
+                          if (!showQuickEditAffordances && !isActiveTitleField) {
+                            return null;
+                          }
+                          return (
+                            <button
+                              key={`${blockGestureKey}-${field.fieldPath}`}
+                              type="button"
+                              onClick={() => {
+                                setPreviewQuickEditDraft({
+                                  nodeId: quickEditNodeId,
+                                  fieldPath: field.fieldPath,
+                                  lineKey: `${blockGestureKey}-${field.fieldPath}`,
+                                  value: field.value,
+                                  saving: false,
+                                  error: null,
+                                });
+                              }}
+                              className={`rounded-md border border-black/10 bg-white/90 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${isActiveTitleField ? "border-[color:var(--accent)]/40 text-[color:var(--accent)]" : previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                              aria-label={`Edit ${field.label}`}
+                              title={field.label}
+                            >
+                              {field.shortLabel}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {canEditCurrentBook && typeof quickEditNodeId === "number" && titleQuickEditFields.some((field) => previewQuickEditDraft?.nodeId === quickEditNodeId && previewQuickEditDraft?.fieldPath === field.fieldPath) && (
+                    <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                      {(() => {
+                        const activeTitleField = titleQuickEditFields.find(
+                          (field) =>
+                            previewQuickEditDraft?.nodeId === quickEditNodeId &&
+                            previewQuickEditDraft?.fieldPath === field.fieldPath
+                        );
+                        if (!activeTitleField) {
+                          return null;
+                        }
+                        return (
+                          <>
+                            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                              {activeTitleField.label}
+                            </div>
+                            {renderPreviewQuickEditTextControl({
+                              clearAriaLabel: `Clear ${activeTitleField.label}`,
+                            })}
+                            {previewQuickEditDraft?.error && (
+                              <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
+                            )}
+                            <div className="mt-2 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleSavePreviewQuickEdit();
+                                }}
+                                disabled={Boolean(previewQuickEditDraft?.saving)}
+                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                              >
+                                {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewQuickEditDraft(null)}
+                                disabled={Boolean(previewQuickEditDraft?.saving)}
+                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <span />
               )}
-              {previewQuickEditEnabled && canEditCurrentBook && typeof quickEditNodeId === "number" && (
+              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
                 <button
                   type="button"
                   onClick={() => {
                     void openPreviewNodeInFullEditor(quickEditNodeId);
                   }}
-                  className="flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800"
+                  className={`flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                   title="Edit all fields for this node"
                   aria-label="Edit all fields for this node"
                 >
@@ -13068,7 +13370,6 @@ function ScripturesContent() {
                 {nonTranslationLines.map((line, lineIndex) => {
                   const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
                   const canQuickEditLine =
-                    previewQuickEditEnabled &&
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number" &&
                     Boolean(fieldPath);
@@ -13083,8 +13384,25 @@ function ScripturesContent() {
                     : line.value;
                   const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenNonTransFields.has(fieldPath ?? "");
                   const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                  const normalizedLineLabel = (line.label || "").trim().toLowerCase();
+                  const normalizedLineField = (line.fieldName || "").trim().toLowerCase();
+                  const isExplicitSingleLineField =
+                    Boolean(fieldPath) &&
+                    (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
+                      normalizedLineLabel.includes("title") ||
+                      normalizedLineLabel.includes("sequence") ||
+                      normalizedLineField.includes("title") ||
+                      normalizedLineField.includes("sequence"));
+                  const shouldUseMultilineInput =
+                    Boolean(fieldPath) &&
+                    !selectOptions &&
+                    isPreviewQuickEditMultiLineField(fieldPath as string) &&
+                    !isExplicitSingleLineField &&
+                    /\r?\n/.test(fullFieldValue || "");
                   const useSingleLineInput =
-                    fieldPath ? isPreviewQuickEditSingleLineField(fieldPath) && !selectOptions : false;
+                    fieldPath
+                      ? !shouldUseMultilineInput && !selectOptions
+                      : false;
                   if (line.isFieldStart && fieldPath) {
                     seenNonTransFields.add(fieldPath);
                   }
@@ -13098,12 +13416,12 @@ function ScripturesContent() {
                           : "mt-1 border-t border-black/10 pt-1"
                       }
                     >
-                      {line.label && (
+                      {appliedShowPreviewLabels && line.label && (
                         <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                       )}
                       <div className="group flex items-start gap-2">
-                        <p className={`${line.className} flex-1`} style={previewBodyTextStyle}>{line.value}</p>
-                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && (
+                        <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle}>{line.value}</p>
+                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13116,7 +13434,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit field"
                             title="Edit field"
                           >
@@ -13145,33 +13463,14 @@ function ScripturesContent() {
                               ))}
                             </select>
                           ) : useSingleLineInput ? (
-                            <input
-                              type="text"
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            renderPreviewQuickEditTextControl({
+                              clearAriaLabel: `Clear ${line.label || "field"}`,
+                            })
                           ) : (
-                            <textarea
-                              rows={10}
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            renderPreviewQuickEditTextControl({
+                              multiline: true,
+                              clearAriaLabel: `Clear ${line.label || "field"}`,
+                            })
                           )}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
@@ -13224,7 +13523,6 @@ function ScripturesContent() {
                         const sourceFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_source.text`;
                         const meaningFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_meaning.text`;
                         const canQuickEditWordMeaning =
-                          previewQuickEditEnabled &&
                           canEditCurrentBook &&
                           typeof quickEditNodeId === "number";
                         const isActiveSource =
@@ -13241,7 +13539,7 @@ function ScripturesContent() {
                             <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
                               <div className="group flex items-start gap-2">
                                 <span>{row.sourceText || "—"}</span>
-                                {canQuickEditWordMeaning && !isActiveSource && (
+                                {canQuickEditWordMeaning && !isActiveSource && showQuickEditAffordances && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -13254,7 +13552,7 @@ function ScripturesContent() {
                                         error: null,
                                       });
                                     }}
-                                    className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                                    className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                                     aria-label="Edit word source"
                                     title="Edit word source"
                                   >
@@ -13264,19 +13562,9 @@ function ScripturesContent() {
                               </div>
                               {isActiveSource && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    value={previewQuickEditDraft?.value || ""}
-                                    onChange={(event) =>
-                                      setPreviewQuickEditDraft((prev) =>
-                                        prev ? { ...prev, value: event.target.value, error: null } : prev
-                                      )
-                                    }
-                                    onFocus={focusPreviewQuickEditFieldStart}
-                                    disabled={Boolean(previewQuickEditDraft?.saving)}
-                                    className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                  />
+                                  {renderPreviewQuickEditTextControl({
+                                    clearAriaLabel: "Clear word source",
+                                  })}
                                   {previewQuickEditDraft?.error && (
                                     <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                                   )}
@@ -13313,7 +13601,7 @@ function ScripturesContent() {
                                     </span>
                                   ) : null}
                                 </span>
-                                {canQuickEditWordMeaning && !isActiveMeaning && (
+                                {canQuickEditWordMeaning && !isActiveMeaning && showQuickEditAffordances && (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -13326,7 +13614,7 @@ function ScripturesContent() {
                                         error: null,
                                       });
                                     }}
-                                    className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                                    className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                                     aria-label="Edit word meaning"
                                     title="Edit word meaning"
                                   >
@@ -13336,19 +13624,9 @@ function ScripturesContent() {
                               </div>
                               {isActiveMeaning && (
                                 <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    value={previewQuickEditDraft?.value || ""}
-                                    onChange={(event) =>
-                                      setPreviewQuickEditDraft((prev) =>
-                                        prev ? { ...prev, value: event.target.value, error: null } : prev
-                                      )
-                                    }
-                                    onFocus={focusPreviewQuickEditFieldStart}
-                                    disabled={Boolean(previewQuickEditDraft?.saving)}
-                                    className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                  />
+                                  {renderPreviewQuickEditTextControl({
+                                    clearAriaLabel: "Clear word meaning",
+                                  })}
                                   {previewQuickEditDraft?.error && (
                                     <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                                   )}
@@ -13393,7 +13671,6 @@ function ScripturesContent() {
                     const sourceFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_source.text`;
                     const meaningFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_meaning.text`;
                     const canQuickEditWordMeaning =
-                      previewQuickEditEnabled &&
                       canEditCurrentBook &&
                       typeof quickEditNodeId === "number";
                     const isActiveSource =
@@ -13411,7 +13688,7 @@ function ScripturesContent() {
                           <span className="transliteration-highlight">{source}</span>
                           <span>{` : ${meaning}${fallbackLabel}`}</span>
                           {rowIndex < wordMeaningRows.length - 1 ? <span>;</span> : null}
-                          {canQuickEditWordMeaning && !isActiveSource && (
+                          {canQuickEditWordMeaning && !isActiveSource && showQuickEditAffordances && (
                             <button
                               type="button"
                               onClick={() => {
@@ -13424,14 +13701,14 @@ function ScripturesContent() {
                                   error: null,
                                 });
                               }}
-                              className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                              className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                               aria-label="Edit word source"
                               title="Edit word source"
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
                           )}
-                          {canQuickEditWordMeaning && !isActiveMeaning && (
+                          {canQuickEditWordMeaning && !isActiveMeaning && showQuickEditAffordances && (
                             <button
                               type="button"
                               onClick={() => {
@@ -13444,7 +13721,7 @@ function ScripturesContent() {
                                   error: null,
                                 });
                               }}
-                              className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                              className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                               aria-label="Edit word meaning"
                               title="Edit word meaning"
                             >
@@ -13454,19 +13731,9 @@ function ScripturesContent() {
                         </div>
                         {isActiveSource && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            <input
-                              type="text"
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            {renderPreviewQuickEditTextControl({
+                              clearAriaLabel: "Clear word source",
+                            })}
                             {previewQuickEditDraft?.error && (
                               <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                             )}
@@ -13494,19 +13761,9 @@ function ScripturesContent() {
                         )}
                         {isActiveMeaning && (
                           <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            <input
-                              type="text"
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            {renderPreviewQuickEditTextControl({
+                              clearAriaLabel: "Clear word meaning",
+                            })}
                             {previewQuickEditDraft?.error && (
                               <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                             )}
@@ -13546,7 +13803,6 @@ function ScripturesContent() {
                 {translationLines.map((line, lineIndex) => {
                   const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
                   const canQuickEditLine =
-                    previewQuickEditEnabled &&
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number" &&
                     Boolean(fieldPath);
@@ -13565,8 +13821,25 @@ function ScripturesContent() {
                     : line.value;
                   const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenTranslationFields.has(fieldPath ?? "");
                   const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                  const normalizedLineLabel = (line.label || "").trim().toLowerCase();
+                  const normalizedLineField = (line.fieldName || "").trim().toLowerCase();
+                  const isExplicitSingleLineField =
+                    Boolean(fieldPath) &&
+                    (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
+                      normalizedLineLabel.includes("title") ||
+                      normalizedLineLabel.includes("sequence") ||
+                      normalizedLineField.includes("title") ||
+                      normalizedLineField.includes("sequence"));
+                  const shouldUseMultilineInput =
+                    Boolean(fieldPath) &&
+                    !selectOptions &&
+                    isPreviewQuickEditMultiLineField(fieldPath as string) &&
+                    !isExplicitSingleLineField &&
+                    /\r?\n/.test(fullFieldValue || "");
                   const useSingleLineInput =
-                    fieldPath ? isPreviewQuickEditSingleLineField(fieldPath) && !selectOptions : false;
+                    fieldPath
+                      ? !shouldUseMultilineInput && !selectOptions
+                      : false;
                   if (line.isFieldStart && fieldPath) {
                     seenTranslationFields.add(fieldPath);
                   }
@@ -13580,12 +13853,12 @@ function ScripturesContent() {
                           : "mt-1 border-t border-black/10 pt-1"
                       }
                     >
-                      {line.label && (
+                      {appliedShowPreviewLabels && line.label && (
                         <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                       )}
                       <div className="group flex items-start gap-2">
-                        <p className={`${line.className} flex-1`} style={previewBodyTextStyle} lang={scriptLangForText(line.value)}>{line.value}</p>
-                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && (
+                        <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle} lang={scriptLangForText(line.value)}>{line.value}</p>
+                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13598,7 +13871,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit field"
                             title="Edit field"
                           >
@@ -13627,33 +13900,14 @@ function ScripturesContent() {
                               ))}
                             </select>
                           ) : useSingleLineInput ? (
-                            <input
-                              type="text"
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            renderPreviewQuickEditTextControl({
+                              clearAriaLabel: `Clear ${line.label || "field"}`,
+                            })
                           ) : (
-                            <textarea
-                              rows={10}
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
-                              }
-                              onFocus={focusPreviewQuickEditFieldStart}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
+                            renderPreviewQuickEditTextControl({
+                              multiline: true,
+                              clearAriaLabel: `Clear ${line.label || "field"}`,
+                            })
                           )}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
@@ -13697,7 +13951,6 @@ function ScripturesContent() {
                   const authorFieldPath = `content_data.translation_variants.${entry.originalIndex}.author`;
                   const languageFieldPath = `content_data.translation_variants.${entry.originalIndex}.language`;
                   const canQuickEditVariant =
-                    previewQuickEditEnabled &&
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number";
                   const isActiveText =
@@ -13723,7 +13976,7 @@ function ScripturesContent() {
                           {displayAuthor}
                           {entry.language ? ` • ${entry.language}` : ""}
                         </span>
-                        {canQuickEditVariant && !isActiveAuthor && (
+                        {canQuickEditVariant && !isActiveAuthor && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13736,14 +13989,14 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit translation variant author"
                             title="Edit translation variant author"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
                         )}
-                        {canQuickEditVariant && !isActiveLanguage && (
+                        {canQuickEditVariant && !isActiveLanguage && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13756,7 +14009,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit translation variant language"
                             title="Edit translation variant language"
                           >
@@ -13766,7 +14019,7 @@ function ScripturesContent() {
                       </div>
                       <div className="group flex items-start gap-2">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
-                        {canQuickEditVariant && !isActiveText && (
+                        {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13779,7 +14032,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit translation variant"
                             title="Edit translation variant"
                           >
@@ -13875,19 +14128,10 @@ function ScripturesContent() {
                       )}
                       {isActiveText && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <textarea
-                            rows={10}
-                            autoFocus
-                            value={previewQuickEditDraft?.value || ""}
-                            onChange={(event) =>
-                              setPreviewQuickEditDraft((prev) =>
-                                prev ? { ...prev, value: event.target.value, error: null } : prev
-                              )
-                            }
-                            onFocus={focusPreviewQuickEditFieldStart}
-                            disabled={Boolean(previewQuickEditDraft?.saving)}
-                            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                          />
+                          {renderPreviewQuickEditTextControl({
+                            multiline: true,
+                            clearAriaLabel: "Clear translation variant",
+                          })}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -13930,7 +14174,6 @@ function ScripturesContent() {
                   const authorFieldPath = `content_data.commentary_variants.${entry.originalIndex}.author`;
                   const languageFieldPath = `content_data.commentary_variants.${entry.originalIndex}.language`;
                   const canQuickEditVariant =
-                    previewQuickEditEnabled &&
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number";
                   const isActiveText =
@@ -13956,7 +14199,7 @@ function ScripturesContent() {
                           {displayAuthor}
                           {entry.language ? ` • ${entry.language}` : ""}
                         </span>
-                        {canQuickEditVariant && !isActiveAuthor && (
+                        {canQuickEditVariant && !isActiveAuthor && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13969,14 +14212,14 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit commentary variant author"
                             title="Edit commentary variant author"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
                         )}
-                        {canQuickEditVariant && !isActiveLanguage && (
+                        {canQuickEditVariant && !isActiveLanguage && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -13989,7 +14232,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`rounded-md border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit commentary variant language"
                             title="Edit commentary variant language"
                           >
@@ -13999,7 +14242,7 @@ function ScripturesContent() {
                       </div>
                       <div className="group flex items-start gap-2">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
-                        {canQuickEditVariant && !isActiveText && (
+                        {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
@@ -14012,7 +14255,7 @@ function ScripturesContent() {
                                 error: null,
                               });
                             }}
-                            className="mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700"
+                            className={`mt-0.5 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit commentary variant"
                             title="Edit commentary variant"
                           >
@@ -14108,19 +14351,10 @@ function ScripturesContent() {
                       )}
                       {isActiveText && (
                         <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          <textarea
-                            rows={10}
-                            autoFocus
-                            value={previewQuickEditDraft?.value || ""}
-                            onChange={(event) =>
-                              setPreviewQuickEditDraft((prev) =>
-                                prev ? { ...prev, value: event.target.value, error: null } : prev
-                              )
-                            }
-                            onFocus={focusPreviewQuickEditFieldStart}
-                            disabled={Boolean(previewQuickEditDraft?.saving)}
-                            className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                          />
+                          {renderPreviewQuickEditTextControl({
+                            multiline: true,
+                            clearAriaLabel: "Clear commentary variant",
+                          })}
                           {previewQuickEditDraft?.error && (
                             <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
                           )}
@@ -14215,7 +14449,7 @@ function ScripturesContent() {
     resolvePreviewWordMeanings,
     getDisplayLevelName,
     renderInlineMediaPreview,
-    previewQuickEditEnabled,
+    previewQuickEditGestureBlockKey,
     previewQuickEditDraft,
     canEditCurrentBook,
     resolvePreviewQuickEditFieldPath,
@@ -19580,9 +19814,9 @@ function ScripturesContent() {
         {showBookPreview && bookPreviewArtifact && (
           <div
             ref={bookPreviewOverlayRef}
-            className="fixed inset-0 z-50 bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
+            className="fixed inset-0 z-50 overflow-x-hidden bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
           >
-            <div className="flex h-[100svh] w-full flex-col bg-[color:var(--paper)]">
+            <div className="flex h-[100svh] w-full min-w-0 flex-col overflow-x-hidden bg-[color:var(--paper)]">
               <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -19708,38 +19942,6 @@ function ScripturesContent() {
                             className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <BookOpen className="h-4 w-4" />
-                          </button>
-                        )}
-                        {canEditCurrentBook && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPreviewQuickEditEnabled((prev) => {
-                                const next = !prev;
-                                setPreviewQuickEditDraft(null);
-                                setPreviewLinkMessage(
-                                  next
-                                    ? "Quick edit enabled. Click a field pencil to edit inline."
-                                    : "Quick edit disabled."
-                                );
-                                if (typeof window !== "undefined") {
-                                  window.setTimeout(() => {
-                                    setPreviewLinkMessage(null);
-                                  }, 1800);
-                                }
-                                return next;
-                              });
-                            }}
-                            disabled={showPreviewControls}
-                            title={previewQuickEditEnabled ? "Disable quick edit" : "Enable quick edit"}
-                            aria-label={previewQuickEditEnabled ? "Disable quick edit" : "Enable quick edit"}
-                            className={`rounded-full border p-2 transition ${
-                              previewQuickEditEnabled
-                                ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white shadow-sm"
-                                : "border-black/10 text-zinc-600 hover:border-black/20"
-                            }`}
-                          >
-                            <Pencil className="h-4 w-4" />
                           </button>
                         )}
                         {previewScope === "book" && hasEffectiveBookPreviewSummary && (
@@ -20138,16 +20340,11 @@ function ScripturesContent() {
               <div
                 ref={bookPreviewScrollContainerRef}
                 onScroll={handleBookPreviewScroll}
-                className="flex-1 w-full overflow-y-auto px-2.5 pb-1.5 pt-0.5 sm:px-3"
+                className="flex-1 w-full overflow-y-auto overflow-x-hidden px-2.5 pb-1.5 pt-0.5 sm:px-3"
               >
                 {previewLinkMessage && (
                   <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs text-zinc-700">
                     {previewLinkMessage}
-                  </div>
-                )}
-                {previewQuickEditEnabled && !previewQuickEditDraft && (
-                  <div className="mb-1.5 rounded-lg border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs text-[color:var(--deep)]">
-                    Use the pencils or field chips inside each preview block to edit in place.
                   </div>
                 )}
                 {bookPreviewLoading && (
@@ -20215,7 +20412,7 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 [&_input]:text-base [&_textarea]:text-base [&_select]:text-base sm:[&_input]:text-sm sm:[&_textarea]:text-sm sm:[&_select]:text-sm">
                   {previewBodyBlockElements.length === 0 ? (
                     <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-1.5 text-sm text-zinc-500">
                       {bookPreviewArtifact.preview_scope === "node"
