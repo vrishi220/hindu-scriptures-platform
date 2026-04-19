@@ -13397,8 +13397,7 @@ function ScripturesContent() {
                     Boolean(fieldPath) &&
                     !selectOptions &&
                     isPreviewQuickEditMultiLineField(fieldPath as string) &&
-                    !isExplicitSingleLineField &&
-                    /\r?\n/.test(fullFieldValue || "");
+                    !isExplicitSingleLineField;
                   const useSingleLineInput =
                     fieldPath
                       ? !shouldUseMultilineInput && !selectOptions
@@ -13834,8 +13833,7 @@ function ScripturesContent() {
                     Boolean(fieldPath) &&
                     !selectOptions &&
                     isPreviewQuickEditMultiLineField(fieldPath as string) &&
-                    !isExplicitSingleLineField &&
-                    /\r?\n/.test(fullFieldValue || "");
+                    !isExplicitSingleLineField;
                   const useSingleLineInput =
                     fieldPath
                       ? !shouldUseMultilineInput && !selectOptions
