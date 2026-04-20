@@ -4748,6 +4748,7 @@ def replace_media_bank_asset_file(
         metadata["original_filename"] = file.filename
     metadata["content_type"] = content_type
     metadata["size_bytes"] = total_bytes
+    metadata["replaced_at"] = datetime.now(timezone.utc).isoformat()
     _set_asset_metadata(asset, metadata)
 
     # Keep linked media metadata in sync while preserving URLs/links.
@@ -4760,6 +4761,7 @@ def replace_media_bank_asset_file(
         media_metadata = _media_metadata(media)
         media_metadata["content_type"] = content_type
         media_metadata["size_bytes"] = total_bytes
+        media_metadata["replaced_at"] = metadata.get("replaced_at")
         _set_media_metadata(media, media_metadata)
 
     db.commit()

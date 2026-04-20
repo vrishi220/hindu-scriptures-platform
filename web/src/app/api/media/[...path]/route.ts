@@ -96,7 +96,9 @@ export async function GET(
     status: upstream.status,
     headers: {
       "content-type": upstream.headers.get("content-type") || "application/octet-stream",
-      "cache-control": upstream.headers.get("cache-control") || "public, max-age=3600",
+      // Assets in media bank can be replaced in place while retaining the same URL.
+      // Force revalidation/no-store to avoid stale browser caches showing old files.
+      "cache-control": "no-store, max-age=0, must-revalidate",
     },
   });
 }

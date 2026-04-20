@@ -100,6 +100,34 @@ const canPreviewInModal = (asset: MediaAsset) => {
   return type === "image" || type === "video" || type === "audio";
 };
 
+const resolveAssetPreviewUrl = (asset: MediaAsset) => {
+  const baseUrl = resolveMediaUrl(asset.url);
+  if (!baseUrl || isExternalUrl(asset.url)) {
+    return baseUrl;
+  }
+
+  const metadata =
+    asset.metadata_json && typeof asset.metadata_json === "object"
+      ? (asset.metadata_json as Record<string, unknown>)
+      : null;
+  const replacedAt = typeof metadata?.replaced_at === "string" ? metadata.replaced_at.trim() : "";
+  const sizeBytesValue = metadata?.size_bytes;
+  const sizeBytes =
+    typeof sizeBytesValue === "number"
+      ? String(sizeBytesValue)
+      : typeof sizeBytesValue === "string"
+        ? sizeBytesValue.trim()
+        : "";
+
+  const version = replacedAt || sizeBytes;
+  if (!version) {
+    return baseUrl;
+  }
+
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}v=${encodeURIComponent(version)}`;
+};
+
 export default function AdminMediaBankPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -475,7 +503,7 @@ export default function AdminMediaBankPage() {
       id: asset.id,
       label: getDisplayName(asset),
       mediaType: asset.media_type || "media",
-      url: resolveMediaUrl(asset.url),
+      url: resolveAssetPreviewUrl(asset),
     });
   };
 
@@ -704,7 +732,7 @@ export default function AdminMediaBankPage() {
                             {isImage ? (
                               <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-zinc-50 p-2">
                                 <img
-                                  src={resolveMediaUrl(asset.url)}
+                                  src={resolveAssetPreviewUrl(asset)}
                                   alt={label}
                                   className="max-h-full max-w-full object-contain transition duration-200 group-hover:scale-[1.02]"
                                 />
@@ -712,7 +740,7 @@ export default function AdminMediaBankPage() {
                             ) : isVideo ? (
                               <div className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-t-xl bg-zinc-950 p-2">
                                 <video
-                                  src={resolveMediaUrl(asset.url)}
+                                  src={resolveAssetPreviewUrl(asset)}
                                   className="max-h-full max-w-full object-contain"
                                   muted
                                   playsInline
@@ -895,7 +923,7 @@ export default function AdminMediaBankPage() {
                               {isImage ? (
                                 <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-zinc-50 p-1">
                                   <img
-                                    src={resolveMediaUrl(asset.url)}
+                                    src={resolveAssetPreviewUrl(asset)}
                                     alt={label}
                                     className="max-h-full max-w-full object-contain"
                                   />
@@ -903,7 +931,7 @@ export default function AdminMediaBankPage() {
                               ) : isVideo ? (
                                 <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-zinc-950 p-1">
                                   <video
-                                    src={resolveMediaUrl(asset.url)}
+                                    src={resolveAssetPreviewUrl(asset)}
                                     className="max-h-full max-w-full object-contain"
                                     muted
                                     playsInline
