@@ -188,7 +188,8 @@ class TestAuthCoverageCOV03:
         assert response.status_code == status.HTTP_200_OK
         assert response.json().get("reset_token") is None
 
-    def test_reset_password_rejects_invalid_or_stale_token(self, client):
+    def test_reset_password_rejects_invalid_or_stale_token(self, client, monkeypatch):
+        monkeypatch.setenv("INCLUDE_RESET_TOKEN_IN_RESPONSE", "true")
         auth = _register_and_login(client)
 
         invalid_token_response = client.post(

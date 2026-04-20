@@ -3,6 +3,8 @@
 import { useState } from "react";
 import InlineClearButton from "../../components/InlineClearButton";
 
+const SHOW_DEBUG_RESET_TOKEN = process.env.NEXT_PUBLIC_SHOW_RESET_TOKEN === "true";
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export default function ForgotPasswordPage() {
       }
 
       setMessage(payload?.message || "If an account exists, a reset link has been generated.");
-      if (payload?.reset_token) {
+      if (SHOW_DEBUG_RESET_TOKEN && payload?.reset_token) {
         setToken(payload.reset_token);
       }
     } catch (err) {

@@ -56,8 +56,8 @@ def include_reset_token_in_response() -> bool:
     if explicit_value is not None:
         return explicit_value.lower() == "true"
 
-    app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).lower()
-    return app_env != "production"
+    # Security-first default: never include reset tokens unless explicitly enabled.
+    return False
 
 
 def email_verification_required() -> bool:

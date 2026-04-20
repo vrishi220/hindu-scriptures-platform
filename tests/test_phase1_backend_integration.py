@@ -182,7 +182,8 @@ class TestPasswordResetIntegration:
         )
         assert register_response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    def test_forgot_and_reset_password_flow(self, client):
+    def test_forgot_and_reset_password_flow(self, client, monkeypatch):
+        monkeypatch.setenv("INCLUDE_RESET_TOKEN_IN_RESPONSE", "true")
         email, old_password = _register_user(client)
 
         forgot_response = client.post("/api/auth/forgot-password", json={"email": email})
