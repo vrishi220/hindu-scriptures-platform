@@ -695,7 +695,7 @@ export default function WordMeaningsEditor({
     ? "mt-1 rounded-lg border border-black/10 px-1.5 pt-1.5 pb-1 sm:px-2 sm:pt-2 sm:pb-1.5"
     : "mt-2 rounded-lg border border-black/10 bg-white/80 p-2 sm:p-3";
   const panelClassName = blendWithParent ? "bg-transparent" : "bg-white";
-  const subtlePanelClassName = blendWithParent ? "bg-transparent" : "bg-zinc-50";
+  const subtlePanelClassName = blendWithParent ? "bg-zinc-100" : "bg-zinc-50";
 
   return (
     <div className={containerClassName}>
