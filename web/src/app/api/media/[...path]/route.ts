@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 
+// This route must never be statically cached at the framework/CDN layer because
+// media files can be replaced in place while keeping the same URL.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function isLikelyImageRequest(pathParts: string[], request: NextRequest): boolean {
   const lastPart = pathParts[pathParts.length - 1] || "";
   const lowered = lastPart.toLowerCase();
@@ -68,6 +73,12 @@ export async function GET(
     upstream = await fetch(target.toString(), {
       headers: {
         Accept: request.headers.get("accept") || "*/*",
+        ...(request.headers.get("if-none-match")
+          ? { "if-none-match": request.headers.get("if-none-match") as string }
+          : {}),
+        ...(request.headers.get("if-modified-since")
+          ? { "if-modified-since": request.headers.get("if-modified-since") as string }
+          : {}),
       },
       cache: "no-store",
     });
@@ -78,27 +89,52 @@ export async function GET(
     return NextResponse.json({ detail: "Media upstream unavailable" }, { status: 502 });
   }
 
-  if (!upstream.ok) {
-    if (upstream.status === 404 && imageRequest) {
-      return missingImagePlaceholder(pathParts);
-    }
-    const raw = await upstream.text().catch(() => "");
-    return new NextResponse(raw || "", {
-      status: upstream.status,
+  if (upstream.status === 304) {
+    return new NextResponse(null, {
+      status: 304,
       headers: {
-        "content-type": upstream.headers.get("content-type") || "text/plain",
+        "cache-control": "no-cache, max-age=0, must-revalidate",
+        "cdn-cache-control": "no-store",
+        "vercel-cdn-cache-control": "no-store",
+        ...(upstream.headers.get("etag")
+          ? { etag: upstream.headers.get("etag") as string }
+          : {}),
+        ...(upstream.headers.get("last-modified")
+          ? { "last-modified": upstream.headers.get("last-modified") as string }
+          : {}),
       },
     });
   }
+
+    if (!upstream.ok) {
+      if (upstream.status === 404 && imageRequest) {
+        return missingImagePlaceholder(pathParts);
+      }
+      const raw = await upstream.text().catch(() => "");
+      return new NextResponse(raw || "", {
+        status: upstream.status,
+        headers: {
+          "content-type": upstream.headers.get("content-type") || "text/plain",
+        },
+      });
+    }
 
   const body = await upstream.arrayBuffer();
   return new NextResponse(body, {
     status: upstream.status,
     headers: {
       "content-type": upstream.headers.get("content-type") || "application/octet-stream",
-      // Assets in media bank can be replaced in place while retaining the same URL.
-      // Force revalidation/no-store to avoid stale browser caches showing old files.
-      "cache-control": "no-store, max-age=0, must-revalidate",
+      // Browser may store bytes but must revalidate before reuse.
+      "cache-control": "no-cache, max-age=0, must-revalidate",
+      // Prevent stale edge cache entries at CDN/proxy layers.
+      "cdn-cache-control": "no-store",
+      "vercel-cdn-cache-control": "no-store",
+      ...(upstream.headers.get("etag")
+        ? { etag: upstream.headers.get("etag") as string }
+        : {}),
+      ...(upstream.headers.get("last-modified")
+        ? { "last-modified": upstream.headers.get("last-modified") as string }
+        : {}),
     },
   });
 }
