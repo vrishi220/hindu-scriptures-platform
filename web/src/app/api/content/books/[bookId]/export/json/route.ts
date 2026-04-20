@@ -20,18 +20,38 @@ export async function GET(
     API_BASE_URL
   );
 
-  const response = await fetch(target.toString(), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 min timeout
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    return NextResponse.json(payload || { detail: "Export failed" }, { status: response.status });
+  try {
+    const response = await fetch(target.toString(), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return NextResponse.json(payload || { detail: "Export failed" }, { status: response.status });
+    }
+
+    return NextResponse.json(payload, { status: response.status });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      return NextResponse.json(
+        { detail: "Export timed out after 5 minutes. Book may be too large." },
+        { status: 504 }
+      );
+    }
+    return NextResponse.json(
+      { detail: "Export request failed" },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json(payload, { status: response.status });
 }
