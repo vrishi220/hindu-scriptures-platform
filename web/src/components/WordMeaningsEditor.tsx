@@ -134,6 +134,7 @@ export default function WordMeaningsEditor({
   const [editorMode, setEditorMode] = useState<"table" | "token">("token");
   const [tokenDraft, setTokenDraft] = useState("");
   const [tokenMessage, setTokenMessage] = useState<string | null>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
 
   const sourcePairFromDisplayInput = (
     value: string
@@ -376,119 +377,79 @@ export default function WordMeaningsEditor({
         <p className="text-xs text-zinc-500">No word-meaning rows yet.</p>
       ) : (
         <>
+          {/* Mobile: stacked cards */}
           <div className="space-y-2 md:hidden">
             {rows.map((row, index) => (
               <div key={row.id} className="rounded-lg border border-black/10 bg-white p-2">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">Row {index + 1}</div>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onMoveRow(row.id, "up")}
-                      disabled={index === 0}
-                      className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onMoveRow(row.id, "down")}
-                      disabled={index === rows.length - 1}
-                      className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveRow(row.id)}
-                      className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700"
-                    >
-                      Delete
-                    </button>
+                    {editingRowId === row.id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setEditingRowId(null)}
+                          className="rounded border border-green-200 px-2 py-1 text-[10px] font-medium text-green-700 transition hover:bg-green-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingRowId(null)}
+                          className="rounded border border-gray-200 px-2 py-1 text-[10px] text-gray-600 transition hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRowId(row.id)}
+                        className="rounded border border-black/10 px-2 py-1 text-[10px] text-zinc-600 transition hover:bg-zinc-50"
+                        title="Edit row"
+                      >
+                        ✎
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 gap-2">
-                  <input
-                    type="text"
-                    value={sourceDisplayValueFromRow(row)}
-                    onChange={(event) => {
-                      const nextPair = sourcePairFromDisplayInput(event.target.value);
-                      onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
-                      onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
-                      onSourceFieldChange(
-                        row.id,
-                        "sourceTransliterationIast",
-                        nextPair.sourceTransliterationIast
-                      );
-                    }}
-                    className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                    placeholder={`Source (${sourceDisplayScript})`}
-                  />
-                  <input
-                    type="text"
-                    value={row.meanings[row.activeMeaningLanguage] || ""}
-                    onChange={(event) => {
-                      onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
-                    }}
-                    className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                    placeholder={`Meaning (${row.activeMeaningLanguage})`}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="hidden overflow-x-auto rounded-lg border border-black/10 bg-white md:block">
-          <table className="min-w-full border-collapse">
-            <thead>
-              <tr className="bg-zinc-50 text-left text-[11px] uppercase tracking-[0.14em] text-zinc-500">
-                <th className="border-b border-black/10 px-2 py-2">#</th>
-                <th className="border-b border-black/10 px-2 py-2">Source ({effectiveSourceLanguage})</th>
-                <th className="border-b border-black/10 px-2 py-2">
-                  Meaning ({effectiveMeaningLanguage}){effectiveMeaningLanguage === requiredLanguage ? "*" : ""}
-                </th>
-                <th className="border-b border-black/10 px-2 py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={row.id} className="align-top">
-                  <td className="border-b border-black/10 px-2 py-2 text-xs text-zinc-500">{index + 1}</td>
-                  <td className="border-b border-black/10 px-2 py-2">
-                    <input
-                      type="text"
-                      value={sourceDisplayValueFromRow(row)}
-                      onChange={(event) => {
-                        const nextPair = sourcePairFromDisplayInput(event.target.value);
-                        onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
-                        onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
-                        onSourceFieldChange(
-                          row.id,
-                          "sourceTransliterationIast",
-                          nextPair.sourceTransliterationIast
-                        );
-                      }}
-                      className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder={`Source (${sourceDisplayScript})`}
-                    />
-                  </td>
-                  <td className="border-b border-black/10 px-2 py-2">
-                    <input
-                      type="text"
-                      value={row.meanings[row.activeMeaningLanguage] || ""}
-                      onChange={(event) => {
-                        onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
-                      }}
-                      className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder={`Meaning (${row.activeMeaningLanguage})`}
-                    />
-                  </td>
-                  <td className="border-b border-black/10 px-2 py-2">
-                    <div className="flex items-center gap-1">
+
+                {editingRowId === row.id ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-2 mb-2">
+                      <input
+                        type="text"
+                        value={sourceDisplayValueFromRow(row)}
+                        onChange={(event) => {
+                          const nextPair = sourcePairFromDisplayInput(event.target.value);
+                          onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
+                          onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
+                          onSourceFieldChange(
+                            row.id,
+                            "sourceTransliterationIast",
+                            nextPair.sourceTransliterationIast
+                          );
+                        }}
+                        className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        placeholder={`Source (${sourceDisplayScript})`}
+                        autoFocus
+                      />
+                      <input
+                        type="text"
+                        value={row.meanings[row.activeMeaningLanguage] || ""}
+                        onChange={(event) => {
+                          onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
+                        }}
+                        className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                        placeholder={`Meaning (${row.activeMeaningLanguage})`}
+                      />
+                    </div>
+                    <div className="flex gap-1">
                       <button
                         type="button"
                         onClick={() => onMoveRow(row.id, "up")}
                         disabled={index === 0}
-                        className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex-1 rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
                       >
                         ↑
                       </button>
@@ -496,26 +457,153 @@ export default function WordMeaningsEditor({
                         type="button"
                         onClick={() => onMoveRow(row.id, "down")}
                         disabled={index === rows.length - 1}
-                        className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex-1 rounded border border-black/10 px-1.5 py-0.5 text-[10px] text-zinc-600 disabled:opacity-40"
                       >
                         ↓
                       </button>
                       <button
                         type="button"
                         onClick={() => onRemoveRow(row.id)}
-                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 transition hover:bg-red-50"
+                        className="flex-1 rounded border border-red-200 px-1.5 py-0.5 text-[10px] text-red-700"
                       >
                         Delete
                       </button>
                     </div>
-                    <div className="mt-1 text-[10px] text-zinc-500">
-                      Src: {row.sourceLanguage} | Meaning langs: {rowMeaningLanguages.filter((lang) => (row.meanings[lang] || "").trim()).join(", ") || "-"}
+                  </>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 text-sm">
+                    <div className="rounded bg-zinc-50 px-2 py-1.5">
+                      <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500 mb-0.5">Source</div>
+                      <div className="text-zinc-900 break-words">{sourceDisplayValueFromRow(row)}</div>
                     </div>
-                  </td>
+                    <div className="rounded bg-zinc-50 px-2 py-1.5">
+                      <div className="text-[10px] uppercase tracking-[0.12em] text-zinc-500 mb-0.5">Meaning</div>
+                      <div className="text-zinc-900 break-words">{row.meanings[row.activeMeaningLanguage] || "—"}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden overflow-x-auto rounded-lg border border-black/10 bg-white md:block">
+            <table className="min-w-full border-collapse">
+              <thead>
+                <tr className="bg-zinc-50 text-left text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+                  <th className="border-b border-black/10 px-2 py-2">#</th>
+                  <th className="border-b border-black/10 px-2 py-2">Source ({effectiveSourceLanguage})</th>
+                  <th className="border-b border-black/10 px-2 py-2">
+                    Meaning ({effectiveMeaningLanguage}){effectiveMeaningLanguage === requiredLanguage ? "*" : ""}
+                  </th>
+                  <th className="border-b border-black/10 px-2 py-2">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr
+                    key={row.id}
+                    className={editingRowId === row.id ? "bg-blue-50" : "align-top"}
+                  >
+                    <td className="border-b border-black/10 px-2 py-2 text-xs text-zinc-500">{index + 1}</td>
+                    <td className="border-b border-black/10 px-2 py-2">
+                      {editingRowId === row.id ? (
+                        <input
+                          type="text"
+                          value={sourceDisplayValueFromRow(row)}
+                          onChange={(event) => {
+                            const nextPair = sourcePairFromDisplayInput(event.target.value);
+                            onSourceFieldChange(row.id, "sourceLanguage", effectiveSourceLanguage);
+                            onSourceFieldChange(row.id, "sourceScriptText", nextPair.sourceScriptText);
+                            onSourceFieldChange(
+                              row.id,
+                              "sourceTransliterationIast",
+                              nextPair.sourceTransliterationIast
+                            );
+                          }}
+                          className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder={`Source (${sourceDisplayScript})`}
+                          autoFocus
+                        />
+                      ) : (
+                        <div className="text-sm text-zinc-900">{sourceDisplayValueFromRow(row)}</div>
+                      )}
+                    </td>
+                    <td className="border-b border-black/10 px-2 py-2">
+                      {editingRowId === row.id ? (
+                        <input
+                          type="text"
+                          value={row.meanings[row.activeMeaningLanguage] || ""}
+                          onChange={(event) => {
+                            onMeaningTextChange(row.id, row.activeMeaningLanguage, event.target.value);
+                          }}
+                          className="w-full rounded-lg border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                          placeholder={`Meaning (${row.activeMeaningLanguage})`}
+                        />
+                      ) : (
+                        <div className="text-sm text-zinc-900">{row.meanings[row.activeMeaningLanguage] || "—"}</div>
+                      )}
+                    </td>
+                    <td className="border-b border-black/10 px-2 py-2">
+                      <div className="flex items-center gap-1">
+                        {editingRowId === row.id ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRowId(null)}
+                              className="rounded border border-green-200 px-2 py-1 text-xs font-medium text-green-700 transition hover:bg-green-50"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRowId(null)}
+                              className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRowId(row.id)}
+                              className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50"
+                              title="Edit row"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onMoveRow(row.id, "up")}
+                              disabled={index === 0}
+                              className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onMoveRow(row.id, "down")}
+                              disabled={index === rows.length - 1}
+                              className="rounded border border-black/10 px-2 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onRemoveRow(row.id)}
+                              className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 transition hover:bg-red-50"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
