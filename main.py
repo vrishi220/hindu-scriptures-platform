@@ -2,9 +2,11 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from api import auth, content, search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email
 from models.database import DATABASE_URL
@@ -58,6 +60,25 @@ if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
 
 app = FastAPI(title="Hindu Scriptures Platform", version="0.1.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+class NoCacheMediaMiddleware(BaseHTTPMiddleware):
+    """Force browsers to revalidate media files on every request.
+
+    StaticFiles does not set Cache-Control, so browsers use heuristic caching
+    and may serve stale bytes after a file is replaced. Setting no-cache here
+    means browsers always revalidate with ETag/Last-Modified, getting 304 for
+    unchanged files and 200 for replaced ones.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith("/media/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.add_middleware(NoCacheMediaMiddleware)
 
 
 @app.on_event("startup")
