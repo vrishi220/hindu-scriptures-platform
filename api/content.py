@@ -4159,9 +4159,12 @@ def update_node_single_field(
             )
 
     field_path = payload.field_path.strip()
-    next_value = payload.value.strip() if isinstance(payload.value, str) else None
-    if next_value == "":
-        next_value = None
+    if isinstance(payload.value, str):
+        next_value = payload.value.strip()
+        if next_value == "":
+            next_value = None
+    else:
+        next_value = payload.value
 
     patch_updates: dict[str, object] = {}
 
@@ -4206,37 +4209,174 @@ def update_node_single_field(
             else:
                 content_data.pop("translations", None)
         elif field_path.startswith("content_data.word_meanings_rows."):
-            match = re.fullmatch(
+            word_meanings = (
+                content_data.get("word_meanings")
+                if isinstance(content_data.get("word_meanings"), dict)
+                else {}
+            )
+            rows = word_meanings.get("rows") if isinstance(word_meanings.get("rows"), list) else []
+            word_meanings = dict(word_meanings)
+            word_meanings["version"] = str(word_meanings.get("version") or "1.0")
+            word_meanings["rows"] = rows
+            content_data["word_meanings"] = word_meanings
+            preview_rows = (
+                content_data.get("word_meanings_rows")
+                if isinstance(content_data.get("word_meanings_rows"), list)
+                else []
+            )
+
+            op_match = re.fullmatch(
+                r"content_data\.word_meanings_rows\.(\d+)\.(delete|move_up|move_down)",
+                field_path,
+            )
+            add_match = re.fullmatch(r"content_data\.word_meanings_rows\.add", field_path)
+            replace_all_match = re.fullmatch(r"content_data\.word_meanings_rows\.replace_all", field_path)
+            field_match = re.fullmatch(
                 r"content_data\.word_meanings_rows\.(\d+)\.resolved_(meaning|source)\.text",
                 field_path,
             )
-            if not match:
+
+            if replace_all_match:
+                if not isinstance(next_value, list):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="value must be a list for word_meanings_rows.replace_all",
+                    )
+                rows = list(next_value)
+            elif op_match:
+                row_index = int(op_match.group(1))
+                operation = op_match.group(2)
+                if operation == "delete":
+                    if 0 <= row_index < len(rows):
+                        rows.pop(row_index)
+                elif operation == "move_up":
+                    if 0 < row_index < len(rows):
+                        rows[row_index - 1], rows[row_index] = rows[row_index], rows[row_index - 1]
+                elif operation == "move_down":
+                    if 0 <= row_index < len(rows) - 1:
+                        rows[row_index], rows[row_index + 1] = rows[row_index + 1], rows[row_index]
+            elif add_match:
+                import time as _time
+                new_row: dict = {
+                    "id": f"wm_quick_{int(_time.time() * 1000) % 10000000}_{len(rows) + 1}",
+                    "order": len(rows) + 1,
+                    "source": {"language": "sa", "script_text": "", "transliteration": {}},
+                    "meanings": {"en": {"text": ""}},
+                }
+                rows.append(new_row)
+            elif field_match:
+                row_index = int(field_match.group(1))
+                resolved_kind = field_match.group(2)
+                if row_index >= len(rows):
+                    rows.extend({} for _ in range(row_index - len(rows) + 1))
+
+                row = rows[row_index]
+                if not isinstance(row, dict):
+                    row = {}
+                    rows[row_index] = row
+
+                if resolved_kind == "source":
+                    source_entry = row.get("source")
+                    if not isinstance(source_entry, dict):
+                        source_entry = {"language": "sa", "transliteration": {}}
+                        row["source"] = source_entry
+                    source_entry["script_text"] = next_value or ""
+                else:
+                    meanings_entry = row.get("meanings")
+                    if not isinstance(meanings_entry, dict):
+                        meanings_entry = {}
+                        row["meanings"] = meanings_entry
+
+                    preview_row = preview_rows[row_index] if 0 <= row_index < len(preview_rows) and isinstance(preview_rows[row_index], dict) else {}
+                    resolved_meaning = (
+                        preview_row.get("resolved_meaning")
+                        if isinstance(preview_row.get("resolved_meaning"), dict)
+                        else {}
+                    )
+                    target_language = (
+                        str(resolved_meaning.get("language") or "").strip().lower()
+                        or ("en" if "en" in meanings_entry else "")
+                        or next((str(key).strip().lower() for key in meanings_entry.keys() if str(key).strip()), "en")
+                    )
+
+                    existing_meaning = meanings_entry.get(target_language)
+                    if not isinstance(existing_meaning, dict):
+                        existing_meaning = {}
+                        meanings_entry[target_language] = existing_meaning
+                    existing_meaning["text"] = next_value or ""
+            else:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Unsupported field_path for single-field patch",
                 )
 
-            row_index = int(match.group(1))
-            resolved_kind = match.group(2)
-            rows = content_data.get("word_meanings_rows")
-            if not isinstance(rows, list):
-                rows = []
-            if row_index >= len(rows):
-                rows.extend({} for _ in range(row_index - len(rows) + 1))
-            content_data["word_meanings_rows"] = rows
+            for index, row in enumerate(rows):
+                if isinstance(row, dict):
+                    row["order"] = index + 1
 
-            row = rows[row_index]
-            if not isinstance(row, dict):
-                row = {}
-                rows[row_index] = row
-
-            resolved_key = f"resolved_{resolved_kind}"
-            resolved_entry = row.get(resolved_key)
-            if not isinstance(resolved_entry, dict):
-                resolved_entry = {}
-                row[resolved_key] = resolved_entry
-
-            resolved_entry["text"] = next_value or ""
+            content_data["word_meanings_rows"] = [
+                {
+                    "id": str(row.get("id") or f"wm_row_{index + 1}"),
+                    "order": index + 1,
+                    "source": row.get("source") if isinstance(row.get("source"), dict) else {"language": "sa", "script_text": "", "transliteration": {}},
+                    "meanings": row.get("meanings") if isinstance(row.get("meanings"), dict) else {},
+                    "resolved_source": {
+                        "text": (
+                            str(
+                                (
+                                    row.get("source") if isinstance(row.get("source"), dict) else {}
+                                ).get("script_text")
+                                or (
+                                    (
+                                        (row.get("source") if isinstance(row.get("source"), dict) else {}).get("transliteration")
+                                        if isinstance((row.get("source") if isinstance(row.get("source"), dict) else {}).get("transliteration"), dict)
+                                        else {}
+                                    ).get("iast")
+                                )
+                                or ""
+                            )
+                        ),
+                        "mode": "script",
+                        "scheme": "",
+                    },
+                    "resolved_meaning": {
+                        "text": (
+                            str(
+                                (
+                                    (
+                                        row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
+                                    ).get("en")
+                                    if isinstance((row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).get("en"), dict)
+                                    else next(
+                                        (
+                                            value
+                                            for value in (row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).values()
+                                            if isinstance(value, dict)
+                                        ),
+                                        {},
+                                    )
+                                ).get("text")
+                                or ""
+                            )
+                        ),
+                        "language": (
+                            "en"
+                            if isinstance((row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).get("en"), dict)
+                            else next(
+                                (
+                                    str(key).strip().lower()
+                                    for key, value in (row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).items()
+                                    if str(key).strip() and isinstance(value, dict)
+                                ),
+                                "en",
+                            )
+                        ),
+                        "fallback_badge_visible": False,
+                    },
+                }
+                for index, row in enumerate(rows)
+                if isinstance(row, dict)
+            ]
         elif field_path.startswith("content_data.translation_variants.") or field_path.startswith("content_data.commentary_variants."):
             match = re.fullmatch(
                 r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.(text|author|language)",

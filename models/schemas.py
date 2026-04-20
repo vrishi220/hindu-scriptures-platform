@@ -1,6 +1,6 @@
 from datetime import datetime
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 from services.transliteration import latin_to_devanagari, latin_to_iast
@@ -625,7 +625,7 @@ class ContentNodeUpdate(BaseModel):
 
 class ContentNodeFieldPatch(BaseModel):
     field_path: str
-    value: str | None = None
+    value: Any = None
     edit_reason: str | None = None
 
     @field_validator("field_path")
@@ -636,7 +636,7 @@ class ContentNodeFieldPatch(BaseModel):
             raise ValueError("field_path is required")
 
         if re.fullmatch(
-            r"(title_english|title_sanskrit|title_transliteration|sequence_number|content_data\.basic\.(sanskrit|transliteration|translation)|content_data\.translations\.[A-Za-z0-9_-]+|content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text|content_data\.(translation_variants|commentary_variants)\.\d+\.(text|author|language))",
+            r"(title_english|title_sanskrit|title_transliteration|sequence_number|content_data\.basic\.(sanskrit|transliteration|translation)|content_data\.translations\.[A-Za-z0-9_-]+|content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text|content_data\.word_meanings_rows\.\d+\.(delete|move_up|move_down)|content_data\.word_meanings_rows\.add|content_data\.word_meanings_rows\.replace_all|content_data\.(translation_variants|commentary_variants)\.\d+\.(text|author|language))",
             normalized,
         ):
             return normalized

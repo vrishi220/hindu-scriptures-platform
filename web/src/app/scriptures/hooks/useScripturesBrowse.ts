@@ -265,6 +265,9 @@ export function useScripturesBrowse(config: UseScripturesBrowseConfig = {}): Use
       setSelectedId(nodeId);
       setBreadcrumb(path);
       setExpandedIds((prev) => {
+        if (autoSelect) {
+          return new Set(path.map((node) => node.id));
+        }
         const next = new Set(prev);
         path.forEach((node) => next.add(node.id));
         return next;

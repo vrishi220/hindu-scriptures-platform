@@ -2807,6 +2807,7 @@ function ScripturesContent() {
     saving: boolean;
     error: string | null;
   } | null>(null);
+  const [wmPreviewTableEditNodeId, setWmPreviewTableEditNodeId] = useState<number | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
     useState<BookPreviewLanguageSettings>({
@@ -6282,7 +6283,7 @@ function ScripturesContent() {
           selectedId !== nodeId ||
           (!isCurrentNodeAlreadyLoading && nodeContent?.id !== nodeId)
         ) {
-          applySelection(nodeId, path);
+          applySelection(nodeId, path, true);
         }
         lastAutoSelectNodeId.current = nodeId;
         if (pendingSavedNodeId.current === nodeId) {
@@ -9070,6 +9071,41 @@ function ScripturesContent() {
         body: nextBody,
       },
     };
+  };
+
+  const handleWmPreviewReplaceRows = async (nodeId: number, newRows: WordMeaningRow[]) => {
+    if (!bookPreviewArtifact) return;
+    const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
+    const rawRows = mapWordMeaningRowsForPayload(newRows);
+    try {
+      const res = await fetch(contentPath(`/nodes/${nodeId}/field`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          field_path: "content_data.word_meanings_rows.replace_all",
+          value: rawRows,
+          edit_reason: "Word meanings table edit",
+        }),
+      });
+      if (!res.ok) {
+        const p = (await res.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(p?.detail || `Save failed (${res.status})`);
+      }
+      const payload = (await res.json().catch(() => null)) as NodeContent | { detail?: string } | null;
+      if (isNodeContentPayload(payload)) {
+        syncSavedNodeState(payload);
+        setBookPreviewArtifact((prev) =>
+          prev ? applySavedNodeToPreviewArtifact(prev, payload) : prev
+        );
+      }
+      setWmPreviewTableEditNodeId(null);
+      setPreviewLinkMessage("Saved.");
+      window.setTimeout(() => setPreviewLinkMessage(null), 1200);
+    } catch (err) {
+      setBookPreviewArtifact(snapshot);
+      console.error("Failed to save word meanings:", err);
+    }
   };
 
   const applySavedNodeToPreviewArtifact = (
@@ -13613,299 +13649,127 @@ function ScripturesContent() {
               </div>
             );
           })()}
-          {wordMeaningRows.length > 0 && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
+          {(wordMeaningRows.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
             <div className="mt-1 border-t border-black/10 pt-1">
-              {appliedPreviewWordMeaningsDisplayMode === "table" ? (
-                <div className="overflow-x-auto rounded-lg border border-black/10 bg-white/80">
-                  <table className="min-w-full border-collapse text-sm text-zinc-700">
-                    <thead className="bg-zinc-50/70 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                      <tr>
-                        <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
-                          Source
-                        </th>
-                        <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
-                          Meaning
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {wordMeaningRows.map((row) => {
-                        const sourceFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_source.text`;
-                        const meaningFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_meaning.text`;
-                        const canQuickEditWordMeaning =
-                          canEditCurrentBook &&
-                          typeof quickEditNodeId === "number";
-                        const isActiveSource =
-                          canQuickEditWordMeaning &&
-                          previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                          previewQuickEditDraft?.fieldPath === sourceFieldPath;
-                        const isActiveMeaning =
-                          canQuickEditWordMeaning &&
-                          previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                          previewQuickEditDraft?.fieldPath === meaningFieldPath;
-
-                        return (
-                          <tr key={row.key} className="border-b border-black/5 last:border-b-0">
-                            <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
-                              <div className="group relative">
-                                <span>{row.sourceText || "—"}</span>
-                                {canQuickEditWordMeaning && !isActiveSource && showQuickEditAffordances && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setPreviewQuickEditDraft({
-                                        nodeId: quickEditNodeId as number,
-                                        fieldPath: sourceFieldPath,
-                                        lineKey: `wm-source-${row.rowIndex}`,
-                                        value: row.sourceRawText || "",
-                                        saving: false,
-                                        error: null,
-                                      });
-                                    }}
-                                    className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                                    aria-label="Edit word source"
-                                    title="Edit word source"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                              {isActiveSource && (
-                                <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  {renderPreviewQuickEditTextControl({
-                                    clearAriaLabel: "Clear word source",
-                                  })}
-                                  {previewQuickEditDraft?.error && (
-                                    <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                                  )}
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSavePreviewQuickEdit();
-                                      }}
-                                      disabled={Boolean(previewQuickEditDraft?.saving)}
-                                      className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                                    >
-                                      {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPreviewQuickEditDraft(null)}
-                                      disabled={Boolean(previewQuickEditDraft?.saving)}
-                                      className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-2 py-1 align-top text-zinc-700">
-                              <div className="group relative">
-                                <span>
-                                  {row.meaningText || "—"}
-                                  {row.fallbackBadgeVisible && row.meaningLanguage ? (
-                                    <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
-                                      ({row.meaningLanguage})
-                                    </span>
-                                  ) : null}
-                                </span>
-                                {canQuickEditWordMeaning && !isActiveMeaning && showQuickEditAffordances && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setPreviewQuickEditDraft({
-                                        nodeId: quickEditNodeId as number,
-                                        fieldPath: meaningFieldPath,
-                                        lineKey: `wm-meaning-${row.rowIndex}`,
-                                        value: row.meaningText || "",
-                                        saving: false,
-                                        error: null,
-                                      });
-                                    }}
-                                    className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                                    aria-label="Edit word meaning"
-                                    title="Edit word meaning"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                              {isActiveMeaning && (
-                                <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                                  {renderPreviewQuickEditTextControl({
-                                    clearAriaLabel: "Clear word meaning",
-                                  })}
-                                  {previewQuickEditDraft?.error && (
-                                    <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                                  )}
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSavePreviewQuickEdit();
-                                      }}
-                                      disabled={Boolean(previewQuickEditDraft?.saving)}
-                                      className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                                    >
-                                      {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPreviewQuickEditDraft(null)}
-                                      disabled={Boolean(previewQuickEditDraft?.saving)}
-                                      className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
+              {canEditCurrentBook && typeof quickEditNodeId === "number" && wmPreviewTableEditNodeId === quickEditNodeId ? (
+                <div>
+                  <WordMeaningsEditor
+                    rows={(() => {
+                      const rawRows = Array.isArray(block.content.word_meanings_rows)
+                        ? (block.content.word_meanings_rows as Record<string, unknown>[])
+                        : [];
+                      return rawRows.map((row, index) => {
+                        const normalizedSource = normalizeWordMeaningSourceForms(
+                          row?.source as { script_text?: string; transliteration?: Record<string, string | undefined> } | undefined
                         );
-                      })}
-                    </tbody>
-                  </table>
+                        const rawMeanings = row?.meanings;
+                        const mapped: Record<string, string> = {};
+                        if (rawMeanings && typeof rawMeanings === "object") {
+                          Object.entries(rawMeanings as Record<string, unknown>).forEach(([lang, payload]) => {
+                            mapped[lang] = (payload as Record<string, string> | null)?.text || "";
+                          });
+                        }
+                        if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in mapped)) {
+                          mapped[WORD_MEANINGS_REQUIRED_LANGUAGE] = "";
+                        }
+                        const firstNonEmpty = Object.entries(mapped).find(([, t]) => t.trim())?.[0] || WORD_MEANINGS_REQUIRED_LANGUAGE;
+                        return {
+                          id: typeof row?.id === "string" && (row.id as string).trim() ? (row.id as string) : `wm_row_${index + 1}`,
+                          order: typeof row?.order === "number" ? (row.order as number) : index + 1,
+                          sourceLanguage: typeof (row?.source as Record<string, unknown> | undefined)?.language === "string"
+                            ? String((row?.source as Record<string, unknown>).language)
+                            : "sa",
+                          sourceScriptText: normalizedSource.sourceScriptText,
+                          sourceTransliterationIast: normalizedSource.sourceTransliterationIast,
+                          meanings: mapped,
+                          activeMeaningLanguage: firstNonEmpty,
+                        };
+                      });
+                    })()}
+                    validationErrors={[]}
+                    missingRequired={false}
+                    requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
+                    allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
+                    sourceDisplayScript={normalizeTransliterationScript(appliedBookPreviewTransliterationScript)}
+                    onAddRow={() => { /* handled by editor toolbar */ }}
+                    onReplaceRows={(newRows) => { void handleWmPreviewReplaceRows(quickEditNodeId as number, newRows); }}
+                    onMoveRow={() => { /* handled by editor toolbar */ }}
+                    onRemoveRow={() => { /* handled by editor toolbar */ }}
+                    onSourceFieldChange={() => { /* handled by editor toolbar */ }}
+                    onSelectMeaningLanguage={() => { /* handled by editor toolbar */ }}
+                    onMeaningTextChange={() => { /* handled by editor toolbar */ }}
+                    autoEnterTableEdit
+                    initialEditorMode="table"
+                    onRequestClose={() => setWmPreviewTableEditNodeId(null)}
+                    blendWithParent
+                  />
                 </div>
               ) : (
-                <div className="flex flex-col gap-1.5">
-                  {wordMeaningRows.map((row, rowIndex) => {
-                    const source = row.sourceText || "—";
-                    const meaning = row.meaningText || "—";
-                    const fallbackLabel =
-                      row.fallbackBadgeVisible && row.meaningLanguage
-                        ? ` (${row.meaningLanguage})`
-                        : "";
-                    const sourceFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_source.text`;
-                    const meaningFieldPath = `content_data.word_meanings_rows.${row.rowIndex}.resolved_meaning.text`;
-                    const canQuickEditWordMeaning =
-                      canEditCurrentBook &&
-                      typeof quickEditNodeId === "number";
-                    const isActiveSource =
-                      canQuickEditWordMeaning &&
-                      previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                      previewQuickEditDraft?.fieldPath === sourceFieldPath;
-                    const isActiveMeaning =
-                      canQuickEditWordMeaning &&
-                      previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                      previewQuickEditDraft?.fieldPath === meaningFieldPath;
-
-                    return (
-                      <div key={row.key} className="rounded-md border border-black/5 bg-white/60 px-2 py-1">
-                        <div className="group relative whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
-                          <span className="transliteration-highlight">{source}</span>
-                          <span>{` : ${meaning}${fallbackLabel}`}</span>
-                          {rowIndex < wordMeaningRows.length - 1 ? <span>;</span> : null}
-                          {(canQuickEditWordMeaning && showQuickEditAffordances && (!isActiveSource || !isActiveMeaning)) && (
-                            <div className={`absolute right-0 top-0 z-10 flex items-center gap-1 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}>
-                              {!isActiveSource && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewQuickEditDraft({
-                                      nodeId: quickEditNodeId as number,
-                                      fieldPath: sourceFieldPath,
-                                      lineKey: `wm-source-inline-${row.rowIndex}`,
-                                      value: row.sourceRawText || "",
-                                      saving: false,
-                                      error: null,
-                                    });
-                                  }}
-                                  className="rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700"
-                                  aria-label="Edit word source"
-                                  title="Edit word source"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                              {!isActiveMeaning && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewQuickEditDraft({
-                                      nodeId: quickEditNodeId as number,
-                                      fieldPath: meaningFieldPath,
-                                      lineKey: `wm-meaning-inline-${row.rowIndex}`,
-                                      value: row.meaningText || "",
-                                      saving: false,
-                                      error: null,
-                                    });
-                                  }}
-                                  className="rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700"
-                                  aria-label="Edit word meaning"
-                                  title="Edit word meaning"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {isActiveSource && (
-                          <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            {renderPreviewQuickEditTextControl({
-                              clearAriaLabel: "Clear word source",
-                            })}
-                            {previewQuickEditDraft?.error && (
-                              <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                            )}
-                            <div className="mt-2 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleSavePreviewQuickEdit();
-                                }}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                              >
-                                {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPreviewQuickEditDraft(null)}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        {isActiveMeaning && (
-                          <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            {renderPreviewQuickEditTextControl({
-                              clearAriaLabel: "Clear word meaning",
-                            })}
-                            {previewQuickEditDraft?.error && (
-                              <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                            )}
-                            <div className="mt-2 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleSavePreviewQuickEdit();
-                                }}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                              >
-                                {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPreviewQuickEditDraft(null)}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="group relative">
+                  {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                    <button
+                      type="button"
+                      onClick={() => setWmPreviewTableEditNodeId(quickEditNodeId as number)}
+                      className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                      aria-label="Edit word meanings"
+                      title="Edit word meanings"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {appliedPreviewWordMeaningsDisplayMode === "table" ? (
+                    <div className="overflow-x-auto rounded-lg border border-black/10 bg-transparent">
+                      <table className="min-w-full border-collapse text-sm text-zinc-700">
+                        <thead className="bg-transparent text-xs uppercase tracking-[0.14em] text-zinc-500">
+                          <tr>
+                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
+                              Source
+                            </th>
+                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
+                              Meaning
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wordMeaningRows.map((row) => (
+                            <tr key={row.key} className="border-b border-black/5 last:border-b-0">
+                              <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
+                                {row.sourceText || "—"}
+                              </td>
+                              <td className="px-2 py-1 align-top text-zinc-700">
+                                {row.meaningText || "—"}
+                                {row.fallbackBadgeVisible && row.meaningLanguage ? (
+                                  <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                                    ({row.meaningLanguage})
+                                  </span>
+                                ) : null}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="px-1 py-0.5">
+                      <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
+                        {wordMeaningRows.map((row, rowIndex) => {
+                          const source = row.sourceText || "—";
+                          const meaning = row.meaningText || "—";
+                          const fallbackLabel =
+                            row.fallbackBadgeVisible && row.meaningLanguage
+                              ? ` (${row.meaningLanguage})`
+                              : "";
+                          return (
+                            <span key={row.key}>
+                              <span className="transliteration-highlight">{source}</span>
+                              <span>{` : ${meaning}${fallbackLabel}`}</span>
+                              {rowIndex < wordMeaningRows.length - 1 ? <span>; </span> : null}
+                            </span>
+                          );
+                        })}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -14564,10 +14428,12 @@ function ScripturesContent() {
     renderInlineMediaPreview,
     previewQuickEditGestureBlockKey,
     previewQuickEditDraft,
+    wmPreviewTableEditNodeId,
     canEditCurrentBook,
     resolvePreviewQuickEditFieldPath,
     resolvePreviewQuickEditNodeId,
     handleSavePreviewQuickEdit,
+    handleWmPreviewReplaceRows,
     openPreviewNodeInFullEditor,
   ]);
 
