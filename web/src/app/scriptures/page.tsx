@@ -15352,7 +15352,11 @@ function ScripturesContent() {
       <button
         type="button"
         onClick={() => setShowMediaManagerDensityMenu((prev) => !prev)}
-        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-black/10 bg-white px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+        className={`inline-flex h-8 items-center gap-1.5 rounded-md border bg-white px-2 text-[10px] font-medium uppercase tracking-[0.12em] transition ${
+          showMediaManagerDensityMenu
+            ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+            : "border-black/10 text-zinc-700 hover:bg-zinc-50"
+        }`}
         aria-label="Open media density"
         title="Media density"
       >
@@ -15360,7 +15364,7 @@ function ScripturesContent() {
         {mediaManagerDensityLabel}
       </button>
       {showMediaManagerDensityMenu && (
-        <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+        <div className="absolute left-1/2 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 -translate-x-1/2 rounded-xl border border-black/10 bg-white p-3 shadow-xl sm:left-auto sm:right-0 sm:translate-x-0">
           <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
             <span>Media density</span>
             <span className="font-semibold text-zinc-700">{mediaManagerDensityLabel}</span>
@@ -15424,7 +15428,11 @@ function ScripturesContent() {
                 <button
                   type="button"
                   onClick={() => setShowBookBrowserDensityMenu((prev) => !prev)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-black/10 bg-white px-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-zinc-700 transition hover:bg-zinc-50"
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border bg-white px-2.5 text-[11px] font-medium uppercase tracking-[0.12em] transition ${
+                    showBookBrowserDensityMenu
+                      ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                      : "border-black/10 text-zinc-700 hover:bg-zinc-50"
+                  }`}
                   aria-label="Open view density"
                   title="View density"
                 >
@@ -15432,7 +15440,7 @@ function ScripturesContent() {
                   {booksDensityLabel}
                 </button>
                 {showBookBrowserDensityMenu && (
-                  <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 rounded-xl border border-black/10 bg-white p-3 shadow-xl">
+                  <div className="absolute left-1/2 z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 -translate-x-1/2 rounded-xl border border-black/10 bg-white p-3 shadow-xl sm:left-auto sm:right-0 sm:translate-x-0">
                     <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.12em] text-zinc-500">
                       <span>View density</span>
                       <span className="font-semibold text-zinc-700">{booksDensityLabel}</span>
@@ -15842,7 +15850,11 @@ function ScripturesContent() {
                                     }}
                                     title="Row actions"
                                     aria-label="Row actions"
-                                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-black/15 bg-white/90 text-zinc-700 backdrop-blur transition hover:border-black/25 hover:bg-white"
+                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-md border bg-white/90 text-zinc-700 backdrop-blur transition ${
+                                      isBookRowMenuOpen
+                                        ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                                        : "border-black/15 hover:border-black/25 hover:bg-white"
+                                    }`}
                                   >
                                     ⋮
                                   </button>
@@ -15926,7 +15938,11 @@ function ScripturesContent() {
                                   }}
                                   title="Row actions"
                                   aria-label="Row actions"
-                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white/90 text-zinc-700 transition ${
+                                    openBookRowActionsId === book.id
+                                      ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                                      : "border-black/10 hover:border-black/20 hover:bg-zinc-50"
+                                  }`}
                                 >
                                   ⋮
                                 </button>
@@ -16415,12 +16431,16 @@ function ScripturesContent() {
                             }}
                             title="Book tree actions"
                             aria-label="Book tree actions"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white/80 text-sm transition ${
+                              showBookRootActionsMenu
+                                ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                                : "border-black/10 text-zinc-700 hover:border-black/20 hover:bg-zinc-50"
+                            }`}
                           >
                             <MoreVertical size={16} />
                           </button>
                           {showBookRootActionsMenu && (
-                            <div className="absolute right-0 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56">
+                            <div className="absolute left-1/2 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:left-auto sm:right-0 sm:translate-x-0 sm:w-56">
                               {canEditCurrentBook && !bookInlineEditMode && (
                                 <button
                                   type="button"
@@ -16769,12 +16789,16 @@ function ScripturesContent() {
                             }}
                             title="Node actions"
                             aria-label="Node actions"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-sm text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white/80 text-sm transition ${
+                              showNodeActionsMenu
+                                ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                                : "border-black/10 text-zinc-700 hover:border-black/20 hover:bg-zinc-50"
+                            }`}
                           >
                             ⋮
                           </button>
                           {showNodeActionsMenu && (
-                            <div className="absolute right-0 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:w-56">
+                            <div className="absolute left-1/2 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:left-auto sm:right-0 sm:translate-x-0 sm:w-56">
                               {canPreviewCurrentNode && (
                                 <button
                                   type="button"
@@ -18974,13 +18998,17 @@ function ScripturesContent() {
                         type="button"
                         onClick={() => setBookMediaActionsOpen((prev) => !prev)}
                         disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !resolvedCurrentBookId}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-white transition disabled:opacity-50 ${
+                          bookMediaActionsOpen
+                            ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                            : "border-black/10 text-zinc-700 hover:bg-zinc-50"
+                        }`}
                         aria-label="More media actions"
                       >
                         <MoreVertical size={16} />
                       </button>
                       {bookMediaActionsOpen && (
-                        <div className="absolute right-0 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute left-1/2 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg sm:left-auto sm:right-0 sm:translate-x-0 sm:origin-top-right">
                           <button
                             type="button"
                             onClick={() => {
@@ -19613,13 +19641,17 @@ function ScripturesContent() {
                         type="button"
                         onClick={() => setNodeMediaActionsOpen((prev) => !prev)}
                         disabled={nodeMediaUploading || nodeMediaUpdating || mediaBankUploading || mediaBankUpdating || externalMediaFormSubmitting || !selectedId}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-white transition disabled:opacity-50 ${
+                          nodeMediaActionsOpen
+                            ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                            : "border-black/10 text-zinc-700 hover:bg-zinc-50"
+                        }`}
                         aria-label="More media actions"
                       >
                         <MoreVertical size={16} />
                       </button>
                       {nodeMediaActionsOpen && (
-                        <div className="absolute right-0 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg">
+                        <div className="absolute left-1/2 top-full z-50 mt-2 w-56 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-lg border border-black/10 bg-white p-1.5 shadow-lg sm:left-auto sm:right-0 sm:translate-x-0 sm:origin-top-right">
                           <button
                             type="button"
                             onClick={() => {

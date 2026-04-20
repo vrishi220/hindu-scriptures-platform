@@ -338,7 +338,11 @@ export default function NavBar() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="sm:hidden flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-xl font-bold text-zinc-700 hover:bg-black/5 hover:text-[color:var(--accent)] transition"
+            className={`sm:hidden flex h-9 w-9 items-center justify-center rounded-lg border bg-white/90 text-xl font-bold transition ${
+              mobileMenuOpen
+                ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                : "border-black/10 text-zinc-700 hover:bg-black/5 hover:text-[color:var(--accent)]"
+            }`}
             title="Menu"
           >
             ☰
@@ -447,14 +451,18 @@ export default function NavBar() {
               <button
                 type="button"
                 onClick={() => setUserMenuOpen((prev) => !prev)}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-black/10 bg-white/90 text-sm font-semibold text-zinc-700 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className={`flex h-10 w-10 items-center justify-center rounded-full border bg-white/90 text-sm font-semibold shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                  userMenuOpen
+                    ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                    : "border-black/10 text-zinc-700"
+                }`}
                 title={authUser.email || "Profile"}
                 aria-label="User menu"
               >
                 {initials}
               </button>
               {userMenuOpen && (
-                <div className="absolute right-4 sm:right-6 top-[58px] sm:top-[66px] z-50 min-w-[180px] rounded-xl border border-black/10 bg-white p-1 shadow-lg">
+                <div className="absolute left-1/2 top-[58px] z-50 min-w-[180px] -translate-x-1/2 rounded-xl border border-black/10 bg-white p-1 shadow-lg sm:left-auto sm:right-6 sm:top-[66px] sm:translate-x-0">
                   <button
                     type="button"
                     onClick={() => {
