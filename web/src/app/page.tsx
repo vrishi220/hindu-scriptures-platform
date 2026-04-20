@@ -8,7 +8,7 @@ import { getMe, invalidateMeCache } from "../lib/authClient";
 import BasketPanel from "../components/BasketPanel";
 import { type UserPreferences } from "../components/UserPreferencesDialog";
 import { normalizeTransliterationScript, transliterateFromIast, transliterateFromDevanagari, hasDevanagariLetters } from "../lib/indicScript";
-import { resolveMediaUrl } from "../lib/mediaUrl";
+import { resolveMediaUrlWithMetadataVersion } from "../lib/mediaUrl";
 import {
   applyUiPreferencesToDocument,
   normalizeUiDensity,
@@ -984,7 +984,7 @@ function HomeContent() {
 
     for (const candidate of thumbnailCandidates) {
       if (typeof candidate === "string" && candidate.trim()) {
-        return resolveMediaUrl(candidate);
+        return resolveMediaUrlWithMetadataVersion(candidate, metadata);
       }
     }
 

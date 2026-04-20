@@ -4743,13 +4743,13 @@ def replace_media_bank_asset_file(
 
     total_bytes = _save_upload_to_media_storage(file, relative_path)
 
-    metadata = _asset_metadata(asset)
+    asset_metadata = _asset_metadata(asset)
     if file.filename:
-        metadata["original_filename"] = file.filename
-    metadata["content_type"] = content_type
-    metadata["size_bytes"] = total_bytes
-    metadata["replaced_at"] = datetime.now(timezone.utc).isoformat()
-    _set_asset_metadata(asset, metadata)
+        asset_metadata["original_filename"] = file.filename
+    asset_metadata["content_type"] = content_type
+    asset_metadata["size_bytes"] = total_bytes
+    asset_metadata["replaced_at"] = datetime.now(timezone.utc).isoformat()
+    _set_asset_metadata(asset, asset_metadata)
 
     # Keep linked media metadata in sync while preserving URLs/links.
     linked_media = (
@@ -4761,8 +4761,76 @@ def replace_media_bank_asset_file(
         media_metadata = _media_metadata(media)
         media_metadata["content_type"] = content_type
         media_metadata["size_bytes"] = total_bytes
-        media_metadata["replaced_at"] = metadata.get("replaced_at")
+        media_metadata["replaced_at"] = asset_metadata.get("replaced_at")
         _set_media_metadata(media, media_metadata)
+
+    # Keep book-level metadata in sync for thumbnail and media_items references.
+    linked_books = db.query(Book).all()
+    for book in linked_books:
+        book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else None
+        if not book_metadata:
+            continue
+
+        metadata_changed = False
+        thumbnail_url_candidates = [
+            book_metadata.get("thumbnail_url"),
+            book_metadata.get("thumbnailUrl"),
+            book_metadata.get("cover_image_url"),
+            book_metadata.get("coverImageUrl"),
+        ]
+
+        has_thumbnail_match = any(
+            isinstance(candidate, str) and candidate.strip() == asset.url
+            for candidate in thumbnail_url_candidates
+        )
+        if has_thumbnail_match:
+            book_metadata["thumbnail_content_type"] = content_type
+            book_metadata["thumbnail_size_bytes"] = total_bytes
+            book_metadata["thumbnail_replaced_at"] = asset_metadata.get("replaced_at")
+            metadata_changed = True
+
+        media_items_raw = book_metadata.get("media_items")
+        if isinstance(media_items_raw, list):
+            media_items_updated = False
+            for item in media_items_raw:
+                if not isinstance(item, dict):
+                    continue
+
+                item_url = item.get("url")
+                item_asset_id = item.get("asset_id")
+                parsed_item_asset_id = None
+                if isinstance(item_asset_id, int):
+                    parsed_item_asset_id = item_asset_id
+                elif isinstance(item_asset_id, str):
+                    try:
+                        parsed_item_asset_id = int(item_asset_id.strip())
+                    except ValueError:
+                        parsed_item_asset_id = None
+
+                url_match = isinstance(item_url, str) and item_url.strip() == asset.url
+                asset_id_match = parsed_item_asset_id == asset.id
+                if not url_match and not asset_id_match:
+                    continue
+
+                item["content_type"] = content_type
+                item["size_bytes"] = total_bytes
+                item["replaced_at"] = asset_metadata.get("replaced_at")
+                media_items_updated = True
+
+                item_media_type = item.get("media_type")
+                item_is_default = bool(item.get("is_default"))
+                if item_media_type == "image" and item_is_default:
+                    book_metadata["thumbnail_size_bytes"] = total_bytes
+                    book_metadata["thumbnail_replaced_at"] = asset_metadata.get("replaced_at")
+                    metadata_changed = True
+
+            if media_items_updated:
+                book_metadata["media_items"] = media_items_raw
+                metadata_changed = True
+
+        if metadata_changed:
+            setattr(book, "metadata_json", book_metadata)
+            flag_modified(book, "metadata_json")
 
     db.commit()
     db.refresh(asset)

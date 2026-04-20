@@ -78,7 +78,7 @@ import {
   renameMediaBankAsset,
   uploadMediaBankAsset,
 } from "../../lib/mediaBankClient";
-import { resolveMediaUrl } from "../../lib/mediaUrl";
+import { resolveMediaUrl, resolveMediaUrlWithMetadataVersion } from "../../lib/mediaUrl";
 type CanonicalUploadComplete = {
   upload_id?: string;
   canonical_json_url?: string;
@@ -151,6 +151,8 @@ type BookMediaItem = {
   display_name?: string;
   content_type?: string;
   asset_id?: number | string;
+  size_bytes?: number | string;
+  replaced_at?: string;
   is_default?: boolean;
   display_order?: number | string;
 };
@@ -1462,7 +1464,7 @@ const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | nu
 
   for (const candidate of thumbnailUrlCandidates) {
     if (typeof candidate === "string" && candidate.trim()) {
-      return resolveMediaUrl(candidate);
+      return resolveMediaUrlWithMetadataVersion(candidate, metadata);
     }
   }
 
@@ -1527,6 +1529,14 @@ const getBookMediaItems = (book: BookDetails | BookOption | null): BookMediaItem
         content_type:
           typeof candidate.content_type === "string" && candidate.content_type.trim()
             ? candidate.content_type.trim()
+            : undefined,
+        size_bytes:
+          typeof candidate.size_bytes === "number" || typeof candidate.size_bytes === "string"
+            ? candidate.size_bytes
+            : undefined,
+        replaced_at:
+          typeof candidate.replaced_at === "string" && candidate.replaced_at.trim()
+            ? candidate.replaced_at.trim()
             : undefined,
         asset_id: typeof assetId === "number" && Number.isFinite(assetId) ? assetId : undefined,
         is_default: Boolean(candidate.is_default),
@@ -1596,7 +1606,14 @@ const getNodeThumbnailUrl = (mediaItems: MediaFile[]): string | null => {
           : null;
     return Boolean(metadata?.is_default);
   });
-  return resolveMediaUrl((defaultImage || imageItems[0]).url);
+  const picked = defaultImage || imageItems[0];
+  const metadata =
+    picked.metadata && typeof picked.metadata === "object"
+      ? picked.metadata
+      : picked.metadata_json && typeof picked.metadata_json === "object"
+        ? picked.metadata_json
+        : null;
+  return resolveMediaUrlWithMetadataVersion(picked.url, metadata);
 };
 
 const getYouTubeEmbedUrl = (rawUrl: string): string | null => {
@@ -7306,6 +7323,14 @@ function ScripturesContent() {
         content_type:
           typeof asset.metadata?.content_type === "string" && asset.metadata.content_type.trim()
             ? asset.metadata.content_type.trim()
+            : undefined,
+        size_bytes:
+          typeof asset.metadata?.size_bytes === "number" || typeof asset.metadata?.size_bytes === "string"
+            ? asset.metadata.size_bytes
+            : undefined,
+        replaced_at:
+          typeof asset.metadata?.replaced_at === "string" && asset.metadata.replaced_at.trim()
+            ? asset.metadata.replaced_at.trim()
             : undefined,
         asset_id: asset.id,
         is_default: isDefault,
@@ -19291,7 +19316,7 @@ function ScripturesContent() {
                                     <>
                                       {asset.media_type === "image" ? (
                                         <img
-                                          src={resolveMediaUrl(asset.url)}
+                                          src={resolveMediaUrlWithMetadataVersion(asset.url, asset.metadata)}
                                           alt={label}
                                           className="aspect-square w-full object-cover"
                                         />
@@ -19473,7 +19498,7 @@ function ScripturesContent() {
                                         )}
                                         {asset.media_type === "image" ? (
                                           <img
-                                            src={resolveMediaUrl(asset.url)}
+                                            src={resolveMediaUrlWithMetadataVersion(asset.url, asset.metadata)}
                                             alt={label}
                                             className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
                                           />
@@ -19756,7 +19781,7 @@ function ScripturesContent() {
                                     <>
                                       {mediaType === "image" ? (
                                         <img
-                                          src={resolveMediaUrl(media.url)}
+                                          src={resolveMediaUrlWithMetadataVersion(media.url, media.metadata || media.metadata_json || null)}
                                           alt={label}
                                           className="aspect-square w-full object-cover"
                                         />
@@ -19833,7 +19858,7 @@ function ScripturesContent() {
                                         <div className="truncate font-medium">{label}</div>
                                         {mediaType === "image" ? (
                                           <img
-                                            src={resolveMediaUrl(media.url)}
+                                            src={resolveMediaUrlWithMetadataVersion(media.url, media.metadata || media.metadata_json || null)}
                                             alt={label}
                                             className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
                                           />

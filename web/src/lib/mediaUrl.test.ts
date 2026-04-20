@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveMediaUrl } from "./mediaUrl";
+import { appendMediaVersion, resolveMediaUrl, resolveMediaUrlWithMetadataVersion } from "./mediaUrl";
 
 describe("resolveMediaUrl", () => {
   it("rewrites /media paths to frontend proxy", () => {
@@ -24,5 +24,26 @@ describe("resolveMediaUrl", () => {
   it("keeps external non-media URLs unchanged", () => {
     const url = "https://example.com/cdn/image.jpeg";
     expect(resolveMediaUrl(url)).toBe(url);
+  });
+
+  it("appends a v query parameter for cache busting", () => {
+    expect(appendMediaVersion("/api/media/bank/image.jpeg", "2026-04-20T15:33:04.031233+00:00")).toBe(
+      "/api/media/bank/image.jpeg?v=2026-04-20T15%3A33%3A04.031233%2B00%3A00"
+    );
+  });
+
+  it("replaces existing v query parameter", () => {
+    expect(appendMediaVersion("/api/media/bank/image.jpeg?v=old", "new")).toBe(
+      "/api/media/bank/image.jpeg?v=new"
+    );
+  });
+
+  it("resolves media URL with metadata version preference", () => {
+    expect(
+      resolveMediaUrlWithMetadataVersion("/media/bank/image.jpeg", {
+        replaced_at: "2026-04-20T15:33:04.031233+00:00",
+        size_bytes: 1234,
+      })
+    ).toBe("/api/media/bank/image.jpeg?v=2026-04-20T15%3A33%3A04.031233%2B00%3A00");
   });
 });
