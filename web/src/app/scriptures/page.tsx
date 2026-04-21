@@ -12332,12 +12332,10 @@ function ScripturesContent() {
         }
         if (action === "edit" && savedNode) {
           syncSavedNodeState(savedNode);
-          if (editorOpenedFromPreviewRef.current) {
-            editorOpenedFromPreviewRef.current = false;
-            setBookPreviewArtifact((prev) =>
-              prev ? applySavedNodeToPreviewArtifact(prev, savedNode) : prev
-            );
-          }
+          editorOpenedFromPreviewRef.current = false;
+          setBookPreviewArtifact((prev) =>
+            prev ? applySavedNodeToPreviewArtifact(prev, savedNode) : prev
+          );
         } else if (preservedNodeId) {
           await loadNodeContent(preservedNodeId, true);
         }
