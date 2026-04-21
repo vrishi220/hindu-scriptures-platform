@@ -3997,6 +3997,60 @@ def get_node(
     return ContentNodePublic.model_validate(payload_out)
 
 
+def _build_word_meanings_rows_from_raw(rows: list) -> list[dict]:
+    """Build a denormalized word_meanings_rows list from raw word_meanings.rows entries."""
+    result = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        meanings = row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
+
+        script_text = str(source.get("script_text") or "").strip()
+        transliteration = (
+            source.get("transliteration")
+            if isinstance(source.get("transliteration"), dict)
+            else {}
+        )
+        iast = str(transliteration.get("iast") or "").strip()
+        resolved_source_text = script_text or iast
+
+        resolved_meaning_text = ""
+        resolved_meaning_language = "en"
+        en_meaning = meanings.get("en") if isinstance(meanings.get("en"), dict) else None
+        if en_meaning:
+            resolved_meaning_text = str(en_meaning.get("text") or "").strip()
+            resolved_meaning_language = "en"
+        else:
+            for lang, payload in meanings.items():
+                if isinstance(payload, dict):
+                    text = str(payload.get("text") or "").strip()
+                    if text:
+                        resolved_meaning_text = text
+                        resolved_meaning_language = str(lang).strip().lower()
+                        break
+
+        result.append(
+            {
+                "id": str(row.get("id") or f"wm_row_{index + 1}"),
+                "order": index + 1,
+                "source": source,
+                "meanings": meanings,
+                "resolved_source": {
+                    "text": resolved_source_text,
+                    "mode": "script",
+                    "scheme": "",
+                },
+                "resolved_meaning": {
+                    "text": resolved_meaning_text,
+                    "language": resolved_meaning_language,
+                    "fallback_badge_visible": False,
+                },
+            }
+        )
+    return result
+
+
 @router.patch("/nodes/{node_id}", response_model=ContentNodePublic)
 def update_node(
     node_id: int,
@@ -4059,6 +4113,20 @@ def update_node(
 
     if "content_data" in updates:
         updates["content_data"] = _autofill_content_data_pair(updates.get("content_data"))
+        # Keep word_meanings_rows in sync with word_meanings.rows so both storage
+        # formats always reflect the same data (preview render reads word_meanings.rows
+        # while the client preview uses word_meanings_rows from the API response).
+        cd = updates.get("content_data")
+        if isinstance(cd, dict):
+            wm = cd.get("word_meanings") if isinstance(cd.get("word_meanings"), dict) else None
+            if wm:
+                raw_rows = wm.get("rows") if isinstance(wm.get("rows"), list) else []
+                updates["content_data"] = {
+                    **cd,
+                    "word_meanings_rows": _build_word_meanings_rows_from_raw(raw_rows),
+                }
+            elif "word_meanings_rows" in cd:
+                updates["content_data"] = {k: v for k, v in cd.items() if k != "word_meanings_rows"}
 
     effective_level_name = updates.get("level_name") or node.level_name
     effective_content_data = updates.get("content_data")
@@ -4243,6 +4311,7 @@ def update_node_single_field(
                         detail="value must be a list for word_meanings_rows.replace_all",
                     )
                 rows = list(next_value)
+                word_meanings["rows"] = rows
             elif op_match:
                 row_index = int(op_match.group(1))
                 operation = op_match.group(2)
