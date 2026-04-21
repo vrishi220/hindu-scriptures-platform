@@ -4180,6 +4180,17 @@ def update_node(
     if source_node is not None:
         source_node.last_modified_by = current_user.id
     db.commit()
+
+    # Preview render artifacts are cached for performance. Any node update can
+    # change rendered block content, so invalidate book-scoped preview cache.
+    try:
+        from api.draft_books import invalidate_preview_render_cache
+
+        invalidate_preview_render_cache(node.book_id)
+    except Exception:
+        # Cache invalidation is best-effort and must not block persistence.
+        pass
+
     db.refresh(node)
     if source_node is not None:
         db.refresh(source_node)

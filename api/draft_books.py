@@ -945,6 +945,24 @@ def _set_cached_preview_render(cache_key: str, payload: dict) -> None:
             _PREVIEW_RENDER_CACHE.popitem(last=False)
 
 
+def invalidate_preview_render_cache(book_id: int | None = None) -> None:
+    """Invalidate cached preview render artifacts.
+
+    If ``book_id`` is provided, only cache entries for that book are removed.
+    Otherwise the full preview render cache is cleared.
+    """
+
+    with _PREVIEW_RENDER_CACHE_LOCK:
+        if book_id is None:
+            _PREVIEW_RENDER_CACHE.clear()
+            return
+
+        prefix = f"book:{int(book_id)}:"
+        keys_to_delete = [key for key in _PREVIEW_RENDER_CACHE.keys() if key.startswith(prefix)]
+        for key in keys_to_delete:
+            _PREVIEW_RENDER_CACHE.pop(key, None)
+
+
 def _load_system_template_sources(db: Session) -> dict[str, str]:
     now = monotonic()
     with _SYSTEM_TEMPLATE_SOURCES_CACHE_LOCK:

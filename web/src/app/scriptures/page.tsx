@@ -13287,6 +13287,9 @@ function ScripturesContent() {
       const quickEditNodeId = resolvePreviewQuickEditNodeId(block);
       const previewSourceNode =
         typeof quickEditNodeId === "number" ? findNodeById(treeData, quickEditNodeId) : null;
+      const wordMeaningsEnabledForPreviewBlock = isWordMeaningsEnabledForLevel(
+        block.content.level_name || previewSourceNode?.level_name
+      );
       const rawTitle = previewSourceNode
         ? resolvePreviewTitleBySettings(
             formatValue(previewSourceNode.title_sanskrit),
@@ -13668,7 +13671,9 @@ function ScripturesContent() {
               </div>
             );
           })()}
-          {(wordMeaningRows.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && appliedPreviewWordMeaningsDisplayMode !== "hide" && (
+          {wordMeaningsEnabledForPreviewBlock &&
+            (wordMeaningRows.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) &&
+            appliedPreviewWordMeaningsDisplayMode !== "hide" && (
             <div className="mt-1 border-t border-black/10 pt-1">
               {canEditCurrentBook && typeof quickEditNodeId === "number" && wmPreviewTableEditNodeId === quickEditNodeId ? (
                 <div>
