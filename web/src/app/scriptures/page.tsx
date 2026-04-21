@@ -2920,6 +2920,10 @@ function ScripturesContent() {
   const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [basketRangeStart, setBasketRangeStart] = useState("");
+  const [basketRangeEnd, setBasketRangeEnd] = useState("");
+  const [basketRangeSubmitting, setBasketRangeSubmitting] = useState(false);
+  const [basketRangeMessage, setBasketRangeMessage] = useState<string | null>(null);
   const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
   const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
   const [contentFieldLabels, setContentFieldLabels] = useState<Record<string, string>>({
@@ -5498,6 +5502,348 @@ function ScripturesContent() {
         );
       } catch {
         // ignore basket add failures for now
+      }
+    })();
+  };
+
+  const addSelectedRangeToBasket = () => {
+    if (!selectedTreeNode || !authEmail) {
+      return;
+    }
+
+    void (async () => {
+      const parsedStart = Number.parseInt(basketRangeStart.trim(), 10);
+      const parsedEnd = Number.parseInt(basketRangeEnd.trim(), 10);
+
+      if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) {
+        setBasketRangeMessage("Enter valid start and end verse numbers.");
+        return;
+      }
+
+      if (parsedStart <= 0 || parsedEnd <= 0) {
+        setBasketRangeMessage("Verse numbers must be positive.");
+        return;
+      }
+
+      if (parsedStart > parsedEnd) {
+        setBasketRangeMessage("Start verse must be less than or equal to end verse.");
+        return;
+      }
+
+      const directChildren = Array.isArray(selectedTreeNode.children)
+        ? selectedTreeNode.children
+        : [];
+      const candidateVerses = directChildren
+        .filter((node) => !node.children || node.children.length === 0)
+        .map((node) => ({
+          node,
+          sequence: getSequenceSortValue(node),
+        }))
+        .filter((entry) => Number.isFinite(entry.sequence))
+        .sort((a, b) => a.sequence - b.sequence)
+        .filter((entry) => entry.sequence >= parsedStart && entry.sequence <= parsedEnd)
+        .map((entry) => entry.node);
+
+      if (candidateVerses.length === 0) {
+        setBasketRangeMessage(
+          `No direct verses found in this section for range ${parsedStart}-${parsedEnd}.`
+        );
+        return;
+      }
+
+      if (candidateVerses.length > 250) {
+        setBasketRangeMessage("Range is too large. Please use a smaller span (max 250 verses).");
+        return;
+      }
+
+      setBasketRangeSubmitting(true);
+      setBasketRangeMessage(null);
+
+      let addedCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
+
+      try {
+        for (const verseNode of candidateVerses) {
+          if (basketNodeIds.has(verseNode.id)) {
+            skippedCount += 1;
+            continue;
+          }
+
+          const isLeaf = !verseNode.children || verseNode.children.length === 0;
+          const sequenceDisplay =
+            formatSequenceDisplay(verseNode.sequence_number || verseNode.id, isLeaf) || verseNode.id;
+          const levelLabel = formatValue(verseNode.level_name) || "Level";
+          const titleLabel = getNodeBreadcrumbLabel(verseNode).trim();
+          const title = titleLabel || `${levelLabel} ${sequenceDisplay}`;
+          const fullPath = findPath(treeData, verseNode.id) || breadcrumb;
+          const breadcrumbPathParts = fullPath.map((node, index) => {
+            const canonicalLevel = getSchemaMatchedLevelName(
+              formatValue(node.level_name) || "",
+              typeof node.level_order === "number" ? node.level_order : null
+            );
+            const levelRaw = canonicalLevel || formatValue(node.level_name) || "Level";
+            const levelDisplay = levelRaw
+              .toString()
+              .replace(/_/g, " ")
+              .toLowerCase()
+              .replace(/\b\w/g, (char) => char.toUpperCase());
+            const pathIsLeaf = index === fullPath.length - 1;
+            const seq = formatSequenceDisplay(node.sequence_number || node.id, pathIsLeaf);
+            const levelWithSeq = seq ? `${levelDisplay} ${seq}` : levelDisplay;
+            const preferred = getNodeBreadcrumbLabel(node).trim();
+            const normalizedPreferred = preferred.toLowerCase();
+            const normalizedLevelWithSeq = levelWithSeq.toLowerCase();
+            const preferredHasSameSeq = Boolean(seq) && normalizedPreferred.includes(seq.toString());
+            const levelHasSameSeq = Boolean(seq) && normalizedLevelWithSeq.includes(seq.toString());
+
+            if (!preferred) return levelWithSeq;
+            if (normalizedPreferred === levelDisplay.toLowerCase()) return levelWithSeq;
+            if (normalizedPreferred === normalizedLevelWithSeq) return preferred;
+            if (preferredHasSameSeq && levelHasSameSeq) return preferred;
+            return `${preferred}: ${levelWithSeq}`;
+          });
+          const breadcrumbParts = [currentBook?.book_name, ...breadcrumbPathParts].filter(
+            (part): part is string => Boolean(part && part.trim())
+          );
+          const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
+
+          const response = await fetch("/api/cart/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              item_id: verseNode.id,
+              item_type: "library_node",
+              metadata: {
+                title,
+                breadcrumb: breadcrumbText,
+                book_name: currentBook?.book_name,
+                level_name: verseNode.level_name,
+              },
+            }),
+          });
+
+          if (response.status === 409) {
+            skippedCount += 1;
+            basketNodeIds.add(verseNode.id);
+            continue;
+          }
+
+          if (!response.ok) {
+            failedCount += 1;
+            continue;
+          }
+
+          addedCount += 1;
+          basketNodeIds.add(verseNode.id);
+        }
+
+        await loadBasket();
+        const summaryParts = [
+          `${addedCount} added`,
+          `${skippedCount} skipped`,
+          `${failedCount} failed`,
+        ];
+        setBasketRangeMessage(`Range ${parsedStart}-${parsedEnd}: ${summaryParts.join(", ")}.`);
+      } catch {
+        setBasketRangeMessage("Could not add range to basket. Please try again.");
+      } finally {
+        setBasketRangeSubmitting(false);
+      }
+    })();
+  };
+
+  const addPreviewBlockToBasket = useCallback(
+    (nodeId: number, block: BookPreviewBlock) => {
+      if (!authEmail) return;
+      if (basketItems.some((item) => item.node_id === nodeId)) return;
+
+      void (async () => {
+        const seq =
+          formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
+        const levelLabel = formatValue(block.content.level_name) || "Level";
+        const title = block.title || `${levelLabel} ${seq}`;
+        const contentPreview =
+          (block.content.translations?.english) ||
+          (typeof block.content.english === "string" ? block.content.english : undefined) ||
+          (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
+          (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
+          undefined;
+        const breadcrumbParts = [
+          currentBook?.book_name,
+          ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
+        ].filter((p): p is string => Boolean(p?.trim()));
+        const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
+
+        try {
+          const response = await fetch("/api/cart/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              item_id: nodeId,
+              item_type: "library_node",
+              metadata: {
+                title,
+                content: contentPreview,
+                breadcrumb: breadcrumbText,
+                book_name: currentBook?.book_name,
+                level_name: block.content.level_name,
+              },
+            }),
+          });
+
+          if (response.status === 409) {
+            await loadBasket();
+            return;
+          }
+          if (!response.ok) return;
+
+          const item = (await response.json()) as {
+            id: number;
+            item_id: number;
+            order: number;
+            metadata?: {
+              title?: string;
+              content?: string;
+              breadcrumb?: string;
+              book_name?: string;
+              level_name?: string;
+            };
+          };
+
+          setBasketItems((prev) =>
+            [
+              ...prev,
+              {
+                cart_item_id: item.id,
+                node_id: item.item_id,
+                title: item.metadata?.title || title,
+                content: item.metadata?.content || contentPreview,
+                breadcrumb: item.metadata?.breadcrumb || breadcrumbText,
+                book_name: item.metadata?.book_name || currentBook?.book_name,
+                level_name: item.metadata?.level_name || block.content.level_name,
+                order: item.order,
+              },
+            ].sort((a, b) => a.order - b.order)
+          );
+        } catch {
+          // ignore
+        }
+      })();
+    },
+    [authEmail, basketItems, breadcrumb, currentBook, loadBasket, setBasketItems]
+  );
+
+  const addPreviewRangeToBasket = () => {
+    if (!authEmail || !bookPreviewArtifact) return;
+
+    void (async () => {
+      const parsedStart = Number.parseInt(basketRangeStart.trim(), 10);
+      const parsedEnd = Number.parseInt(basketRangeEnd.trim(), 10);
+
+      if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) {
+        setBasketRangeMessage("Enter valid start and end verse numbers.");
+        return;
+      }
+      if (parsedStart <= 0 || parsedEnd <= 0) {
+        setBasketRangeMessage("Verse numbers must be positive.");
+        return;
+      }
+      if (parsedStart > parsedEnd) {
+        setBasketRangeMessage("Start verse must be less than or equal to end verse.");
+        return;
+      }
+
+      const candidateBlocks = bookPreviewArtifact.sections.body.filter((block) => {
+        if (!block.source_node_id) return false;
+        const seq = parseSequenceNumber(block.content.sequence_number);
+        return seq !== null && seq >= parsedStart && seq <= parsedEnd;
+      });
+
+      if (candidateBlocks.length === 0) {
+        setBasketRangeMessage(
+          `No verses found in preview for range ${parsedStart}-${parsedEnd}.`
+        );
+        return;
+      }
+      if (candidateBlocks.length > 250) {
+        setBasketRangeMessage("Range is too large. Please use a smaller span (max 250 verses).");
+        return;
+      }
+
+      setBasketRangeSubmitting(true);
+      setBasketRangeMessage(null);
+
+      let addedCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
+
+      try {
+        for (const block of candidateBlocks) {
+          const nodeId = block.source_node_id!;
+          if (basketNodeIds.has(nodeId)) {
+            skippedCount += 1;
+            continue;
+          }
+          const seq =
+            formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
+          const levelLabel = formatValue(block.content.level_name) || "Level";
+          const title = block.title || `${levelLabel} ${seq}`;
+          const contentPreview =
+            block.content.translations?.english ||
+            (typeof block.content.english === "string" ? block.content.english : undefined) ||
+            (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
+            (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
+            undefined;
+          const breadcrumbParts = [
+            currentBook?.book_name,
+            ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
+          ].filter((p): p is string => Boolean(p?.trim()));
+          const breadcrumbText =
+            breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
+
+          const response = await fetch("/api/cart/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              item_id: nodeId,
+              item_type: "library_node",
+              metadata: {
+                title,
+                content: contentPreview,
+                breadcrumb: breadcrumbText,
+                book_name: currentBook?.book_name,
+                level_name: block.content.level_name,
+              },
+            }),
+          });
+
+          if (response.status === 409) {
+            skippedCount += 1;
+            basketNodeIds.add(nodeId);
+            continue;
+          }
+          if (!response.ok) {
+            failedCount += 1;
+            continue;
+          }
+          addedCount += 1;
+          basketNodeIds.add(nodeId);
+        }
+
+        await loadBasket();
+        setBasketRangeMessage(
+          `Range ${parsedStart}-${parsedEnd}: ${addedCount} added, ${skippedCount} skipped, ${failedCount} failed.`
+        );
+      } catch {
+        setBasketRangeMessage("Could not add range to basket. Please try again.");
+      } finally {
+        setBasketRangeSubmitting(false);
       }
     })();
   };
@@ -13064,6 +13410,10 @@ function ScripturesContent() {
   const canPreviewCurrentNode = Boolean(selectedId) && (Boolean(authEmail) || currentBook?.visibility === "public");
   const canCopyPreviewLink = Boolean(selectedId) && canPreviewCurrentNode;
   const canAddSelectedNodeToBasket = Boolean(selectedId && nodeContent) && isLeafSelected && Boolean(authEmail);
+  const canAddVerseRangeToBasket =
+    Boolean(authEmail && selectedTreeNode && !isLeafSelected) &&
+    Array.isArray(selectedTreeNode?.children) &&
+    selectedTreeNode.children.some((node) => !node.children || node.children.length === 0);
   const canCopyBrowseLink = Boolean(selectedId) && canBrowseCurrentNode;
   const canPreviewCurrentBook = Boolean(bookId) && (Boolean(authEmail) || currentBook?.visibility === "public");
   const canCopyBookBrowseLink = Boolean(bookId) && canBrowseCurrentNode;
@@ -13425,7 +13775,7 @@ function ScripturesContent() {
               {getDisplayLevelName(block.content.level_name)} {block.content.sequence_number}
             </div>
           )}
-          {(displayTitle || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
+          {(displayTitle || ((canEditCurrentBook || authEmail) && typeof quickEditNodeId === "number")) && (
             <div className="mb-0.5 flex items-center justify-between gap-2">
               {displayTitle ? (
                 <div className="min-w-0 flex-1">
@@ -13516,20 +13866,47 @@ function ScripturesContent() {
               ) : (
                 <span />
               )}
-              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void openPreviewNodeInFullEditor(quickEditNodeId);
-                  }}
-                  className={`flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                  title="Edit all fields for this node"
-                  aria-label="Edit all fields for this node"
-                >
-                  <Pencil className="h-3 w-3" />
-                  <Pencil className="h-3 w-3" />
-                </button>
-              )}
+              <div className="flex shrink-0 items-center gap-1">
+                {authEmail && typeof quickEditNodeId === "number" && (() => {
+                  const basketEntry = basketItems.find((item) => item.node_id === quickEditNodeId);
+                  const alreadyInBasket = Boolean(basketEntry);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (alreadyInBasket && basketEntry) {
+                          removeFromBasket(basketEntry);
+                        } else {
+                          addPreviewBlockToBasket(quickEditNodeId, block);
+                        }
+                      }}
+                      className={`flex items-center gap-0.5 rounded-md border px-2 py-1 transition ${
+                        alreadyInBasket
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          : "border-black/10 bg-white/90 text-zinc-400 hover:border-black/20 hover:text-zinc-700"
+                      }`}
+                      title={alreadyInBasket ? "Remove from basket" : "Add to basket"}
+                      aria-label={alreadyInBasket ? "Remove from basket" : "Add to basket"}
+                    >
+                      <ShoppingBasket className="h-3 w-3" />
+                    </button>
+                  );
+                })()}
+                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void openPreviewNodeInFullEditor(quickEditNodeId);
+                    }}
+                    className={`flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                    title="Edit all fields for this node"
+                    aria-label="Edit all fields for this node"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {nonTranslationLines.length > 0 && (() => {
@@ -14459,6 +14836,10 @@ function ScripturesContent() {
     handleSavePreviewQuickEdit,
     handleWmPreviewReplaceRows,
     openPreviewNodeInFullEditor,
+    authEmail,
+    basketItems,
+    addPreviewBlockToBasket,
+    removeFromBasket,
   ]);
 
   const previewQuickEditTarget = useMemo(() => {
@@ -16215,6 +16596,54 @@ function ScripturesContent() {
                   </div>
                   {selectedId && !isLeafSelected && (
                     <>
+                      {canAddVerseRangeToBasket && (
+                        <div className="ml-auto flex flex-wrap items-center gap-2 rounded-full border border-black/10 bg-white/90 px-2 py-1">
+                          <span className="px-1 text-[11px] uppercase tracking-[0.16em] text-zinc-500">
+                            Add verses
+                          </span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            value={basketRangeStart}
+                            onChange={(event) => {
+                              setBasketRangeStart(event.target.value);
+                              if (basketRangeMessage) setBasketRangeMessage(null);
+                            }}
+                            placeholder="21"
+                            className="h-8 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                            disabled={basketRangeSubmitting}
+                            aria-label="Start verse"
+                          />
+                          <span className="text-xs text-zinc-500">to</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            value={basketRangeEnd}
+                            onChange={(event) => {
+                              setBasketRangeEnd(event.target.value);
+                              if (basketRangeMessage) setBasketRangeMessage(null);
+                            }}
+                            placeholder="58"
+                            className="h-8 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                            disabled={basketRangeSubmitting}
+                            aria-label="End verse"
+                          />
+                          <button
+                            type="button"
+                            onClick={addSelectedRangeToBasket}
+                            disabled={
+                              basketRangeSubmitting ||
+                              !basketRangeStart.trim() ||
+                              !basketRangeEnd.trim()
+                            }
+                            className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {basketRangeSubmitting ? "Adding..." : "Add range"}
+                          </button>
+                        </div>
+                      )}
                       {!canEditCurrentBook && canBrowseCurrentNode &&
                         resolveBookVisibility(currentBook?.visibility) === "public" && (
                         <div className="ml-auto">
@@ -16275,6 +16704,9 @@ function ScripturesContent() {
                   )}
                 </div>
               )}
+              {basketRangeMessage && selectedId && !isLeafSelected ? (
+                <p className="mb-3 text-xs text-zinc-600">{basketRangeMessage}</p>
+              ) : null}
               {isBookRootSelected && currentBook ? (
                 <>
                   <div className="mb-3 flex items-center justify-between">
@@ -20444,6 +20876,60 @@ function ScripturesContent() {
                         );
                       })}
                     </div>
+                  </div>
+                )}
+
+                {authEmail && bookPreviewArtifact.preview_scope === "node" && previewBodyBlockElements.length > 1 && (
+                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">
+                        Add verse range to basket
+                      </span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={basketRangeStart}
+                        onChange={(event) => {
+                          setBasketRangeStart(event.target.value);
+                          if (basketRangeMessage) setBasketRangeMessage(null);
+                        }}
+                        placeholder="From"
+                        className="h-7 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                        disabled={basketRangeSubmitting}
+                        aria-label="Start verse"
+                      />
+                      <span className="text-xs text-zinc-400">–</span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        value={basketRangeEnd}
+                        onChange={(event) => {
+                          setBasketRangeEnd(event.target.value);
+                          if (basketRangeMessage) setBasketRangeMessage(null);
+                        }}
+                        placeholder="To"
+                        className="h-7 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                        disabled={basketRangeSubmitting}
+                        aria-label="End verse"
+                      />
+                      <button
+                        type="button"
+                        onClick={addPreviewRangeToBasket}
+                        disabled={
+                          basketRangeSubmitting ||
+                          !basketRangeStart.trim() ||
+                          !basketRangeEnd.trim()
+                        }
+                        className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-xs font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {basketRangeSubmitting ? "Adding…" : "Add"}
+                      </button>
+                    </div>
+                    {basketRangeMessage && (
+                      <p className="mt-1.5 text-xs text-zinc-600">{basketRangeMessage}</p>
+                    )}
                   </div>
                 )}
 
