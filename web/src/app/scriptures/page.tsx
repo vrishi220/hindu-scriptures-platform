@@ -9590,7 +9590,7 @@ function ScripturesContent() {
                 allow_runtime_transliteration_generation: true,
               },
               meanings: {
-                meaning_language: translationLanguageToCode(preferences?.source_language),
+                meaning_language: WORD_MEANINGS_REQUIRED_LANGUAGE,
                 fallback_order: ["user_preference", "en", "first_available"],
               },
               rendering: {
@@ -9896,7 +9896,7 @@ function ScripturesContent() {
                   allow_runtime_transliteration_generation: true,
                 },
                 meanings: {
-                  meaning_language: translationLanguageToCode(preferences?.source_language),
+                  meaning_language: WORD_MEANINGS_REQUIRED_LANGUAGE,
                   fallback_order: ["user_preference", "en", "first_available"],
                 },
                 rendering: {
@@ -11086,7 +11086,7 @@ function ScripturesContent() {
                   allow_runtime_transliteration_generation: true,
                 },
                 meanings: {
-                  meaning_language: translationLanguageToCode(preferences?.source_language),
+                  meaning_language: WORD_MEANINGS_REQUIRED_LANGUAGE,
                   fallback_order: ["user_preference", "en", "first_available"],
                 },
                 rendering: {
