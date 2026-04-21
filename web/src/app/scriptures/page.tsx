@@ -12336,6 +12336,27 @@ function ScripturesContent() {
           setBookPreviewArtifact((prev) =>
             prev ? applySavedNodeToPreviewArtifact(prev, savedNode) : prev
           );
+
+          // Ensure preview reflects saved content even when block-node matching
+          // is incomplete for certain templates. Clear preview cache and refetch
+          // the active preview scope once after save.
+          if (showBookPreview && bookPreviewArtifact && bookId) {
+            bookPreviewCacheRef.current.clear();
+            const activeScope =
+              bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+            const activeNodeId =
+              activeScope === "node"
+                ? bookPreviewArtifact.root_node_id ?? savedNode.id
+                : null;
+            void handlePreviewBook(
+              activeScope,
+              String(bookId),
+              "replace",
+              0,
+              false,
+              activeNodeId ?? undefined
+            );
+          }
         } else if (preservedNodeId) {
           await loadNodeContent(preservedNodeId, true);
         }
