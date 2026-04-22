@@ -2058,6 +2058,32 @@ const pickTranslationTextForLanguageOnly = (
   return "";
 };
 
+const applyTranslationDraftValue = (
+  translations: Record<string, string>,
+  language: string,
+  rawValue: string
+) => {
+  const canonical = normalizeTranslationLanguage(language);
+  const code = translationLanguageToCode(canonical);
+  const keys = getTranslationLookupKeys(canonical);
+
+  for (const key of keys) {
+    delete translations[key];
+  }
+
+  const value = rawValue.trim();
+  if (!value) {
+    return;
+  }
+
+  if (code) {
+    translations[code] = value;
+  }
+  if (canonical) {
+    translations[canonical] = value;
+  }
+};
+
 const buildEditableTranslationDrafts = (
   translations: Record<string, string>
 ): Record<EditableTranslationLanguage, string> => {
@@ -12422,19 +12448,8 @@ function ScripturesContent() {
         );
 
         for (const language of selectedTranslationLanguages) {
-          const translationCode = translationLanguageToCode(language);
           const value = (modalTranslationDrafts[language] || "").trim();
-          if (value) {
-            nextTranslations[translationCode] = value;
-            if (translationCode === "en") {
-              nextTranslations.english = value;
-            }
-          } else {
-            delete nextTranslations[translationCode];
-            if (translationCode === "en") {
-              delete nextTranslations.english;
-            }
-          }
+          applyTranslationDraftValue(nextTranslations, language, value);
         }
 
         const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
@@ -12765,19 +12780,8 @@ function ScripturesContent() {
         );
 
         for (const language of selectedTranslationLanguages) {
-          const translationCode = translationLanguageToCode(language);
           const value = (inlineTranslationDrafts[language] || "").trim();
-          if (value) {
-            nextTranslations[translationCode] = value;
-            if (translationCode === "en") {
-              nextTranslations.english = value;
-            }
-          } else {
-            delete nextTranslations[translationCode];
-            if (translationCode === "en") {
-              delete nextTranslations.english;
-            }
-          }
+          applyTranslationDraftValue(nextTranslations, language, value);
         }
 
         const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
@@ -12854,6 +12858,9 @@ function ScripturesContent() {
       const savedNodePayload = isNodeContentPayload(savedNode) ? savedNode : null;
       if (savedNodePayload) {
         syncSavedNodeState(savedNodePayload);
+        setBookPreviewArtifact((prev) =>
+          prev ? applySavedNodeToPreviewArtifact(prev, savedNodePayload) : prev
+        );
       }
       setInlineMessage("Details saved.");
       setTimeout(() => setInlineMessage(null), 2000);
