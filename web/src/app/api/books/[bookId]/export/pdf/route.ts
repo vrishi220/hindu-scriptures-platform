@@ -12,6 +12,9 @@ import {
 } from "@/lib/indicScript";
 import { canUseSparticuzChromium, getPdfBrowserExecutableCandidates } from "@/lib/pdfBrowserLaunch";
 
+// Allow up to 5 minutes for large book PDF generation on serverless hosts.
+export const maxDuration = 300;
+
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
