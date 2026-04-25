@@ -20013,7 +20013,11 @@ function ScripturesContent() {
           </div>
         )}
 
-        {showMediaManagerModal && ((mediaManagerScope === "bank" && canContribute) || (canEditCurrentBook && (mediaManagerScope === "book" ? Boolean(resolvedCurrentBookId) : Boolean(selectedId)))) && (
+        {showMediaManagerModal && (
+          (mediaManagerScope === "bank" && canContribute) ||
+          (mediaManagerScope === "book" && Boolean(resolvedCurrentBookId)) ||
+          (mediaManagerScope === "node" && canEditCurrentBook && Boolean(selectedId))
+        ) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3">
             <div
               className="w-full max-w-3xl min-w-[320px] max-h-[92dvh] resize overflow-auto rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5"
