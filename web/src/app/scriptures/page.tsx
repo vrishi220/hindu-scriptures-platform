@@ -3028,6 +3028,21 @@ function ScripturesContent() {
     nodeId: number;
     position: "before" | "after";
   } | null>(null);
+  const treeReorderDropTargetRef = useRef<{
+    parentId: number;
+    nodeId: number;
+    position: "before" | "after";
+  } | null>(null);
+  const setTreeReorderDropTargetSynced = (
+    next: {
+      parentId: number;
+      nodeId: number;
+      position: "before" | "after";
+    } | null
+  ) => {
+    treeReorderDropTargetRef.current = next;
+    setTreeReorderDropTarget(next);
+  };
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -3184,7 +3199,7 @@ function ScripturesContent() {
     setTreeReorderDraftByParentId({});
     setTreeReorderDraggingNodeId(null);
     setTreeReorderSavingParentId(null);
-    setTreeReorderDropTarget(null);
+    setTreeReorderDropTargetSynced(null);
   }, [bookId, setTreeReorderModeNodeId]);
 
   useEffect(() => {
@@ -7025,7 +7040,7 @@ function ScripturesContent() {
     });
     setTreeReorderModeNodeId(null);
     setTreeReorderDraggingNodeId(null);
-    setTreeReorderDropTarget(null);
+    setTreeReorderDropTargetSynced(null);
   };
 
   const saveTreeReorderDraft = async (parentId: number, anchorNodeId: number) => {
@@ -7066,7 +7081,7 @@ function ScripturesContent() {
         return next;
       });
       setTreeReorderDraggingNodeId(null);
-      setTreeReorderDropTarget(null);
+      setTreeReorderDropTargetSynced(null);
     } catch (err) {
       setTreeError(err instanceof Error ? err.message : "Failed to save sibling order");
     } finally {
@@ -7103,6 +7118,161 @@ function ScripturesContent() {
     }
     return activeNode.parent_node_id ?? BOOK_ROOT_NODE_ID;
   }, [treeData, treeReorderModeNodeId]);
+
+  const treeCanonicalSiblingOrderByParentId = useMemo(() => {
+    const orders: Record<number, number[]> = {};
+    const visit = (nodes: TreeNode[]) => {
+      if (!Array.isArray(nodes) || nodes.length === 0) {
+        return;
+      }
+      const sorted = [...nodes].sort((a, b) => {
+        const seqA = parseSequenceNumber(a.sequence_number) ?? Infinity;
+        const seqB = parseSequenceNumber(b.sequence_number) ?? Infinity;
+        return seqA - seqB;
+      });
+      const parentId = sorted[0].parent_node_id ?? BOOK_ROOT_NODE_ID;
+      orders[parentId] = sorted.map((node) => node.id);
+      for (const node of sorted) {
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          visit(node.children);
+        }
+      }
+    };
+
+    visit(treeData);
+    return orders;
+  }, [treeData]);
+
+  const applyTreeDropAtIndicator = (draggedId: number): boolean => {
+    const activeDropTarget = treeReorderDropTargetRef.current;
+    if (!activeDropTarget) {
+      return false;
+    }
+
+    const parentId = activeDropTarget.parentId;
+    const canonicalOrder = treeCanonicalSiblingOrderByParentId[parentId];
+    const currentDraft = treeReorderDraftByParentId[parentId];
+    const workingOrder =
+      Array.isArray(currentDraft) &&
+      Array.isArray(canonicalOrder) &&
+      currentDraft.length === canonicalOrder.length &&
+      currentDraft.every((id) => canonicalOrder.includes(id))
+        ? [...currentDraft]
+        : Array.isArray(canonicalOrder)
+          ? [...canonicalOrder]
+          : [];
+
+    if (workingOrder.length === 0) {
+      return false;
+    }
+
+    const fromIndex = workingOrder.indexOf(draggedId);
+    const targetRowIndex = workingOrder.indexOf(activeDropTarget.nodeId);
+    if (fromIndex < 0 || targetRowIndex < 0) {
+      return false;
+    }
+
+    const nextOrder = [...workingOrder];
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    const desiredIndex =
+      activeDropTarget.position === "before" ? targetRowIndex : targetRowIndex + 1;
+    const clampedTarget = Math.max(0, Math.min(desiredIndex, workingOrder.length));
+    const adjustedTarget = fromIndex < clampedTarget ? clampedTarget - 1 : clampedTarget;
+    const finalTarget = Math.max(0, Math.min(adjustedTarget, nextOrder.length));
+    nextOrder.splice(finalTarget, 0, moved);
+
+    applyTreeReorderDraft(parentId, nextOrder);
+    setTreeReorderModeNodeId(activeDropTarget.nodeId);
+    setTreeReorderDropTargetSynced(null);
+    return true;
+  };
+
+  const treeReorderHasPendingChanges = useMemo(() => {
+    return Object.entries(treeReorderDraftByParentId).some(([parentKey, draftOrder]) => {
+      const parentId = Number.parseInt(parentKey, 10);
+      const canonicalOrder = treeCanonicalSiblingOrderByParentId[parentId];
+      if (!Array.isArray(draftOrder) || !Array.isArray(canonicalOrder)) {
+        return false;
+      }
+      if (draftOrder.length !== canonicalOrder.length) {
+        return false;
+      }
+      return draftOrder.some((id, idx) => id !== canonicalOrder[idx]);
+    });
+  }, [treeReorderDraftByParentId, treeCanonicalSiblingOrderByParentId]);
+
+  const cancelAllTreeReorderDrafts = () => {
+    setTreeReorderDraftByParentId({});
+    setTreeReorderModeNodeId(null);
+    setTreeReorderDraggingNodeId(null);
+    setTreeReorderDropTargetSynced(null);
+  };
+
+  const saveAllTreeReorderDrafts = async () => {
+    if (!bookId) {
+      return;
+    }
+
+    const changedDrafts = Object.entries(treeReorderDraftByParentId)
+      .map(([parentKey, draftOrder]) => {
+        const parentId = Number.parseInt(parentKey, 10);
+        const canonicalOrder = treeCanonicalSiblingOrderByParentId[parentId];
+        const changed =
+          Array.isArray(draftOrder) &&
+          Array.isArray(canonicalOrder) &&
+          draftOrder.length === canonicalOrder.length &&
+          draftOrder.some((id, idx) => id !== canonicalOrder[idx]);
+        return {
+          parentId,
+          siblingIds: draftOrder,
+          changed,
+        };
+      })
+      .filter((entry) => entry.changed && Array.isArray(entry.siblingIds) && entry.siblingIds.length > 0);
+
+    if (changedDrafts.length === 0) {
+      return;
+    }
+
+    const targetSelectedNodeId =
+      typeof selectedId === "number" && selectedId !== BOOK_ROOT_NODE_ID ? selectedId : null;
+    const preservedExpandedIds = new Set(expandedIds);
+    const firstAnchorNodeId = changedDrafts[0]?.siblingIds[0] ?? null;
+    if (!firstAnchorNodeId) {
+      return;
+    }
+
+    setTreeReorderingNodeId(firstAnchorNodeId);
+    setTreeReorderSavingParentId(-1);
+    setTreeError(null);
+
+    try {
+      for (const draft of changedDrafts) {
+        const anchorNodeId = draft.siblingIds[0];
+        if (!anchorNodeId) {
+          continue;
+        }
+        const response = await fetch(contentPath(`/nodes/${anchorNodeId}/reorder`), {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sibling_ids: draft.siblingIds }),
+        });
+        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (!response.ok) {
+          throw new Error(payload?.detail || "Failed to save sibling order");
+        }
+      }
+
+      await refreshTreePreservingState(bookId, targetSelectedNodeId, preservedExpandedIds);
+      cancelAllTreeReorderDrafts();
+    } catch (err) {
+      setTreeError(err instanceof Error ? err.message : "Failed to save sibling order");
+    } finally {
+      setTreeReorderingNodeId(null);
+      setTreeReorderSavingParentId(null);
+    }
+  };
 
   const readCachedNodeContent = (nodeId: number): NodeContent | null => {
     const cached = nodeContentCacheRef.current.get(nodeId);
@@ -13395,48 +13565,38 @@ function ScripturesContent() {
             return;
           }
           event.preventDefault();
+          event.stopPropagation();
           event.dataTransfer.dropEffect = "move";
           const rect = event.currentTarget.getBoundingClientRect();
           const nextPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
-          setTreeReorderDropTarget((prev) => {
-            if (
-              prev &&
-              prev.parentId === parentIdForGroup &&
-              prev.nodeId === node.id &&
-              prev.position === nextPosition
-            ) {
-              return prev;
-            }
-            return {
-              parentId: parentIdForGroup,
-              nodeId: node.id,
-              position: nextPosition,
-            };
-          });
+          const nextTarget = {
+            parentId: parentIdForGroup,
+            nodeId: node.id,
+            position: nextPosition,
+          } as const;
+          const prev = treeReorderDropTargetRef.current;
+          if (
+            prev &&
+            prev.parentId === nextTarget.parentId &&
+            prev.nodeId === nextTarget.nodeId &&
+            prev.position === nextTarget.position
+          ) {
+            return;
+          }
+          setTreeReorderDropTargetSynced(nextTarget);
         }}
         onDrop={(event) => {
           if (!canEditTreeOrder) {
             return;
           }
           event.preventDefault();
+          event.stopPropagation();
           const draggedIdRaw = event.dataTransfer.getData("text/plain");
           const draggedId = Number.parseInt(draggedIdRaw, 10);
           if (!Number.isFinite(draggedId)) {
             return;
           }
-          ensureDraftForGroup();
-          setTreeReorderModeNodeId(node.id);
-          const rect = event.currentTarget.getBoundingClientRect();
-          const fallbackPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
-          const dropPosition =
-            treeReorderDropTarget &&
-            treeReorderDropTarget.parentId === parentIdForGroup &&
-            treeReorderDropTarget.nodeId === node.id
-              ? treeReorderDropTarget.position
-              : fallbackPosition;
-          const desiredIndex = dropPosition === "before" ? index : index + 1;
-          moveTreeReorderDraftNodeToIndex(parentIdForGroup, draggedId, desiredIndex);
-          setTreeReorderDropTarget(null);
+          applyTreeDropAtIndicator(draggedId);
         }}
       >
         <div
@@ -13465,7 +13625,7 @@ function ScripturesContent() {
           }}
           onDragEnd={() => {
             setTreeReorderDraggingNodeId(null);
-            setTreeReorderDropTarget(null);
+            setTreeReorderDropTargetSynced(null);
           }}
           style={canEditTreeOrder ? { cursor: "grab" } : undefined}
         >
@@ -16781,6 +16941,7 @@ function ScripturesContent() {
                               setTreeReorderDraftByParentId({});
                               setTreeReorderDraggingNodeId(null);
                               setTreeReorderSavingParentId(null);
+                              setTreeReorderDropTargetSynced(null);
                             }
                             return next;
                           });
@@ -16798,27 +16959,34 @@ function ScripturesContent() {
                     )}
                     {treeEditMode &&
                       (canContribute || canEditCurrentBook) &&
-                      treeReorderModeParentId !== null &&
-                      treeReorderModeNodeId !== null && (
+                      bookId && (
                         <>
                           <button
                             type="button"
-                            onClick={() =>
-                              void saveTreeReorderDraft(treeReorderModeParentId, treeReorderModeNodeId)
-                            }
+                            onClick={() => {
+                              void saveAllTreeReorderDrafts();
+                            }}
                             title="Save sibling order"
                             aria-label="Save sibling order"
-                            disabled={treeReorderingNodeId !== null || treeReorderSavingParentId !== null}
+                            disabled={
+                              treeReorderingNodeId !== null ||
+                              treeReorderSavingParentId !== null ||
+                              !treeReorderHasPendingChanges
+                            }
                             className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-35"
                           >
-                            {treeReorderSavingParentId === treeReorderModeParentId ? "Saving" : "Save"}
+                            {treeReorderSavingParentId !== null ? "Saving" : "Save"}
                           </button>
                           <button
                             type="button"
-                            onClick={() => cancelTreeReorderDraft(treeReorderModeParentId)}
+                            onClick={() => cancelAllTreeReorderDrafts()}
                             title="Cancel reorder"
                             aria-label="Cancel reorder"
-                            disabled={treeReorderingNodeId !== null || treeReorderSavingParentId !== null}
+                            disabled={
+                              treeReorderingNodeId !== null ||
+                              treeReorderSavingParentId !== null ||
+                              Object.keys(treeReorderDraftByParentId).length === 0
+                            }
                             className="rounded-lg border border-black/10 bg-white/85 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
                           >
                             Cancel
@@ -16892,7 +17060,36 @@ function ScripturesContent() {
                       <p className="mt-3 text-sm text-zinc-600">No nodes yet.</p>
                     )}
                     {!treeLoading && !treeError && treeData.length > 0 && (
-                      <div className="mt-1 space-y-2">
+                      <div
+                        className="mt-1 space-y-2"
+                        onDragOver={(event) => {
+                          if (!treeEditMode || !(canContribute || canEditCurrentBook)) {
+                            return;
+                          }
+                          if (treeReorderDraggingNodeId === null) {
+                            return;
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                        }}
+                        onDrop={(event) => {
+                          if (!treeEditMode || !(canContribute || canEditCurrentBook)) {
+                            return;
+                          }
+                          if (treeReorderDraggingNodeId === null) {
+                            return;
+                          }
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const draggedIdRaw = event.dataTransfer.getData("text/plain");
+                          const draggedId = Number.parseInt(draggedIdRaw, 10);
+                          if (!Number.isFinite(draggedId)) {
+                            return;
+                          }
+                          applyTreeDropAtIndicator(draggedId);
+                        }}
+                      >
                         <button
                           type="button"
                           onClick={() => selectBookRoot(true)}
