@@ -135,7 +135,7 @@ const normalizePdfSettings = (value: unknown): NormalizedPdfSettings => {
 type BrowserLaunchResult = {
   browser: {
     newPage: () => Promise<{
-      setContent: (html: string, options?: { waitUntil?: "networkidle" | "load" | "domcontentloaded" }) => Promise<void>;
+      setContent: (html: string, options?: { waitUntil?: "networkidle" | "load" | "domcontentloaded"; timeout?: number }) => Promise<void>;
       evaluate: <T>(fn: () => T | Promise<T>) => Promise<T>;
       pdf: (options: {
         format?: "A4" | "Letter";
@@ -1342,7 +1342,7 @@ export async function GET(
     const total = firstArtifact.total_blocks ?? 0;
     while (offset < total) {
       const pageResp = await doPostPreviewPage(token, offset);
-      if (!pageResp.ok) break;
+      if (!pageResp.ok) throw new Error(`preview_page_fetch_failed_status_${pageResp.status}_offset_${offset}`);
       const pageArtifact = (await pageResp.json()) as BookPreviewArtifact;
       allBlocks.push(...pageArtifact.sections.body);
       if (!pageArtifact.has_more) break;
@@ -1453,7 +1453,7 @@ export async function GET(
       }
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "domcontentloaded" });
+        await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 120000 });
         await waitForFontsBeforePdf(page);
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
@@ -1616,7 +1616,7 @@ export async function POST(
     const total = firstArtifact.total_blocks ?? 0;
     while (offset < total) {
       const pageResp = await doPostPreviewPage(token, offset);
-      if (!pageResp.ok) break;
+      if (!pageResp.ok) throw new Error(`preview_page_fetch_failed_status_${pageResp.status}_offset_${offset}`);
       const pageArtifact = (await pageResp.json()) as BookPreviewArtifact;
       allBlocks.push(...pageArtifact.sections.body);
       if (!pageArtifact.has_more) break;
@@ -1729,7 +1729,7 @@ export async function POST(
       }
       try {
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "domcontentloaded" });
+        await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 120000 });
         await waitForFontsBeforePdf(page);
         const pdfBuffer = await page.pdf({
           format: pdfSettings.pageSize,
