@@ -366,7 +366,8 @@ class NodeMediaReorderPayload(BaseModel):
 
 
 class NodeReorderPayload(BaseModel):
-    direction: Literal["up", "down"]
+    direction: Literal["up", "down"] | None = None
+    sibling_ids: list[int] | None = None
 
 
 class NodeMediaSetDefaultPayload(BaseModel):
@@ -4626,16 +4627,39 @@ def reorder_node(
     if current_index is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    target_index = current_index - 1 if payload.direction == "up" else current_index + 1
-    if target_index < 0 or target_index >= len(ordered_siblings):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Node cannot be moved {payload.direction}",
-        )
+    if payload.sibling_ids is not None:
+        requested_ids = [int(sibling_id) for sibling_id in payload.sibling_ids]
+        expected_ids = [sibling.id for sibling in ordered_siblings]
+        if len(requested_ids) != len(expected_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sibling_ids must include all siblings exactly once",
+            )
+        if len(set(requested_ids)) != len(requested_ids) or set(requested_ids) != set(expected_ids):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sibling_ids must match the current sibling set",
+            )
+        sibling_by_id = {sibling.id: sibling for sibling in ordered_siblings}
+        reordered_siblings = [sibling_by_id[sibling_id] for sibling_id in requested_ids]
+        target_index = requested_ids.index(node_id)
+    else:
+        if payload.direction not in {"up", "down"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provide either direction or sibling_ids",
+            )
 
-    reordered_siblings = list(ordered_siblings)
-    moved_node = reordered_siblings.pop(current_index)
-    reordered_siblings.insert(target_index, moved_node)
+        target_index = current_index - 1 if payload.direction == "up" else current_index + 1
+        if target_index < 0 or target_index >= len(ordered_siblings):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Node cannot be moved {payload.direction}",
+            )
+
+        reordered_siblings = list(ordered_siblings)
+        moved_node = reordered_siblings.pop(current_index)
+        reordered_siblings.insert(target_index, moved_node)
 
     for index, sibling in enumerate(reordered_siblings, start=1):
         sibling.sequence_number = index

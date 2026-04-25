@@ -3018,6 +3018,16 @@ function ScripturesContent() {
   const [bookInfoStatsOpen, setBookInfoStatsOpen] = useState(true);
   const [bookInfoAuthorsOpen, setBookInfoAuthorsOpen] = useState(true);
   const [treeEditMode, setTreeEditMode] = useState(false);
+  const [treeReorderDraftByParentId, setTreeReorderDraftByParentId] = useState<
+    Record<number, number[]>
+  >({});
+  const [treeReorderDraggingNodeId, setTreeReorderDraggingNodeId] = useState<number | null>(null);
+  const [treeReorderSavingParentId, setTreeReorderSavingParentId] = useState<number | null>(null);
+  const [treeReorderDropTarget, setTreeReorderDropTarget] = useState<{
+    parentId: number;
+    nodeId: number;
+    position: "before" | "after";
+  } | null>(null);
   const bookRowActionsMenuRef = useRef<HTMLDivElement | null>(null);
   const bookBrowserDensityMenuRef = useRef<HTMLDivElement | null>(null);
   const mediaManagerDensityMenuRef = useRef<HTMLDivElement | null>(null);
@@ -3168,6 +3178,14 @@ function ScripturesContent() {
   useEffect(() => {
     setShowBookTreeActionsMenu(false);
   }, [bookId]);
+
+  useEffect(() => {
+    setTreeReorderModeNodeId(null);
+    setTreeReorderDraftByParentId({});
+    setTreeReorderDraggingNodeId(null);
+    setTreeReorderSavingParentId(null);
+    setTreeReorderDropTarget(null);
+  }, [bookId, setTreeReorderModeNodeId]);
 
   useEffect(() => {
     setShowNodeActionsMenu(false);
@@ -6946,6 +6964,145 @@ function ScripturesContent() {
       setTreeReorderingNodeId(null);
     }
   };
+
+  const applyTreeReorderDraft = (parentId: number, nextSiblingIds: number[]) => {
+    setTreeReorderDraftByParentId((prev) => ({
+      ...prev,
+      [parentId]: nextSiblingIds,
+    }));
+  };
+
+  const moveTreeReorderDraftNode = (
+    parentId: number,
+    draggedNodeId: number,
+    targetNodeId: number
+  ) => {
+    if (draggedNodeId === targetNodeId) {
+      return;
+    }
+    const currentOrder = treeReorderDraftByParentId[parentId];
+    if (!Array.isArray(currentOrder) || currentOrder.length === 0) {
+      return;
+    }
+    const fromIndex = currentOrder.indexOf(draggedNodeId);
+    const toIndex = currentOrder.indexOf(targetNodeId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+      return;
+    }
+    const nextOrder = [...currentOrder];
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    nextOrder.splice(toIndex, 0, moved);
+    applyTreeReorderDraft(parentId, nextOrder);
+  };
+
+  const moveTreeReorderDraftNodeToIndex = (
+    parentId: number,
+    draggedNodeId: number,
+    targetIndex: number
+  ) => {
+    const currentOrder = treeReorderDraftByParentId[parentId];
+    if (!Array.isArray(currentOrder) || currentOrder.length === 0) {
+      return;
+    }
+    const fromIndex = currentOrder.indexOf(draggedNodeId);
+    if (fromIndex < 0) {
+      return;
+    }
+    const nextOrder = [...currentOrder];
+    const [moved] = nextOrder.splice(fromIndex, 1);
+    const clampedTarget = Math.max(0, Math.min(targetIndex, currentOrder.length));
+    const adjustedTarget = fromIndex < clampedTarget ? clampedTarget - 1 : clampedTarget;
+    const finalTarget = Math.max(0, Math.min(adjustedTarget, nextOrder.length));
+    nextOrder.splice(finalTarget, 0, moved);
+    applyTreeReorderDraft(parentId, nextOrder);
+  };
+
+  const cancelTreeReorderDraft = (parentId: number) => {
+    setTreeReorderDraftByParentId((prev) => {
+      const next = { ...prev };
+      delete next[parentId];
+      return next;
+    });
+    setTreeReorderModeNodeId(null);
+    setTreeReorderDraggingNodeId(null);
+    setTreeReorderDropTarget(null);
+  };
+
+  const saveTreeReorderDraft = async (parentId: number, anchorNodeId: number) => {
+    if (!bookId) {
+      return;
+    }
+
+    const siblingIds = treeReorderDraftByParentId[parentId];
+    if (!Array.isArray(siblingIds) || siblingIds.length === 0) {
+      return;
+    }
+
+    const targetSelectedNodeId =
+      typeof selectedId === "number" && selectedId !== BOOK_ROOT_NODE_ID ? selectedId : null;
+    const preservedExpandedIds = new Set(expandedIds);
+
+    setTreeReorderingNodeId(anchorNodeId);
+    setTreeReorderSavingParentId(parentId);
+    setTreeError(null);
+
+    try {
+      const response = await fetch(contentPath(`/nodes/${anchorNodeId}/reorder`), {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sibling_ids: siblingIds }),
+      });
+      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Failed to save sibling order");
+      }
+
+      await refreshTreePreservingState(bookId, targetSelectedNodeId, preservedExpandedIds);
+      setTreeReorderModeNodeId(null);
+      setTreeReorderDraftByParentId((prev) => {
+        const next = { ...prev };
+        delete next[parentId];
+        return next;
+      });
+      setTreeReorderDraggingNodeId(null);
+      setTreeReorderDropTarget(null);
+    } catch (err) {
+      setTreeError(err instanceof Error ? err.message : "Failed to save sibling order");
+    } finally {
+      setTreeReorderingNodeId(null);
+      setTreeReorderSavingParentId(null);
+    }
+  };
+
+  const treeReorderModeParentId = useMemo(() => {
+    if (treeReorderModeNodeId === null) {
+      return null;
+    }
+    const findNodeForReorderParent = (
+      nodes: TreeNode[],
+      id: number
+    ): TreeNode | null => {
+      for (const node of nodes) {
+        if (node.id === id) {
+          return node;
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          const found = findNodeForReorderParent(node.children, id);
+          if (found) {
+            return found;
+          }
+        }
+      }
+      return null;
+    };
+
+    const activeNode = findNodeForReorderParent(treeData, treeReorderModeNodeId);
+    if (!activeNode) {
+      return null;
+    }
+    return activeNode.parent_node_id ?? BOOK_ROOT_NODE_ID;
+  }, [treeData, treeReorderModeNodeId]);
 
   const readCachedNodeContent = (nodeId: number): NodeContent | null => {
     const cached = nodeContentCacheRef.current.get(nodeId);
@@ -13184,20 +13341,148 @@ function ScripturesContent() {
   };
 
   const renderTree = (nodes: TreeNode[], depth = 0) => {
-    // Sort nodes by sequence_number
-    const sorted = [...nodes].sort((a, b) => {
+    const canEditTreeOrder = treeEditMode && (canContribute || canEditCurrentBook);
+
+    const canonicalSorted = [...nodes].sort((a, b) => {
       const seqA = parseSequenceNumber(a.sequence_number) ?? Infinity;
       const seqB = parseSequenceNumber(b.sequence_number) ?? Infinity;
       return seqA - seqB;
     });
-    
+
+    const parentIdForGroup =
+      canonicalSorted.length > 0
+        ? canonicalSorted[0].parent_node_id ?? BOOK_ROOT_NODE_ID
+        : BOOK_ROOT_NODE_ID;
+    const isReorderGroupActive =
+      canEditTreeOrder &&
+      treeReorderModeParentId !== null &&
+      treeReorderModeParentId === parentIdForGroup;
+
+    const canonicalSiblingIds = canonicalSorted.map((sibling) => sibling.id);
+    const hasValidDraftForGroup = (candidate: number[] | undefined) =>
+      Array.isArray(candidate) &&
+      candidate.length === canonicalSiblingIds.length &&
+      candidate.every((id) => canonicalSiblingIds.includes(id));
+
+    const ensureDraftForGroup = () => {
+      const currentDraft = treeReorderDraftByParentId[parentIdForGroup];
+      if (!hasValidDraftForGroup(currentDraft)) {
+        applyTreeReorderDraft(parentIdForGroup, canonicalSiblingIds);
+      }
+    };
+
+    const draftOrder = treeReorderDraftByParentId[parentIdForGroup];
+    const sorted =
+      isReorderGroupActive && Array.isArray(draftOrder) && draftOrder.length === canonicalSorted.length
+        ? (() => {
+            const byId = new Map(canonicalSorted.map((node) => [node.id, node]));
+            const reordered = draftOrder
+              .map((id) => byId.get(id))
+              .filter((node): node is TreeNode => Boolean(node));
+            if (reordered.length === canonicalSorted.length) {
+              return reordered;
+            }
+            return canonicalSorted;
+          })()
+        : canonicalSorted;
+
     return sorted.map((node, index) => (
-      <div key={node.id} className="mt-2">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+      <div
+        key={node.id}
+        className="relative mt-2"
+        onDragOver={(event) => {
+          if (!canEditTreeOrder) {
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          const rect = event.currentTarget.getBoundingClientRect();
+          const nextPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+          setTreeReorderDropTarget((prev) => {
+            if (
+              prev &&
+              prev.parentId === parentIdForGroup &&
+              prev.nodeId === node.id &&
+              prev.position === nextPosition
+            ) {
+              return prev;
+            }
+            return {
+              parentId: parentIdForGroup,
+              nodeId: node.id,
+              position: nextPosition,
+            };
+          });
+        }}
+        onDrop={(event) => {
+          if (!canEditTreeOrder) {
+            return;
+          }
+          event.preventDefault();
+          const draggedIdRaw = event.dataTransfer.getData("text/plain");
+          const draggedId = Number.parseInt(draggedIdRaw, 10);
+          if (!Number.isFinite(draggedId)) {
+            return;
+          }
+          ensureDraftForGroup();
+          setTreeReorderModeNodeId(node.id);
+          const rect = event.currentTarget.getBoundingClientRect();
+          const fallbackPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+          const dropPosition =
+            treeReorderDropTarget &&
+            treeReorderDropTarget.parentId === parentIdForGroup &&
+            treeReorderDropTarget.nodeId === node.id
+              ? treeReorderDropTarget.position
+              : fallbackPosition;
+          const desiredIndex = dropPosition === "before" ? index : index + 1;
+          moveTreeReorderDraftNodeToIndex(parentIdForGroup, draggedId, desiredIndex);
+          setTreeReorderDropTarget(null);
+        }}
+      >
+        <div
+          className={`flex flex-wrap items-center gap-2 text-sm ${
+            isReorderGroupActive ? "rounded-md px-1 py-0.5" : ""
+          } ${
+            isReorderGroupActive && treeReorderDraggingNodeId === node.id
+              ? "opacity-60"
+              : ""
+          } ${canEditTreeOrder ? "select-none" : ""}`}
+          draggable={canEditTreeOrder}
+          onDragStart={(event) => {
+            if (!canEditTreeOrder) {
+              return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target?.closest('[data-no-row-drag="true"]')) {
+              event.preventDefault();
+              return;
+            }
+            ensureDraftForGroup();
+            setTreeReorderModeNodeId(node.id);
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(node.id));
+            setTreeReorderDraggingNodeId(node.id);
+          }}
+          onDragEnd={() => {
+            setTreeReorderDraggingNodeId(null);
+            setTreeReorderDropTarget(null);
+          }}
+          style={canEditTreeOrder ? { cursor: "grab" } : undefined}
+        >
+          {canEditTreeOrder ? (
+            <span
+              className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded border border-black/10 bg-white/80 text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
+              title="Drag to reorder"
+              aria-label="Drag to reorder"
+            >
+              <MoreVertical size={14} />
+            </span>
+          ) : null}
           <span className="shrink-0">
             {node.children && node.children.length > 0 ? (
               <button
                 type="button"
+                data-no-row-drag="true"
                 onClick={() => browsingHook.toggleNode(node.id)}
                 className="h-6 w-6 rounded-full border border-black/10 bg-white/80 text-xs text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
               >
@@ -13209,7 +13494,14 @@ function ScripturesContent() {
           </span>
           <button
             type="button"
-            onClick={() => selectNode(node.id, true, false)}
+            onClick={() => {
+              if (!canEditTreeOrder) {
+                selectNode(node.id, true, false);
+                return;
+              }
+              ensureDraftForGroup();
+              setTreeReorderModeNodeId(node.id);
+            }}
             title={`${formatValue(node.level_name) || "Level"} ${
               formatSequenceDisplay(
                 node.sequence_number ?? node.id,
@@ -13221,7 +13513,7 @@ function ScripturesContent() {
               selectedId === node.id
                 ? "text-[color:var(--accent)]"
                 : "text-[color:var(--deep)] hover:text-[color:var(--accent)]"
-            }`}
+            } ${canEditTreeOrder ? "select-none" : ""}`}
           >
             <span>
               {(() => {
@@ -13248,46 +13540,50 @@ function ScripturesContent() {
               })()}
             </span>
           </button>
-          {treeEditMode && (canContribute || canEditCurrentBook) && (
+          {canEditTreeOrder && (
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setTreeReorderModeNodeId((prev) => (prev === node.id ? null : node.id))
-                }
-                title={treeReorderModeNodeId === node.id ? "Done reordering" : "Reorder siblings"}
-                aria-label={treeReorderModeNodeId === node.id ? "Done reordering" : "Reorder siblings"}
-                disabled={treeReorderingNodeId !== null}
-                className={`flex h-7 w-7 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-35 ${
-                  treeReorderModeNodeId === node.id
-                    ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
-                    : "border-black/10 bg-white/80 text-zinc-600 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                }`}
-              >
-                <SlidersHorizontal size={14} />
-              </button>
-              {treeReorderModeNodeId === node.id && (
+              {isReorderGroupActive && treeReorderModeNodeId === node.id && (
                 <>
-              <button
-                type="button"
-                onClick={() => reorderTreeNode(node.id, "up")}
-                title="Move up"
-                aria-label="Move up"
-                disabled={index === 0 || treeReorderingNodeId !== null}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
-              >
-                <ChevronUp size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => reorderTreeNode(node.id, "down")}
-                title="Move down"
-                aria-label="Move down"
-                disabled={index === sorted.length - 1 || treeReorderingNodeId !== null}
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
-              >
-                <ChevronDown size={14} />
-              </button>
+                  <button
+                    type="button"
+                    data-no-row-drag="true"
+                    onClick={() => {
+                      if (index <= 0) {
+                        return;
+                      }
+                      const previousSibling = sorted[index - 1];
+                      if (!previousSibling) {
+                        return;
+                      }
+                      moveTreeReorderDraftNode(parentIdForGroup, node.id, previousSibling.id);
+                    }}
+                    title="Move up"
+                    aria-label="Move up"
+                    disabled={index === 0 || treeReorderSavingParentId !== null}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <ChevronUp size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    data-no-row-drag="true"
+                    onClick={() => {
+                      if (index >= sorted.length - 1) {
+                        return;
+                      }
+                      const nextSibling = sorted[index + 1];
+                      if (!nextSibling) {
+                        return;
+                      }
+                      moveTreeReorderDraftNode(parentIdForGroup, node.id, nextSibling.id);
+                    }}
+                    title="Move down"
+                    aria-label="Move down"
+                    disabled={index === sorted.length - 1 || treeReorderSavingParentId !== null}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <ChevronDown size={14} />
+                  </button>
                 </>
               )}
             </div>
@@ -13295,6 +13591,7 @@ function ScripturesContent() {
           {treeEditMode && (canContribute || canEditCurrentBook) && canAddChild(node) && (
             <button
               type="button"
+              data-no-row-drag="true"
               onClick={() => {
                 const nextLevel = getNextLevelName(node);
                 let insertAfterNodeId: number | null = null;
@@ -13352,6 +13649,18 @@ function ScripturesContent() {
             </button>
           )}
         </div>
+        {canEditTreeOrder &&
+          treeReorderDropTarget?.parentId === parentIdForGroup &&
+          treeReorderDropTarget.nodeId === node.id &&
+          treeReorderDropTarget.position === "before" && (
+            <div className="pointer-events-none absolute -top-1 left-0 right-0 z-20 h-0.5 rounded bg-[color:var(--accent)]" />
+          )}
+        {canEditTreeOrder &&
+          treeReorderDropTarget?.parentId === parentIdForGroup &&
+          treeReorderDropTarget.nodeId === node.id &&
+          treeReorderDropTarget.position === "after" && (
+            <div className="pointer-events-none absolute -bottom-1 left-0 right-0 z-20 h-0.5 rounded bg-[color:var(--accent)]" />
+          )}
         {node.children && node.children.length > 0 && expandedIds.has(node.id) && (
           <div className="ml-3 border-l border-black/10 pl-3">
             {renderTree(node.children, depth + 1)}
@@ -16469,6 +16778,9 @@ function ScripturesContent() {
                             const next = !prev;
                             if (!next) {
                               setTreeReorderModeNodeId(null);
+                              setTreeReorderDraftByParentId({});
+                              setTreeReorderDraggingNodeId(null);
+                              setTreeReorderSavingParentId(null);
                             }
                             return next;
                           });
@@ -16484,6 +16796,35 @@ function ScripturesContent() {
                         <Pencil size={14} />
                       </button>
                     )}
+                    {treeEditMode &&
+                      (canContribute || canEditCurrentBook) &&
+                      treeReorderModeParentId !== null &&
+                      treeReorderModeNodeId !== null && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void saveTreeReorderDraft(treeReorderModeParentId, treeReorderModeNodeId)
+                            }
+                            title="Save sibling order"
+                            aria-label="Save sibling order"
+                            disabled={treeReorderingNodeId !== null || treeReorderSavingParentId !== null}
+                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            {treeReorderSavingParentId === treeReorderModeParentId ? "Saving" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => cancelTreeReorderDraft(treeReorderModeParentId)}
+                            title="Cancel reorder"
+                            aria-label="Cancel reorder"
+                            disabled={treeReorderingNodeId !== null || treeReorderSavingParentId !== null}
+                            className="rounded-lg border border-black/10 bg-white/85 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
                     {bookId && treeData.length > 0 && (
                       <>
                         <button
@@ -16515,6 +16856,14 @@ function ScripturesContent() {
                 className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
                 style={{ scrollbarGutter: "stable" }}
               >
+                {treeEditMode &&
+                  (canContribute || canEditCurrentBook) &&
+                  treeReorderModeParentId === null &&
+                  !privateBookGate && (
+                    <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                      Tap a row to show up/down. Drag and drop is enabled in edit mode.
+                    </p>
+                  )}
                 {privateBookGate ? (
                   <div className="mx-2 mt-6 rounded-2xl border border-black/10 bg-white/80 p-5 text-center">
                     <p className="text-sm font-medium text-zinc-700">🔒 Private book</p>
