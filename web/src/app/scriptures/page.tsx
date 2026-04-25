@@ -13689,49 +13689,53 @@ function ScripturesContent() {
           })()
         : canonicalSorted;
 
-    return sorted.map((node, index) => (
-      <div
-        key={node.id}
-        className="relative mt-2"
-        onDragOver={(event) => {
-          if (!canEditTreeOrder) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = "move";
-          const rect = event.currentTarget.getBoundingClientRect();
-          const nextPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
-          const nextTarget = {
-            parentId: parentIdForGroup,
-            nodeId: node.id,
-            position: nextPosition,
-          } as const;
-          const prev = treeReorderDropTargetRef.current;
-          if (
-            prev &&
-            prev.parentId === nextTarget.parentId &&
-            prev.nodeId === nextTarget.nodeId &&
-            prev.position === nextTarget.position
-          ) {
-            return;
-          }
-          setTreeReorderDropTargetSynced(nextTarget);
-        }}
-        onDrop={(event) => {
-          if (!canEditTreeOrder) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          const draggedIdRaw = event.dataTransfer.getData("text/plain");
-          const draggedId = Number.parseInt(draggedIdRaw, 10);
-          if (!Number.isFinite(draggedId)) {
-            return;
-          }
-          applyTreeDropAtIndicator(draggedId);
-        }}
-      >
+    const lastNodeInGroup = sorted.length > 0 ? sorted[sorted.length - 1] : null;
+
+    return (
+      <>
+        {sorted.map((node, index) => (
+          <div
+            key={node.id}
+            className="relative mt-2"
+            onDragOver={(event) => {
+              if (!canEditTreeOrder) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              const rect = event.currentTarget.getBoundingClientRect();
+              const nextPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+              const nextTarget = {
+                parentId: parentIdForGroup,
+                nodeId: node.id,
+                position: nextPosition,
+              } as const;
+              const prev = treeReorderDropTargetRef.current;
+              if (
+                prev &&
+                prev.parentId === nextTarget.parentId &&
+                prev.nodeId === nextTarget.nodeId &&
+                prev.position === nextTarget.position
+              ) {
+                return;
+              }
+              setTreeReorderDropTargetSynced(nextTarget);
+            }}
+            onDrop={(event) => {
+              if (!canEditTreeOrder) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              const draggedIdRaw = event.dataTransfer.getData("text/plain");
+              const draggedId = Number.parseInt(draggedIdRaw, 10);
+              if (!Number.isFinite(draggedId)) {
+                return;
+              }
+              applyTreeDropAtIndicator(draggedId);
+            }}
+          >
         <div
           className={`flex flex-wrap items-center gap-2 text-sm ${
             isReorderGroupActive ? "rounded-md px-1 py-0.5" : ""
@@ -13954,13 +13958,56 @@ function ScripturesContent() {
           treeReorderDropTarget.position === "after" && (
             <div className="pointer-events-none absolute -bottom-1 left-0 right-0 z-20 h-0.5 rounded bg-[color:var(--accent)]" />
           )}
-        {node.children && node.children.length > 0 && expandedIds.has(node.id) && (
-          <div className="ml-3 border-l border-black/10 pl-3">
-            {renderTree(node.children, depth + 1)}
+            {node.children && node.children.length > 0 && expandedIds.has(node.id) && (
+              <div className="ml-3 border-l border-black/10 pl-3">
+                {renderTree(node.children, depth + 1)}
+              </div>
+            )}
           </div>
+        ))}
+        {canEditTreeOrder && lastNodeInGroup && (
+          <div
+            className="relative mt-1 h-5 rounded-md"
+            onDragOver={(event) => {
+              if (treeReorderDraggingNodeId === null) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = "move";
+              const nextTarget = {
+                parentId: parentIdForGroup,
+                nodeId: lastNodeInGroup.id,
+                position: "after",
+              } as const;
+              const prev = treeReorderDropTargetRef.current;
+              if (
+                prev &&
+                prev.parentId === nextTarget.parentId &&
+                prev.nodeId === nextTarget.nodeId &&
+                prev.position === nextTarget.position
+              ) {
+                return;
+              }
+              setTreeReorderDropTargetSynced(nextTarget);
+            }}
+            onDrop={(event) => {
+              if (treeReorderDraggingNodeId === null) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              const draggedIdRaw = event.dataTransfer.getData("text/plain");
+              const draggedId = Number.parseInt(draggedIdRaw, 10);
+              if (!Number.isFinite(draggedId)) {
+                return;
+              }
+              applyTreeDropAtIndicator(draggedId);
+            }}
+          />
         )}
-      </div>
-    ));
+      </>
+    );
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
