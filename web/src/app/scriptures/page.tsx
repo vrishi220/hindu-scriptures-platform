@@ -15471,9 +15471,7 @@ function ScripturesContent() {
             </details>
           )}
           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
-            <div className="mt-1 border-t border-black/10 pt-1">
-              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">Multimedia</div>
-              <div className="flex flex-col gap-1.5">
+            <div className="mt-1 flex flex-col gap-1.5">
                 {block.content.media_items.map((media, mediaIndex) => {
                   const mediaType = (media?.media_type || "link").trim().toLowerCase();
                   const mediaUrl = (media?.url || "").trim();
@@ -15492,16 +15490,11 @@ function ScripturesContent() {
                         : `Media ${mediaIndex + 1}`;
 
                   return (
-                    <div
-                      key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`}
-                      className="rounded-lg border border-black/10 bg-zinc-50/40 p-1"
-                    >
+                    <div key={`${mediaType}:${mediaUrl}:${media?.id || mediaIndex}`} className="contents">
                       {renderInlineMediaPreview(mediaType, mediaUrl, metadataLabel)}
-                      <div className="mt-1 text-xs text-zinc-500">{metadataLabel}</div>
                     </div>
                   );
                 })}
-              </div>
             </div>
           )}
           {appliedShowPreviewDetails && bookPreviewArtifact.render_settings.show_metadata && (
@@ -21647,23 +21640,16 @@ function ScripturesContent() {
                 )}
 
                 {bookPreviewArtifact.preview_scope === "book" && appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
-                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 p-2">
-                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Book Multimedia</div>
-                    <div className="mt-1.5 flex flex-col gap-2">
-                      {(bookPreviewArtifact.book_media_items || []).map((media, index) => {
-                        const label = getBookMediaLabel(media);
-                        const mediaType = (media.media_type || "link").trim().toLowerCase();
-                        return (
-                          <div
-                            key={`${mediaType}:${media.url}:${media.asset_id || index}`}
-                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2"
-                          >
-                            {renderInlineMediaPreview(mediaType, media.url, label)}
-                            <div className="mt-1 text-xs text-zinc-500">{label}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div className="mb-1.5 flex flex-col gap-2">
+                    {(bookPreviewArtifact.book_media_items || []).map((media, index) => {
+                      const label = getBookMediaLabel(media);
+                      const mediaType = (media.media_type || "link").trim().toLowerCase();
+                      return (
+                        <div key={`${mediaType}:${media.url}:${media.asset_id || index}`} className="contents">
+                          {renderInlineMediaPreview(mediaType, media.url, label)}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 

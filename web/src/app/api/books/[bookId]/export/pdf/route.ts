@@ -10,6 +10,7 @@ import {
   transliterationScriptLabel,
   type TransliterationScriptOption,
 } from "@/lib/indicScript";
+import { canUseSparticuzChromium, getPdfBrowserExecutableCandidates } from "@/lib/pdfBrowserLaunch";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
@@ -165,15 +166,7 @@ const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
     "--font-render-hinting=medium",
   ];
 
-  const executableCandidates = [
-    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
-    process.env.CHROME_BIN,
-    process.env.CHROMIUM_PATH,
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/google-chrome",
-  ].filter((candidate): candidate is string => Boolean(candidate && candidate.trim()));
+  const executableCandidates = getPdfBrowserExecutableCandidates();
 
   try {
     const pw = await import("@playwright/test");
@@ -196,6 +189,10 @@ const launchPdfBrowser = async (): Promise<BrowserLaunchResult> => {
       } catch {
         // Try next candidate.
       }
+    }
+
+    if (!canUseSparticuzChromium()) {
+      throw new Error(`playwright_browser_missing_for_platform_${process.platform}`);
     }
 
     const chromium = await import("@sparticuz/chromium");
