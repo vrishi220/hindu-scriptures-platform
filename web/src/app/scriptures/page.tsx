@@ -2708,6 +2708,7 @@ function ScripturesContent() {
   const [createNextOnSubmit, setCreateNextOnSubmit] = useState(false);
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
   const lastPreviewTouchTime = useRef<number>(0);
+  const lastPreviewTouchStartY = useRef<number>(0);
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
   const lastLoadedNodeId = useRef<number | null>(null);
@@ -13740,15 +13741,30 @@ function ScripturesContent() {
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
           }}
           onTouchStart={(event) => {
+            // Record start Y for scroll detection — activation deferred to onTouchEnd
+            const touch = event.touches[0];
+            if (touch) {
+              lastPreviewTouchStartY.current = touch.clientY;
+            }
+          }}
+          onTouchEnd={(event) => {
             if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
               return;
             }
-            // If an edit field is open, don't toggle — user may be scrolling to see the field
             if (previewQuickEditDraft) {
               return;
             }
             const target = event.target as HTMLElement | null;
             if (target?.closest("button,input,textarea,select,a,summary,label")) {
+              return;
+            }
+            const touch = event.changedTouches[0];
+            if (!touch) {
+              return;
+            }
+            const dy = Math.abs(touch.clientY - lastPreviewTouchStartY.current);
+            // Only treat as a tap if finger didn't scroll (threshold: 12px)
+            if (dy > 12) {
               return;
             }
             lastPreviewTouchTime.current = Date.now();

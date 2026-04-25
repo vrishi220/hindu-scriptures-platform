@@ -410,6 +410,26 @@ export function UserPreferencesForm({
         />
         Show multimedia
       </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-sm text-zinc-700">Word meanings</span>
+        <select
+          value={preferences.preview_word_meanings_display_mode}
+          onChange={(event) =>
+            onChange({
+              ...preferences,
+              preview_word_meanings_display_mode: event.target.value as
+                | "inline"
+                | "table"
+                | "hide",
+            })
+          }
+          className="rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
+        >
+          <option value="inline">Inline</option>
+          <option value="table">Table</option>
+          <option value="hide">Hide</option>
+        </select>
+      </label>
 
       <div className="mt-1 border-t border-black/10 pt-3">
         <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
