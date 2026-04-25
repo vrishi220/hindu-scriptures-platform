@@ -2709,6 +2709,7 @@ function ScripturesContent() {
   const [searchReturnUrl, setSearchReturnUrl] = useState<string | null>(null);
   const lastPreviewTouchTime = useRef<number>(0);
   const lastPreviewTouchStartY = useRef<number>(0);
+  const lastPreviewBasketToggleTime = useRef<number>(0);
   const lastTreeBookId = useRef<string | null>(null);
   const lastAutoSelectNodeId = useRef<number | null>(null);
   const lastLoadedNodeId = useRef<number | null>(null);
@@ -2947,6 +2948,8 @@ function ScripturesContent() {
   const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
   const [isReorderingBasket, setIsReorderingBasket] = useState(false);
   const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const [previewBasketUiOverrides, setPreviewBasketUiOverrides] = useState<Record<number, boolean>>({});
+  const cancelledPreviewBasketAddsRef = useRef<Set<number>>(new Set());
   const [basketRangeStart, setBasketRangeStart] = useState("");
   const [basketRangeEnd, setBasketRangeEnd] = useState("");
   const [basketRangeSubmitting, setBasketRangeSubmitting] = useState(false);
@@ -5184,6 +5187,27 @@ function ScripturesContent() {
   }, [authResolved, authEmail]);
 
   useEffect(() => {
+    setPreviewBasketUiOverrides((prev) => {
+      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
+      let next: Record<number, boolean> | null = null;
+      for (const [rawNodeId, overrideValue] of Object.entries(prev)) {
+        const nodeId = Number(rawNodeId);
+        if (!Number.isFinite(nodeId)) {
+          continue;
+        }
+        const inBasket = basketNodeIds.has(nodeId);
+        if (inBasket === overrideValue) {
+          if (!next) {
+            next = { ...prev };
+          }
+          delete next[nodeId];
+        }
+      }
+      return next ?? prev;
+    });
+  }, [basketItems]);
+
+  useEffect(() => {
     const loadPreferences = async () => {
       if (typeof window === "undefined") {
         return;
@@ -5719,24 +5743,45 @@ function ScripturesContent() {
     (nodeId: number, block: BookPreviewBlock) => {
       if (!authEmail) return;
       if (basketItems.some((item) => item.node_id === nodeId)) return;
+      cancelledPreviewBasketAddsRef.current.delete(nodeId);
+
+      const seq =
+        formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
+      const levelLabel = formatValue(block.content.level_name) || "Level";
+      const title = block.title || `${levelLabel} ${seq}`;
+      const contentPreview =
+        (block.content.translations?.english) ||
+        (typeof block.content.english === "string" ? block.content.english : undefined) ||
+        (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
+        (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
+        undefined;
+      const breadcrumbParts = [
+        currentBook?.book_name,
+        ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
+      ].filter((p): p is string => Boolean(p?.trim()));
+      const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
+
+      // Optimistically mark as added so the basket icon remains visible immediately.
+      setBasketItems((prev) => {
+        if (prev.some((item) => item.node_id === nodeId)) {
+          return prev;
+        }
+        const nextOrder = prev.reduce((maxOrder, item) => Math.max(maxOrder, item.order), 0) + 1;
+        return [
+          ...prev,
+          {
+            node_id: nodeId,
+            title,
+            content: contentPreview,
+            breadcrumb: breadcrumbText,
+            book_name: currentBook?.book_name,
+            level_name: block.content.level_name,
+            order: nextOrder,
+          },
+        ].sort((a, b) => a.order - b.order);
+      });
 
       void (async () => {
-        const seq =
-          formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
-        const levelLabel = formatValue(block.content.level_name) || "Level";
-        const title = block.title || `${levelLabel} ${seq}`;
-        const contentPreview =
-          (block.content.translations?.english) ||
-          (typeof block.content.english === "string" ? block.content.english : undefined) ||
-          (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
-          (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
-          undefined;
-        const breadcrumbParts = [
-          currentBook?.book_name,
-          ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
-        ].filter((p): p is string => Boolean(p?.trim()));
-        const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
-
         try {
           const response = await fetch("/api/cart/items", {
             method: "POST",
@@ -5759,7 +5804,13 @@ function ScripturesContent() {
             await loadBasket();
             return;
           }
-          if (!response.ok) return;
+          if (!response.ok) {
+            setBasketItems((prev) =>
+              prev.filter((item) => !(item.node_id === nodeId && !item.cart_item_id))
+            );
+            setPreviewBasketUiOverrides((prev) => ({ ...prev, [nodeId]: false }));
+            return;
+          }
 
           const item = (await response.json()) as {
             id: number;
@@ -5774,9 +5825,26 @@ function ScripturesContent() {
             };
           };
 
-          setBasketItems((prev) =>
-            [
-              ...prev,
+          if (cancelledPreviewBasketAddsRef.current.has(item.item_id)) {
+            cancelledPreviewBasketAddsRef.current.delete(item.item_id);
+            setBasketItems((prev) =>
+              prev.filter((candidate) => !(candidate.node_id === item.item_id && !candidate.cart_item_id))
+            );
+            try {
+              await fetch(`/api/cart/items/${item.id}`, {
+                method: "DELETE",
+                credentials: "include",
+              });
+            } catch {
+              // ignore cleanup failures
+            }
+            return;
+          }
+
+          setBasketItems((prev) => {
+            const filtered = prev.filter((candidate) => candidate.node_id !== item.item_id);
+            return [
+              ...filtered,
               {
                 cart_item_id: item.id,
                 node_id: item.item_id,
@@ -5787,10 +5855,13 @@ function ScripturesContent() {
                 level_name: item.metadata?.level_name || block.content.level_name,
                 order: item.order,
               },
-            ].sort((a, b) => a.order - b.order)
-          );
+            ].sort((a, b) => a.order - b.order);
+          });
         } catch {
-          // ignore
+          setBasketItems((prev) =>
+            prev.filter((item) => !(item.node_id === nodeId && !item.cart_item_id))
+          );
+          setPreviewBasketUiOverrides((prev) => ({ ...prev, [nodeId]: false }));
         }
       })();
     },
@@ -5909,42 +5980,104 @@ function ScripturesContent() {
   };
 
   const removeFromBasket = (item: BasketItem) => {
+    const removeMatches = (candidate: BasketItem): boolean => {
+      if (item.cart_item_id && candidate.cart_item_id) {
+        return candidate.cart_item_id === item.cart_item_id;
+      }
+      return candidate.node_id === item.node_id && candidate.order === item.order;
+    };
+
+    // Optimistically hide/remove immediately so inactive-node taps reflect state instantly.
+    setBasketItems((prev) => prev.filter((candidate) => !removeMatches(candidate)));
+
     void (async () => {
-      const target = basketItems.find((candidate) => {
-        if (item.cart_item_id && candidate.cart_item_id) {
-          return candidate.cart_item_id === item.cart_item_id;
-        }
-        return candidate.node_id === item.node_id && candidate.order === item.order;
-      });
-      if (!target?.cart_item_id) {
-        setBasketItems((prev) => prev.filter((candidate) => {
-          if (item.cart_item_id && candidate.cart_item_id) {
-            return candidate.cart_item_id !== item.cart_item_id;
-          }
-          return !(candidate.node_id === item.node_id && candidate.order === item.order);
-        }));
+      if (!item.cart_item_id) {
+        // If this is an optimistic preview add, cancel the in-flight create.
+        cancelledPreviewBasketAddsRef.current.add(item.node_id);
         return;
       }
 
+      cancelledPreviewBasketAddsRef.current.delete(item.node_id);
+
       try {
-        const response = await fetch(`/api/cart/items/${target.cart_item_id}`, {
+        const response = await fetch(`/api/cart/items/${item.cart_item_id}`, {
           method: "DELETE",
           credentials: "include",
         });
         if (!response.ok && response.status !== 404) {
+          // Roll back optimistic remove if delete failed server-side.
+          setBasketItems((prev) => {
+            if (prev.some((candidate) => removeMatches(candidate))) {
+              return prev;
+            }
+            return [...prev, item].sort((a, b) => a.order - b.order);
+          });
           return;
         }
-        setBasketItems((prev) => prev.filter((candidate) => {
-          if (item.cart_item_id && candidate.cart_item_id) {
-            return candidate.cart_item_id !== item.cart_item_id;
-          }
-          return !(candidate.node_id === item.node_id && candidate.order === item.order);
-        }));
       } catch {
-        // ignore basket remove failures for now
+        // Roll back optimistic remove on request failure.
+        setBasketItems((prev) => {
+          if (prev.some((candidate) => removeMatches(candidate))) {
+            return prev;
+          }
+          return [...prev, item].sort((a, b) => a.order - b.order);
+        });
       }
     })();
   };
+
+  const removePreviewNodeFromBasket = useCallback(
+    (nodeId: number) => {
+      const matchingItems = basketItems.filter((item) => item.node_id === nodeId);
+      if (matchingItems.length === 0) {
+        return;
+      }
+
+      // Ensure any in-flight optimistic add for this node cannot re-appear.
+      cancelledPreviewBasketAddsRef.current.add(nodeId);
+
+      // Remove all node duplicates immediately so inactive-node toggle reflects instantly.
+      setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
+
+      const cartItemIds = matchingItems
+        .map((item) => item.cart_item_id)
+        .filter((id): id is number => typeof id === "number");
+      if (cartItemIds.length === 0) {
+        return;
+      }
+
+      void (async () => {
+        let shouldReload = false;
+        try {
+          for (const cartItemId of cartItemIds) {
+            const response = await fetch(`/api/cart/items/${cartItemId}`, {
+              method: "DELETE",
+              credentials: "include",
+            });
+            if (!response.ok && response.status !== 404) {
+              shouldReload = true;
+            }
+          }
+        } catch {
+          shouldReload = true;
+        } finally {
+          cancelledPreviewBasketAddsRef.current.delete(nodeId);
+          if (shouldReload) {
+            await loadBasket();
+            setPreviewBasketUiOverrides((prev) => {
+              if (!(nodeId in prev)) {
+                return prev;
+              }
+              const next = { ...prev };
+              delete next[nodeId];
+              return next;
+            });
+          }
+        }
+      })();
+    },
+    [basketItems, loadBasket]
+  );
 
   const moveBasketItem = (item: BasketItem, direction: "up" | "down") => {
     void (async () => {
@@ -14361,18 +14494,52 @@ function ScripturesContent() {
               <div className="flex shrink-0 items-center gap-1">
                 {authEmail && typeof quickEditNodeId === "number" && (() => {
                   const basketEntry = basketItems.find((item) => item.node_id === quickEditNodeId);
-                  const alreadyInBasket = Boolean(basketEntry);
+                  const overrideBasketState = previewBasketUiOverrides[quickEditNodeId];
+                  const alreadyInBasket =
+                    typeof overrideBasketState === "boolean"
+                      ? overrideBasketState
+                      : Boolean(basketEntry);
+                  const shouldShowBasketButton = alreadyInBasket || showQuickEditAffordances;
+                  if (!shouldShowBasketButton) {
+                    return null;
+                  }
+                  const basketAffordanceClass = alreadyInBasket
+                    ? "opacity-100 pointer-events-auto"
+                    : previewQuickEditAffordanceClass(showQuickEditAffordances);
+                  const togglePreviewBasket = () => {
+                    if (alreadyInBasket) {
+                      setPreviewBasketUiOverrides((prev) => ({ ...prev, [quickEditNodeId]: false }));
+                      removePreviewNodeFromBasket(quickEditNodeId);
+                    } else {
+                      setPreviewBasketUiOverrides((prev) => ({ ...prev, [quickEditNodeId]: true }));
+                      addPreviewBlockToBasket(quickEditNodeId, block);
+                    }
+                  };
                   return (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (alreadyInBasket && basketEntry) {
-                          removeFromBasket(basketEntry);
-                        } else {
-                          addPreviewBlockToBasket(quickEditNodeId, block);
-                        }
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
                       }}
-                      className={`flex items-center gap-0.5 rounded-md border px-2 py-1 transition ${
+                      onTouchStart={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onTouchEnd={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onPointerUp={(event) => {
+                        event.stopPropagation();
+                        lastPreviewBasketToggleTime.current = Date.now();
+                        togglePreviewBasket();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (Date.now() - lastPreviewBasketToggleTime.current < 500) {
+                          return;
+                        }
+                        togglePreviewBasket();
+                      }}
+                      className={`flex items-center gap-0.5 rounded-md border px-2 py-1 transition ${basketAffordanceClass} ${
                         alreadyInBasket
                           ? "border-emerald-200 bg-emerald-50 text-emerald-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
                           : "border-black/10 bg-white/90 text-zinc-400 hover:border-black/20 hover:text-zinc-700"
@@ -15330,8 +15497,9 @@ function ScripturesContent() {
     openPreviewNodeInFullEditor,
     authEmail,
     basketItems,
+    previewBasketUiOverrides,
     addPreviewBlockToBasket,
-    removeFromBasket,
+    removePreviewNodeFromBasket,
   ]);
 
   const previewQuickEditTarget = useMemo(() => {
