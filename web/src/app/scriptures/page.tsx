@@ -14237,8 +14237,10 @@ function ScripturesContent() {
         const prevLine = contentLines[index - 1];
         return line.value !== prevLine.value;
       });
-      const nonTranslationLines = deduplicatedLines.filter((line) => line.fieldName !== "english");
-      const translationLines = deduplicatedLines.filter((line) => line.fieldName === "english");
+      const isTranslationLine = (fieldName: string) =>
+        fieldName === "english" || fieldName.startsWith("content_data.translations.");
+      const nonTranslationLines = deduplicatedLines.filter((line) => !isTranslationLine(line.fieldName));
+      const translationLines = deduplicatedLines.filter((line) => isTranslationLine(line.fieldName));
       const translationVariants = Array.isArray(block.content.translation_variants)
         ? block.content.translation_variants
             .map((entry, entryIndex) => ({
