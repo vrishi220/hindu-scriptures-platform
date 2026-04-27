@@ -1,8 +1,8 @@
 .PHONY: test test-backend test-frontend test-sanity test-watch test-coverage help install-deps prepush-check api ui
 
-PYTHON := $(if $(wildcard ./venv/bin/python),./venv/bin/python,python)
+PYTHON := $(if $(wildcard ./.venv/bin/python),./.venv/bin/python,$(if $(wildcard ./venv/bin/python),./venv/bin/python,python))
 PIP := $(PYTHON) -m pip
-PTW := $(if $(wildcard ./venv/bin/ptw),./venv/bin/ptw,ptw)
+PTW := $(if $(wildcard ./.venv/bin/ptw),./.venv/bin/ptw,$(if $(wildcard ./venv/bin/ptw),./venv/bin/ptw,ptw))
 
 # Default help target
 help:
@@ -100,10 +100,15 @@ api:
 	[ -f .env ] && . ./.env || true; \
 	[ -f .env.local ] && . ./.env.local || true; \
 	set +a; \
-	if [ -x ./venv/bin/python ]; then \
+	if [ -x ./.venv/bin/python ]; then \
+		./.venv/bin/python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000; \
+	elif [ -x ./venv/bin/python ]; then \
 		./venv/bin/python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000; \
-	else \
+	elif command -v uvicorn >/dev/null 2>&1; then \
 		uvicorn main:app --reload --host 0.0.0.0 --port 8000; \
+	else \
+		echo "Error: could not find uvicorn or a project virtualenv (expected ./.venv)."; \
+		exit 1; \
 	fi
 
 ui:
