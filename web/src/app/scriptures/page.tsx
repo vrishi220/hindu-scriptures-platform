@@ -4060,7 +4060,7 @@ function ScripturesContent() {
     }
 
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}`, {
         credentials: "include",
         cache: "no-store",
       });
@@ -4850,7 +4850,7 @@ function ScripturesContent() {
           if (!propertiesNodeId) {
             throw new Error("Select a node first");
           }
-          const renameResponse = await fetch(contentPath(`/nodes/${propertiesNodeId}`), {
+          const renameResponse = await fetchContentWithSessionRecovery(`/nodes/${propertiesNodeId}`, {
             method: "PATCH",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
@@ -4974,7 +4974,7 @@ function ScripturesContent() {
         } else {
           delete nextNodeMetadata.description;
         }
-        const response = await fetch(contentPath(`/nodes/${propertiesNodeId}`), {
+        const response = await fetchContentWithSessionRecovery(`/nodes/${propertiesNodeId}`, {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -7094,7 +7094,7 @@ function ScripturesContent() {
     setTreeError(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}/reorder`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/reorder`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -7195,7 +7195,7 @@ function ScripturesContent() {
     setTreeError(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${anchorNodeId}/reorder`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${anchorNodeId}/reorder`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -7385,7 +7385,7 @@ function ScripturesContent() {
         if (!anchorNodeId) {
           continue;
         }
-        const response = await fetch(contentPath(`/nodes/${anchorNodeId}/reorder`), {
+        const response = await fetchContentWithSessionRecovery(`/nodes/${anchorNodeId}/reorder`, {
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -7459,7 +7459,7 @@ function ScripturesContent() {
     lastLoadedNodeId.current = nodeId;
     setContentLoading(true);
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}`, {
         credentials: "include",
         signal: abortController.signal,
       });
@@ -7775,7 +7775,7 @@ function ScripturesContent() {
   };
 
   const attachMediaBankAssetToNode = async (assetId: number, nodeId: number): Promise<void> => {
-    const response = await fetch(contentPath(`/media-bank/assets/${assetId}/attach/nodes/${nodeId}`), {
+    const response = await fetchContentWithSessionRecovery(`/media-bank/assets/${assetId}/attach/nodes/${nodeId}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -8259,7 +8259,7 @@ function ScripturesContent() {
     setNodeMediaLoading(true);
     setNodeMediaError(null);
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}/media?limit=20`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/media?limit=20`, {
         credentials: "include",
         signal: abortController.signal,
       });
@@ -8299,7 +8299,7 @@ function ScripturesContent() {
     setNodeMediaMessage(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${targetNodeId}/media/${media.id}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${targetNodeId}/media/${media.id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -8329,7 +8329,7 @@ function ScripturesContent() {
     setNodeMediaMessage(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${selectedId}/media/${mediaId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/media/${mediaId}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -8382,7 +8382,7 @@ function ScripturesContent() {
     setNodeMediaMessage(null);
 
     try {
-      const response = await fetch(contentPath(`/nodes/${selectedId}/media/reorder`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/media/reorder`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -8438,7 +8438,7 @@ function ScripturesContent() {
     setNodeCommentaryLoading(true);
     setNodeCommentaryError(null);
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}/commentary?limit=100`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/commentary?limit=100`, {
         credentials: "include",
         signal: abortController.signal,
       });
@@ -8480,7 +8480,7 @@ function ScripturesContent() {
     setNodeCommentsLoading(true);
     setNodeCommentsError(null);
     try {
-      const response = await fetch(contentPath(`/nodes/${nodeId}/comments?limit=200`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/comments?limit=200`, {
         credentials: "include",
         signal: abortController.signal,
       });
@@ -8587,7 +8587,7 @@ function ScripturesContent() {
     setNodeCommentSubmitting(true);
     setNodeCommentMessage(null);
     try {
-      const response = await fetch(contentPath(`/nodes/${selectedId}/comments/${commentId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/comments/${commentId}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -8704,7 +8704,7 @@ function ScripturesContent() {
     setCommentarySubmitting(true);
     setCommentaryMessage(null);
     try {
-      const response = await fetch(contentPath(`/nodes/${selectedId}/commentary/${entryId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/commentary/${entryId}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -8842,7 +8842,7 @@ function ScripturesContent() {
 
   const loadSchemas = async () => {
     try {
-      const response = await fetch(contentPath("/schemas"), {
+      const response = await fetchContentWithSessionRecovery("/schemas", {
         credentials: "include",
         cache: "no-store",
       });
@@ -9537,7 +9537,7 @@ function ScripturesContent() {
       setActionMessage(null);
       
       try {
-        const response = await fetch(contentPath(`/nodes/${nodeId}`), {
+        const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}`, {
           credentials: "include",
           cache: "no-store",
         });
@@ -9911,15 +9911,10 @@ function ScripturesContent() {
     const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
     const rawRows = mapWordMeaningRowsForPayload(newRows);
     try {
-      const res = await fetch(contentPath(`/nodes/${nodeId}/field`), {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          field_path: "content_data.word_meanings_rows.replace_all",
-          value: rawRows,
-          edit_reason: "Word meanings table edit",
-        }),
+      const res = await patchPreviewFieldWithSessionRecovery(nodeId, {
+        field_path: "content_data.word_meanings_rows.replace_all",
+        value: rawRows,
+        edit_reason: "Word meanings table edit",
       });
       if (!res.ok) {
         const p = (await res.json().catch(() => null)) as { detail?: string } | null;
@@ -10215,6 +10210,39 @@ function ScripturesContent() {
     );
   };
 
+  const patchPreviewFieldWithSessionRecovery = async (
+    nodeId: number,
+    body: {
+      field_path: string;
+      value: unknown;
+      edit_reason: string;
+    }
+  ): Promise<Response> => {
+    const requestInit: RequestInit = {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    };
+
+    return fetchContentWithSessionRecovery(`/nodes/${nodeId}/field`, requestInit);
+  };
+
+  const fetchContentWithSessionRecovery = async (
+    path: string,
+    init?: RequestInit
+  ): Promise<Response> => {
+    let response = await fetch(contentPath(path), init);
+    if (response.status !== 401) {
+      return response;
+    }
+
+    // If another tab rotated tokens, resync session cookies then retry once.
+    await getMe({ force: true }).catch(() => null);
+    response = await fetch(contentPath(path), init);
+    return response;
+  };
+
   const handleSavePreviewQuickEdit = async () => {
     if (!previewQuickEditDraft || !bookPreviewArtifact) {
       return;
@@ -10240,15 +10268,10 @@ function ScripturesContent() {
     );
 
     try {
-      const response = await fetch(contentPath(`/nodes/${draft.nodeId}/field`), {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          field_path: draft.fieldPath,
-          value: nextValue,
-          edit_reason: "Quick preview edit",
-        }),
+      const response = await patchPreviewFieldWithSessionRecovery(draft.nodeId, {
+        field_path: draft.fieldPath,
+        value: nextValue,
+        edit_reason: "Quick preview edit",
       });
 
       const payload = (await response.json().catch(() => null)) as
@@ -13298,7 +13321,7 @@ function ScripturesContent() {
           : [],
       };
 
-      const response = await fetch(contentPath(`/nodes/${selectedId}`), {
+      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -18159,7 +18182,7 @@ function ScripturesContent() {
                                       )
                                     ) {
                                       try {
-                                        await fetch(contentPath(`/nodes/${selectedId}`), {
+                                        await fetchContentWithSessionRecovery(`/nodes/${selectedId}`, {
                                           method: "DELETE",
                                           credentials: "include",
                                         });

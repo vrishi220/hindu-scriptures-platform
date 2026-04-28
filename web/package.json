@@ -9,11 +9,11 @@
     "lint": "eslint",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed --workers=1 --project=chromium",
-    "test:e2e:debug": "playwright test --headed --workers=1 --project=chromium --debug",
-    "test:e2e:file": "playwright test tests/example.spec.ts --headed --workers=1 --project=chromium"
+    "test:e2e": "bash ../scripts/run_e2e_safe.sh",
+    "test:e2e:ui": "bash ../scripts/run_e2e_safe.sh --ui",
+    "test:e2e:headed": "bash ../scripts/run_e2e_safe.sh --headed --workers=1 --project=chromium",
+    "test:e2e:debug": "bash ../scripts/run_e2e_safe.sh --headed --workers=1 --project=chromium --debug",
+    "test:e2e:file": "bash ../scripts/run_e2e_safe.sh tests/example.spec.ts --headed --workers=1 --project=chromium"
   },
   "dependencies": {
     "@sparticuz/chromium": "^143.0.4",
