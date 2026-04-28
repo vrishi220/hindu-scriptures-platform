@@ -63,6 +63,25 @@ def ensure_phase1_schema(database_url: str) -> None:
             ADD COLUMN IF NOT EXISTS search_vector tsvector;
         """,
         """
+        DO $$
+        DECLARE
+            current_type text;
+        BEGIN
+            SELECT data_type
+            INTO current_type
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'content_nodes'
+              AND column_name = 'sequence_number';
+
+            IF current_type IN ('integer', 'smallint', 'bigint', 'numeric') THEN
+                ALTER TABLE public.content_nodes
+                    ALTER COLUMN sequence_number TYPE VARCHAR(50)
+                    USING sequence_number::text;
+            END IF;
+        END $$;
+        """,
+        """
         ALTER TABLE IF EXISTS user_preferences
             ADD COLUMN IF NOT EXISTS show_only_preferred_script BOOLEAN NOT NULL DEFAULT false,
             ADD COLUMN IF NOT EXISTS show_media BOOLEAN NOT NULL DEFAULT true,

@@ -3837,6 +3837,7 @@ def create_node(
                 ContentNode.book_id == payload.book_id,
                 ContentNode.parent_node_id == resolved_parent_node_id,
                 ContentNode.sequence_number.isnot(None),
+                ContentNode.sequence_number.op("~")("^[0-9]+$"),
             ).scalar()
             sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
         else:
@@ -3856,6 +3857,7 @@ def create_node(
                 ContentNode.book_id == payload.book_id,
                 ContentNode.parent_node_id == resolved_parent_node_id,
                 ContentNode.sequence_number.isnot(None),
+                ContentNode.sequence_number.op("~")("^[0-9]+$"),
                 numeric_sequence >= sequence_number,
             )
             .order_by(numeric_sequence.desc(), ContentNode.id.desc())
@@ -3869,6 +3871,7 @@ def create_node(
             ContentNode.book_id == payload.book_id,
             ContentNode.parent_node_id == resolved_parent_node_id,
             ContentNode.sequence_number.isnot(None),
+            ContentNode.sequence_number.op("~")("^[0-9]+$"),
         ).scalar()
         sequence_number = (int(max_seq) if max_seq is not None else 0) + 1
 
@@ -4701,6 +4704,7 @@ def delete_node(
                 ContentNode.parent_node_id == node.parent_node_id,
                 ContentNode.id != node.id,
                 ContentNode.sequence_number.isnot(None),
+                ContentNode.sequence_number.op("~")("^[0-9]+$"),
                 numeric_sequence > deleted_sequence,
             )
             .order_by(numeric_sequence.asc(), ContentNode.id.asc())

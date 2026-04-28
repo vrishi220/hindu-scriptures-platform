@@ -23,7 +23,7 @@ class ContentNode(Base):
     referenced_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="CASCADE"))
     level_name = Column(String(100), nullable=False)
     level_order = Column(Integer, nullable=False)
-    sequence_number = Column(Integer)
+    sequence_number = Column(String(50))
     title_sanskrit = Column(Text)
     title_transliteration = Column(Text)
     title_english = Column(Text)

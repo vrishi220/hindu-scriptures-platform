@@ -37,6 +37,17 @@ def _trimmed_string(value: object, path: str) -> str:
     return value.strip()
 
 
+def _normalize_sequence_number_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    if isinstance(value, int):
+        return str(value)
+    raise ValueError("sequence_number must be a string or integer")
+
+
 def _validate_plain_text(value: object, path: str, max_chars: int) -> str:
     text = _trimmed_string(value, path)
     if len(text) > max_chars:
@@ -587,6 +598,11 @@ class ContentNodeBase(BaseModel):
     def validate_content_data(cls, value: dict | None) -> dict | None:
         return _validate_word_meanings_content_data(value)
 
+    @field_validator("sequence_number", mode="before")
+    @classmethod
+    def normalize_sequence_number(cls, value: object) -> str | None:
+        return _normalize_sequence_number_value(value)
+
 
 class ContentNodeCreate(ContentNodeBase):
     insert_after_node_id: int | None = None
@@ -621,6 +637,11 @@ class ContentNodeUpdate(BaseModel):
     @classmethod
     def validate_content_data(cls, value: dict | None) -> dict | None:
         return _validate_word_meanings_content_data(value)
+
+    @field_validator("sequence_number", mode="before")
+    @classmethod
+    def normalize_sequence_number(cls, value: object) -> str | None:
+        return _normalize_sequence_number_value(value)
 
 
 class ContentNodeFieldPatch(BaseModel):
@@ -671,6 +692,11 @@ class ContentNodeTreeItem(BaseModel):
     created_by: int | None = None
     last_modified_by: int | None = None
 
+    @field_validator("sequence_number", mode="before")
+    @classmethod
+    def normalize_sequence_number(cls, value: object) -> str | None:
+        return _normalize_sequence_number_value(value)
+
 
 class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
@@ -694,6 +720,11 @@ class TreeNodeImportItem(BaseModel):
     original_source_url: str | None = None
     tags: list | None = None
     children: list["TreeNodeImportItem"] = Field(default_factory=list)
+
+    @field_validator("sequence_number", mode="before")
+    @classmethod
+    def normalize_sequence_number(cls, value: object) -> str | None:
+        return _normalize_sequence_number_value(value)
 
 
 class BulkTreeImportRequest(BaseModel):
@@ -751,6 +782,11 @@ class BookExchangeNodeV1(BaseModel):
     original_source_url: str | None = None
     tags: list | None = None
     media_items: list[BookExchangeMediaItemV1] = Field(default_factory=list)
+
+    @field_validator("sequence_number", mode="before")
+    @classmethod
+    def normalize_sequence_number(cls, value: object) -> str | None:
+        return _normalize_sequence_number_value(value)
 
 
 class BookExchangeBookV1(BaseModel):
