@@ -21989,11 +21989,8 @@ function ScripturesContent() {
                         typeof bookPreviewArtifact.book_id === "number"
                           ? bookPreviewArtifact.book_id
                           : null;
-                      const bookBasic =
-                        currentBook?.content_data?.basic &&
-                        typeof currentBook.content_data.basic === "object"
-                          ? currentBook.content_data.basic
-                          : null;
+                      const bookContentData = toRecord(currentBook?.content_data);
+                      const bookBasic = toRecord(bookContentData.basic);
                       const summaryQuickEditFields =
                         previewBookId !== null
                           ? [
