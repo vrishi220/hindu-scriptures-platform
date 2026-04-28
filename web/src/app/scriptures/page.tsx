@@ -14432,15 +14432,9 @@ function ScripturesContent() {
       return [] as ReactElement[];
     }
 
-    const bookContentData =
-      currentBook?.content_data && typeof currentBook.content_data === "object"
-        ? currentBook.content_data
-        : null;
-    const bookBasicContent =
-      bookContentData?.basic && typeof bookContentData.basic === "object"
-        ? bookContentData.basic
-        : null;
-    const bookTranslations = toTranslationRecord(bookContentData?.translations);
+    const bookContentData = toRecord(currentBook?.content_data);
+    const bookBasicContent = toRecord(bookContentData.basic);
+    const bookTranslations = toTranslationRecord(bookContentData.translations);
     const hasBookContentBlock = Boolean(
       currentBook?.has_content ||
         (bookBasicContent &&
