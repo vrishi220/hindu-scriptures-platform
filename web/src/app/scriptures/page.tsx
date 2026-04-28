@@ -174,6 +174,18 @@ type BookSchema = {
 type BookOption = {
   id: number;
   book_name: string;
+  title_sanskrit?: string | null;
+  title_transliteration?: string | null;
+  title_english?: string | null;
+  has_content?: boolean;
+  content_data?: {
+    basic?: {
+      sanskrit?: string;
+      transliteration?: string;
+      translation?: string;
+    };
+    translations?: Record<string, string>;
+  } | null;
   status?: string;
   visibility?: "private" | "public" | string;
   metadata?: BookMetadata | null;
@@ -2829,6 +2841,7 @@ function ScripturesContent() {
   const [previewQuickEditGestureBlockKey, setPreviewQuickEditGestureBlockKey] = useState<string | null>(null);
   const [previewQuickEditDraft, setPreviewQuickEditDraft] = useState<{
     nodeId: number;
+    targetType?: "node" | "book";
     fieldPath: string;
     lineKey: string;
     value: string;
@@ -9740,16 +9753,42 @@ function ScripturesContent() {
       return contentNodeId;
     }
 
+    if (
+      bookPreviewArtifact?.preview_scope === "book" &&
+      typeof bookPreviewArtifact.book_id === "number"
+    ) {
+      return bookPreviewArtifact.book_id;
+    }
+
     return null;
+  };
+
+  const resolvePreviewQuickEditTargetType = (block: BookPreviewBlock): "node" | "book" => {
+    if (typeof block.source_node_id === "number") {
+      return "node";
+    }
+
+    const contentNodeId = (block.content as { node_id?: unknown }).node_id;
+    if (typeof contentNodeId === "number") {
+      return "node";
+    }
+
+    if (bookPreviewArtifact?.preview_scope === "book") {
+      return "book";
+    }
+
+    return "node";
   };
 
   const applyPreviewFieldValueToArtifact = (
     artifact: BookPreviewArtifact,
     nodeId: number,
     fieldPath: string,
-    value: string | null
+    value: string | null,
+    targetType: "node" | "book" = "node"
   ): BookPreviewArtifact => {
     const normalizedValue = value ?? "";
+    let bookScopeBlockPatched = false;
     const nextBody = artifact.sections.body.map((block) => {
       const blockNodeId =
         typeof block.source_node_id === "number"
@@ -9757,8 +9796,17 @@ function ScripturesContent() {
           : typeof (block.content as { node_id?: unknown }).node_id === "number"
             ? ((block.content as { node_id?: number }).node_id ?? null)
             : null;
-      if (blockNodeId !== nodeId) {
+      const isBookScopeBlockTarget =
+        targetType === "book" &&
+        artifact.preview_scope === "book" &&
+        blockNodeId === null &&
+        !bookScopeBlockPatched;
+      const matchesTargetNode = targetType === "node" && blockNodeId === nodeId;
+      if (!matchesTargetNode && !isBookScopeBlockTarget) {
         return block;
+      }
+      if (isBookScopeBlockTarget) {
+        bookScopeBlockPatched = true;
       }
 
       const nextContent = { ...block.content };
@@ -9933,6 +9981,99 @@ function ScripturesContent() {
     } catch (err) {
       setBookPreviewArtifact(snapshot);
       console.error("Failed to save word meanings:", err);
+    }
+  };
+
+  const handlePreviewVariantOperation = async (
+    nodeId: number,
+    targetType: "node" | "book",
+    kind: "translation" | "commentary",
+    operation: "add" | "delete",
+    variantIndex?: number
+  ) => {
+    if (!bookPreviewArtifact) {
+      return;
+    }
+
+    const fieldPrefix = kind === "translation" ? "translation_variants" : "commentary_variants";
+    const fieldPath =
+      operation === "add"
+        ? `content_data.${fieldPrefix}.add`
+        : `content_data.${fieldPrefix}.${variantIndex ?? -1}.delete`;
+
+    if (operation === "delete" && (typeof variantIndex !== "number" || variantIndex < 0)) {
+      return;
+    }
+
+    const defaultLanguage =
+      appliedPreviewTranslationLanguages[0] ||
+      (normalizeTranslationLanguage(preferences?.source_language) as EditableTranslationLanguage);
+    const value =
+      operation === "add"
+        ? {
+            author_slug: "",
+            author: "",
+            language: defaultLanguage,
+            field: buildVariantFieldCode(defaultLanguage, kind),
+            text: "",
+          }
+        : null;
+
+    try {
+      const response = await patchPreviewFieldWithSessionRecovery(
+        nodeId,
+        {
+          field_path: fieldPath,
+          value,
+          edit_reason: "Preview variant update",
+        },
+        targetType
+      );
+
+      const payload = (await response.json().catch(() => null)) as
+        | NodeContent
+        | { detail?: string }
+        | null;
+
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload === "object" && "detail" in payload
+            ? payload.detail || response.statusText
+            : response.statusText;
+        setPreviewLinkMessage(`Save failed (${response.status}): ${detail}`);
+        window.setTimeout(() => setPreviewLinkMessage(null), 1800);
+        return;
+      }
+
+      if (isNodeContentPayload(payload)) {
+        syncSavedNodeState(payload);
+        setBookPreviewArtifact((prev) =>
+          prev ? applySavedNodeToPreviewArtifact(prev, payload) : prev
+        );
+      }
+
+      if (targetType === "book") {
+        const currentScope =
+          bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+        const scopeNodeId =
+          currentScope === "node" && typeof bookPreviewArtifact.root_node_id === "number"
+            ? bookPreviewArtifact.root_node_id
+            : undefined;
+        void handlePreviewBook(
+          currentScope,
+          String(bookPreviewArtifact.book_id),
+          "replace",
+          0,
+          false,
+          scopeNodeId
+        );
+      }
+
+      setPreviewLinkMessage("Saved.");
+      window.setTimeout(() => setPreviewLinkMessage(null), 1200);
+    } catch (err) {
+      setPreviewLinkMessage(err instanceof Error ? err.message : "Save failed.");
+      window.setTimeout(() => setPreviewLinkMessage(null), 1800);
     }
   };
 
@@ -10216,7 +10357,8 @@ function ScripturesContent() {
       field_path: string;
       value: unknown;
       edit_reason: string;
-    }
+    },
+    targetType: "node" | "book" = "node"
   ): Promise<Response> => {
     const requestInit: RequestInit = {
       method: "PATCH",
@@ -10225,7 +10367,9 @@ function ScripturesContent() {
       body: JSON.stringify(body),
     };
 
-    return fetchContentWithSessionRecovery(`/nodes/${nodeId}/field`, requestInit);
+    const path =
+      targetType === "book" ? `/books/${nodeId}/field` : `/nodes/${nodeId}/field`;
+    return fetchContentWithSessionRecovery(path, requestInit);
   };
 
   const fetchContentWithSessionRecovery = async (
@@ -10264,15 +10408,27 @@ function ScripturesContent() {
     );
 
     setBookPreviewArtifact((prev) =>
-      prev ? applyPreviewFieldValueToArtifact(prev, draft.nodeId, draft.fieldPath, nextValue) : prev
+      prev
+        ? applyPreviewFieldValueToArtifact(
+            prev,
+            draft.nodeId,
+            draft.fieldPath,
+            nextValue,
+            draft.targetType ?? "node"
+          )
+        : prev
     );
 
     try {
-      const response = await patchPreviewFieldWithSessionRecovery(draft.nodeId, {
+      const response = await patchPreviewFieldWithSessionRecovery(
+        draft.nodeId,
+        {
         field_path: draft.fieldPath,
         value: nextValue,
         edit_reason: "Quick preview edit",
-      });
+        },
+        draft.targetType ?? "node"
+      );
 
       const payload = (await response.json().catch(() => null)) as
         | NodeContent
@@ -10299,6 +10455,25 @@ function ScripturesContent() {
 
       if (isNodeContentPayload(payload)) {
         syncSavedNodeState(payload);
+      }
+
+      if ((draft.targetType ?? "node") === "book" && bookPreviewArtifact) {
+        const currentScope =
+          bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
+        const scopeNodeId =
+          currentScope === "node"
+            ? (typeof bookPreviewArtifact.root_node_id === "number"
+                ? bookPreviewArtifact.root_node_id
+                : undefined)
+            : undefined;
+        void handlePreviewBook(
+          currentScope,
+          String(bookPreviewArtifact.book_id),
+          "replace",
+          0,
+          false,
+          scopeNodeId
+        );
       }
 
       setPreviewQuickEditDraft(null);
@@ -14229,26 +14404,115 @@ function ScripturesContent() {
         : [];
       [...tv, ...cv].forEach(registerVariant);
     }
+
+    const bookVariantsSource = currentBook?.content_data;
+    if (bookVariantsSource && typeof bookVariantsSource === "object") {
+      const tv = Array.isArray((bookVariantsSource as { translation_variants?: unknown }).translation_variants)
+        ? (bookVariantsSource as { translation_variants: unknown[] }).translation_variants
+        : [];
+      const cv = Array.isArray((bookVariantsSource as { commentary_variants?: unknown }).commentary_variants)
+        ? (bookVariantsSource as { commentary_variants: unknown[] }).commentary_variants
+        : [];
+      [...tv, ...cv].forEach(registerVariant);
+    }
     return new Map(
       [...map.entries()].sort((left, right) =>
         left[1].localeCompare(right[1], undefined, { sensitivity: "base" })
       )
     );
-  }, [bookPreviewArtifact, currentBook?.variant_authors, nodeContent?.content_data]);
+  }, [
+    bookPreviewArtifact,
+    currentBook?.variant_authors,
+    currentBook?.content_data,
+    nodeContent?.content_data,
+  ]);
 
   const previewBodyBlockElements = useMemo(() => {
     if (!bookPreviewArtifact) {
       return [] as ReactElement[];
     }
 
-    const filteredBlocks = bookPreviewArtifact.sections.body.filter(
+    const bookContentData =
+      currentBook?.content_data && typeof currentBook.content_data === "object"
+        ? currentBook.content_data
+        : null;
+    const bookBasicContent =
+      bookContentData?.basic && typeof bookContentData.basic === "object"
+        ? bookContentData.basic
+        : null;
+    const bookTranslations = toTranslationRecord(bookContentData?.translations);
+    const hasBookContentBlock = Boolean(
+      currentBook?.has_content ||
+        (bookBasicContent &&
+          (bookBasicContent.sanskrit ||
+            bookBasicContent.transliteration ||
+            bookBasicContent.translation)) ||
+        Object.keys(bookTranslations).length > 0 ||
+        (Array.isArray(bookContentData?.translation_variants) &&
+          bookContentData.translation_variants.length > 0) ||
+        (Array.isArray(bookContentData?.commentary_variants) &&
+          bookContentData.commentary_variants.length > 0) ||
+        (Array.isArray(bookContentData?.word_meanings_rows) &&
+          bookContentData.word_meanings_rows.length > 0)
+    );
+
+    const syntheticBookContentBlock: BookPreviewBlock | null =
+      bookPreviewArtifact.preview_scope === "book" &&
+      hasBookContentBlock &&
+      typeof bookPreviewArtifact.book_id === "number"
+        ? {
+            section: "body",
+            order: 0,
+            block_type: "book_content",
+            template_key: "book.content.synthetic.v1",
+            source_node_id: null,
+            source_book_id: bookPreviewArtifact.book_id,
+            title: currentBook?.book_name || bookPreviewArtifact.book_name || "Book",
+            content: {
+              level_name: "BOOK",
+              sequence_number: null,
+              sanskrit:
+                typeof bookBasicContent?.sanskrit === "string"
+                  ? bookBasicContent.sanskrit
+                  : "",
+              transliteration:
+                typeof bookBasicContent?.transliteration === "string"
+                  ? bookBasicContent.transliteration
+                  : "",
+              english:
+                typeof bookBasicContent?.translation === "string"
+                  ? bookBasicContent.translation
+                  : pickPreferredTranslationText(
+                      bookTranslations,
+                      sourceLanguage,
+                      ""
+                    ),
+              translations: bookTranslations,
+              translation_variants: Array.isArray(bookContentData?.translation_variants)
+                ? bookContentData.translation_variants
+                : [],
+              commentary_variants: Array.isArray(bookContentData?.commentary_variants)
+                ? bookContentData.commentary_variants
+                : [],
+              word_meanings_rows: Array.isArray(bookContentData?.word_meanings_rows)
+                ? bookContentData.word_meanings_rows
+                : [],
+            },
+          }
+        : null;
+
+    const previewBlocks = syntheticBookContentBlock
+      ? [syntheticBookContentBlock, ...bookPreviewArtifact.sections.body]
+      : bookPreviewArtifact.sections.body;
+
+    const filteredBlocks = previewBlocks.filter(
       (block) => !block.content.level_name || !appliedHiddenPreviewLevels.has(block.content.level_name)
     );
     const visibleBlocks =
       bookPreviewArtifact.preview_scope === "node" &&
       filteredBlocks.length === 0 &&
-      bookPreviewArtifact.sections.body.length > 0
-        ? bookPreviewArtifact.sections.body
+      previewBlocks.length > 0
+        ? previewBlocks
         : filteredBlocks;
 
     const elements: ReactElement[] = [];
@@ -14317,6 +14581,7 @@ function ScripturesContent() {
         : [];
       const wordMeaningRows = resolvePreviewWordMeanings(block);
       const quickEditNodeId = resolvePreviewQuickEditNodeId(block);
+      const quickEditTargetType = resolvePreviewQuickEditTargetType(block);
       const previewSourceNode =
         typeof quickEditNodeId === "number" ? findNodeById(treeData, quickEditNodeId) : null;
       const wordMeaningsEnabledForPreviewBlock = isWordMeaningsEnabledForLevel(
@@ -14494,6 +14759,7 @@ function ScripturesContent() {
                               onClick={() => {
                                 setPreviewQuickEditDraft({
                                   nodeId: quickEditNodeId,
+                                  targetType: quickEditTargetType,
                                   fieldPath: field.fieldPath,
                                   lineKey: `${blockGestureKey}-${field.fieldPath}`,
                                   value: field.value,
@@ -14564,7 +14830,7 @@ function ScripturesContent() {
                 <span />
               )}
               <div className="flex shrink-0 items-center gap-1">
-                {authEmail && typeof quickEditNodeId === "number" && (() => {
+                {authEmail && quickEditTargetType === "node" && typeof quickEditNodeId === "number" && (() => {
                   const basketEntry = basketItems.find((item) => item.node_id === quickEditNodeId);
                   const overrideBasketState = previewBasketUiOverrides[quickEditNodeId];
                   const alreadyInBasket =
@@ -14623,7 +14889,7 @@ function ScripturesContent() {
                     </button>
                   );
                 })()}
-                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                {canEditCurrentBook && quickEditTargetType === "node" && typeof quickEditNodeId === "number" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -14703,6 +14969,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath,
                                 lineKey: `${line.key}-${lineIndex}`,
                                 value: fullFieldValue,
@@ -14973,6 +15240,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath,
                                 lineKey: `${line.key}-translation-${lineIndex}`,
                                 value: fullFieldValue,
@@ -15049,11 +15317,31 @@ function ScripturesContent() {
               </div>
             );
           })()}
-          {visibleTranslationVariants.length > 0 && (
+          {(visibleTranslationVariants.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                 Translations By Authors ({visibleTranslationVariants.length})
               </summary>
+              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                <div className="mt-1 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handlePreviewVariantOperation(
+                        quickEditNodeId,
+                        quickEditTargetType,
+                        "translation",
+                        "add"
+                      );
+                    }}
+                    className="rounded-md border border-black/10 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20"
+                    title="Add translation variant"
+                    aria-label="Add translation variant"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
               <div className="mt-1 flex flex-col gap-1">
                 {visibleTranslationVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.translation_variants.${entry.originalIndex}.text`;
@@ -15091,6 +15379,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: authorFieldPath,
                                 lineKey: `translation-variant-author-${entry.originalIndex}`,
                                 value: entry.author,
@@ -15111,6 +15400,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: languageFieldPath,
                                 lineKey: `translation-variant-language-${entry.originalIndex}`,
                                 value: entry.language,
@@ -15125,6 +15415,25 @@ function ScripturesContent() {
                             <Pencil className="h-3 w-3" />
                           </button>
                         )}
+                        {canQuickEditVariant && showQuickEditAffordances && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePreviewVariantOperation(
+                                quickEditNodeId as number,
+                                quickEditTargetType,
+                                "translation",
+                                "delete",
+                                entry.originalIndex
+                              );
+                            }}
+                            className={`rounded-md border border-red-200 bg-red-50 px-1 py-0.5 text-[9px] leading-none text-red-600 transition hover:border-red-300 hover:text-red-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            aria-label="Remove translation variant"
+                            title="Remove translation variant"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                       <div className="group relative">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
@@ -15134,6 +15443,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: textFieldPath,
                                 lineKey: `translation-variant-${entry.originalIndex}`,
                                 value: entry.text,
@@ -15272,11 +15582,31 @@ function ScripturesContent() {
               </div>
             </details>
           )}
-          {visibleCommentaryVariants.length > 0 && (
+          {(visibleCommentaryVariants.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                 Commentaries By Authors ({visibleCommentaryVariants.length})
               </summary>
+              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                <div className="mt-1 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handlePreviewVariantOperation(
+                        quickEditNodeId,
+                        quickEditTargetType,
+                        "commentary",
+                        "add"
+                      );
+                    }}
+                    className="rounded-md border border-black/10 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20"
+                    title="Add commentary variant"
+                    aria-label="Add commentary variant"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
               <div className="mt-1 flex flex-col gap-1">
                 {visibleCommentaryVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.commentary_variants.${entry.originalIndex}.text`;
@@ -15314,6 +15644,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: authorFieldPath,
                                 lineKey: `commentary-variant-author-${entry.originalIndex}`,
                                 value: entry.author,
@@ -15334,6 +15665,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: languageFieldPath,
                                 lineKey: `commentary-variant-language-${entry.originalIndex}`,
                                 value: entry.language,
@@ -15348,6 +15680,25 @@ function ScripturesContent() {
                             <Pencil className="h-3 w-3" />
                           </button>
                         )}
+                        {canQuickEditVariant && showQuickEditAffordances && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void handlePreviewVariantOperation(
+                                quickEditNodeId as number,
+                                quickEditTargetType,
+                                "commentary",
+                                "delete",
+                                entry.originalIndex
+                              );
+                            }}
+                            className={`rounded-md border border-red-200 bg-red-50 px-1 py-0.5 text-[9px] leading-none text-red-600 transition hover:border-red-300 hover:text-red-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            aria-label="Remove commentary variant"
+                            title="Remove commentary variant"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
                       </div>
                       <div className="group relative">
                         <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
@@ -15357,6 +15708,7 @@ function ScripturesContent() {
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
+                                targetType: quickEditTargetType,
                                 fieldPath: textFieldPath,
                                 lineKey: `commentary-variant-${entry.originalIndex}`,
                                 value: entry.text,
@@ -21217,7 +21569,7 @@ function ScripturesContent() {
                             <BookOpen className="h-4 w-4" />
                           </button>
                         )}
-                        {previewScope === "book" && hasEffectiveBookPreviewSummary && (
+                        {previewScope === "book" && (hasEffectiveBookPreviewSummary || canEditCurrentBook) && (
                           <label className="ml-1 flex items-center gap-1.5 rounded-full border border-black/10 bg-[color:var(--paper)] px-2.5 py-1 text-xs text-zinc-700">
                             <input
                               type="checkbox"
@@ -21636,10 +21988,135 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                {showPreviewBookSummary && hasEffectiveBookPreviewSummary && (
+                {showPreviewBookSummary && (hasEffectiveBookPreviewSummary || (bookPreviewArtifact.preview_scope === "book" && canEditCurrentBook)) && (
                   <div className="mb-1.5 rounded-lg border border-black/10 bg-[color:var(--paper)] p-2">
+                    {(() => {
+                      const previewBookId =
+                        typeof bookPreviewArtifact.book_id === "number"
+                          ? bookPreviewArtifact.book_id
+                          : null;
+                      const bookBasic =
+                        currentBook?.content_data?.basic &&
+                        typeof currentBook.content_data.basic === "object"
+                          ? currentBook.content_data.basic
+                          : null;
+                      const summaryQuickEditFields =
+                        previewBookId !== null
+                          ? [
+                              {
+                                fieldPath: "content_data.basic.sanskrit",
+                                shortLabel: "SA",
+                                label: "Book Summary (Sanskrit)",
+                                value: typeof bookBasic?.sanskrit === "string" ? bookBasic.sanskrit : "",
+                              },
+                              {
+                                fieldPath: "content_data.basic.transliteration",
+                                shortLabel: "TR",
+                                label: "Book Summary (Transliteration)",
+                                value:
+                                  typeof bookBasic?.transliteration === "string"
+                                    ? bookBasic.transliteration
+                                    : "",
+                              },
+                              {
+                                fieldPath: "content_data.basic.translation",
+                                shortLabel: "EN",
+                                label: "Book Summary (Translation)",
+                                value:
+                                  typeof bookBasic?.translation === "string"
+                                    ? bookBasic.translation
+                                    : "",
+                              },
+                            ]
+                          : [];
+
+                      const hasActiveSummaryField = summaryQuickEditFields.some(
+                        (field) =>
+                          previewQuickEditDraft?.targetType === "book" &&
+                          previewQuickEditDraft?.nodeId === previewBookId &&
+                          previewQuickEditDraft?.fieldPath === field.fieldPath
+                      );
+
+                      if (!canEditCurrentBook || previewBookId === null) {
+                        return null;
+                      }
+
+                      return (
+                        <div className="mb-2">
+                          <div className="mb-1 flex items-center gap-1.5">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                              Book Summary
+                            </div>
+                            {summaryQuickEditFields.map((field) => {
+                              const isActiveField =
+                                previewQuickEditDraft?.targetType === "book" &&
+                                previewQuickEditDraft?.nodeId === previewBookId &&
+                                previewQuickEditDraft?.fieldPath === field.fieldPath;
+                              return (
+                                <button
+                                  key={`book-summary-${field.fieldPath}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setPreviewQuickEditDraft({
+                                      nodeId: previewBookId,
+                                      targetType: "book",
+                                      fieldPath: field.fieldPath,
+                                      lineKey: `book-summary-${field.fieldPath}`,
+                                      value: field.value,
+                                      saving: false,
+                                      error: null,
+                                    });
+                                  }}
+                                  className={`rounded-md border border-black/10 bg-white/90 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${
+                                    isActiveField ? "border-[color:var(--accent)]/40 text-[color:var(--accent)]" : ""
+                                  }`}
+                                  aria-label={`Edit ${field.label}`}
+                                  title={field.label}
+                                >
+                                  {field.shortLabel}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {hasActiveSummaryField && (
+                            <div className="rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                              {renderPreviewQuickEditTextControl({
+                                multiline: true,
+                                clearAriaLabel: "Clear book summary field",
+                              })}
+                              {previewQuickEditDraft?.error && (
+                                <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
+                              )}
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleSavePreviewQuickEdit();
+                                  }}
+                                  disabled={Boolean(previewQuickEditDraft?.saving)}
+                                  className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                                >
+                                  {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewQuickEditDraft(null)}
+                                  disabled={Boolean(previewQuickEditDraft?.saving)}
+                                  className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700" style={previewBodyTextStyle}>
-                      {bookPreviewArtifact.book_template?.rendered_text?.trim() || ""}
+                      {bookPreviewArtifact.book_template?.rendered_text?.trim() ||
+                        (canEditCurrentBook
+                          ? "No book summary yet. Use SA/TR/EN to add one."
+                          : "")}
                     </p>
                   </div>
                 )}

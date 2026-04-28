@@ -4171,17 +4171,52 @@ def preview_book_render(
         )
     resolved_book_binding_metadata = _resolve_book_binding_metadata_for_template(db, book.id)
     book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    book_node_payload = book_metadata.get("book_node") if isinstance(book_metadata.get("book_node"), dict) else {}
+    book_content_data = (
+        book_node_payload.get("content_data")
+        if isinstance(book_node_payload.get("content_data"), dict)
+        else {}
+    )
+    book_basic_content = (
+        book_content_data.get("basic")
+        if isinstance(book_content_data.get("basic"), dict)
+        else {}
+    )
+    book_translation_map = _normalize_translation_map(book_content_data.get("translations"))
+    selected_book_translation_languages = _normalize_selected_translation_languages(
+        payload.selected_translation_languages
+    )
+    preferred_book_translation = ""
+    if selected_book_translation_languages:
+        preferred_book_translation = _pick_translation_text_for_language_only(
+            book_translation_map,
+            selected_book_translation_languages[0],
+        )
+    if not preferred_book_translation:
+        preferred_book_translation = _pick_translation_text_for_language_only(
+            book_translation_map,
+            "english",
+        )
+    if not preferred_book_translation:
+        preferred_book_translation = _pick_translation_text_for_language_only(
+            book_translation_map,
+            "en",
+        )
     book_summary_fields = {
         "sanskrit": _as_clean_string(resolved_book_binding_metadata.get("sanskrit"))
+        or _as_clean_string(book_basic_content.get("sanskrit"))
         or _as_clean_string(book_metadata.get("summary_sanskrit"))
         or _as_clean_string(book_metadata.get("sanskrit"))
         or _as_clean_string(book_metadata.get("title_sanskrit")),
         "transliteration": _as_clean_string(resolved_book_binding_metadata.get("transliteration"))
+        or _as_clean_string(book_basic_content.get("transliteration"))
         or _as_clean_string(book_metadata.get("summary_transliteration"))
         or _as_clean_string(book_metadata.get("transliteration"))
         or _as_clean_string(book_metadata.get("title_transliteration")),
         "english": _as_clean_string(resolved_book_binding_metadata.get("english"))
         or _as_clean_string(resolved_book_binding_metadata.get("text"))
+        or _as_clean_string(book_basic_content.get("translation"))
+        or preferred_book_translation
         or _as_clean_string(book_metadata.get("summary_english"))
         or _as_clean_string(book_metadata.get("english"))
         or _as_clean_string(book_metadata.get("summary_text"))

@@ -125,6 +125,7 @@ IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB",
 IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
 IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(1024 * 1024)))
 MEDIA_FILENAME_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
+BOOK_NODE_METADATA_KEY = "book_node"
 
 
 def require_import_permission(current_user: User = Depends(get_current_user)) -> User:
@@ -636,6 +637,48 @@ def _display_level_name_for_book(book: Book | None, level_name: str | None) -> s
     return level_name
 
 
+def _book_node_payload_from_metadata(metadata: object) -> dict:
+    metadata_obj = metadata if isinstance(metadata, dict) else {}
+    raw_payload = metadata_obj.get(BOOK_NODE_METADATA_KEY)
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+
+    content_data = _sanitize_content_data_for_response(payload.get("content_data"))
+    summary_data = payload.get("summary_data") if isinstance(payload.get("summary_data"), dict) else {}
+    tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+
+    return {
+        "title_sanskrit": payload.get("title_sanskrit") if isinstance(payload.get("title_sanskrit"), str) else None,
+        "title_transliteration": payload.get("title_transliteration") if isinstance(payload.get("title_transliteration"), str) else None,
+        "title_english": payload.get("title_english") if isinstance(payload.get("title_english"), str) else None,
+        "title_hindi": payload.get("title_hindi") if isinstance(payload.get("title_hindi"), str) else None,
+        "title_tamil": payload.get("title_tamil") if isinstance(payload.get("title_tamil"), str) else None,
+        "has_content": bool(payload.get("has_content")),
+        "content_data": content_data,
+        "summary_data": summary_data,
+        "source_attribution": payload.get("source_attribution") if isinstance(payload.get("source_attribution"), str) else None,
+        "license_type": payload.get("license_type") if isinstance(payload.get("license_type"), str) else "CC-BY-SA-4.0",
+        "original_source_url": payload.get("original_source_url") if isinstance(payload.get("original_source_url"), str) else None,
+        "tags": tags,
+    }
+
+
+def _write_book_node_payload_into_metadata(metadata: dict, node_payload: dict) -> None:
+    metadata[BOOK_NODE_METADATA_KEY] = {
+        "title_sanskrit": node_payload.get("title_sanskrit"),
+        "title_transliteration": node_payload.get("title_transliteration"),
+        "title_english": node_payload.get("title_english"),
+        "title_hindi": node_payload.get("title_hindi"),
+        "title_tamil": node_payload.get("title_tamil"),
+        "has_content": bool(node_payload.get("has_content")),
+        "content_data": node_payload.get("content_data") if isinstance(node_payload.get("content_data"), dict) else {},
+        "summary_data": node_payload.get("summary_data") if isinstance(node_payload.get("summary_data"), dict) else {},
+        "source_attribution": node_payload.get("source_attribution"),
+        "license_type": node_payload.get("license_type") if isinstance(node_payload.get("license_type"), str) else "CC-BY-SA-4.0",
+        "original_source_url": node_payload.get("original_source_url"),
+        "tags": node_payload.get("tags") if isinstance(node_payload.get("tags"), list) else [],
+    }
+
+
 def _book_public_model(book: Book) -> BookPublic:
     existing_metadata = book.metadata_json or {}
     if not isinstance(existing_metadata, dict):
@@ -645,6 +688,7 @@ def _book_public_model(book: Book) -> BookPublic:
     metadata_out = dict(metadata)
     metadata_out["status"] = _book_status(book)
     metadata_out["visibility"] = _book_visibility(book)
+    node_payload = _book_node_payload_from_metadata(metadata)
 
     payload = {
         "id": book.id,
@@ -658,6 +702,7 @@ def _book_public_model(book: Book) -> BookPublic:
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
         "schema": book.schema,
+        **node_payload,
     }
     return BookPublic.model_validate(payload)
 
@@ -786,6 +831,353 @@ def _metadata_string_values(value: object) -> list[str]:
                 values.append(item)
         return values
     return []
+
+
+_NODE_SIMPLE_PATCH_FIELDS = {
+    "title_english",
+    "title_sanskrit",
+    "title_transliteration",
+    "sequence_number",
+}
+
+_BOOK_SIMPLE_PATCH_FIELDS = {
+    "title_english",
+    "title_sanskrit",
+    "title_transliteration",
+}
+
+
+def _unsupported_single_field_patch() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Unsupported field_path for single-field patch",
+    )
+
+
+def _normalize_single_field_patch_value(value: object) -> object:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+    return value
+
+
+def _clone_content_data(value: object) -> dict:
+    if isinstance(value, dict):
+        return json.loads(json.dumps(value))
+    return {}
+
+
+def _set_basic_content_field(content_data: dict, field_path: str, next_value: object) -> None:
+    basic = content_data.get("basic")
+    if not isinstance(basic, dict):
+        basic = {}
+    basic_key = field_path.rsplit(".", 1)[1]
+    if next_value is None:
+        basic.pop(basic_key, None)
+    else:
+        basic[basic_key] = next_value
+    if basic:
+        content_data["basic"] = basic
+    else:
+        content_data.pop("basic", None)
+
+
+def _set_translation_content_field(content_data: dict, field_path: str, next_value: object) -> None:
+    translation_key = field_path[len("content_data.translations.") :].strip()
+    translations = content_data.get("translations")
+    if not isinstance(translations, dict):
+        translations = {}
+    if next_value is None:
+        translations.pop(translation_key, None)
+        if translation_key == "en":
+            translations.pop("english", None)
+        elif translation_key == "english":
+            translations.pop("en", None)
+    else:
+        translations[translation_key] = next_value
+        if translation_key == "en":
+            translations["english"] = next_value
+        elif translation_key == "english":
+            translations["en"] = next_value
+    if translations:
+        content_data["translations"] = translations
+    else:
+        content_data.pop("translations", None)
+
+
+def _normalize_variant_payload(value: object) -> dict:
+    if isinstance(value, dict):
+        return {
+            "author_slug": str(value.get("author_slug") or "").strip(),
+            "author": str(value.get("author") or "").strip(),
+            "language": str(value.get("language") or "").strip().lower(),
+            "field": str(value.get("field") or "").strip().lower(),
+            "text": str(value.get("text") or ""),
+        }
+    return {
+        "author_slug": "",
+        "author": "",
+        "language": "",
+        "field": "",
+        "text": "",
+    }
+
+
+def _apply_variant_field_patch(content_data: dict, field_path: str, next_value: object) -> None:
+    field_match = re.fullmatch(
+        r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.(text|author|language)",
+        field_path,
+    )
+    add_match = re.fullmatch(
+        r"content_data\.(translation_variants|commentary_variants)\.add",
+        field_path,
+    )
+    delete_match = re.fullmatch(
+        r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.delete",
+        field_path,
+    )
+    replace_all_match = re.fullmatch(
+        r"content_data\.(translation_variants|commentary_variants)\.replace_all",
+        field_path,
+    )
+
+    if field_match:
+        variants_key = field_match.group(1)
+        variant_index = int(field_match.group(2))
+        variant_field = field_match.group(3)
+        variants = content_data.get(variants_key)
+        if not isinstance(variants, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{variants_key} not available on this node",
+            )
+        if variant_index < 0 or variant_index >= len(variants):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{variants_key} index out of bounds",
+            )
+
+        variant = variants[variant_index]
+        if not isinstance(variant, dict):
+            variant = {}
+            variants[variant_index] = variant
+        if variant_field == "language":
+            variant[variant_field] = (next_value or "").strip().lower()
+        elif variant_field == "author":
+            variant[variant_field] = (next_value or "").strip()
+        else:
+            variant[variant_field] = next_value or ""
+        return
+
+    if add_match:
+        variants_key = add_match.group(1)
+        variants = content_data.get(variants_key)
+        if not isinstance(variants, list):
+            variants = []
+        variants.append(_normalize_variant_payload(next_value))
+        content_data[variants_key] = variants
+        return
+
+    if delete_match:
+        variants_key = delete_match.group(1)
+        variant_index = int(delete_match.group(2))
+        variants = content_data.get(variants_key)
+        if not isinstance(variants, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{variants_key} not available on this node",
+            )
+        if variant_index < 0 or variant_index >= len(variants):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{variants_key} index out of bounds",
+            )
+        variants.pop(variant_index)
+        if variants:
+            content_data[variants_key] = variants
+        else:
+            content_data.pop(variants_key, None)
+        return
+
+    if replace_all_match:
+        variants_key = replace_all_match.group(1)
+        if next_value is None:
+            content_data.pop(variants_key, None)
+            return
+        if not isinstance(next_value, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"value must be a list for {variants_key}.replace_all",
+            )
+        content_data[variants_key] = [item for item in next_value if isinstance(item, dict)]
+        return
+
+    _unsupported_single_field_patch()
+
+
+def _build_preview_word_meanings_rows(rows: list) -> list[dict]:
+    result: list[dict] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        transliteration = source.get("transliteration") if isinstance(source.get("transliteration"), dict) else {}
+        meanings = row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
+
+        preferred_meaning = meanings.get("en") if isinstance(meanings.get("en"), dict) else next(
+            (value for value in meanings.values() if isinstance(value, dict)),
+            {},
+        )
+        preferred_language = (
+            "en"
+            if isinstance(meanings.get("en"), dict)
+            else next(
+                (
+                    str(key).strip().lower()
+                    for key, value in meanings.items()
+                    if str(key).strip() and isinstance(value, dict)
+                ),
+                "en",
+            )
+        )
+
+        result.append(
+            {
+                "id": str(row.get("id") or f"wm_row_{index + 1}"),
+                "order": index + 1,
+                "source": source if source else {"language": "sa", "script_text": "", "transliteration": {}},
+                "meanings": meanings,
+                "resolved_source": {
+                    "text": str(source.get("script_text") or transliteration.get("iast") or ""),
+                    "mode": "script",
+                    "scheme": "",
+                },
+                "resolved_meaning": {
+                    "text": str(preferred_meaning.get("text") or ""),
+                    "language": preferred_language,
+                    "fallback_badge_visible": False,
+                },
+            }
+        )
+    return result
+
+
+def _apply_word_meanings_field_patch(content_data: dict, field_path: str, next_value: object) -> None:
+    word_meanings = content_data.get("word_meanings") if isinstance(content_data.get("word_meanings"), dict) else {}
+    rows = word_meanings.get("rows") if isinstance(word_meanings.get("rows"), list) else []
+    word_meanings = dict(word_meanings)
+    word_meanings["version"] = str(word_meanings.get("version") or "1.0")
+    word_meanings["rows"] = rows
+    content_data["word_meanings"] = word_meanings
+    preview_rows = content_data.get("word_meanings_rows") if isinstance(content_data.get("word_meanings_rows"), list) else []
+
+    op_match = re.fullmatch(r"content_data\.word_meanings_rows\.(\d+)\.(delete|move_up|move_down)", field_path)
+    add_match = re.fullmatch(r"content_data\.word_meanings_rows\.add", field_path)
+    replace_all_match = re.fullmatch(r"content_data\.word_meanings_rows\.replace_all", field_path)
+    field_match = re.fullmatch(r"content_data\.word_meanings_rows\.(\d+)\.resolved_(meaning|source)\.text", field_path)
+
+    if replace_all_match:
+        if not isinstance(next_value, list):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="value must be a list for word_meanings_rows.replace_all",
+            )
+        rows = list(next_value)
+        word_meanings["rows"] = rows
+    elif op_match:
+        row_index = int(op_match.group(1))
+        operation = op_match.group(2)
+        if operation == "delete" and 0 <= row_index < len(rows):
+            rows.pop(row_index)
+        elif operation == "move_up" and 0 < row_index < len(rows):
+            rows[row_index - 1], rows[row_index] = rows[row_index], rows[row_index - 1]
+        elif operation == "move_down" and 0 <= row_index < len(rows) - 1:
+            rows[row_index], rows[row_index + 1] = rows[row_index + 1], rows[row_index]
+    elif add_match:
+        import time as _time
+
+        rows.append(
+            {
+                "id": f"wm_quick_{int(_time.time() * 1000) % 10000000}_{len(rows) + 1}",
+                "order": len(rows) + 1,
+                "source": {"language": "sa", "script_text": "", "transliteration": {}},
+                "meanings": {"en": {"text": ""}},
+            }
+        )
+    elif field_match:
+        row_index = int(field_match.group(1))
+        resolved_kind = field_match.group(2)
+        if row_index >= len(rows):
+            rows.extend({} for _ in range(row_index - len(rows) + 1))
+
+        row = rows[row_index]
+        if not isinstance(row, dict):
+            row = {}
+            rows[row_index] = row
+
+        if resolved_kind == "source":
+            source_entry = row.get("source")
+            if not isinstance(source_entry, dict):
+                source_entry = {"language": "sa", "transliteration": {}}
+                row["source"] = source_entry
+            source_entry["script_text"] = next_value or ""
+        else:
+            meanings_entry = row.get("meanings")
+            if not isinstance(meanings_entry, dict):
+                meanings_entry = {}
+                row["meanings"] = meanings_entry
+
+            preview_row = (
+                preview_rows[row_index]
+                if 0 <= row_index < len(preview_rows) and isinstance(preview_rows[row_index], dict)
+                else {}
+            )
+            resolved_meaning = preview_row.get("resolved_meaning") if isinstance(preview_row.get("resolved_meaning"), dict) else {}
+            target_language = (
+                str(resolved_meaning.get("language") or "").strip().lower()
+                or ("en" if "en" in meanings_entry else "")
+                or next((str(key).strip().lower() for key in meanings_entry.keys() if str(key).strip()), "en")
+            )
+            existing_meaning = meanings_entry.get(target_language)
+            if not isinstance(existing_meaning, dict):
+                existing_meaning = {}
+                meanings_entry[target_language] = existing_meaning
+            existing_meaning["text"] = next_value or ""
+    else:
+        _unsupported_single_field_patch()
+
+    for index, row in enumerate(rows):
+        if isinstance(row, dict):
+            row["order"] = index + 1
+
+    content_data["word_meanings_rows"] = _build_preview_word_meanings_rows(rows)
+
+
+def _apply_content_data_field_patch(content_data: dict, field_path: str, next_value: object) -> dict:
+    if field_path in {
+        "content_data.basic.sanskrit",
+        "content_data.basic.transliteration",
+        "content_data.basic.translation",
+    }:
+        _set_basic_content_field(content_data, field_path, next_value)
+        return content_data
+
+    if field_path.startswith("content_data.translations."):
+        _set_translation_content_field(content_data, field_path, next_value)
+        return content_data
+
+    if field_path.startswith("content_data.word_meanings_rows."):
+        _apply_word_meanings_field_patch(content_data, field_path, next_value)
+        return content_data
+
+    if field_path.startswith("content_data.translation_variants.") or field_path.startswith(
+        "content_data.commentary_variants."
+    ):
+        _apply_variant_field_patch(content_data, field_path, next_value)
+        return content_data
+
+    _unsupported_single_field_patch()
+    return content_data
 
 
 def _book_search_haystacks(book: Book) -> dict[str, list[str]]:
@@ -1174,10 +1566,25 @@ def create_book(
     metadata_json = payload.metadata or {}
     if not isinstance(metadata_json, dict):
         metadata_json = {}
+    book_node_payload = {
+        "title_sanskrit": payload.title_sanskrit,
+        "title_transliteration": payload.title_transliteration,
+        "title_english": payload.title_english,
+        "title_hindi": payload.title_hindi,
+        "title_tamil": payload.title_tamil,
+        "has_content": payload.has_content,
+        "content_data": payload.content_data or {},
+        "summary_data": payload.summary_data or {},
+        "source_attribution": payload.source_attribution,
+        "license_type": payload.license_type,
+        "original_source_url": payload.original_source_url,
+        "tags": payload.tags or [],
+    }
     metadata_json["owner_id"] = current_user.id
     metadata_json["owner_email"] = current_user.email
     metadata_json["status"] = BOOK_STATUS_DRAFT
     metadata_json["visibility"] = BOOK_VISIBILITY_PRIVATE
+    _write_book_node_payload_into_metadata(metadata_json, book_node_payload)
 
     book_code = payload.book_code
     if isinstance(book_code, str) and not book_code.strip():
@@ -1313,15 +1720,40 @@ def update_book(
     metadata = book.metadata_json or {}
     if not isinstance(metadata, dict):
         metadata = {}
+    book_node_payload = _book_node_payload_from_metadata(metadata)
 
     for key, value in updates.items():
         if key == "metadata":
             metadata = dict(value) if isinstance(value, dict) else {}
+            book_node_payload = _book_node_payload_from_metadata(metadata)
         elif key == "level_name_overrides":
             continue
         elif key == "variant_authors":
             if isinstance(value, dict):
                 book.variant_authors = {str(k): str(v) for k, v in value.items() if k and v}
+            continue
+        elif key in {
+            "title_sanskrit",
+            "title_transliteration",
+            "title_english",
+            "title_hindi",
+            "title_tamil",
+            "has_content",
+            "content_data",
+            "summary_data",
+            "source_attribution",
+            "license_type",
+            "original_source_url",
+            "tags",
+        }:
+            if key == "content_data":
+                book_node_payload[key] = value if isinstance(value, dict) else {}
+            elif key == "summary_data":
+                book_node_payload[key] = value if isinstance(value, dict) else {}
+            elif key == "tags":
+                book_node_payload[key] = value if isinstance(value, list) else []
+            else:
+                book_node_payload[key] = value
             continue
         elif key == "status":
             normalized_status = str(value).strip().lower() if value else ""
@@ -1354,6 +1786,8 @@ def update_book(
         metadata["status"] = BOOK_STATUS_DRAFT
     if "visibility" not in metadata:
         metadata["visibility"] = BOOK_VISIBILITY_PRIVATE
+
+    _write_book_node_payload_into_metadata(metadata, book_node_payload)
 
     setattr(book, "metadata_json", metadata)
     flag_modified(book, "metadata_json")
@@ -4228,6 +4662,8 @@ def update_node_single_field(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
+    _ensure_node_edit_access(db, current_user, node)
+
     source_node = None
     if node.referenced_node_id:
         source_node = (
@@ -4242,286 +4678,73 @@ def update_node_single_field(
             )
 
     field_path = payload.field_path.strip()
-    if isinstance(payload.value, str):
-        next_value = payload.value.strip()
-        if next_value == "":
-            next_value = None
-    else:
-        next_value = payload.value
+    next_value = _normalize_single_field_patch_value(payload.value)
 
     patch_updates: dict[str, object] = {}
 
-    if field_path in {"title_english", "title_sanskrit", "title_transliteration", "sequence_number"}:
+    if field_path in _NODE_SIMPLE_PATCH_FIELDS:
         patch_updates[field_path] = next_value
     elif field_path.startswith("content_data."):
         content_target = source_node if source_node is not None else node
-        content_data = json.loads(json.dumps(content_target.content_data or {}))
-
-        if field_path in {
-            "content_data.basic.sanskrit",
-            "content_data.basic.transliteration",
-            "content_data.basic.translation",
-        }:
-            basic = content_data.get("basic")
-            if not isinstance(basic, dict):
-                basic = {}
-            basic_key = field_path.rsplit(".", 1)[1]
-            if next_value is None:
-                basic.pop(basic_key, None)
-            else:
-                basic[basic_key] = next_value
-            if basic:
-                content_data["basic"] = basic
-            else:
-                content_data.pop("basic", None)
-        elif field_path.startswith("content_data.translations."):
-            translation_key = field_path[len("content_data.translations.") :].strip()
-            translations = content_data.get("translations")
-            if not isinstance(translations, dict):
-                translations = {}
-            if next_value is None:
-                translations.pop(translation_key, None)
-            else:
-                translations[translation_key] = next_value
-                if translation_key == "en":
-                    translations["english"] = next_value
-                elif translation_key == "english":
-                    translations["en"] = next_value
-            if translations:
-                content_data["translations"] = translations
-            else:
-                content_data.pop("translations", None)
-        elif field_path.startswith("content_data.word_meanings_rows."):
-            word_meanings = (
-                content_data.get("word_meanings")
-                if isinstance(content_data.get("word_meanings"), dict)
-                else {}
-            )
-            rows = word_meanings.get("rows") if isinstance(word_meanings.get("rows"), list) else []
-            word_meanings = dict(word_meanings)
-            word_meanings["version"] = str(word_meanings.get("version") or "1.0")
-            word_meanings["rows"] = rows
-            content_data["word_meanings"] = word_meanings
-            preview_rows = (
-                content_data.get("word_meanings_rows")
-                if isinstance(content_data.get("word_meanings_rows"), list)
-                else []
-            )
-
-            op_match = re.fullmatch(
-                r"content_data\.word_meanings_rows\.(\d+)\.(delete|move_up|move_down)",
-                field_path,
-            )
-            add_match = re.fullmatch(r"content_data\.word_meanings_rows\.add", field_path)
-            replace_all_match = re.fullmatch(r"content_data\.word_meanings_rows\.replace_all", field_path)
-            field_match = re.fullmatch(
-                r"content_data\.word_meanings_rows\.(\d+)\.resolved_(meaning|source)\.text",
-                field_path,
-            )
-
-            if replace_all_match:
-                if not isinstance(next_value, list):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="value must be a list for word_meanings_rows.replace_all",
-                    )
-                rows = list(next_value)
-                word_meanings["rows"] = rows
-            elif op_match:
-                row_index = int(op_match.group(1))
-                operation = op_match.group(2)
-                if operation == "delete":
-                    if 0 <= row_index < len(rows):
-                        rows.pop(row_index)
-                elif operation == "move_up":
-                    if 0 < row_index < len(rows):
-                        rows[row_index - 1], rows[row_index] = rows[row_index], rows[row_index - 1]
-                elif operation == "move_down":
-                    if 0 <= row_index < len(rows) - 1:
-                        rows[row_index], rows[row_index + 1] = rows[row_index + 1], rows[row_index]
-            elif add_match:
-                import time as _time
-                new_row: dict = {
-                    "id": f"wm_quick_{int(_time.time() * 1000) % 10000000}_{len(rows) + 1}",
-                    "order": len(rows) + 1,
-                    "source": {"language": "sa", "script_text": "", "transliteration": {}},
-                    "meanings": {"en": {"text": ""}},
-                }
-                rows.append(new_row)
-            elif field_match:
-                row_index = int(field_match.group(1))
-                resolved_kind = field_match.group(2)
-                if row_index >= len(rows):
-                    rows.extend({} for _ in range(row_index - len(rows) + 1))
-
-                row = rows[row_index]
-                if not isinstance(row, dict):
-                    row = {}
-                    rows[row_index] = row
-
-                if resolved_kind == "source":
-                    source_entry = row.get("source")
-                    if not isinstance(source_entry, dict):
-                        source_entry = {"language": "sa", "transliteration": {}}
-                        row["source"] = source_entry
-                    source_entry["script_text"] = next_value or ""
-                else:
-                    meanings_entry = row.get("meanings")
-                    if not isinstance(meanings_entry, dict):
-                        meanings_entry = {}
-                        row["meanings"] = meanings_entry
-
-                    preview_row = preview_rows[row_index] if 0 <= row_index < len(preview_rows) and isinstance(preview_rows[row_index], dict) else {}
-                    resolved_meaning = (
-                        preview_row.get("resolved_meaning")
-                        if isinstance(preview_row.get("resolved_meaning"), dict)
-                        else {}
-                    )
-                    target_language = (
-                        str(resolved_meaning.get("language") or "").strip().lower()
-                        or ("en" if "en" in meanings_entry else "")
-                        or next((str(key).strip().lower() for key in meanings_entry.keys() if str(key).strip()), "en")
-                    )
-
-                    existing_meaning = meanings_entry.get(target_language)
-                    if not isinstance(existing_meaning, dict):
-                        existing_meaning = {}
-                        meanings_entry[target_language] = existing_meaning
-                    existing_meaning["text"] = next_value or ""
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Unsupported field_path for single-field patch",
-                )
-
-            for index, row in enumerate(rows):
-                if isinstance(row, dict):
-                    row["order"] = index + 1
-
-            content_data["word_meanings_rows"] = [
-                {
-                    "id": str(row.get("id") or f"wm_row_{index + 1}"),
-                    "order": index + 1,
-                    "source": row.get("source") if isinstance(row.get("source"), dict) else {"language": "sa", "script_text": "", "transliteration": {}},
-                    "meanings": row.get("meanings") if isinstance(row.get("meanings"), dict) else {},
-                    "resolved_source": {
-                        "text": (
-                            str(
-                                (
-                                    row.get("source") if isinstance(row.get("source"), dict) else {}
-                                ).get("script_text")
-                                or (
-                                    (
-                                        (row.get("source") if isinstance(row.get("source"), dict) else {}).get("transliteration")
-                                        if isinstance((row.get("source") if isinstance(row.get("source"), dict) else {}).get("transliteration"), dict)
-                                        else {}
-                                    ).get("iast")
-                                )
-                                or ""
-                            )
-                        ),
-                        "mode": "script",
-                        "scheme": "",
-                    },
-                    "resolved_meaning": {
-                        "text": (
-                            str(
-                                (
-                                    (
-                                        row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
-                                    ).get("en")
-                                    if isinstance((row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).get("en"), dict)
-                                    else next(
-                                        (
-                                            value
-                                            for value in (row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).values()
-                                            if isinstance(value, dict)
-                                        ),
-                                        {},
-                                    )
-                                ).get("text")
-                                or ""
-                            )
-                        ),
-                        "language": (
-                            "en"
-                            if isinstance((row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).get("en"), dict)
-                            else next(
-                                (
-                                    str(key).strip().lower()
-                                    for key, value in (row.get("meanings") if isinstance(row.get("meanings"), dict) else {}).items()
-                                    if str(key).strip() and isinstance(value, dict)
-                                ),
-                                "en",
-                            )
-                        ),
-                        "fallback_badge_visible": False,
-                    },
-                }
-                for index, row in enumerate(rows)
-                if isinstance(row, dict)
-            ]
-        elif field_path.startswith("content_data.translation_variants.") or field_path.startswith("content_data.commentary_variants."):
-            match = re.fullmatch(
-                r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.(text|author|language)",
-                field_path,
-            )
-            if not match:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Unsupported field_path for single-field patch",
-                )
-
-            variants_key = match.group(1)
-            variant_index = int(match.group(2))
-            variant_field = match.group(3)
-            variants = content_data.get(variants_key)
-            if not isinstance(variants, list):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{variants_key} not available on this node",
-                )
-            if variant_index < 0 or variant_index >= len(variants):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{variants_key} index out of bounds",
-                )
-
-            variant = variants[variant_index]
-            if not isinstance(variant, dict):
-                variant = {}
-                variants[variant_index] = variant
-            if variant_field == "language":
-                variant[variant_field] = (next_value or "").strip().lower()
-            elif variant_field == "author":
-                variant[variant_field] = (next_value or "").strip()
-            else:
-                variant[variant_field] = next_value or ""
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unsupported field_path for single-field patch",
-            )
-
-        normalized_content_data = _validate_word_meanings_content_data(content_data)
+        content_data = _clone_content_data(content_target.content_data)
+        normalized_content_data = _validate_word_meanings_content_data(
+            _apply_content_data_field_patch(content_data, field_path, next_value)
+        )
         patch_updates["content_data"] = normalized_content_data
         patch_updates["has_content"] = bool(normalized_content_data)
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported field_path for single-field patch",
-        )
+        _unsupported_single_field_patch()
 
     if payload.edit_reason:
         patch_updates["edit_reason"] = payload.edit_reason
 
-    update_payload = ContentNodeUpdate(**patch_updates)
     return update_node(
         node_id=node_id,
-        payload=update_payload,
+        payload=ContentNodeUpdate(**patch_updates),
         db=db,
         current_user=current_user,
     )
+
+
+@router.patch("/books/{book_id}/field", response_model=BookPublic)
+def update_book_single_field(
+    book_id: int,
+    payload: ContentNodeFieldPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BookPublic:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_edit_access(db, current_user, book)
+
+    field_path = payload.field_path.strip()
+    next_value = _normalize_single_field_patch_value(payload.value)
+
+    metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
+    next_metadata = dict(metadata)
+    book_node_payload = _book_node_payload_from_metadata(next_metadata)
+
+    if field_path in _BOOK_SIMPLE_PATCH_FIELDS:
+        book_node_payload[field_path] = next_value
+    elif field_path.startswith("content_data."):
+        content_data = _clone_content_data(book_node_payload.get("content_data"))
+        normalized_content_data = _validate_word_meanings_content_data(
+            _apply_content_data_field_patch(content_data, field_path, next_value)
+        )
+        book_node_payload["content_data"] = normalized_content_data
+        book_node_payload["has_content"] = bool(normalized_content_data)
+    else:
+        _unsupported_single_field_patch()
+
+    _write_book_node_payload_into_metadata(next_metadata, book_node_payload)
+    book.metadata_json = next_metadata
+    flag_modified(book, "metadata_json")
+
+    db.commit()
+    db.refresh(book)
+    return _book_public_model(book)
 
 
 @router.post("/nodes/{node_id}/repair-level", response_model=ContentNodePublic)

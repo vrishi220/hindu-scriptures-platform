@@ -509,7 +509,47 @@ class ScriptureSchemaPublic(ScriptureSchemaBase):
 PrimaryLanguage = Literal["sanskrit", "english"]
 
 
-class BookBase(BaseModel):
+class NodeBase(BaseModel):
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool = False
+    content_data: dict | None = None
+    summary_data: dict | None = None
+    source_attribution: str | None = None
+    license_type: str = "CC-BY-SA-4.0"
+    original_source_url: str | None = None
+    tags: list | None = None
+
+    @field_validator("content_data")
+    @classmethod
+    def validate_content_data(cls, value: dict | None) -> dict | None:
+        return _validate_word_meanings_content_data(value)
+
+
+class NodeUpdateBase(BaseModel):
+    title_sanskrit: str | None = None
+    title_transliteration: str | None = None
+    title_english: str | None = None
+    title_hindi: str | None = None
+    title_tamil: str | None = None
+    has_content: bool | None = None
+    content_data: dict | None = None
+    summary_data: dict | None = None
+    source_attribution: str | None = None
+    license_type: str | None = None
+    original_source_url: str | None = None
+    tags: list | None = None
+
+    @field_validator("content_data")
+    @classmethod
+    def validate_content_data(cls, value: dict | None) -> dict | None:
+        return _validate_word_meanings_content_data(value)
+
+
+class BookBase(NodeBase):
     schema_id: int | None = None
     book_name: str
     book_code: str | None = None
@@ -525,7 +565,7 @@ class BookCreate(BookBase):
     pass
 
 
-class BookUpdate(BaseModel):
+class BookUpdate(NodeUpdateBase):
     schema_id: int | None = None
     book_name: str | None = None
     book_code: str | None = None
@@ -572,31 +612,14 @@ class BookSharePublic(BaseModel):
     shared_with_is_active: bool = True
 
 
-class ContentNodeBase(BaseModel):
+class ContentNodeBase(NodeBase):
     book_id: int
     parent_node_id: int | None = None
     referenced_node_id: int | None = None
     level_name: str
     level_order: int
     sequence_number: str | None = None
-    title_sanskrit: str | None = None
-    title_transliteration: str | None = None
-    title_english: str | None = None
-    title_hindi: str | None = None
-    title_tamil: str | None = None
-    has_content: bool = False
-    content_data: dict | None = None
-    summary_data: dict | None = None
     metadata_json: dict | None = None
-    source_attribution: str | None = None
-    license_type: str = "CC-BY-SA-4.0"
-    original_source_url: str | None = None
-    tags: list | None = None
-
-    @field_validator("content_data")
-    @classmethod
-    def validate_content_data(cls, value: dict | None) -> dict | None:
-        return _validate_word_meanings_content_data(value)
 
     @field_validator("sequence_number", mode="before")
     @classmethod
@@ -608,35 +631,18 @@ class ContentNodeCreate(ContentNodeBase):
     insert_after_node_id: int | None = None
 
 
-class ContentNodeUpdate(BaseModel):
+class ContentNodeUpdate(NodeUpdateBase):
     parent_node_id: int | None = None
     referenced_node_id: int | None = None
     level_name: str | None = None
     level_order: int | None = None
     sequence_number: str | None = None
-    title_sanskrit: str | None = None
-    title_transliteration: str | None = None
-    title_english: str | None = None
-    title_hindi: str | None = None
-    title_tamil: str | None = None
-    has_content: bool | None = None
-    content_data: dict | None = None
-    summary_data: dict | None = None
     metadata_json: dict | None = None
-    source_attribution: str | None = None
-    license_type: str | None = None
-    original_source_url: str | None = None
-    tags: list | None = None
     # Phase 1: Draft workflow
     status: str | None = None  # draft, published, archived
     visibility: str | None = None  # private, draft, published, archived
     language_code: str | None = None
     edit_reason: str | None = None  # Reason for edit (included in version history)
-
-    @field_validator("content_data")
-    @classmethod
-    def validate_content_data(cls, value: dict | None) -> dict | None:
-        return _validate_word_meanings_content_data(value)
 
     @field_validator("sequence_number", mode="before")
     @classmethod
@@ -671,6 +677,18 @@ class ContentNodePublic(ContentNodeBase):
     id: int
     created_by: int | None = None
     last_modified_by: int | None = None
+
+
+class LeafNodeBase(ContentNodeBase):
+    has_content: Literal[True] = True
+
+
+class LeafNodeCreate(ContentNodeCreate):
+    has_content: Literal[True] = True
+
+
+class LeafNodePublic(ContentNodePublic):
+    has_content: Literal[True] = True
 
 
 class ContentNodeTreeItem(BaseModel):
