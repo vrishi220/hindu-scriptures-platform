@@ -3584,7 +3584,18 @@ function ScripturesContent() {
           continue;
         }
 
-        const fieldName = (line?.field || "text").trim().toLowerCase();
+        const rawFieldName = (line?.field || "text").trim().toLowerCase();
+        const rawLabel = (line?.label || "").trim();
+        const inheritedFieldCandidate =
+          rawFieldName === "text" &&
+          !rawLabel &&
+          isLeafPreviewLevel &&
+          (previousFieldName === "sanskrit" ||
+            previousFieldName === "transliteration" ||
+            previousFieldName === "english")
+            ? previousFieldName
+            : "";
+        const fieldName = inheritedFieldCandidate || rawFieldName;
         if (fieldName in visibleByKey && !visibleByKey[fieldName]) {
           continue;
         }
@@ -3599,7 +3610,6 @@ function ScripturesContent() {
           continue;
         }
 
-        const rawLabel = (line?.label || "").trim();
         const baseLabel = metadataLabelForField(fieldName);
         const computedLabel =
           fieldName === "transliteration"
@@ -14000,12 +14010,17 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
         commentary_variants:
           normalizedCommentaryVariants.length > 0 ? normalizedCommentaryVariants : undefined,
       };
-      const response = await fetchContentWithSessionRecovery(`/books/${bookId}`, {
+      const requestInit: RequestInit = {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content_data: contentData }),
-      });
+      };
+      let response = await fetch(`/api/books/${bookId}`, requestInit);
+      if (response.status === 401) {
+        await getMe({ force: true }).catch(() => null);
+        response = await fetch(`/api/books/${bookId}`, requestInit);
+      }
       const payload = (await response.json().catch(() => null)) as
         | BookDetails
         | { detail?: string }
