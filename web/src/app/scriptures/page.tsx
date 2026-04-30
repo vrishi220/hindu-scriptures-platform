@@ -3510,7 +3510,7 @@ function ScripturesContent() {
       normalizedLevelName === "verse" ||
       normalizedLevelName === "shloka";
     const isSyntheticEnglishTitleLine = (fieldName: string, value: string): boolean => {
-      if (fieldName !== "english" || !isLeafPreviewLevel) {
+      if (fieldName !== "english") {
         return false;
       }
       const normalizedValue = normalizeTextForDisplay((value || "").trim()).toLowerCase();
@@ -3586,13 +3586,14 @@ function ScripturesContent() {
 
         const rawFieldName = (line?.field || "text").trim().toLowerCase();
         const rawLabel = (line?.label || "").trim();
+        const previousFieldIsContinuable =
+          previousFieldName === "sanskrit" ||
+          previousFieldName === "transliteration" ||
+          previousFieldName === "english";
         const inheritedFieldCandidate =
           rawFieldName === "text" &&
           !rawLabel &&
-          isLeafPreviewLevel &&
-          (previousFieldName === "sanskrit" ||
-            previousFieldName === "transliteration" ||
-            previousFieldName === "english")
+          previousFieldIsContinuable
             ? previousFieldName
             : "";
         const fieldName = inheritedFieldCandidate || rawFieldName;
