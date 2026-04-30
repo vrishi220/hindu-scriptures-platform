@@ -15677,8 +15677,8 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                       void openPropertiesModal("node", quickEditNodeId);
                     }}
                     className={`flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                    title={quickEditTargetType === "book" ? "Open book properties" : "Open node properties"}
-                    aria-label={quickEditTargetType === "book" ? "Open book properties" : "Open node properties"}
+                    title={quickEditTargetType === "book" ? "Open book properties" : "Edit all fields for this node"}
+                    aria-label={quickEditTargetType === "book" ? "Open book properties" : "Edit all fields for this node"}
                   >
                     <Pencil className="h-3 w-3" />
                     <Pencil className="h-3 w-3" />
@@ -19841,6 +19841,26 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                 </div>
                               );
                             })}
+                          </div>
+                        </div>
+                      )}
+
+                      {canEditCurrentBook && selectedId && showMedia && (
+                        <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Multimedia
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openNodeMediaManager(selectedId);
+                              }}
+                              disabled={nodeMediaUploading || nodeMediaUpdating}
+                              className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {nodeMediaUploading || nodeMediaUpdating ? "Working..." : "Manage multimedia"}
+                            </button>
                           </div>
                         </div>
                       )}
