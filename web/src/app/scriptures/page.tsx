@@ -10080,11 +10080,11 @@ function ScripturesContent() {
     };
   };
 
-  const applyPreviewBookFieldValueToCurrentBook = (
-    book: BookOption,
+  const applyPreviewBookFieldValueToCurrentBook = <T extends BookOption>(
+    book: T,
     fieldPath: string,
     value: string | null,
-  ): BookOption => {
+  ): T => {
     const normalizedValue = value ?? "";
     if (fieldPath === "book_name") {
       return {
@@ -10678,7 +10678,7 @@ function ScripturesContent() {
     }
 
     const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
-    const currentBookSnapshot = currentBook ? ({ ...currentBook } as BookOption) : null;
+    const currentBookSnapshot = currentBook ? ({ ...currentBook } as BookDetails) : null;
     const draft = previewQuickEditDraft;
     const trimmedValue = draft.value.trim();
     if (draft.fieldPath === "book_name" && !trimmedValue) {
@@ -10718,12 +10718,11 @@ function ScripturesContent() {
     );
 
     if ((draft.targetType ?? "node") === "book") {
-      setCurrentBook((prev) => {
-        if (!prev || prev.id !== draft.nodeId) {
-          return prev;
-        }
-        return applyPreviewBookFieldValueToCurrentBook(prev, draft.fieldPath, nextValue);
-      });
+      if (currentBook && currentBook.id === draft.nodeId) {
+        setCurrentBook(
+          applyPreviewBookFieldValueToCurrentBook(currentBook, draft.fieldPath, nextValue)
+        );
+      }
     }
 
     try {
@@ -10749,11 +10748,9 @@ function ScripturesContent() {
             : response.statusText;
         setBookPreviewArtifact(snapshot);
         if ((draft.targetType ?? "node") === "book") {
-          setCurrentBook((prev) =>
-            prev && currentBookSnapshot && prev.id === currentBookSnapshot.id
-              ? currentBookSnapshot
-              : prev
-          );
+          if (currentBook && currentBookSnapshot && currentBook.id === currentBookSnapshot.id) {
+            setCurrentBook(currentBookSnapshot);
+          }
         }
         setPreviewQuickEditDraft((prev) =>
           prev
@@ -10774,14 +10771,12 @@ function ScripturesContent() {
           payload && typeof payload === "object" && typeof payload.book_name === "string"
             ? payload.book_name.trim()
             : trimmedValue;
-        setCurrentBook((prev) =>
-          prev && prev.id === draft.nodeId
-            ? {
-                ...prev,
-                book_name: savedBookName,
-              }
-            : prev
-        );
+        if (currentBook && currentBook.id === draft.nodeId) {
+          setCurrentBook({
+            ...currentBook,
+            book_name: savedBookName,
+          });
+        }
         setBooks((prev) =>
           prev.map((book) =>
             book.id === draft.nodeId
@@ -10823,11 +10818,9 @@ function ScripturesContent() {
     } catch (err) {
       setBookPreviewArtifact(snapshot);
       if ((draft.targetType ?? "node") === "book") {
-        setCurrentBook((prev) =>
-          prev && currentBookSnapshot && prev.id === currentBookSnapshot.id
-            ? currentBookSnapshot
-            : prev
-        );
+        if (currentBook && currentBookSnapshot && currentBook.id === currentBookSnapshot.id) {
+          setCurrentBook(currentBookSnapshot);
+        }
       }
       setPreviewQuickEditDraft((prev) =>
         prev
@@ -19366,7 +19359,10 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                             </div>
                           </div>
                         ) : (
-                          renderBrowseContentData(currentBook.content_data, "book") || (
+                          renderBrowseContentData(
+                            currentBook.content_data as BookOption["content_data"],
+                            "book"
+                          ) || (
                             <div className="rounded-2xl border border-dashed border-black/10 bg-white/70 px-4 py-5 text-sm text-zinc-500">
                               No book-root content yet.
                             </div>
@@ -19392,11 +19388,18 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                     >
                       {(() => {
                         const metadata = getBookMetadataObject(currentBook);
-                        const titleEnglish = formatValue(metadata?.title_english) || currentBook.title_english || currentBook.book_name;
-                        const titleSanskrit = formatValue(metadata?.title_sanskrit) || currentBook.title_sanskrit;
+                        const titleEnglish =
+                          formatValue(metadata?.title_english) ||
+                          formatValue(currentBook.title_english) ||
+                          formatValue(currentBook.book_name);
+                        const titleSanskrit =
+                          formatValue(metadata?.title_sanskrit) ||
+                          formatValue(currentBook.title_sanskrit);
                         const titleTransliteration =
-                          formatValue(metadata?.title_transliteration) || currentBook.title_transliteration;
+                          formatValue(metadata?.title_transliteration) ||
+                          formatValue(currentBook.title_transliteration);
                         const description = formatValue(metadata?.description);
+                        const schemaName = formatValue(currentBook.schema?.name);
                         return (
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
@@ -19413,7 +19416,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                             </div>
                             <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
                               <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
-                              <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
+                              <div className="mt-1 text-sm text-zinc-700">{schemaName || "Not set"}</div>
                             </div>
                             <div className="rounded-2xl border border-black/10 bg-white/90 p-3 md:col-span-2">
                               <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Description</div>
