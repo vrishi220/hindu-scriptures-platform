@@ -7752,7 +7752,11 @@ function ScripturesContent() {
     }
 
     if (normalizedType === "audio") {
-      return <audio controls className="w-full"><source src={mediaUrl} /></audio>;
+      return (
+        <audio controls className={mode === "thumb" ? "w-full max-w-xs" : "w-full"}>
+          <source src={mediaUrl} />
+        </audio>
+      );
     }
 
     if (normalizedType === "video") {
@@ -7762,7 +7766,11 @@ function ScripturesContent() {
           <iframe
             src={youtubeEmbedUrl}
             title={label}
-            className="h-[260px] w-full rounded-lg border border-black/10"
+            className={
+              mode === "thumb"
+                ? "h-24 w-full rounded-md border border-black/10"
+                : "h-[260px] w-full rounded-lg border border-black/10"
+            }
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             referrerPolicy="strict-origin-when-cross-origin"
             allowFullScreen
@@ -7770,7 +7778,14 @@ function ScripturesContent() {
         );
       }
       return (
-        <video controls className="max-h-[260px] w-full rounded-lg border border-black/10">
+        <video
+          controls
+          className={
+            mode === "thumb"
+              ? "max-h-24 w-full rounded-md border border-black/10"
+              : "max-h-[260px] w-full rounded-lg border border-black/10"
+          }
+        >
           <source src={mediaUrl} />
         </video>
       );
@@ -22329,15 +22344,9 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                     <>
                                       <div className="min-w-0">
                                         <div className="truncate font-medium">{label}</div>
-                                        {mediaType === "image" ? (
-                                          <img
-                                            src={resolveMediaUrlWithMetadataVersion(media.url, media.metadata || media.metadata_json || null)}
-                                            alt={label}
-                                            className="mt-1 h-10 w-10 rounded-md border border-black/10 object-cover"
-                                          />
-                                        ) : (
-                                          <div className="mt-1 truncate text-xs text-zinc-500">{media.url}</div>
-                                        )}
+                                        <div className="mt-1">
+                                          {renderInlineMediaPreview(mediaType, media.url, label, "thumb")}
+                                        </div>
                                       </div>
                                       <span className="uppercase text-xs tracking-[0.12em] text-zinc-600">{mediaType}</span>
                                       <span className="text-xs text-zinc-600">
