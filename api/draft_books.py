@@ -2243,8 +2243,6 @@ def _render_liquid_lines(
 ) -> list[dict[str, str]]:
     rendered = Template(template_source).render(**context)
     lines: list[dict[str, str]] = []
-    current_field: str | None = None
-    current_label: str | None = None
     resolved_label_to_field = label_to_field or _DEFAULT_TEMPLATE_LABEL_TO_FIELD
 
     for raw_line in rendered.splitlines():
@@ -2259,16 +2257,6 @@ def _render_liquid_lines(
         should_parse_labeled_line = bool(label_prefix) and label_prefix in resolved_label_to_field
 
         if not should_parse_labeled_line:
-            if current_field and current_label:
-                lines.append(
-                    {
-                        "field": current_field,
-                        "label": current_label,
-                        "value": line,
-                    }
-                )
-                continue
-
             lines.append(
                 {
                     "field": "text",
@@ -2285,8 +2273,6 @@ def _render_liquid_lines(
             continue
 
         field_name = resolved_label_to_field.get(resolved_label.lower(), resolved_label.lower())
-        current_field = field_name
-        current_label = resolved_label
         lines.append(
             {
                 "field": field_name,
@@ -4169,7 +4155,6 @@ def preview_book_render(
             book,
             _load_content_node_path(db, book.id, root_node),
         )
-    resolved_book_binding_metadata = _resolve_book_binding_metadata_for_template(db, book.id)
     book_metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     book_node_payload = book_metadata.get("book_node") if isinstance(book_metadata.get("book_node"), dict) else {}
     book_content_data = (
@@ -4202,26 +4187,13 @@ def preview_book_render(
             book_translation_map,
             "en",
         )
+    # Keep preview summary aligned with editable Book Content fields only.
     book_summary_fields = {
-        "sanskrit": _as_clean_string(resolved_book_binding_metadata.get("sanskrit"))
-        or _as_clean_string(book_basic_content.get("sanskrit"))
-        or _as_clean_string(book_metadata.get("summary_sanskrit"))
-        or _as_clean_string(book_metadata.get("sanskrit"))
-        or _as_clean_string(book_metadata.get("title_sanskrit")),
-        "transliteration": _as_clean_string(resolved_book_binding_metadata.get("transliteration"))
-        or _as_clean_string(book_basic_content.get("transliteration"))
-        or _as_clean_string(book_metadata.get("summary_transliteration"))
-        or _as_clean_string(book_metadata.get("transliteration"))
-        or _as_clean_string(book_metadata.get("title_transliteration")),
-        "english": _as_clean_string(resolved_book_binding_metadata.get("english"))
-        or _as_clean_string(resolved_book_binding_metadata.get("text"))
-        or _as_clean_string(book_basic_content.get("translation"))
-        or preferred_book_translation
-        or _as_clean_string(book_metadata.get("summary_english"))
-        or _as_clean_string(book_metadata.get("english"))
-        or _as_clean_string(book_metadata.get("summary_text"))
-        or _as_clean_string(book_metadata.get("text"))
-        or _as_clean_string(book_metadata.get("title_english")),
+        "sanskrit": _as_clean_string(book_basic_content.get("sanskrit")),
+        "transliteration": _as_clean_string(book_basic_content.get("transliteration")),
+        "english": _as_clean_string(book_basic_content.get("translation"))
+        or _as_clean_string(book_basic_content.get("english"))
+        or preferred_book_translation,
     }
     custom_template_sources = _extract_custom_template_sources(preview_payload)
     system_template_sources = _load_system_template_sources(db)

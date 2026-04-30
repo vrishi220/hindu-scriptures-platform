@@ -73,7 +73,7 @@ export default function PropertiesPanel({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-3 md:items-center">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/30 p-3 md:items-center">
       <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] p-4 shadow-2xl sm:p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>

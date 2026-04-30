@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams, type ReadonlyURLSearchParams } from "next/navigation";
 import {
@@ -1787,7 +1787,6 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
 };
 
 const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
-const PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY = "scriptures.preview.showBookSummary";
 const PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY = "scriptures.preview.fontSizePercent";
 const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
 const IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES = 512 * 1024;
@@ -2839,6 +2838,7 @@ function ScripturesContent() {
   const [bookPreviewError, setBookPreviewError] = useState<string | null>(null);
   const [previewLinkMessage, setPreviewLinkMessage] = useState<string | null>(null);
   const [previewQuickEditGestureBlockKey, setPreviewQuickEditGestureBlockKey] = useState<string | null>(null);
+  const [bookSummaryAffordancesVisible, setBookSummaryAffordancesVisible] = useState(false);
   const [previewQuickEditDraft, setPreviewQuickEditDraft] = useState<{
     nodeId: number;
     targetType?: "node" | "book";
@@ -2876,7 +2876,6 @@ function ScripturesContent() {
   const [showPreviewDetails, setShowPreviewDetails] = useState(false);
   const [showPreviewTitles, setShowPreviewTitles] = useState(false);
   const [showPreviewMedia, setShowPreviewMedia] = useState(true);
-  const [showPreviewBookSummary, setShowPreviewBookSummary] = useState(true);
   const [previewWordMeaningsDisplayMode, setPreviewWordMeaningsDisplayMode] =
     useState<"inline" | "table" | "hide">("inline");
   const [previewFontSizePercent, setPreviewFontSizePercent] = useState(100);
@@ -2996,6 +2995,9 @@ function ScripturesContent() {
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
+  const [propertiesBookContentSanskrit, setPropertiesBookContentSanskrit] = useState("");
+  const [propertiesBookContentTransliteration, setPropertiesBookContentTransliteration] = useState("");
+  const [propertiesBookContentEnglish, setPropertiesBookContentEnglish] = useState("");
   const [ownershipTargetEmail, setOwnershipTargetEmail] = useState("");
   const [ownedBooksForTransfer, setOwnedBooksForTransfer] = useState<OwnedBookSummary[]>([]);
   const [ownedBooksForTransferLoading, setOwnedBooksForTransferLoading] = useState(false);
@@ -3028,9 +3030,23 @@ function ScripturesContent() {
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
   const [showPreviewShareMenu, setShowPreviewShareMenu] = useState(false);
-  const [bookInlineEditMode, setBookInlineEditMode] = useState(false);
-  const [bookInlineName, setBookInlineName] = useState("");
-  const [bookInlineSubmitting, setBookInlineSubmitting] = useState(false);
+  const [browseDetailsTab, setBrowseDetailsTab] = useState<"overview" | "content" | "properties">("overview");
+  const previousBrowseSelectedIdRef = useRef<number | null>(null);
+  const previousBrowseBookIdRef = useRef<string | null>(null);
+  // Book content inline editor
+  const [bookContentInlineMode, setBookContentInlineMode] = useState(false);
+  const [bookContentInlineSubmitting, setBookContentInlineSubmitting] = useState(false);
+  const [bookContentInlineMessage, setBookContentInlineMessage] = useState<string | null>(null);
+  const [bookContentInlineSanskrit, setBookContentInlineSanskrit] = useState("");
+  const [bookContentInlineTransliteration, setBookContentInlineTransliteration] = useState("");
+  const [bookContentInlineTranslationDrafts, setBookContentInlineTranslationDrafts] =
+    useState<Record<EditableTranslationLanguage, string>>(buildEditableTranslationDrafts({}));
+  const [bookContentInlineSelectedLanguages, setBookContentInlineSelectedLanguages] =
+    useState<EditableTranslationLanguage[]>(["english"]);
+  const [bookContentInlineTranslationVariants, setBookContentInlineTranslationVariants] =
+    useState<AuthorVariantDraft[]>([]);
+  const [bookContentInlineCommentaryVariants, setBookContentInlineCommentaryVariants] =
+    useState<AuthorVariantDraft[]>([]);
   const [bookInfoStatsOpen, setBookInfoStatsOpen] = useState(true);
   const [bookInfoAuthorsOpen, setBookInfoAuthorsOpen] = useState(true);
   const [treeEditMode, setTreeEditMode] = useState(false);
@@ -3227,11 +3243,27 @@ function ScripturesContent() {
     if (selectedId !== BOOK_ROOT_NODE_ID) {
       setShowBookRootActionsMenu(false);
       setOpenHoverShareSubmenuKey(null);
-      setBookInlineEditMode(false);
-      setBookInlineName("");
-      setBookInlineSubmitting(false);
+      setBookContentInlineMessage(null);
     }
   }, [selectedId, bookId]);
+
+  useEffect(() => {
+    if (inlineEditMode || bookContentInlineMode) {
+      setBrowseDetailsTab("content");
+      previousBrowseSelectedIdRef.current = typeof selectedId === "number" ? selectedId : null;
+      previousBrowseBookIdRef.current = bookId ?? null;
+      return;
+    }
+
+    const previousBookId = previousBrowseBookIdRef.current;
+    const currentBookId = bookId ?? null;
+    if (previousBookId !== currentBookId) {
+      setBrowseDetailsTab("overview");
+    }
+
+    previousBrowseSelectedIdRef.current = typeof selectedId === "number" ? selectedId : null;
+    previousBrowseBookIdRef.current = currentBookId;
+  }, [selectedId, bookId, inlineEditMode, bookContentInlineMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -4149,6 +4181,9 @@ function ScripturesContent() {
               setPropertiesInitialDescription("");
     if (scope === "book") {
       const metadata = getBookMetadataObject(currentBook) || {};
+      const bookContentData = toRecord(currentBook?.content_data);
+      const bookBasic = toRecord(bookContentData.basic);
+      const bookTranslations = toTranslationRecord(bookContentData.translations);
       setPropertiesBookAuthor(typeof metadata.author === "string" ? metadata.author : "");
       setPropertiesBookTitleEnglish(
         typeof metadata.title_english === "string" ? metadata.title_english : ""
@@ -4160,6 +4195,17 @@ function ScripturesContent() {
         typeof metadata.title_transliteration === "string"
           ? metadata.title_transliteration
           : ""
+      );
+      setPropertiesBookContentSanskrit(
+        typeof bookBasic.sanskrit === "string" ? bookBasic.sanskrit : ""
+      );
+      setPropertiesBookContentTransliteration(
+        typeof bookBasic.transliteration === "string" ? bookBasic.transliteration : ""
+      );
+      setPropertiesBookContentEnglish(
+        typeof bookBasic.translation === "string"
+          ? bookBasic.translation
+          : pickPreferredTranslationText(bookTranslations, sourceLanguage, "")
       );
       const enabledLevels = getWordMeaningsEnabledLevelsFromBook(currentBook);
       const schemaLevels = Array.isArray(currentBook?.schema?.levels)
@@ -4215,6 +4261,9 @@ function ScripturesContent() {
       setPropertiesBookTitleEnglish("");
       setPropertiesBookTitleSanskrit("");
       setPropertiesBookTitleTransliteration("");
+      setPropertiesBookContentSanskrit("");
+      setPropertiesBookContentTransliteration("");
+      setPropertiesBookContentEnglish("");
       setPropertiesWordMeaningsEnabledLevels([]);
       setPropertiesWordMeaningsDefaultSourceLanguage(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
       setPropertiesWordMeaningsDefaultMeaningLanguage(WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE);
@@ -4761,12 +4810,31 @@ function ScripturesContent() {
     );
     const nextBookTitleSanskrit = bookTitlePair.sanskrit;
     const nextBookTitleTransliteration = bookTitlePair.transliteration;
+    const currentBookContentData = toRecord(currentBook?.content_data);
+    const currentBookBasic = toRecord(currentBookContentData.basic);
+    const currentBookTranslations = toTranslationRecord(currentBookContentData.translations);
+    const currentBookContentSanskrit =
+      typeof currentBookBasic.sanskrit === "string" ? currentBookBasic.sanskrit.trim() : "";
+    const currentBookContentTransliteration =
+      typeof currentBookBasic.transliteration === "string" ? currentBookBasic.transliteration.trim() : "";
+    const currentBookContentEnglish =
+      typeof currentBookBasic.translation === "string"
+        ? currentBookBasic.translation.trim()
+        : pickPreferredTranslationText(currentBookTranslations, sourceLanguage, "").trim();
+    const nextBookContentSanskrit = propertiesBookContentSanskrit.trim();
+    const nextBookContentTransliteration = propertiesBookContentTransliteration.trim();
+    const nextBookContentEnglish = propertiesBookContentEnglish.trim();
     const shouldSaveBookTitles =
       propertiesScope === "book" &&
       (nextBookTitleEnglish !== currentBookTitleEnglish ||
         nextBookAuthor !== currentBookAuthor ||
         nextBookTitleSanskrit !== currentBookTitleSanskrit ||
         nextBookTitleTransliteration !== currentBookTitleTransliteration);
+    const shouldSaveBookContent =
+      propertiesScope === "book" &&
+      (nextBookContentSanskrit !== currentBookContentSanskrit ||
+        nextBookContentTransliteration !== currentBookContentTransliteration ||
+        nextBookContentEnglish !== currentBookContentEnglish);
 
     const currentWordMeaningsEnabledLevels = Array.from(getWordMeaningsEnabledLevelsFromBook(currentBook));
     const nextWordMeaningsEnabledLevels = normalizeWordMeaningsEnabledLevels(
@@ -4801,7 +4869,7 @@ function ScripturesContent() {
       propertiesScope === "book" &&
       (shouldSaveBookTitles || shouldSaveWordMeanings || shouldSaveDescription);
 
-    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookMetadata && !shouldSaveNodeDescription) {
+    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookMetadata && !shouldSaveBookContent && !shouldSaveNodeDescription) {
       setPropertiesError("No changes to save");
       return;
     }
@@ -4822,6 +4890,7 @@ function ScripturesContent() {
     try {
       let didUpdateName = false;
       let didSaveBookMetadata = false;
+      let didSaveBookContent = false;
       let didSaveDescription = false;
       let didSaveMetadata = false;
 
@@ -4974,6 +5043,65 @@ function ScripturesContent() {
         didSaveBookMetadata = true;
       }
 
+      if (shouldSaveBookContent) {
+        if (!bookId) {
+          throw new Error("Select a book first");
+        }
+
+        const patchBookContentField = async (fieldPath: string, rawValue: string) => {
+          const response = await fetchContentWithSessionRecovery(`/books/${bookId}/field`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              field_path: fieldPath,
+              value: rawValue.trim() ? rawValue.trim() : null,
+              edit_reason: "Book properties content edit",
+            }),
+          });
+          const payload = (await response.json().catch(() => null)) as
+            | BookDetails
+            | { detail?: string }
+            | null;
+          if (!response.ok) {
+            throw new Error((payload as { detail?: string } | null)?.detail || "Failed to save book content");
+          }
+          return payload as BookDetails;
+        };
+
+        let latestBook = currentBook as BookDetails | BookOption | null;
+        if (nextBookContentSanskrit !== currentBookContentSanskrit) {
+          latestBook = await patchBookContentField("content_data.basic.sanskrit", nextBookContentSanskrit);
+        }
+        if (nextBookContentTransliteration !== currentBookContentTransliteration) {
+          latestBook = await patchBookContentField("content_data.basic.transliteration", nextBookContentTransliteration);
+        }
+        if (nextBookContentEnglish !== currentBookContentEnglish) {
+          latestBook = await patchBookContentField("content_data.basic.translation", nextBookContentEnglish);
+        }
+
+        if (latestBook && typeof latestBook === "object" && "id" in latestBook) {
+          const updatedBook = latestBook as BookDetails;
+          setCurrentBook(updatedBook);
+          setBooks((prev) =>
+            prev.map((book) =>
+              book.id === updatedBook.id
+                ? {
+                    ...book,
+                    book_name: updatedBook.book_name,
+                    content_data: updatedBook.content_data,
+                    has_content: updatedBook.has_content,
+                    level_name_overrides: updatedBook.level_name_overrides,
+                    metadata_json: updatedBook.metadata_json,
+                    metadata: updatedBook.metadata,
+                  }
+                : book
+            )
+          );
+        }
+        didSaveBookContent = true;
+      }
+
       if (shouldSaveNodeDescription) {
         if (!propertiesNodeId) {
           throw new Error("Select a node first");
@@ -5020,22 +5148,23 @@ function ScripturesContent() {
         didSaveMetadata = true;
       }
 
+      const didSaveAnyBookDetails = didSaveBookMetadata || didSaveBookContent;
       setPropertiesMessage(
-        didUpdateName && didSaveBookMetadata && didSaveDescription && didSaveMetadata
+        didUpdateName && didSaveAnyBookDetails && didSaveDescription && didSaveMetadata
           ? "Name, book details, description, and properties saved"
-          : didUpdateName && didSaveBookMetadata && didSaveMetadata
+          : didUpdateName && didSaveAnyBookDetails && didSaveMetadata
             ? "Name, book details, and properties saved"
             : didUpdateName && didSaveDescription && didSaveMetadata
               ? "Name, description, and properties saved"
-              : didSaveBookMetadata && didSaveMetadata
+              : didSaveAnyBookDetails && didSaveMetadata
                 ? "Book details and properties saved"
                 : didSaveDescription && didSaveMetadata
                   ? "Description and properties saved"
-                  : didUpdateName && didSaveBookMetadata
+                  : didUpdateName && didSaveAnyBookDetails
                     ? "Name and book details saved"
                     : didUpdateName && didSaveDescription
                       ? "Name and description saved"
-                      : didSaveBookMetadata
+                      : didSaveAnyBookDetails
                         ? "Book details saved"
                         : didSaveDescription
                           ? "Description saved"
@@ -6299,9 +6428,6 @@ function ScripturesContent() {
           !bookId
         )));
   const showPageInlinePreviewLoading = bookPreviewLoading && !showPreviewTransitionOverlay;
-  const hasEffectiveBookPreviewSummary =
-    bookPreviewArtifact?.preview_scope === "book" &&
-    Boolean(bookPreviewArtifact.book_template?.rendered_text?.trim());
   const previewBodyFontSizeRem = (0.875 * appliedPreviewFontSizePercent) / 100;
   const previewBodyTextStyle = useMemo(
     () => ({
@@ -6481,28 +6607,6 @@ function ScripturesContent() {
     setPreviewTranslationLanguages(normalized);
     setAppliedPreviewTranslationLanguages(normalized);
   }, [authEmail, preferences?.source_language, sourceLanguage]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const raw = window.localStorage.getItem(PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY);
-    if (raw === "true") {
-      setShowPreviewBookSummary(true);
-    } else if (raw === "false") {
-      setShowPreviewBookSummary(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(
-      PREVIEW_BOOK_SUMMARY_TOGGLE_STORAGE_KEY,
-      showPreviewBookSummary ? "true" : "false"
-    );
-  }, [showPreviewBookSummary]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -9449,6 +9553,7 @@ function ScripturesContent() {
     setPreviewLinkMessage(null);
     setPreviewQuickEditDraft(null);
     setPreviewQuickEditGestureBlockKey(null);
+    setBookSummaryAffordancesVisible(false);
 
     const fromParam = searchParams.get("from");
     deferUntilNextPaint(() => {
@@ -9532,6 +9637,7 @@ function ScripturesContent() {
     setPreviewLinkMessage(null);
     setPreviewQuickEditDraft(null);
     setPreviewQuickEditGestureBlockKey(null);
+    setBookSummaryAffordancesVisible(false);
     browsingHook.setPrivateBookGate(false);
     setShowExploreStructure(true);
     setShowBrowseBookModal(true);
@@ -9748,6 +9854,10 @@ function ScripturesContent() {
       return block.source_node_id;
     }
 
+    if (typeof block.source_book_id === "number") {
+      return block.source_book_id;
+    }
+
     const contentNodeId = (block.content as { node_id?: unknown }).node_id;
     if (typeof contentNodeId === "number") {
       return contentNodeId;
@@ -9766,6 +9876,10 @@ function ScripturesContent() {
   const resolvePreviewQuickEditTargetType = (block: BookPreviewBlock): "node" | "book" => {
     if (typeof block.source_node_id === "number") {
       return "node";
+    }
+
+    if (typeof block.source_book_id === "number") {
+      return "book";
     }
 
     const contentNodeId = (block.content as { node_id?: unknown }).node_id;
@@ -9796,16 +9910,20 @@ function ScripturesContent() {
           : typeof (block.content as { node_id?: unknown }).node_id === "number"
             ? ((block.content as { node_id?: number }).node_id ?? null)
             : null;
+      const matchesTargetBook =
+        targetType === "book" &&
+        typeof block.source_book_id === "number" &&
+        block.source_book_id === nodeId;
       const isBookScopeBlockTarget =
         targetType === "book" &&
         artifact.preview_scope === "book" &&
         blockNodeId === null &&
         !bookScopeBlockPatched;
       const matchesTargetNode = targetType === "node" && blockNodeId === nodeId;
-      if (!matchesTargetNode && !isBookScopeBlockTarget) {
+      if (!matchesTargetNode && !matchesTargetBook && !isBookScopeBlockTarget) {
         return block;
       }
-      if (isBookScopeBlockTarget) {
+      if (isBookScopeBlockTarget && !matchesTargetBook) {
         bookScopeBlockPatched = true;
       }
 
@@ -9940,17 +10058,106 @@ function ScripturesContent() {
 
       return {
         ...block,
-        title: fieldPath === "title_english" ? normalizedValue : block.title,
+        title:
+          fieldPath === "title_english" || fieldPath === "book_name"
+            ? normalizedValue
+            : block.title,
         content: nextContent,
       };
     });
 
     return {
       ...artifact,
+      book_name: fieldPath === "book_name" ? normalizedValue : artifact.book_name,
+      root_title:
+        artifact.preview_scope === "book" && fieldPath === "book_name"
+          ? normalizedValue
+          : artifact.root_title,
       sections: {
         ...artifact.sections,
         body: nextBody,
       },
+    };
+  };
+
+  const applyPreviewBookFieldValueToCurrentBook = (
+    book: BookOption,
+    fieldPath: string,
+    value: string | null,
+  ): BookOption => {
+    const normalizedValue = value ?? "";
+    if (fieldPath === "book_name") {
+      return {
+        ...book,
+        book_name: normalizedValue,
+      };
+    }
+    if (
+      fieldPath !== "content_data.basic.sanskrit" &&
+      fieldPath !== "content_data.basic.transliteration" &&
+      fieldPath !== "content_data.basic.translation" &&
+      !fieldPath.startsWith("content_data.translations.")
+    ) {
+      return book;
+    }
+
+    const nextContentData = toRecord(book.content_data);
+    const nextBasic = {
+      ...toRecord(nextContentData.basic),
+    } as Record<string, unknown>;
+    const nextTranslations = toTranslationRecord(nextContentData.translations);
+
+    if (fieldPath === "content_data.basic.sanskrit") {
+      if (normalizedValue.trim()) {
+        nextBasic.sanskrit = normalizedValue;
+      } else {
+        delete nextBasic.sanskrit;
+      }
+    } else if (fieldPath === "content_data.basic.transliteration") {
+      if (normalizedValue.trim()) {
+        nextBasic.transliteration = normalizedValue;
+      } else {
+        delete nextBasic.transliteration;
+      }
+    } else if (fieldPath === "content_data.basic.translation") {
+      if (normalizedValue.trim()) {
+        nextBasic.translation = normalizedValue;
+      } else {
+        delete nextBasic.translation;
+      }
+      applyTranslationDraftValue(nextTranslations, "english", normalizedValue);
+    } else if (fieldPath.startsWith("content_data.translations.")) {
+      const languageKey = fieldPath.slice("content_data.translations.".length).trim();
+      if (languageKey) {
+        applyTranslationDraftValue(nextTranslations, languageKey, normalizedValue);
+        if (languageKey === "en" || languageKey === "english") {
+          if (normalizedValue.trim()) {
+            nextBasic.translation = normalizedValue;
+          } else {
+            delete nextBasic.translation;
+          }
+        }
+      }
+    }
+
+    if (Object.keys(nextBasic).length > 0) {
+      nextContentData.basic = nextBasic;
+    } else {
+      delete nextContentData.basic;
+    }
+
+    if (Object.keys(nextTranslations).length > 0) {
+      nextContentData.translations = nextTranslations;
+    } else {
+      delete nextContentData.translations;
+    }
+
+    return {
+      ...book,
+      content_data: Object.keys(nextContentData).length > 0 ? nextContentData : null,
+      has_content:
+        Object.keys(nextContentData).length > 0 ||
+        Boolean(book.has_content),
     };
   };
 
@@ -10209,6 +10416,7 @@ function ScripturesContent() {
   };
 
   const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number, toggle = false): void => {
+    setBookSummaryAffordancesVisible(false);
     setPreviewQuickEditGestureBlockKey((prev) => {
       if (toggle && prev === blockGestureKey) {
         setPreviewQuickEditDraft(null);
@@ -10251,6 +10459,7 @@ function ScripturesContent() {
       return true;
     }
     if (
+      normalizedPath === "book_name" ||
       normalizedPath === "title_english" ||
       normalizedPath === "title_sanskrit" ||
       normalizedPath === "title_transliteration" ||
@@ -10300,6 +10509,67 @@ function ScripturesContent() {
     return null;
   };
 
+  const previewQuickEditFieldTooltip = (
+    fieldPath?: string | null,
+    fallbackLabel?: string | null
+  ): string => {
+    const normalizedPath = (fieldPath || "").trim().toLowerCase();
+    const normalizedFallback = (fallbackLabel || "").trim();
+
+    if (!normalizedPath) {
+      return normalizedFallback ? `Edit ${normalizedFallback}` : "Edit field";
+    }
+
+    if (normalizedPath === "title_sanskrit") {
+      return "Edit Title (Sanskrit)";
+    }
+    if (normalizedPath === "title_transliteration") {
+      return "Edit Title (Transliteration)";
+    }
+    if (normalizedPath === "book_name") {
+      return "Edit Book Title";
+    }
+    if (normalizedPath === "title_english") {
+      return "Edit Title (English)";
+    }
+    if (normalizedPath === "sequence_number") {
+      return "Edit Sequence Number";
+    }
+    if (normalizedPath === "content_data.basic.sanskrit") {
+      return "Edit Book Content (Sanskrit)";
+    }
+    if (normalizedPath === "content_data.basic.transliteration") {
+      return "Edit Book Content (Transliteration)";
+    }
+    if (normalizedPath === "content_data.basic.translation") {
+      return "Edit Book Content (English)";
+    }
+    if (normalizedPath.startsWith("content_data.translations.")) {
+      const languageKey = normalizedPath.slice("content_data.translations.".length).trim();
+      const languageLabel =
+        languageKey === "en" || languageKey === "english"
+          ? "English"
+          : languageKey
+              .replace(/[_-]+/g, " ")
+              .replace(/\b\w/g, (char) => char.toUpperCase());
+      return `Edit Translation (${languageLabel || "Selected Language"})`;
+    }
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.text$/.test(normalizedPath)) {
+      return "Edit Variant Text";
+    }
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.author$/.test(normalizedPath)) {
+      return "Edit Variant Author";
+    }
+    if (/^content_data\.(translation_variants|commentary_variants)\.\d+\.language$/.test(normalizedPath)) {
+      return "Edit Variant Language";
+    }
+    if (/^content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text$/.test(normalizedPath)) {
+      return "Edit Word Meaning";
+    }
+
+    return normalizedFallback ? `Edit ${normalizedFallback}` : "Edit field";
+  };
+
   const updatePreviewQuickEditDraftValue = (value: string) => {
     setPreviewQuickEditDraft((prev) =>
       prev
@@ -10316,7 +10586,12 @@ function ScripturesContent() {
     multiline?: boolean;
     clearAriaLabel: string;
   }) => {
-    const multiline = options.multiline ?? false;
+    const isBookBasicField =
+      previewQuickEditDraft?.targetType === "book" &&
+      (previewQuickEditDraft?.fieldPath === "content_data.basic.sanskrit" ||
+        previewQuickEditDraft?.fieldPath === "content_data.basic.transliteration" ||
+        previewQuickEditDraft?.fieldPath === "content_data.basic.translation");
+    const multiline = (options.multiline ?? false) || isBookBasicField;
 
     return (
       <div className="group relative">
@@ -10360,6 +10635,16 @@ function ScripturesContent() {
     },
     targetType: "node" | "book" = "node"
   ): Promise<Response> => {
+    if (targetType === "book" && body.field_path === "book_name") {
+      const nextBookName = typeof body.value === "string" ? body.value.trim() : "";
+      return fetch(`/api/books/${nodeId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ book_name: nextBookName }),
+      });
+    }
+
     const requestInit: RequestInit = {
       method: "PATCH",
       credentials: "include",
@@ -10393,8 +10678,21 @@ function ScripturesContent() {
     }
 
     const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
+    const currentBookSnapshot = currentBook ? ({ ...currentBook } as BookOption) : null;
     const draft = previewQuickEditDraft;
     const trimmedValue = draft.value.trim();
+    if (draft.fieldPath === "book_name" && !trimmedValue) {
+      setPreviewQuickEditDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              saving: false,
+              error: "Book title cannot be empty.",
+            }
+          : prev
+      );
+      return;
+    }
     const nextValue = trimmedValue.length > 0 ? trimmedValue : null;
 
     setPreviewQuickEditDraft((prev) =>
@@ -10419,6 +10717,15 @@ function ScripturesContent() {
         : prev
     );
 
+    if ((draft.targetType ?? "node") === "book") {
+      setCurrentBook((prev) => {
+        if (!prev || prev.id !== draft.nodeId) {
+          return prev;
+        }
+        return applyPreviewBookFieldValueToCurrentBook(prev, draft.fieldPath, nextValue);
+      });
+    }
+
     try {
       const response = await patchPreviewFieldWithSessionRecovery(
         draft.nodeId,
@@ -10432,7 +10739,7 @@ function ScripturesContent() {
 
       const payload = (await response.json().catch(() => null)) as
         | NodeContent
-        | { detail?: string }
+        | { detail?: string; book_name?: string }
         | null;
 
       if (!response.ok) {
@@ -10441,6 +10748,13 @@ function ScripturesContent() {
             ? payload.detail || response.statusText
             : response.statusText;
         setBookPreviewArtifact(snapshot);
+        if ((draft.targetType ?? "node") === "book") {
+          setCurrentBook((prev) =>
+            prev && currentBookSnapshot && prev.id === currentBookSnapshot.id
+              ? currentBookSnapshot
+              : prev
+          );
+        }
         setPreviewQuickEditDraft((prev) =>
           prev
             ? {
@@ -10455,6 +10769,29 @@ function ScripturesContent() {
 
       if (isNodeContentPayload(payload)) {
         syncSavedNodeState(payload);
+      } else if ((draft.targetType ?? "node") === "book" && draft.fieldPath === "book_name") {
+        const savedBookName =
+          payload && typeof payload === "object" && typeof payload.book_name === "string"
+            ? payload.book_name.trim()
+            : trimmedValue;
+        setCurrentBook((prev) =>
+          prev && prev.id === draft.nodeId
+            ? {
+                ...prev,
+                book_name: savedBookName,
+              }
+            : prev
+        );
+        setBooks((prev) =>
+          prev.map((book) =>
+            book.id === draft.nodeId
+              ? {
+                  ...book,
+                  book_name: savedBookName,
+                }
+              : book
+          )
+        );
       }
 
       if ((draft.targetType ?? "node") === "book" && bookPreviewArtifact) {
@@ -10478,12 +10815,20 @@ function ScripturesContent() {
 
       setPreviewQuickEditDraft(null);
       setPreviewQuickEditGestureBlockKey(null);
+      setBookSummaryAffordancesVisible(false);
       setPreviewLinkMessage("Saved.");
       window.setTimeout(() => {
         setPreviewLinkMessage(null);
       }, 1200);
     } catch (err) {
       setBookPreviewArtifact(snapshot);
+      if ((draft.targetType ?? "node") === "book") {
+        setCurrentBook((prev) =>
+          prev && currentBookSnapshot && prev.id === currentBookSnapshot.id
+            ? currentBookSnapshot
+            : prev
+        );
+      }
       setPreviewQuickEditDraft((prev) =>
         prev
           ? {
@@ -10520,6 +10865,7 @@ function ScripturesContent() {
       activePreviewRequestKey.current = requestKey;
       setPreviewQuickEditGestureBlockKey(null);
       setPreviewQuickEditDraft(null);
+      setBookSummaryAffordancesVisible(false);
     }
 
     const nextLanguageSettings = append
@@ -12536,6 +12882,26 @@ function ScripturesContent() {
     return normalized;
   };
 
+type BrowseSectionProps = {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+};
+
+const BrowseSection = ({ title, description, action, children }: BrowseSectionProps) => (
+  <section className="flex flex-col gap-3 rounded-[1.75rem] border border-black/10 bg-white/70 p-4 shadow-sm backdrop-blur-sm">
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">{title}</div>
+        {description ? <p className="mt-1 text-sm text-zinc-600">{description}</p> : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+    <div className="flex flex-col gap-3">{children}</div>
+  </section>
+);
+
   function hasUnsavedInlineChanges() {
     if (!inlineEditMode || !nodeContent) {
       return false;
@@ -13558,73 +13924,161 @@ function ScripturesContent() {
     setInlineEditMode(false);
   };
 
-  const handleStartBookInlineEdit = () => {
+  const handleStartBookContentEdit = () => {
     if (!currentBook || !canEditCurrentBook) return;
-    setBookInlineName(currentBook.book_name || "");
-    setInlineMessage(null);
-    setBookInlineEditMode(true);
+    const bookContentData = toRecord(currentBook.content_data);
+    const bookBasic = toRecord(bookContentData.basic);
+    const bookTranslations = toTranslationRecord(bookContentData.translations);
+    setBookContentInlineSanskrit(typeof bookBasic.sanskrit === "string" ? bookBasic.sanskrit : "");
+    setBookContentInlineTransliteration(
+      typeof bookBasic.transliteration === "string" ? bookBasic.transliteration : ""
+    );
+    setBookContentInlineTranslationDrafts(buildEditableTranslationDrafts(bookTranslations));
+    const selectedLangs = normalizeSelectedEditableTranslationLanguages(
+      Object.keys(bookTranslations).length > 0
+        ? (Object.keys(bookTranslations) as EditableTranslationLanguage[])
+        : ["english"],
+      sourceLanguage
+    );
+    setBookContentInlineSelectedLanguages(selectedLangs);
+    const existingTranslationVariants = Array.isArray(bookContentData.translation_variants)
+      ? (bookContentData.translation_variants as AuthorVariantDraft[]).map((v) => ({
+          ...buildEmptyAuthorVariantDraft(),
+          ...v,
+        }))
+      : [];
+    const existingCommentaryVariants = Array.isArray(bookContentData.commentary_variants)
+      ? (bookContentData.commentary_variants as AuthorVariantDraft[]).map((v) => ({
+          ...buildEmptyAuthorVariantDraft(),
+          ...v,
+        }))
+      : [];
+    setBookContentInlineTranslationVariants(existingTranslationVariants);
+    setBookContentInlineCommentaryVariants(existingCommentaryVariants);
+    setBookContentInlineMessage(null);
+    setBookContentInlineMode(true);
     setShowBookRootActionsMenu(false);
   };
 
-  const handleCancelBookInlineEdit = () => {
-    setBookInlineName(currentBook?.book_name || "");
-    setInlineMessage(null);
-    setBookInlineEditMode(false);
+  const handleCancelBookContentEdit = () => {
+    setBookContentInlineMode(false);
+    setBookContentInlineMessage(null);
   };
 
-  const handleSaveBookInlineEdit = async () => {
+  const handleSaveBookContentEdit = async () => {
     if (!bookId || !currentBook || !canEditCurrentBook) return;
-
-    const nextName = bookInlineName.trim();
-    if (!nextName) {
-      setInlineMessage("Book name is required.");
-      return;
-    }
-
-    if (nextName === (currentBook.book_name || "").trim()) {
-      setInlineMessage("No changes to save.");
-      return;
-    }
-
-    setBookInlineSubmitting(true);
-    setInlineMessage(null);
-
+    setBookContentInlineSubmitting(true);
+    setBookContentInlineMessage(null);
     try {
-      const response = await fetch(`/api/books/${bookId}`, {
+      const contentPair = autoFillSanskritTransliterationPair(
+        bookContentInlineSanskrit,
+        bookContentInlineTransliteration
+      );
+      const existingTranslations = toTranslationRecord(
+        toRecord(currentBook.content_data).translations
+      );
+      const nextTranslations: Record<string, string> = { ...existingTranslations };
+      const selectedLangs = normalizeSelectedEditableTranslationLanguages(
+        bookContentInlineSelectedLanguages,
+        sourceLanguage
+      );
+      for (const language of selectedLangs) {
+        const value = (bookContentInlineTranslationDrafts[language] || "").trim();
+        applyTranslationDraftValue(nextTranslations, language, value);
+      }
+      const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
+      const normalizedTranslationVariants = normalizeAuthorVariantDrafts(
+        bookContentInlineTranslationVariants,
+        "translation"
+      );
+      const normalizedCommentaryVariants = normalizeAuthorVariantDrafts(
+        bookContentInlineCommentaryVariants,
+        "commentary"
+      );
+      const contentData: Record<string, unknown> = {
+        basic: {
+          sanskrit: contentPair.sanskrit || undefined,
+          transliteration: contentPair.transliteration || undefined,
+          translation: englishFallback || undefined,
+        },
+        translations: Object.keys(nextTranslations).length > 0 ? nextTranslations : undefined,
+        translation_variants:
+          normalizedTranslationVariants.length > 0 ? normalizedTranslationVariants : undefined,
+        commentary_variants:
+          normalizedCommentaryVariants.length > 0 ? normalizedCommentaryVariants : undefined,
+      };
+      const response = await fetchContentWithSessionRecovery(`/books/${bookId}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ book_name: nextName }),
+        body: JSON.stringify({ content_data: contentData }),
       });
-      const payload = (await response.json().catch(() => null)) as BookDetails | { detail?: string } | null;
+      const payload = (await response.json().catch(() => null)) as
+        | BookDetails
+        | { detail?: string }
+        | null;
       if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to update book name");
+        throw new Error(
+          (payload as { detail?: string } | null)?.detail || "Failed to save content"
+        );
       }
-
       const updatedBook = payload as BookDetails;
       setCurrentBook(updatedBook);
       setBooks((prev) =>
-        prev.map((book) =>
-          book.id === updatedBook.id
+        prev.map((b) =>
+          b.id === updatedBook.id
             ? {
-                ...book,
+                ...b,
                 book_name: updatedBook.book_name,
+                content_data: updatedBook.content_data,
+                has_content: updatedBook.has_content,
                 level_name_overrides: updatedBook.level_name_overrides,
                 metadata_json: updatedBook.metadata_json,
                 metadata: updatedBook.metadata,
               }
-            : book
+            : b
         )
       );
-      setBookInlineEditMode(false);
-      setInlineMessage("Book details saved.");
-      setTimeout(() => setInlineMessage(null), 2000);
+      setBookContentInlineMode(false);
+      setBookContentInlineMessage("Content saved.");
+      setTimeout(() => setBookContentInlineMessage(null), 2500);
     } catch (err) {
-      setInlineMessage(err instanceof Error ? err.message : "Failed to save book details.");
+      setBookContentInlineMessage(
+        err instanceof Error ? err.message : "Failed to save content."
+      );
     } finally {
-      setBookInlineSubmitting(false);
+      setBookContentInlineSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (
+      selectedId === BOOK_ROOT_NODE_ID &&
+      inlineEditMode &&
+      canEditCurrentBook &&
+      !bookContentInlineMode
+    ) {
+      setInlineEditMode(false);
+      setBrowseDetailsTab("content");
+      handleStartBookContentEdit();
+    }
+  }, [selectedId, inlineEditMode, canEditCurrentBook, bookContentInlineMode, bookId, currentBook]);
+
+  useEffect(() => {
+    if (
+      selectedId !== null &&
+      selectedId !== BOOK_ROOT_NODE_ID &&
+      bookContentInlineMode &&
+      canEditCurrentBook &&
+      nodeContent &&
+      !inlineEditMode
+    ) {
+      setBookContentInlineMode(false);
+      setBookContentInlineMessage(null);
+      setBrowseDetailsTab("content");
+      handleStartInlineEdit();
+    }
+  }, [selectedId, bookContentInlineMode, canEditCurrentBook, nodeContent, inlineEditMode]);
 
   const updateInlineWordMeaningRows = (rows: WordMeaningRow[]) => {
     setInlineFormData((prev) => ({
@@ -14427,6 +14881,166 @@ function ScripturesContent() {
     nodeContent?.content_data,
   ]);
 
+  const renderBrowseContentData = (
+    contentData: BookOption["content_data"] | NodeContent["content_data"] | null | undefined,
+    keyPrefix: string
+  ) => {
+    const sanskrit = formatValue(contentData?.basic?.sanskrit);
+    const transliterationRaw = formatValue(contentData?.basic?.transliteration);
+    const originalSanskrit = sanskrit || transliterateFromIast(transliterationRaw, "devanagari");
+    const transliteration = renderTransliterationByPreference(transliterationRaw);
+    const preferredSanskrit = renderSanskritByPreference(sanskrit, transliterationRaw);
+    const translations = toTranslationRecord(contentData?.translations);
+    const selectedBrowseTranslationLanguages = normalizeSelectedEditableTranslationLanguages(
+      browseTranslationLanguages,
+      sourceLanguage
+    );
+    const selectedBrowseTranslations = selectedBrowseTranslationLanguages
+      .map((language) => ({
+        language,
+        label: `${translationLanguageLabel(language)} Translation`,
+        value: pickTranslationTextForLanguageOnly(translations, language),
+      }))
+      .filter((entry) => Boolean(entry.value));
+    const preferredTranslationLabel = translationLanguageLabel(sourceLanguage);
+    const translationValue = pickPreferredTranslationText(
+      translations,
+      sourceLanguage,
+      contentData?.basic?.translation
+    );
+    const selectedPrimaryTranslationValue = selectedBrowseTranslations[0]?.value || "";
+    const resolvedTranslationValue = selectedPrimaryTranslationValue || translationValue;
+    const sanskritLabel = contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
+    const transliterationLabel =
+      contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
+    const translationLabel =
+      selectedBrowseTranslations[0]?.label ||
+      (sourceLanguage === "english"
+        ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
+        : `${preferredTranslationLabel} Translation`);
+
+    const primaryContent =
+      showOnlyPreferredScript
+        ? sourceLanguage === "sanskrit"
+          ? preferredSanskrit || resolvedTranslationValue
+          : resolvedTranslationValue || originalSanskrit
+        : originalSanskrit || resolvedTranslationValue;
+
+    const primaryLabel =
+      showOnlyPreferredScript
+        ? sourceLanguage === "sanskrit"
+          ? sanskritLabel
+          : translationLabel
+        : "Sanskrit (Original)";
+
+    const showSecondaryTransliteration =
+      !showOnlyPreferredScript &&
+      showTransliteration &&
+      Boolean(transliteration) &&
+      transliteration !== primaryContent &&
+      transliteration !== originalSanskrit;
+
+    const hasAnyContent = Boolean(
+      originalSanskrit ||
+      transliteration ||
+      translationValue ||
+      Object.keys(translations).length > 0
+    );
+
+    if (!hasAnyContent) {
+      return null;
+    }
+
+    return (
+      <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
+        {Object.keys(translations).length > 0 && (
+          <div className="rounded-lg border border-black/10 bg-white/70 p-2">
+            <div className="mb-1 text-xs uppercase tracking-[0.18em] text-zinc-500">
+              Translation Languages
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                <label key={`${keyPrefix}-browse-translation-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={browseTranslationLanguages.includes(language)}
+                    onChange={(event) => {
+                      const nextValues = event.target.checked
+                        ? [...browseTranslationLanguages, language]
+                        : browseTranslationLanguages.filter((value) => value !== language);
+                      setBrowseTranslationLanguages(
+                        normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                      );
+                    }}
+                  />
+                  {translationLanguageLabel(language)}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {primaryContent && (
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              {primaryLabel}
+            </div>
+            <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-900 ${scriptFontClassName(primaryContent)}`} lang={scriptLangForText(primaryContent)}>
+              {normalizeTextForDisplay(primaryContent)}
+            </div>
+          </div>
+        )}
+        {showSecondaryTransliteration && (
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              {transliterationLabel} ({transliterationScriptLabel(transliterationScript)})
+            </div>
+            <div className={`whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700 ${scriptFontClassName(transliteration)}`} lang={scriptLangForText(transliteration)}>
+              {normalizeTextForDisplay(transliteration)}
+            </div>
+          </div>
+        )}
+        {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
+          originalSanskrit &&
+          originalSanskrit !== primaryContent && (
+          <div>
+            <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+              Sanskrit (Original)
+            </div>
+            <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(originalSanskrit)}`} lang={scriptLangForText(originalSanskrit)}>
+              {normalizeTextForDisplay(originalSanskrit)}
+            </div>
+          </div>
+        )}
+        {!showOnlyPreferredScript &&
+          selectedBrowseTranslations
+            .filter((entry) => entry.value !== primaryContent)
+            .map((entry) => (
+              <div key={`${keyPrefix}-browse-translation-line-${entry.language}`}>
+                <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                  {entry.label}
+                </div>
+                <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(entry.value)}`} lang={scriptLangForText(entry.value)}>
+                  {normalizeTextForDisplay(entry.value)}
+                </div>
+              </div>
+            ))}
+        {!showOnlyPreferredScript &&
+          selectedBrowseTranslations.length === 0 &&
+          translationValue &&
+          translationValue !== primaryContent && (
+            <div>
+              <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                {translationLabel}
+              </div>
+              <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
+                {translationValue}
+              </div>
+            </div>
+          )}
+      </div>
+    );
+  };
+
   const previewBodyBlockElements = useMemo(() => {
     if (!bookPreviewArtifact) {
       return [] as ReactElement[];
@@ -14449,11 +15063,12 @@ function ScripturesContent() {
         (Array.isArray(bookContentData?.word_meanings_rows) &&
           bookContentData.word_meanings_rows.length > 0)
     );
+    const shouldShowBookContentBlock = hasBookContentBlock || canEditCurrentBook;
 
     const syntheticBookContentBlock: BookPreviewBlock | null =
-      bookPreviewArtifact.preview_scope === "book" &&
-      hasBookContentBlock &&
-      typeof bookPreviewArtifact.book_id === "number"
+      shouldShowBookContentBlock &&
+      typeof bookPreviewArtifact.book_id === "number" &&
+      (bookPreviewArtifact.preview_scope === "book" || canEditCurrentBook)
         ? {
             section: "body",
             order: 0,
@@ -14495,9 +15110,21 @@ function ScripturesContent() {
           }
         : null;
 
+    // In book scope, hide backend book-level template blocks (source_node_id=null)
+    // so preview/edit lines only reflect the actual editable Book Content fields.
+    const basePreviewBlocks = bookPreviewArtifact.sections.body.filter((block) => {
+      if (bookPreviewArtifact.preview_scope !== "book") {
+        return true;
+      }
+      const isBackendBookScopeBlock =
+        block.source_node_id == null &&
+        typeof block.source_book_id === "number";
+      return !isBackendBookScopeBlock;
+    });
+
     const previewBlocks = syntheticBookContentBlock
-      ? [syntheticBookContentBlock, ...bookPreviewArtifact.sections.body]
-      : bookPreviewArtifact.sections.body;
+      ? [syntheticBookContentBlock, ...basePreviewBlocks]
+      : basePreviewBlocks;
 
     const filteredBlocks = previewBlocks.filter(
       (block) => !block.content.level_name || !appliedHiddenPreviewLevels.has(block.content.level_name)
@@ -14610,7 +15237,16 @@ function ScripturesContent() {
               value: formatValue(previewSourceNode.title_english),
             },
           ]
-        : [];
+        : quickEditTargetType === "book"
+          ? [
+              {
+                fieldPath: "book_name",
+                shortLabel: "Title",
+                label: "Book Title",
+                value: formatValue(currentBook?.book_name),
+              },
+            ]
+          : [];
       const hideNodeFallback = !appliedShowPreviewDetails && /^Node\s+\d+$/i.test(rawTitle.trim());
       const isStructuralOnlyBlock =
         nonTranslationLines.length === 0 && translationLines.length === 0;
@@ -14636,6 +15272,107 @@ function ScripturesContent() {
         canEditCurrentBook &&
         typeof quickEditNodeId === "number" &&
         previewQuickEditGestureBlockKey === blockGestureKey;
+      const blockHasContentEnabled =
+        quickEditTargetType === "book"
+          ? Boolean(currentBook?.has_content)
+          : previewSourceNode
+            ? Boolean(previewSourceNode.has_content)
+            : true;
+      const headerInlineQuickEditCandidate = (() => {
+        if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+          return null;
+        }
+
+        const titleCandidate = titleQuickEditFields.find((field) => field.fieldPath && field.value != null);
+        if (titleCandidate) {
+          return {
+            fieldPath: titleCandidate.fieldPath,
+            value: titleCandidate.value,
+            lineKey: `${blockGestureKey}-header-title-${titleCandidate.fieldPath}`,
+          };
+        }
+
+        const seenFieldPaths = new Set<string>();
+        const resolveLineCandidate = (
+          line: { fieldName: string; label: string; value: string },
+          lineIndex: number,
+          segment: "non-translation" | "translation"
+        ) => {
+          const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
+          if (!fieldPath || seenFieldPaths.has(fieldPath)) {
+            return null;
+          }
+          seenFieldPaths.add(fieldPath);
+
+          const value =
+            fieldPath === "content_data.basic.translation"
+              ? typeof block.content.english === "string"
+                ? block.content.english
+                : typeof block.content.translations?.en === "string"
+                  ? block.content.translations.en
+                  : typeof block.content.translations?.english === "string"
+                    ? block.content.translations.english
+                    : line.value
+              : fieldPath === "content_data.basic.sanskrit"
+                ? typeof block.content.sanskrit === "string"
+                  ? block.content.sanskrit
+                  : line.value
+                : fieldPath === "content_data.basic.transliteration"
+                  ? typeof block.content.transliteration === "string"
+                    ? block.content.transliteration
+                    : line.value
+                  : fieldPath.startsWith("content_data.translations.")
+                    ? (() => {
+                        const language = fieldPath.slice("content_data.translations.".length);
+                        return typeof block.content.translations?.[language] === "string"
+                          ? block.content.translations[language]
+                          : line.value;
+                      })()
+                    : line.value;
+
+          return {
+            fieldPath,
+            value,
+            lineKey: `${blockGestureKey}-header-${segment}-${lineIndex}`,
+          };
+        };
+
+        if (blockHasContentEnabled) {
+          for (let index = 0; index < nonTranslationLines.length; index += 1) {
+            const candidate = resolveLineCandidate(nonTranslationLines[index], index, "non-translation");
+            if (candidate) {
+              return candidate;
+            }
+          }
+
+          for (let index = 0; index < translationLines.length; index += 1) {
+            const candidate = resolveLineCandidate(translationLines[index], index, "translation");
+            if (candidate) {
+              return candidate;
+            }
+          }
+
+          if (visibleTranslationVariants.length > 0) {
+            const firstVariant = visibleTranslationVariants[0];
+            return {
+              fieldPath: `content_data.translation_variants.${firstVariant.originalIndex}.text`,
+              value: firstVariant.text,
+              lineKey: `${blockGestureKey}-header-translation-variant-${firstVariant.originalIndex}`,
+            };
+          }
+
+          if (visibleCommentaryVariants.length > 0) {
+            const firstVariant = visibleCommentaryVariants[0];
+            return {
+              fieldPath: `content_data.commentary_variants.${firstVariant.originalIndex}.text`,
+              value: firstVariant.text,
+              lineKey: `${blockGestureKey}-header-commentary-variant-${firstVariant.originalIndex}`,
+            };
+          }
+        }
+
+        return null;
+      })();
       if (isStructuralOnlyBlock && !displayTitle) {
         return;
       }
@@ -14883,15 +15620,56 @@ function ScripturesContent() {
                     </button>
                   );
                 })()}
-                {canEditCurrentBook && quickEditTargetType === "node" && typeof quickEditNodeId === "number" && (
+                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
                   <button
                     type="button"
                     onClick={() => {
-                      void openPreviewNodeInFullEditor(quickEditNodeId);
+                      if (!headerInlineQuickEditCandidate) {
+                        return;
+                      }
+                      setPreviewQuickEditDraft({
+                        nodeId: quickEditNodeId,
+                        targetType: quickEditTargetType,
+                        fieldPath: headerInlineQuickEditCandidate.fieldPath,
+                        lineKey: headerInlineQuickEditCandidate.lineKey,
+                        value: headerInlineQuickEditCandidate.value,
+                        saving: false,
+                        error: null,
+                      });
+                    }}
+                    disabled={!headerInlineQuickEditCandidate}
+                    className={`flex items-center rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                    title={
+                      headerInlineQuickEditCandidate
+                        ? previewQuickEditFieldTooltip(headerInlineQuickEditCandidate.fieldPath)
+                        : "No inline-editable field on this block"
+                    }
+                    aria-label={
+                      headerInlineQuickEditCandidate
+                        ? previewQuickEditFieldTooltip(headerInlineQuickEditCandidate.fieldPath)
+                        : "No inline-editable field on this block"
+                    }
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewLinkMessage(null);
+                      setPreviewQuickEditDraft(null);
+                      setPreviewQuickEditGestureBlockKey(null);
+                      setBookSummaryAffordancesVisible(false);
+                      if (quickEditTargetType === "book") {
+                        void openPropertiesModal("book", null, bookId, currentBook?.book_name || null);
+                        return;
+                      }
+                      void openPropertiesModal("node", quickEditNodeId);
                     }}
                     className={`flex items-center gap-0.5 rounded-md border border-black/10 bg-white/90 px-2 py-1 text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                    title="Edit all fields for this node"
-                    aria-label="Edit all fields for this node"
+                    title={quickEditTargetType === "book" ? "Open book properties" : "Open node properties"}
+                    aria-label={quickEditTargetType === "book" ? "Open book properties" : "Open node properties"}
                   >
                     <Pencil className="h-3 w-3" />
                     <Pencil className="h-3 w-3" />
@@ -14930,10 +15708,16 @@ function ScripturesContent() {
                       normalizedLineLabel.includes("sequence") ||
                       normalizedLineField.includes("title") ||
                       normalizedLineField.includes("sequence"));
+                  const forceMultilineForBookContent =
+                    quickEditTargetType === "book" &&
+                    (fieldPath === "content_data.basic.sanskrit" ||
+                      fieldPath === "content_data.basic.transliteration" ||
+                      fieldPath === "content_data.basic.translation");
                   const shouldUseMultilineInput =
                     Boolean(fieldPath) &&
                     !selectOptions &&
-                    isPreviewQuickEditMultiLineField(fieldPath as string) &&
+                    (forceMultilineForBookContent ||
+                      isPreviewQuickEditMultiLineField(fieldPath as string)) &&
                     !isExplicitSingleLineField;
                   const useSingleLineInput =
                     fieldPath
@@ -14972,8 +15756,8 @@ function ScripturesContent() {
                               });
                             }}
                             className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                            aria-label="Edit field"
-                            title="Edit field"
+                            aria-label={previewQuickEditFieldTooltip(fieldPath, line.label)}
+                            title={previewQuickEditFieldTooltip(fieldPath, line.label)}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -15040,6 +15824,73 @@ function ScripturesContent() {
               </div>
             );
           })()}
+          {quickEditTargetType === "book" &&
+            canEditCurrentBook &&
+            typeof quickEditNodeId === "number" &&
+            nonTranslationLines.length === 0 &&
+            translationLines.length === 0 && (
+            <div className="mt-0.5 rounded-md border border-dashed border-black/15 bg-white/70 px-2 py-1.5">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+                Book Content
+              </div>
+              <div className="flex items-center gap-1">
+                {[
+                  {
+                    fieldPath: "content_data.basic.sanskrit",
+                    shortLabel: "SA",
+                    label: "Book Content (Sanskrit)",
+                    value:
+                      typeof block.content.sanskrit === "string" ? block.content.sanskrit : "",
+                  },
+                  {
+                    fieldPath: "content_data.basic.transliteration",
+                    shortLabel: "TR",
+                    label: "Book Content (Transliteration)",
+                    value:
+                      typeof block.content.transliteration === "string"
+                        ? block.content.transliteration
+                        : "",
+                  },
+                  {
+                    fieldPath: "content_data.basic.translation",
+                    shortLabel: "EN",
+                    label: "Book Content (Translation)",
+                    value:
+                      typeof block.content.english === "string" ? block.content.english : "",
+                  },
+                ].map((field) => {
+                  const isActiveField =
+                    previewQuickEditDraft?.nodeId === quickEditNodeId &&
+                    previewQuickEditDraft?.fieldPath === field.fieldPath;
+                  if (!showQuickEditAffordances && !isActiveField) {
+                    return null;
+                  }
+                  return (
+                    <button
+                      key={`${blockGestureKey}-${field.fieldPath}-empty-book`}
+                      type="button"
+                      onClick={() => {
+                        setPreviewQuickEditDraft({
+                          nodeId: quickEditNodeId,
+                          targetType: "book",
+                          fieldPath: field.fieldPath,
+                          lineKey: `${blockGestureKey}-${field.fieldPath}-empty-book`,
+                          value: field.value,
+                          saving: false,
+                          error: null,
+                        });
+                      }}
+                      className={`rounded-md border border-black/10 bg-white/90 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${isActiveField ? "border-[color:var(--accent)]/40 text-[color:var(--accent)]" : previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                      aria-label={`Edit ${field.label}`}
+                      title={field.label}
+                    >
+                      {field.shortLabel}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {wordMeaningsEnabledForPreviewBlock &&
             (wordMeaningRows.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) &&
             appliedPreviewWordMeaningsDisplayMode !== "hide" && (
@@ -15201,10 +16052,16 @@ function ScripturesContent() {
                       normalizedLineLabel.includes("sequence") ||
                       normalizedLineField.includes("title") ||
                       normalizedLineField.includes("sequence"));
+                  const forceMultilineForBookContent =
+                    quickEditTargetType === "book" &&
+                    (fieldPath === "content_data.basic.sanskrit" ||
+                      fieldPath === "content_data.basic.transliteration" ||
+                      fieldPath === "content_data.basic.translation");
                   const shouldUseMultilineInput =
                     Boolean(fieldPath) &&
                     !selectOptions &&
-                    isPreviewQuickEditMultiLineField(fieldPath as string) &&
+                    (forceMultilineForBookContent ||
+                      isPreviewQuickEditMultiLineField(fieldPath as string)) &&
                     !isExplicitSingleLineField;
                   const useSingleLineInput =
                     fieldPath
@@ -15243,8 +16100,8 @@ function ScripturesContent() {
                               });
                             }}
                             className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                            aria-label="Edit field"
-                            title="Edit field"
+                            aria-label={previewQuickEditFieldTooltip(fieldPath, line.label)}
+                            title={previewQuickEditFieldTooltip(fieldPath, line.label)}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -17859,40 +18716,24 @@ function ScripturesContent() {
                 <>
                   <div className="mb-3 flex items-center justify-between">
                     <div className="min-w-0 flex-1">
-                      {bookInlineEditMode ? (
-                        <input
-                          type="text"
-                          value={bookInlineName}
-                          onChange={(event) => setBookInlineName(event.target.value)}
-                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-2xl font-[var(--font-display)] text-[color:var(--deep)] outline-none focus:border-[color:var(--accent)]"
-                          aria-label="Book name"
-                        />
-                      ) : (
-                        <p className="truncate font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                          {currentBook.book_name}
-                        </p>
-                      )}
+                      <p className="truncate font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
+                        {currentBook.book_name}
+                      </p>
                     </div>
                     <div className="ml-3 flex flex-wrap items-center gap-2">
-                      {bookInlineEditMode && canEditCurrentBook && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => void handleSaveBookInlineEdit()}
-                            disabled={bookInlineSubmitting}
-                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {bookInlineSubmitting ? "Saving..." : "Save"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleCancelBookInlineEdit}
-                            disabled={bookInlineSubmitting}
-                            className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </>
+                      {canEditCurrentBook && !bookContentInlineMode && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBrowseDetailsTab("content");
+                            handleStartBookContentEdit();
+                          }}
+                          title="Edit content"
+                          aria-label="Edit content"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          <Pencil size={14} />
+                        </button>
                       )}
                       <div className="flex items-center gap-1 border-l pl-2 border-black/10">
                         <button
@@ -17909,7 +18750,7 @@ function ScripturesContent() {
                             const first = getFirstNodeInOrder();
                             if (first) selectNode(first.id);
                           }}
-                          disabled={bookInlineEditMode || !getFirstNodeInOrder()}
+                          disabled={!getFirstNodeInOrder()}
                           title="Next item"
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
                         >
@@ -17936,18 +18777,6 @@ function ScripturesContent() {
                           </button>
                           {showBookRootActionsMenu && (
                             <div className="absolute left-1/2 z-40 mt-2 w-[min(15rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl border border-black/10 bg-white p-1 shadow-xl sm:left-auto sm:right-0 sm:translate-x-0 sm:w-56">
-                              {canEditCurrentBook && !bookInlineEditMode && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleStartBookInlineEdit();
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Pencil size={14} />
-                                  Edit book name
-                                </button>
-                              )}
                               {canPreviewCurrentBook && (
                                 <button
                                   type="button"
@@ -18102,86 +18931,500 @@ function ScripturesContent() {
                     </div>
                   </div>
 
-                  {(() => {
-                    const thumbUrl = getBookThumbnailUrl(currentBook);
-                    return thumbUrl ? (
-                      <div className="overflow-hidden rounded-2xl border border-black/10">
-                        <img
-                          src={thumbUrl}
-                          alt={currentBook.book_name}
-                          className="h-48 w-full object-cover"
-                        />
-                      </div>
-                    ) : null;
-                  })()}
-
-                  <details
-                    open={bookInfoStatsOpen}
-                    onToggle={(e) => setBookInfoStatsOpen((e.currentTarget as HTMLDetailsElement).open)}
-                    className="rounded-2xl border border-black/10 bg-white/90"
-                  >
-                    <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
-                      Book Statistics
-                      <span className="text-zinc-400">{bookInfoStatsOpen ? "▾" : "▸"}</span>
-                    </summary>
-                    <div className="flex flex-col gap-2.5 px-4 pb-3">
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
-                          <div className="mt-1 text-sm text-zinc-700">
-                            {(currentBook.visibility || "private") === "public" ? "Public" : "Private"}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
-                          <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
-                        </div>
-                      </div>
-                      {currentBook.schema?.levels?.length ? (
-                        <div>
-                          <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">Level Counts</div>
-                          <div className="flex flex-col gap-1">
-                            {currentBook.schema.levels.map((level) => {
-                              const displayName = getDisplayLevelName(level) || level;
-                              const count = bookNodeLevelCounts[level] ?? 0;
-                              return (
-                                <div
-                                  key={`stat-${level}`}
-                                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
-                                >
-                                  <span className="text-zinc-600">{displayName}</span>
-                                  <span className="font-medium tabular-nums text-zinc-900">
-                                    {count.toLocaleString()}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : null}
+                  <div className="flex flex-col gap-5">
+                    <div className="inline-flex w-fit rounded-full border border-black/10 bg-white/90 p-1">
+                      {[
+                        { key: "overview", label: "Overview" },
+                        { key: "content", label: "Content" },
+                        { key: "properties", label: "Properties" },
+                      ].map((tab) => (
+                        <button
+                          key={`book-tab-${tab.key}`}
+                          type="button"
+                          onClick={() => setBrowseDetailsTab(tab.key as "overview" | "content" | "properties")}
+                          className={`rounded-full px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] transition ${
+                            browseDetailsTab === tab.key
+                              ? "bg-[color:var(--accent)] text-white"
+                              : "text-zinc-600 hover:text-zinc-800"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
                     </div>
-                  </details>
 
-                  {Object.keys(currentBook.variant_authors ?? {}).length > 0 ? (
-                    <details
-                      open={bookInfoAuthorsOpen}
-                      onToggle={(e) => setBookInfoAuthorsOpen((e.currentTarget as HTMLDetailsElement).open)}
-                      className="rounded-2xl border border-black/10 bg-white/90"
+                    {browseDetailsTab === "overview" && (
+                    <BrowseSection
+                      title="Overview"
+                      description="Structural context and registry information for this book."
                     >
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
-                        Author Registry
-                        <span className="text-zinc-400">{bookInfoAuthorsOpen ? "▾" : "▸"}</span>
-                      </summary>
-                      <div className="flex flex-col gap-1 px-4 pb-3">
-                        {Object.entries(currentBook.variant_authors ?? {}).map(([slug, name]) => (
-                          <div key={slug} className="flex items-baseline gap-3 rounded-lg bg-zinc-50 px-3 py-1.5 text-sm">
-                            <span className="font-medium text-zinc-900">{name}</span>
-                            <span className="font-mono text-xs text-zinc-400">{slug}</span>
+                      {(() => {
+                        const thumbUrl = getBookThumbnailUrl(currentBook);
+                        return thumbUrl ? (
+                          <div className="overflow-hidden rounded-2xl border border-black/10">
+                            <img
+                              src={thumbUrl}
+                              alt={currentBook.book_name}
+                              className="h-48 w-full object-cover"
+                            />
                           </div>
-                        ))}
-                      </div>
-                    </details>
-                  ) : null}
+                        ) : null;
+                      })()}
+
+                      <details
+                        open={bookInfoStatsOpen}
+                        onToggle={(e) => setBookInfoStatsOpen((e.currentTarget as HTMLDetailsElement).open)}
+                        className="rounded-2xl border border-black/10 bg-white/90"
+                      >
+                        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                          Book Statistics
+                          <span className="text-zinc-400">{bookInfoStatsOpen ? "▾" : "▸"}</span>
+                        </summary>
+                        <div className="flex flex-col gap-2.5 px-4 pb-3">
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Visibility</div>
+                              <div className="mt-1 text-sm text-zinc-700">
+                                {(currentBook.visibility || "private") === "public" ? "Public" : "Private"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
+                              <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
+                            </div>
+                          </div>
+                          {currentBook.schema?.levels?.length ? (
+                            <div>
+                              <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">Level Counts</div>
+                              <div className="flex flex-col gap-1">
+                                {currentBook.schema.levels.map((level) => {
+                                  const displayName = getDisplayLevelName(level) || level;
+                                  const count = bookNodeLevelCounts[level] ?? 0;
+                                  return (
+                                    <div
+                                      key={`stat-${level}`}
+                                      className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
+                                    >
+                                      <span className="text-zinc-600">{displayName}</span>
+                                      <span className="font-medium tabular-nums text-zinc-900">
+                                        {count.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </details>
+
+                      {Object.keys(currentBook.variant_authors ?? {}).length > 0 ? (
+                        <details
+                          open={bookInfoAuthorsOpen}
+                          onToggle={(e) => setBookInfoAuthorsOpen((e.currentTarget as HTMLDetailsElement).open)}
+                          className="rounded-2xl border border-black/10 bg-white/90"
+                        >
+                          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500 select-none [&::-webkit-details-marker]:hidden">
+                            Author Registry
+                            <span className="text-zinc-400">{bookInfoAuthorsOpen ? "▾" : "▸"}</span>
+                          </summary>
+                          <div className="flex flex-col gap-1 px-4 pb-3">
+                            {Object.entries(currentBook.variant_authors ?? {}).map(([slug, name]) => (
+                              <div key={slug} className="flex items-baseline gap-3 rounded-lg bg-zinc-50 px-3 py-1.5 text-sm">
+                                <span className="font-medium text-zinc-900">{name}</span>
+                                <span className="font-mono text-xs text-zinc-400">{slug}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </BrowseSection>
+                    )}
+
+                    {browseDetailsTab === "content" && (
+                      <BrowseSection
+                        title="Content"
+                        description="Primary content for this book root."
+                        action={canEditCurrentBook ? (
+                          bookContentInlineMode ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleSaveBookContentEdit()}
+                                disabled={bookContentInlineSubmitting}
+                                className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {bookContentInlineSubmitting ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelBookContentEdit}
+                                disabled={bookContentInlineSubmitting}
+                                className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : null
+                        ) : null}
+                      >
+                        {bookContentInlineMessage && (
+                          <div className={`rounded-lg border px-3 py-2 text-sm ${
+                            bookContentInlineMessage.toLowerCase().includes("saved")
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-red-200 bg-red-50 text-red-700"
+                          }`}>{bookContentInlineMessage}</div>
+                        )}
+                        {bookContentInlineMode && canEditCurrentBook ? (
+                          <div className="flex flex-col gap-3 rounded-2xl border border-black/10 bg-white/90 p-4">
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
+                              </label>
+                              <div className="group relative mt-1">
+                                <textarea
+                                  rows={3}
+                                  value={bookContentInlineSanskrit}
+                                  onChange={(e) => setBookContentInlineSanskrit(e.target.value)}
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <InlineClearButton
+                                  visible={Boolean(bookContentInlineSanskrit)}
+                                  onClear={() => setBookContentInlineSanskrit("")}
+                                  ariaLabel="Clear Sanskrit"
+                                  position="top"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
+                              </label>
+                              <div className="group relative mt-1">
+                                <textarea
+                                  rows={3}
+                                  value={transliterationDisplayValue(bookContentInlineTransliteration)}
+                                  onChange={(e) =>
+                                    setBookContentInlineTransliteration(
+                                      transliterationInputToIast(e.target.value)
+                                    )
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                />
+                                <InlineClearButton
+                                  visible={Boolean(bookContentInlineTransliteration)}
+                                  onClear={() => setBookContentInlineTransliteration("")}
+                                  ariaLabel="Clear Transliteration"
+                                  position="top"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                                {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                  <label key={`book-content-lang-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={bookContentInlineSelectedLanguages.includes(language)}
+                                      onChange={(e) => {
+                                        const next = e.target.checked
+                                          ? [...bookContentInlineSelectedLanguages, language]
+                                          : bookContentInlineSelectedLanguages.filter((l) => l !== language);
+                                        setBookContentInlineSelectedLanguages(
+                                          normalizeSelectedEditableTranslationLanguages(next, sourceLanguage)
+                                        );
+                                      }}
+                                    />
+                                    {translationLanguageLabel(language)}
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="mt-2 flex flex-col gap-2">
+                                {bookContentInlineSelectedLanguages.map((language) => (
+                                  <div key={`book-content-translation-${language}`}>
+                                    <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                                      {translationLanguageLabel(language)} Translation
+                                    </label>
+                                    <div className="group relative mt-1">
+                                      <textarea
+                                        rows={3}
+                                        value={bookContentInlineTranslationDrafts[language] || ""}
+                                        onChange={(e) =>
+                                          setBookContentInlineTranslationDrafts((prev) => ({
+                                            ...prev,
+                                            [language]: e.target.value,
+                                          }))
+                                        }
+                                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <InlineClearButton
+                                        visible={Boolean((bookContentInlineTranslationDrafts[language] || "").trim())}
+                                        onClear={() =>
+                                          setBookContentInlineTranslationDrafts((prev) => ({
+                                            ...prev,
+                                            [language]: "",
+                                          }))
+                                        }
+                                        ariaLabel={`Clear ${translationLanguageLabel(language)} translation`}
+                                        position="top"
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                  Translation Variants By Author ({bookContentInlineTranslationVariants.length})
+                                </summary>
+                                <div className="mt-2 flex flex-col gap-2">
+                                  {bookContentInlineTranslationVariants.map((entry, index) => (
+                                    <div key={`book-tv-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                      <label className="mb-2 flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                        <select
+                                          value={entry.author_slug}
+                                          onChange={(e) =>
+                                            setBookContentInlineTranslationVariants((prev) =>
+                                              prev.map((item, i) =>
+                                                i === index
+                                                  ? applyVariantAuthorSelection(item, e.target.value, currentBook)
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                        >
+                                          <option value="">
+                                            {getVariantAuthorOptions(currentBook, entry).length > 0
+                                              ? "Select author"
+                                              : "No authors in registry"}
+                                          </option>
+                                          {getVariantAuthorOptions(currentBook, entry).map((opt) => (
+                                            <option key={opt.slug} value={opt.slug}>{opt.name}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <label className="flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                        <select
+                                          value={entry.language}
+                                          onChange={(e) =>
+                                            setBookContentInlineTranslationVariants((prev) =>
+                                              prev.map((item, i) =>
+                                                i === index
+                                                  ? applyVariantLanguageSelection(item, e.target.value, "translation")
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                        >
+                                          <option value="">Select language</option>
+                                          {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((l) => (
+                                            <option key={l} value={l}>{translationLanguageLabel(l)}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <textarea
+                                        value={entry.text}
+                                        onChange={(e) =>
+                                          setBookContentInlineTranslationVariants((prev) =>
+                                            prev.map((item, i) => (i === index ? { ...item, text: e.target.value } : item))
+                                          )
+                                        }
+                                        placeholder="Variant translation text"
+                                        rows={3}
+                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <div className="mt-2 flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setBookContentInlineTranslationVariants((prev) =>
+                                              prev.filter((_, i) => i !== index)
+                                            )
+                                          }
+                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setBookContentInlineTranslationVariants((prev) => [
+                                        ...prev,
+                                        buildEmptyAuthorVariantDraft(),
+                                      ])
+                                    }
+                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                  >
+                                    Add Translation Variant
+                                  </button>
+                                </div>
+                              </details>
+
+                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                  Commentary Variants By Author ({bookContentInlineCommentaryVariants.length})
+                                </summary>
+                                <div className="mt-2 flex flex-col gap-2">
+                                  {bookContentInlineCommentaryVariants.map((entry, index) => (
+                                    <div key={`book-cv-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                      <label className="mb-2 flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                        <select
+                                          value={entry.author_slug}
+                                          onChange={(e) =>
+                                            setBookContentInlineCommentaryVariants((prev) =>
+                                              prev.map((item, i) =>
+                                                i === index
+                                                  ? applyVariantAuthorSelection(item, e.target.value, currentBook)
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                        >
+                                          <option value="">
+                                            {getVariantAuthorOptions(currentBook, entry).length > 0
+                                              ? "Select author"
+                                              : "No authors in registry"}
+                                          </option>
+                                          {getVariantAuthorOptions(currentBook, entry).map((opt) => (
+                                            <option key={opt.slug} value={opt.slug}>{opt.name}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <label className="flex flex-col gap-1">
+                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                        <select
+                                          value={entry.language}
+                                          onChange={(e) =>
+                                            setBookContentInlineCommentaryVariants((prev) =>
+                                              prev.map((item, i) =>
+                                                i === index
+                                                  ? applyVariantLanguageSelection(item, e.target.value, "commentary")
+                                                  : item
+                                              )
+                                            )
+                                          }
+                                          className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                        >
+                                          <option value="">Select language</option>
+                                          {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((l) => (
+                                            <option key={l} value={l}>{translationLanguageLabel(l)}</option>
+                                          ))}
+                                        </select>
+                                      </label>
+                                      <textarea
+                                        value={entry.text}
+                                        onChange={(e) =>
+                                          setBookContentInlineCommentaryVariants((prev) =>
+                                            prev.map((item, i) => (i === index ? { ...item, text: e.target.value } : item))
+                                          )
+                                        }
+                                        placeholder="Variant commentary text"
+                                        rows={3}
+                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                      />
+                                      <div className="mt-2 flex justify-end">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setBookContentInlineCommentaryVariants((prev) =>
+                                              prev.filter((_, i) => i !== index)
+                                            )
+                                          }
+                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setBookContentInlineCommentaryVariants((prev) => [
+                                        ...prev,
+                                        buildEmptyAuthorVariantDraft(),
+                                      ])
+                                    }
+                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                  >
+                                    Add Commentary Variant
+                                  </button>
+                                </div>
+                              </details>
+                            </div>
+                          </div>
+                        ) : (
+                          renderBrowseContentData(currentBook.content_data, "book") || (
+                            <div className="rounded-2xl border border-dashed border-black/10 bg-white/70 px-4 py-5 text-sm text-zinc-500">
+                              No book-root content yet.
+                            </div>
+                          )
+                        )}
+                      </BrowseSection>
+                    )}
+
+                    {browseDetailsTab === "properties" && (
+                    <BrowseSection
+                      title="Properties"
+                      description="Read-only metadata summary with the existing book properties editor behind the same action."
+                      action={canEditCurrentBook ? (
+                        <button
+                          type="button"
+                          onClick={() => void openPropertiesModal("book")}
+                          className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          <SlidersHorizontal size={14} />
+                          Open
+                        </button>
+                      ) : null}
+                    >
+                      {(() => {
+                        const metadata = getBookMetadataObject(currentBook);
+                        const titleEnglish = formatValue(metadata?.title_english) || currentBook.title_english || currentBook.book_name;
+                        const titleSanskrit = formatValue(metadata?.title_sanskrit) || currentBook.title_sanskrit;
+                        const titleTransliteration =
+                          formatValue(metadata?.title_transliteration) || currentBook.title_transliteration;
+                        const description = formatValue(metadata?.description);
+                        return (
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (English)</div>
+                              <div className="mt-1 text-sm text-zinc-700">{titleEnglish || "Not set"}</div>
+                            </div>
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (Sanskrit)</div>
+                              <div className="mt-1 text-sm text-zinc-700">{titleSanskrit || "Not set"}</div>
+                            </div>
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (Transliteration)</div>
+                              <div className="mt-1 text-sm text-zinc-700">{titleTransliteration || "Not set"}</div>
+                            </div>
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Schema</div>
+                              <div className="mt-1 text-sm text-zinc-700">{currentBook.schema?.name || "Not set"}</div>
+                            </div>
+                            <div className="rounded-2xl border border-black/10 bg-white/90 p-3 md:col-span-2">
+                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Description</div>
+                              <div className="mt-1 whitespace-pre-wrap text-sm text-zinc-700">{description || "Not set"}</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </BrowseSection>
+                    )}
+                  </div>
                 </>
               ) : selectedId && nodeContent ? (
                 <>
@@ -18213,39 +19456,21 @@ function ScripturesContent() {
                       )}
                       {canEditCurrentBook && (
                         <>
-                          {inlineEditMode ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => void handleInlineSave()}
-                                disabled={
-                                  inlineSubmitting ||
-                                  !inlineHasChanges ||
-                                  inlineWordMeaningValidationErrors.length > 0
-                                }
-                                className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {inlineSubmitting ? "Saving..." : "Save"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleCancelInlineEdit}
-                                disabled={inlineSubmitting}
-                                className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                Cancel
-                              </button>
-                            </>
-                          ) : (
+                          {!inlineEditMode ? (
                             <button
                               type="button"
-                              onClick={handleStartInlineEdit}
+                              onClick={() => {
+                                setBrowseDetailsTab("content");
+                                handleStartInlineEdit();
+                              }}
                               disabled={inlineSubmitting}
-                              className="rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              title="Edit content"
+                              aria-label="Edit content"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-black/10 bg-white/90 text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              Edit details
+                              <Pencil size={14} />
                             </button>
-                          )}
+                          ) : null}
                         </>
                       )}
                       <div className="flex items-center gap-1 border-l pl-2 border-black/10">
@@ -18253,9 +19478,13 @@ function ScripturesContent() {
                           type="button"
                           onClick={() => {
                             const prev = getPreviousSibling();
-                            if (prev) selectNode(prev.id);
+                            if (prev) {
+                              selectNode(prev.id);
+                            } else {
+                              selectNode(BOOK_ROOT_NODE_ID);
+                            }
                           }}
-                          disabled={inlineHasChanges || !getPreviousSibling()}
+                          disabled={inlineHasChanges || !selectedId}
                           title="Previous item"
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-300/30 bg-zinc-50/80 text-sm text-zinc-600 transition disabled:opacity-40 disabled:cursor-not-allowed hover:enabled:border-zinc-500/60 hover:enabled:shadow-md"
                         >
@@ -18485,41 +19714,6 @@ function ScripturesContent() {
                               {canEditCurrentBook && (
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setShowNodeActionsMenu(false);
-                                    if (!nodeContent) return;
-                                    const foundNode = findNodeById(treeData, selectedId);
-                                    const fallbackNode: TreeNode = foundNode || {
-                                      id: nodeContent.id,
-                                      level_name: nodeContent.level_name,
-                                      level_order: nodeContent.level_order,
-                                      sequence_number: nodeContent.sequence_number ?? null,
-                                      title_english: nodeContent.title_english ?? null,
-                                      title_sanskrit: nodeContent.title_sanskrit ?? null,
-                                      title_transliteration: nodeContent.title_transliteration ?? null,
-                                      children: [],
-                                    };
-                                    setActionNode(fallbackNode);
-                                    setCreateParentNodeIdOverride(null);
-                                    setCreateInsertAfterNodeId(null);
-                                    setFormData(buildFormDataFromNode(nodeContent));
-                                    const translationState = buildTranslationEditorStateFromNode(nodeContent);
-                                    setModalTranslationDrafts(translationState.drafts);
-                                    setModalSelectedTranslationLanguages(translationState.selectedLanguages);
-                                    const variantState = buildVariantEditorStateFromNode(nodeContent);
-                                    setModalTranslationVariants(variantState.translationVariants);
-                                    setModalCommentaryVariants(variantState.commentaryVariants);
-                                    setAction("edit");
-                                  }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50"
-                                >
-                                  <Pencil size={14} />
-                                  {activeNodeEditLabel}
-                                </button>
-                              )}
-                              {canEditCurrentBook && (
-                                <button
-                                  type="button"
                                   onClick={async () => {
                                     setShowNodeActionsMenu(false);
                                     if (
@@ -18558,850 +19752,482 @@ function ScripturesContent() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-3.5">
-                    {preferences && (
-                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                            Display preferences
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setShowPreferencesDialog(true)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-                          >
-                            <SlidersHorizontal size={14} />
-                            Open
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex flex-col gap-5">
+                    <div className="inline-flex w-fit rounded-full border border-black/10 bg-white/90 p-1">
+                      {[
+                        { key: "overview", label: "Overview" },
+                        { key: "content", label: "Content" },
+                        { key: "properties", label: "Properties" },
+                      ].map((tab) => (
+                        <button
+                          key={`node-tab-${tab.key}`}
+                          type="button"
+                          onClick={() => setBrowseDetailsTab(tab.key as "overview" | "content" | "properties")}
+                          className={`rounded-full px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] transition ${
+                            browseDetailsTab === tab.key
+                              ? "bg-[color:var(--accent)] text-white"
+                              : "text-zinc-600 hover:text-zinc-800"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
 
-                    {Object.keys(selectedNodeDescendantLevelCounts).length > 0 && (
-                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
-                        <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                          Level Counts
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          {[
-                            ...currentBookSchemaLevels.filter((level) => selectedNodeDescendantLevelCounts[level] != null),
-                            ...Object.keys(selectedNodeDescendantLevelCounts).filter(
-                              (level) => !currentBookSchemaLevels.includes(level)
-                            ),
-                          ].map((level) => {
-                            const count = selectedNodeDescendantLevelCounts[level] ?? 0;
-                            return (
-                              <div
-                                key={`node-stat-${selectedId}-${level}`}
-                                className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
-                              >
-                                <span className="text-zinc-600">{getDisplayLevelName(level) || level}</span>
-                                <span className="font-medium tabular-nums text-zinc-900">
-                                  {count.toLocaleString()}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {nodeContent === null && showMedia && (bookMediaItems.length > 0 || canEditCurrentBook) && (
-                      <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
-                        <div className="mb-1.5 flex items-center justify-between gap-2">
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                            Book multimedia
-                          </div>
-                          {canEditCurrentBook && (
+                    {browseDetailsTab === "overview" && (
+                    <BrowseSection
+                      title="Overview"
+                      description="Read-only context for the selected node."
+                    >
+                      {preferences && (
+                        <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                              Display preferences
+                            </div>
                             <button
                               type="button"
-                              onClick={() => {
-                                setMediaManagerScope("book");
-                                setShowMediaManagerModal(true);
-                              }}
-                              disabled={bookThumbnailUploading || mediaBankUploading || mediaBankUpdating}
-                              className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              onClick={() => setShowPreferencesDialog(true)}
+                              className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
                             >
-                              {bookThumbnailUploading || mediaBankUploading || mediaBankUpdating
-                                ? "Working..."
-                                : "Manage multimedia"}
+                              <SlidersHorizontal size={14} />
+                              Open
                             </button>
-                          )}
-                        </div>
-                        <div className="group relative mb-1.5">
-                          <input
-                            type="text"
-                            value={bookBrowseMediaSearchQuery}
-                            onChange={(event) => setBookBrowseMediaSearchQuery(event.target.value)}
-                            placeholder="Filter media"
-                            className="w-full rounded-lg border border-black/10 bg-white px-3 py-1.5 pr-10 text-xs outline-none focus:border-[color:var(--accent)]"
-                          />
-                          <InlineClearButton
-                            visible={Boolean(bookBrowseMediaSearchQuery)}
-                            onClear={() => setBookBrowseMediaSearchQuery("")}
-                            ariaLabel="Clear book media filter"
-                          />
-                        </div>
-                        {propertiesMessage && (
-                          <p className="mb-2 text-xs text-zinc-600">{propertiesMessage}</p>
-                        )}
-                        {propertiesError && (
-                          <p className="mb-2 text-xs text-red-600">{propertiesError}</p>
-                        )}
-                        {bookMediaItems.length > 0 ? (
-                          <div className="flex flex-col gap-2.5">
-                            {Object.entries(
-                              bookMediaItems.reduce<Record<string, BookMediaItem[]>>((acc, item) => {
-                                const key = item.media_type || "other";
-                                if (!acc[key]) {
-                                  acc[key] = [];
-                                }
-                                acc[key].push(item);
-                                return acc;
-                              }, {})
-                            )
-                              .sort(([a], [b]) => a.localeCompare(b))
-                              .map(([mediaType, items]) => {
-                                const filteredItems = items.filter((media) =>
-                                  bookMediaMatchesSearch(media, bookBrowseMediaSearchQuery)
-                                );
-                                if (filteredItems.length === 0) {
-                                  return null;
-                                }
-
-                                return (
-                                  <div key={mediaType} className="rounded-xl border border-black/10 bg-white p-2.5">
-                                    <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500">
-                                      {mediaType}
-                                    </div>
-                                    <div className="flex flex-col gap-2">
-                                      {filteredItems.map((media, index) => {
-                                        const label = getBookMediaLabel(media);
-                                        return (
-                                          <div
-                                            key={`${media.media_type}:${media.url}:${media.asset_id || index}`}
-                                            className="rounded-lg border border-black/10 bg-zinc-50/40 p-2"
-                                          >
-                                            {renderInlineMediaPreview(media.media_type, media.url, label)}
-                                            <div className="mt-1.5 text-xs text-zinc-500">{label}</div>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                );
-                              })}
                           </div>
-                        ) : (
-                          <p className="text-sm text-zinc-500">No multimedia attached to this book.</p>
-                        )}
-                      </div>
+                        </div>
+                      )}
+
+                      {Object.keys(selectedNodeDescendantLevelCounts).length > 0 && (
+                        <div className="rounded-2xl border border-black/10 bg-white/90 p-3">
+                          <div className="mb-1.5 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                            Level Counts
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            {[
+                              ...currentBookSchemaLevels.filter((level) => selectedNodeDescendantLevelCounts[level] != null),
+                              ...Object.keys(selectedNodeDescendantLevelCounts).filter(
+                                (level) => !currentBookSchemaLevels.includes(level)
+                              ),
+                            ].map((level) => {
+                              const count = selectedNodeDescendantLevelCounts[level] ?? 0;
+                              return (
+                                <div
+                                  key={`node-stat-${selectedId}-${level}`}
+                                  className="flex items-center justify-between rounded-lg bg-zinc-50 px-3 py-1 text-sm"
+                                >
+                                  <span className="text-zinc-600">{getDisplayLevelName(level) || level}</span>
+                                  <span className="font-medium tabular-nums text-zinc-900">
+                                    {count.toLocaleString()}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </BrowseSection>
                     )}
 
-
-
-                    {/* Titles (hide for verses) */}
-                    {inlineMessage && (
-                      <div
-                        className={`rounded-lg border px-3 py-2 text-sm ${
-                          inlineMessage.toLowerCase().includes("saved")
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-red-200 bg-red-50 text-red-700"
-                        }`}
+                    {browseDetailsTab === "content" && (
+                      <BrowseSection
+                        title="Content"
+                        description="Primary content for this node."
+                        action={canEditCurrentBook ? (
+                          inlineEditMode ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void handleInlineSave()}
+                                disabled={
+                                  inlineSubmitting ||
+                                  !inlineHasChanges ||
+                                  inlineWordMeaningValidationErrors.length > 0
+                                }
+                                className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {inlineSubmitting ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCancelInlineEdit}
+                                disabled={inlineSubmitting}
+                                className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : null
+                        ) : null}
                       >
-                        {inlineMessage}
-                      </div>
-                    )}
-
-                    {inlineEditMode && canEditCurrentBook && (
-                      <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                          <div>
-                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Level Name</label>
-                            <select
-                              value={inlineFormData.levelName}
-                              onChange={(event) =>
-                                setInlineFormData((prev) => ({ ...prev, levelName: event.target.value }))
-                              }
-                              className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                              required
-                            >
-                              <option value="">Select level</option>
-                              {currentBook?.schema?.levels?.map((level) => (
-                                <option key={level} value={level}>
-                                  {getDisplayLevelName(level)}
-                                </option>
-                              ))}
-                            </select>
+                        {inlineMessage && (
+                          <div
+                            className={`rounded-lg border px-3 py-2 text-sm ${
+                              inlineMessage.toLowerCase().includes("saved")
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-red-200 bg-red-50 text-red-700"
+                            }`}
+                          >
+                            {inlineMessage}
                           </div>
-                          <div>
-                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Sequence Number</label>
-                            <input
-                              type="text"
-                              value={inlineFormData.sequenceNumber}
-                              onChange={(event) =>
-                                setInlineFormData((prev) => ({ ...prev, sequenceNumber: event.target.value }))
-                              }
-                              className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (English)</label>
-                          <div className="group relative mt-1">
-                            <input
-                              type="text"
-                              value={inlineFormData.titleEnglish}
-                              onChange={(event) =>
-                                setInlineFormData((prev) => ({ ...prev, titleEnglish: event.target.value }))
-                              }
-                              className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                            />
-                            <InlineClearButton
-                              visible={Boolean(inlineFormData.titleEnglish)}
-                              onClear={() => setInlineFormData((prev) => ({ ...prev, titleEnglish: "" }))}
-                              ariaLabel="Clear inline title English"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                          <div>
-                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (Sanskrit)</label>
-                            <div className="group relative mt-1">
+                        )}
+                        {inlineEditMode && canEditCurrentBook ? (
+                          <div className="flex flex-col gap-3 rounded-2xl border border-black/10 bg-white/90 p-4">
+                            <label className="flex items-center gap-2 text-sm text-zinc-700">
                               <input
-                                type="text"
-                                value={inlineFormData.titleSanskrit}
+                                type="checkbox"
+                                checked={inlineFormData.hasContent}
                                 onChange={(event) =>
-                                  setInlineFormData((prev) => ({ ...prev, titleSanskrit: event.target.value }))
+                                  setInlineFormData((prev) => ({ ...prev, hasContent: event.target.checked }))
                                 }
-                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                className="rounded border-black/10"
                               />
-                              <InlineClearButton
-                                visible={Boolean(inlineFormData.titleSanskrit)}
-                                onClear={() =>
-                                  setInlineFormData((prev) => ({ ...prev, titleSanskrit: "" }))
-                                }
-                                ariaLabel="Clear inline title Sanskrit"
-                              />
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                              Title (Transliteration)
+                              Has content
                             </label>
-                            <div className="group relative mt-1">
-                              <input
-                                type="text"
-                                value={transliterationDisplayValue(inlineFormData.titleTransliteration)}
-                                onChange={(event) =>
-                                  setInlineFormData((prev) => ({
-                                    ...prev,
-                                    titleTransliteration: transliterationInputToIast(event.target.value),
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                              />
-                              <InlineClearButton
-                                visible={Boolean(inlineFormData.titleTransliteration)}
-                                onClear={() =>
-                                  setInlineFormData((prev) => ({ ...prev, titleTransliteration: "" }))
-                                }
-                                ariaLabel="Clear inline title transliteration"
-                              />
-                            </div>
-                          </div>
-                        </div>
 
-                        <label className="flex items-center gap-2 text-sm text-zinc-700">
-                          <input
-                            type="checkbox"
-                            checked={inlineFormData.hasContent}
-                            onChange={(event) =>
-                              setInlineFormData((prev) => ({ ...prev, hasContent: event.target.checked }))
-                            }
-                            className="rounded border-black/10"
-                          />
-                          Has content
-                        </label>
-
-                        {inlineFormData.hasContent && (
-                          <div className="flex flex-col gap-3 rounded-lg border border-black/10 bg-blue-50/30 p-3">
-                            <div>
-                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
-                              </label>
-                              <div className="group relative mt-1">
-                                <textarea
-                                  rows={3}
-                                  value={inlineFormData.contentSanskrit}
-                                  onChange={(event) =>
-                                    setInlineFormData((prev) => ({
-                                      ...prev,
-                                      contentSanskrit: event.target.value,
-                                    }))
-                                  }
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                                />
-                                <InlineClearButton
-                                  visible={Boolean(inlineFormData.contentSanskrit)}
-                                  onClear={() =>
-                                    setInlineFormData((prev) => ({ ...prev, contentSanskrit: "" }))
-                                  }
-                                  ariaLabel="Clear inline content Sanskrit"
-                                  position="top"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
-                              </label>
-                              <div className="group relative mt-1">
-                                <textarea
-                                  rows={3}
-                                  value={transliterationDisplayValue(inlineFormData.contentTransliteration)}
-                                  onChange={(event) =>
-                                    setInlineFormData((prev) => ({
-                                      ...prev,
-                                      contentTransliteration: transliterationInputToIast(event.target.value),
-                                    }))
-                                  }
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                                />
-                                <InlineClearButton
-                                  visible={Boolean(inlineFormData.contentTransliteration)}
-                                  onClear={() =>
-                                    setInlineFormData((prev) => ({
-                                      ...prev,
-                                      contentTransliteration: "",
-                                    }))
-                                  }
-                                  ariaLabel="Clear inline content transliteration"
-                                  position="top"
-                                />
-                              </div>
-                            </div>
-                            <div>
-                              <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
-                              <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
-                                {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                  <label key={`inline-translation-select-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
-                                    <input
-                                      type="checkbox"
-                                      checked={inlineSelectedTranslationLanguages.includes(language)}
-                                      onChange={(event) => {
-                                        const nextValues = event.target.checked
-                                          ? [...inlineSelectedTranslationLanguages, language]
-                                          : inlineSelectedTranslationLanguages.filter((value) => value !== language);
-                                        setInlineSelectedTranslationLanguages(
-                                          normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
-                                        );
-                                      }}
-                                    />
-                                    {translationLanguageLabel(language)}
+                            {inlineFormData.hasContent && (
+                              <>
+                                <div>
+                                  <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
                                   </label>
-                                ))}
-                              </div>
-                              <div className="mt-2 flex flex-col gap-2">
-                                {inlineSelectedTranslationLanguages.map((language) => (
-                                  <div key={`inline-translation-input-${language}`}>
-                                    <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
-                                      {translationLanguageLabel(language)} Translation
-                                    </label>
-                                    <div className="group relative mt-1">
-                                      <textarea
-                                        rows={3}
-                                        value={inlineTranslationDrafts[language] || ""}
-                                        onChange={(event) =>
-                                          setInlineTranslationDrafts((prev) => ({
-                                            ...prev,
-                                            [language]: event.target.value,
-                                          }))
-                                        }
-                                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                                      />
-                                      <InlineClearButton
-                                        visible={Boolean((inlineTranslationDrafts[language] || "").trim())}
-                                        onClear={() =>
-                                          setInlineTranslationDrafts((prev) => ({
-                                            ...prev,
-                                            [language]: "",
-                                          }))
-                                        }
-                                        ariaLabel={`Clear inline ${translationLanguageLabel(language)} translation`}
-                                        position="top"
-                                      />
-                                    </div>
+                                  <div className="group relative mt-1">
+                                    <textarea
+                                      rows={3}
+                                      value={inlineFormData.contentSanskrit}
+                                      onChange={(event) =>
+                                        setInlineFormData((prev) => ({
+                                          ...prev,
+                                          contentSanskrit: event.target.value,
+                                        }))
+                                      }
+                                      className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                    />
+                                    <InlineClearButton
+                                      visible={Boolean(inlineFormData.contentSanskrit)}
+                                      onClear={() =>
+                                        setInlineFormData((prev) => ({ ...prev, contentSanskrit: "" }))
+                                      }
+                                      ariaLabel="Clear inline content Sanskrit"
+                                      position="top"
+                                    />
                                   </div>
-                                ))}
-                              </div>
+                                </div>
 
-                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
-                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
-                                  Translation Variants By Author ({inlineTranslationVariants.length})
-                                </summary>
-                                <div className="mt-2 flex flex-col gap-2">
-                                  {inlineTranslationVariants.map((entry, index) => (
-                                    <div key={`inline-translation-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
-                                      <label className="mb-2 flex flex-col gap-1">
-                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
-                                        <select
-                                          value={entry.author_slug}
-                                          onChange={(event) =>
-                                            setInlineTranslationVariants((prev) =>
-                                              prev.map((item, itemIndex) =>
-                                                itemIndex === index
-                                                  ? applyVariantAuthorSelection(item, event.target.value, currentBook)
-                                                  : item
-                                              )
-                                            )
-                                          }
-                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
-                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                                        >
-                                          <option value="">
-                                            {getVariantAuthorOptions(currentBook, entry).length > 0
-                                              ? "Select author"
-                                              : "No authors in registry"}
-                                          </option>
-                                          {getVariantAuthorOptions(currentBook, entry).map((option) => (
-                                            <option key={option.slug} value={option.slug}>{option.name}</option>
-                                          ))}
-                                        </select>
+                                <div>
+                                  <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                                    {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
+                                  </label>
+                                  <div className="group relative mt-1">
+                                    <textarea
+                                      rows={3}
+                                      value={transliterationDisplayValue(inlineFormData.contentTransliteration)}
+                                      onChange={(event) =>
+                                        setInlineFormData((prev) => ({
+                                          ...prev,
+                                          contentTransliteration: transliterationInputToIast(event.target.value),
+                                        }))
+                                      }
+                                      className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                    />
+                                    <InlineClearButton
+                                      visible={Boolean(inlineFormData.contentTransliteration)}
+                                      onClear={() =>
+                                        setInlineFormData((prev) => ({
+                                          ...prev,
+                                          contentTransliteration: "",
+                                        }))
+                                      }
+                                      ariaLabel="Clear inline content transliteration"
+                                      position="top"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
+                                    {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                      <label key={`inline-translation-select-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
+                                        <input
+                                          type="checkbox"
+                                          checked={inlineSelectedTranslationLanguages.includes(language)}
+                                          onChange={(event) => {
+                                            const nextValues = event.target.checked
+                                              ? [...inlineSelectedTranslationLanguages, language]
+                                              : inlineSelectedTranslationLanguages.filter((value) => value !== language);
+                                            setInlineSelectedTranslationLanguages(
+                                              normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
+                                            );
+                                          }}
+                                        />
+                                        {translationLanguageLabel(language)}
                                       </label>
-                                      <div>
-                                        <label className="flex flex-col gap-1">
-                                          <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
-                                          <select
-                                            value={entry.language}
+                                    ))}
+                                  </div>
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    {inlineSelectedTranslationLanguages.map((language) => (
+                                      <div key={`inline-translation-input-${language}`}>
+                                        <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                                          {translationLanguageLabel(language)} Translation
+                                        </label>
+                                        <div className="group relative mt-1">
+                                          <textarea
+                                            rows={3}
+                                            value={inlineTranslationDrafts[language] || ""}
+                                            onChange={(event) =>
+                                              setInlineTranslationDrafts((prev) => ({
+                                                ...prev,
+                                                [language]: event.target.value,
+                                              }))
+                                            }
+                                            className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
+                                          />
+                                          <InlineClearButton
+                                            visible={Boolean((inlineTranslationDrafts[language] || "").trim())}
+                                            onClear={() =>
+                                              setInlineTranslationDrafts((prev) => ({
+                                                ...prev,
+                                                [language]: "",
+                                              }))
+                                            }
+                                            ariaLabel={`Clear inline ${translationLanguageLabel(language)} translation`}
+                                            position="top"
+                                          />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                    <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                      Translation Variants By Author ({inlineTranslationVariants.length})
+                                    </summary>
+                                    <div className="mt-2 flex flex-col gap-2">
+                                      {inlineTranslationVariants.map((entry, index) => (
+                                        <div key={`inline-translation-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                          <label className="mb-2 flex flex-col gap-1">
+                                            <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                            <select
+                                              value={entry.author_slug}
+                                              onChange={(event) =>
+                                                setInlineTranslationVariants((prev) =>
+                                                  prev.map((item, itemIndex) =>
+                                                    itemIndex === index
+                                                      ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                                      : item
+                                                  )
+                                                )
+                                              }
+                                              disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                              className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                            >
+                                              <option value="">
+                                                {getVariantAuthorOptions(currentBook, entry).length > 0
+                                                  ? "Select author"
+                                                  : "No authors in registry"}
+                                              </option>
+                                              {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                                <option key={option.slug} value={option.slug}>{option.name}</option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          <div>
+                                            <label className="flex flex-col gap-1">
+                                              <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                              <select
+                                                value={entry.language}
+                                                onChange={(event) =>
+                                                  setInlineTranslationVariants((prev) =>
+                                                    prev.map((item, itemIndex) =>
+                                                      itemIndex === index
+                                                        ? applyVariantLanguageSelection(item, event.target.value, "translation")
+                                                        : item
+                                                    )
+                                                  )
+                                                }
+                                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                              >
+                                                <option value="">Select language</option>
+                                                {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                                  <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                          </div>
+                                          <textarea
+                                            value={entry.text}
                                             onChange={(event) =>
                                               setInlineTranslationVariants((prev) =>
                                                 prev.map((item, itemIndex) =>
                                                   itemIndex === index
-                                                    ? applyVariantLanguageSelection(item, event.target.value, "translation")
+                                                    ? { ...item, text: event.target.value }
                                                     : item
                                                 )
                                               )
                                             }
-                                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                          >
-                                            <option value="">Select language</option>
-                                            {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                              <option key={language} value={language}>{translationLanguageLabel(language)}</option>
-                                            ))}
-                                          </select>
-                                        </label>
-                                      </div>
-                                      <textarea
-                                        value={entry.text}
-                                        onChange={(event) =>
-                                          setInlineTranslationVariants((prev) =>
-                                            prev.map((item, itemIndex) =>
-                                              itemIndex === index
-                                                ? { ...item, text: event.target.value }
-                                                : item
-                                            )
-                                          )
+                                            placeholder="Variant translation text"
+                                            rows={3}
+                                            className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                          />
+                                          <div className="mt-2 flex justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setInlineTranslationVariants((prev) =>
+                                                  prev.filter((_, itemIndex) => itemIndex !== index)
+                                                )
+                                              }
+                                              className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                            >
+                                              Remove
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setInlineTranslationVariants((prev) => [
+                                            ...prev,
+                                            buildEmptyAuthorVariantDraft(),
+                                          ])
                                         }
-                                        placeholder="Variant translation text"
-                                        rows={3}
-                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                      />
-                                      <div className="mt-2 flex justify-end">
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setInlineTranslationVariants((prev) =>
-                                              prev.filter((_, itemIndex) => itemIndex !== index)
-                                            )
-                                          }
-                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
-                                        >
-                                          Remove
-                                        </button>
-                                      </div>
+                                        className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                      >
+                                        Add Translation Variant
+                                      </button>
                                     </div>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setInlineTranslationVariants((prev) => [
-                                        ...prev,
-                                        buildEmptyAuthorVariantDraft(),
-                                      ])
-                                    }
-                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
-                                  >
-                                    Add Translation Variant
-                                  </button>
-                                </div>
-                              </details>
+                                  </details>
 
-                              <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
-                                <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
-                                  Commentary Variants By Author ({inlineCommentaryVariants.length})
-                                </summary>
-                                <div className="mt-2 flex flex-col gap-2">
-                                  {inlineCommentaryVariants.map((entry, index) => (
-                                    <div key={`inline-commentary-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
-                                      <label className="mb-2 flex flex-col gap-1">
-                                        <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
-                                        <select
-                                          value={entry.author_slug}
-                                          onChange={(event) =>
-                                            setInlineCommentaryVariants((prev) =>
-                                              prev.map((item, itemIndex) =>
-                                                itemIndex === index
-                                                  ? applyVariantAuthorSelection(item, event.target.value, currentBook)
-                                                  : item
-                                              )
-                                            )
-                                          }
-                                          disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
-                                          className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                                        >
-                                          <option value="">
-                                            {getVariantAuthorOptions(currentBook, entry).length > 0
-                                              ? "Select author"
-                                              : "No authors in registry"}
-                                          </option>
-                                          {getVariantAuthorOptions(currentBook, entry).map((option) => (
-                                            <option key={option.slug} value={option.slug}>{option.name}</option>
-                                          ))}
-                                        </select>
-                                      </label>
-                                      <div>
-                                        <label className="flex flex-col gap-1">
-                                          <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
-                                          <select
-                                            value={entry.language}
+                                  <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
+                                    <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
+                                      Commentary Variants By Author ({inlineCommentaryVariants.length})
+                                    </summary>
+                                    <div className="mt-2 flex flex-col gap-2">
+                                      {inlineCommentaryVariants.map((entry, index) => (
+                                        <div key={`inline-commentary-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
+                                          <label className="mb-2 flex flex-col gap-1">
+                                            <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
+                                            <select
+                                              value={entry.author_slug}
+                                              onChange={(event) =>
+                                                setInlineCommentaryVariants((prev) =>
+                                                  prev.map((item, itemIndex) =>
+                                                    itemIndex === index
+                                                      ? applyVariantAuthorSelection(item, event.target.value, currentBook)
+                                                      : item
+                                                  )
+                                                )
+                                              }
+                                              disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
+                                              className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+                                            >
+                                              <option value="">
+                                                {getVariantAuthorOptions(currentBook, entry).length > 0
+                                                  ? "Select author"
+                                                  : "No authors in registry"}
+                                              </option>
+                                              {getVariantAuthorOptions(currentBook, entry).map((option) => (
+                                                <option key={option.slug} value={option.slug}>{option.name}</option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          <div>
+                                            <label className="flex flex-col gap-1">
+                                              <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
+                                              <select
+                                                value={entry.language}
+                                                onChange={(event) =>
+                                                  setInlineCommentaryVariants((prev) =>
+                                                    prev.map((item, itemIndex) =>
+                                                      itemIndex === index
+                                                        ? applyVariantLanguageSelection(item, event.target.value, "commentary")
+                                                        : item
+                                                    )
+                                                  )
+                                                }
+                                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                              >
+                                                <option value="">Select language</option>
+                                                {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
+                                                  <option key={language} value={language}>{translationLanguageLabel(language)}</option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                          </div>
+                                          <textarea
+                                            value={entry.text}
                                             onChange={(event) =>
                                               setInlineCommentaryVariants((prev) =>
                                                 prev.map((item, itemIndex) =>
                                                   itemIndex === index
-                                                    ? applyVariantLanguageSelection(item, event.target.value, "commentary")
+                                                    ? { ...item, text: event.target.value }
                                                     : item
                                                 )
                                               )
                                             }
-                                            className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                          >
-                                            <option value="">Select language</option>
-                                            {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                              <option key={language} value={language}>{translationLanguageLabel(language)}</option>
-                                            ))}
-                                          </select>
-                                        </label>
-                                      </div>
-                                      <textarea
-                                        value={entry.text}
-                                        onChange={(event) =>
-                                          setInlineCommentaryVariants((prev) =>
-                                            prev.map((item, itemIndex) =>
-                                              itemIndex === index
-                                                ? { ...item, text: event.target.value }
-                                                : item
-                                            )
-                                          )
-                                        }
-                                        placeholder="Variant commentary text"
-                                        rows={3}
-                                        className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                      />
-                                      <div className="mt-2 flex justify-end">
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setInlineCommentaryVariants((prev) =>
-                                              prev.filter((_, itemIndex) => itemIndex !== index)
-                                            )
-                                          }
-                                          className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
-                                        >
-                                          Remove
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setInlineCommentaryVariants((prev) => [
-                                        ...prev,
-                                        buildEmptyAuthorVariantDraft(),
-                                      ])
-                                    }
-                                    className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
-                                  >
-                                    Add Commentary Variant
-                                  </button>
-                                </div>
-                              </details>
-                            </div>
-
-                            {inlineWordMeaningsEnabled && (
-                              <WordMeaningsEditor
-                                rows={inlineFormData.wordMeanings}
-                                validationErrors={inlineWordMeaningValidationErrors}
-                                missingRequired={inlineWordMeaningsMissingRequired}
-                                requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
-                                allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
-                                sourceDisplayScript={transliterationScript}
-                                onAddRow={handleAddInlineWordMeaningRow}
-                                onReplaceRows={updateInlineWordMeaningRows}
-                                onMoveRow={handleMoveInlineWordMeaningRow}
-                                onRemoveRow={handleRemoveInlineWordMeaningRow}
-                                onSourceFieldChange={handleInlineWordMeaningChange}
-                                onSelectMeaningLanguage={handleSelectInlineMeaningLanguage}
-                                onMeaningTextChange={handleInlineMeaningTextChange}
-                              />
-                            )}
-                          </div>
-                        )}
-
-                        <div>
-                          <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Tags</label>
-                          <div className="group relative mt-1">
-                            <input
-                              type="text"
-                              value={inlineFormData.tags}
-                              onChange={(event) =>
-                                setInlineFormData((prev) => ({ ...prev, tags: event.target.value }))
-                              }
-                              className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                              placeholder="tag1, tag2"
-                            />
-                            <InlineClearButton
-                              visible={Boolean(inlineFormData.tags)}
-                              onClear={() => setInlineFormData((prev) => ({ ...prev, tags: "" }))}
-                              ariaLabel="Clear inline tags"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 border-t border-black/10 pt-3">
-                          <button
-                            type="button"
-                            onClick={() => void handleInlineSave()}
-                            disabled={
-                              inlineSubmitting ||
-                              !inlineHasChanges ||
-                              inlineWordMeaningValidationErrors.length > 0
-                            }
-                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {inlineSubmitting ? "Saving..." : "Save"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleCancelInlineEdit}
-                            disabled={inlineSubmitting}
-                            className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-600 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {!inlineEditMode && (
-                      <>
-                        {/* Titles (hide for verses) */}
-                        {!nodeContent.has_content && (
-                          <div className="flex flex-col gap-2">
-                            {getPreferredTitle(nodeContent) && (
-                              <div className="text-xl font-medium text-zinc-900">
-                                {getPreferredTitle(nodeContent)}
-                              </div>
-                            )}
-                            {!showOnlyPreferredScript && showTransliteration &&
-                              (() => {
-                                const renderedTitleTransliteration = renderTransliterationByPreference(
-                                  formatValue(nodeContent.title_transliteration)
-                                );
-                                if (
-                                  !renderedTitleTransliteration ||
-                                  renderedTitleTransliteration === getPreferredTitle(nodeContent)
-                                ) {
-                                  return null;
-                                }
-                                return (
-                                  <div className="text-lg italic text-zinc-700">
-                                    {renderedTitleTransliteration}
-                                  </div>
-                                );
-                              })()}
-                          </div>
-                        )}
-
-                        {/* Content Data */}
-                        {nodeContent.has_content && nodeContent.content_data && (
-                          <div className="flex flex-col gap-4 rounded-2xl border border-black/10 bg-white/90 p-4">
-                            {(() => {
-                              const sanskrit = formatValue(nodeContent.content_data?.basic?.sanskrit);
-                              const transliterationRaw = formatValue(
-                                nodeContent.content_data?.basic?.transliteration
-                              );
-                              const originalSanskrit =
-                                sanskrit || transliterateFromIast(transliterationRaw, "devanagari");
-                              const transliteration = renderTransliterationByPreference(
-                                transliterationRaw
-                              );
-                              const preferredSanskrit = renderSanskritByPreference(
-                                sanskrit,
-                                transliterationRaw
-                              );
-                              const translations = toTranslationRecord(
-                                nodeContent.content_data?.translations
-                              );
-                              const selectedBrowseTranslationLanguages =
-                                normalizeSelectedEditableTranslationLanguages(
-                                  browseTranslationLanguages,
-                                  sourceLanguage
-                                );
-                              const selectedBrowseTranslations = selectedBrowseTranslationLanguages
-                                .map((language) => ({
-                                  language,
-                                  label: `${translationLanguageLabel(language)} Translation`,
-                                  value: pickTranslationTextForLanguageOnly(translations, language),
-                                }))
-                                .filter((entry) => Boolean(entry.value));
-                              const preferredTranslationLabel = translationLanguageLabel(
-                                sourceLanguage
-                              );
-                              const translationValue = pickPreferredTranslationText(
-                                translations,
-                                sourceLanguage,
-                                nodeContent.content_data?.basic?.translation
-                              );
-                              const selectedPrimaryTranslationValue =
-                                selectedBrowseTranslations[0]?.value || "";
-                              const resolvedTranslationValue =
-                                selectedPrimaryTranslationValue || translationValue;
-                              const sanskritLabel = contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit;
-                              const transliterationLabel =
-                                contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration;
-                              const translationLabel =
-                                selectedBrowseTranslations[0]?.label ||
-                                (sourceLanguage === "english"
-                                  ? contentFieldLabels.english || DEFAULT_CONTENT_FIELD_LABELS.english
-                                  : `${preferredTranslationLabel} Translation`);
-
-                              const primaryContent =
-                                showOnlyPreferredScript
-                                  ? sourceLanguage === "sanskrit"
-                                    ? preferredSanskrit || resolvedTranslationValue
-                                    : resolvedTranslationValue || originalSanskrit
-                                  : originalSanskrit || resolvedTranslationValue;
-
-                              const primaryLabel =
-                                showOnlyPreferredScript
-                                  ? sourceLanguage === "sanskrit"
-                                    ? sanskritLabel
-                                    : translationLabel
-                                  : "Sanskrit (Original)";
-
-                              const showSecondaryTransliteration =
-                                !showOnlyPreferredScript &&
-                                showTransliteration &&
-                                Boolean(transliteration) &&
-                                transliteration !== primaryContent &&
-                                transliteration !== originalSanskrit;
-
-                              return (
-                                <>
-                                  {Object.keys(translations).length > 0 && (
-                                    <div className="rounded-lg border border-black/10 bg-white/70 p-2">
-                                      <div className="mb-1 text-xs uppercase tracking-[0.18em] text-zinc-500">
-                                        Translation Languages
-                                      </div>
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                          <label key={`browse-translation-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
-                                            <input
-                                              type="checkbox"
-                                              checked={browseTranslationLanguages.includes(language)}
-                                              onChange={(event) => {
-                                                const nextValues = event.target.checked
-                                                  ? [...browseTranslationLanguages, language]
-                                                  : browseTranslationLanguages.filter((value) => value !== language);
-                                                setBrowseTranslationLanguages(
-                                                  normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
-                                                );
-                                              }}
-                                            />
-                                            {translationLanguageLabel(language)}
-                                          </label>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {primaryContent && (
-                                    <div>
-                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                        {primaryLabel}
-                                      </div>
-                                      <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-900 ${scriptFontClassName(primaryContent)}`} lang={scriptLangForText(primaryContent)}>
-                                        {normalizeTextForDisplay(primaryContent)}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {showSecondaryTransliteration && (
-                                    <div>
-                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                        {transliterationLabel} ({transliterationScriptLabel(transliterationScript)})
-                                      </div>
-                                      <div className={`whitespace-pre-wrap text-base italic leading-relaxed text-zinc-700 ${scriptFontClassName(transliteration)}`} lang={scriptLangForText(transliteration)}>
-                                        {normalizeTextForDisplay(transliteration)}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {!showOnlyPreferredScript && sourceLanguage !== "sanskrit" &&
-                                    originalSanskrit &&
-                                    originalSanskrit !== primaryContent && (
-                                    <div>
-                                      <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                        Sanskrit (Original)
-                                      </div>
-                                      <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(originalSanskrit)}`} lang={scriptLangForText(originalSanskrit)}>
-                                        {normalizeTextForDisplay(originalSanskrit)}
-                                      </div>
-                                    </div>
-                                  )}
-                                  {!showOnlyPreferredScript &&
-                                    selectedBrowseTranslations
-                                      .filter((entry) => entry.value !== primaryContent)
-                                      .map((entry) => (
-                                        <div key={`browse-translation-line-${entry.language}`}>
-                                          <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                            {entry.label}
-                                          </div>
-                                          <div className={`whitespace-pre-wrap text-base leading-relaxed text-zinc-700 ${scriptFontClassName(entry.value)}`} lang={scriptLangForText(entry.value)}>
-                                            {normalizeTextForDisplay(entry.value)}
+                                            placeholder="Variant commentary text"
+                                            rows={3}
+                                            className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                                          />
+                                          <div className="mt-2 flex justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setInlineCommentaryVariants((prev) =>
+                                                  prev.filter((_, itemIndex) => itemIndex !== index)
+                                                )
+                                              }
+                                              className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
+                                            >
+                                              Remove
+                                            </button>
                                           </div>
                                         </div>
                                       ))}
-                                  {!showOnlyPreferredScript &&
-                                    selectedBrowseTranslations.length === 0 &&
-                                    translationValue &&
-                                    translationValue !== primaryContent && (
-                                      <div>
-                                        <div className="mb-1 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                          {translationLabel}
-                                        </div>
-                                        <div className="whitespace-pre-wrap text-base leading-relaxed text-zinc-700">
-                                          {translationValue}
-                                        </div>
-                                      </div>
-                                    )}
-                                </>
-                              );
-                            })()}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setInlineCommentaryVariants((prev) => [
+                                            ...prev,
+                                            buildEmptyAuthorVariantDraft(),
+                                          ])
+                                        }
+                                        className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
+                                      >
+                                        Add Commentary Variant
+                                      </button>
+                                    </div>
+                                  </details>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ) : nodeContent.has_content ? (
+                          renderBrowseContentData(nodeContent.content_data, "node")
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-black/10 bg-white/70 px-4 py-5 text-sm text-zinc-500">
+                            No node content yet.
                           </div>
                         )}
+                      </BrowseSection>
+                    )}
 
+                    {browseDetailsTab === "properties" && (
+                    <BrowseSection
+                      title="Properties"
+                      description="Secondary details, media, commentary, comments, and tags for this node."
+                      action={canEditCurrentBook ? (
+                        <button
+                          type="button"
+                          onClick={() => void openPropertiesModal("node", nodeContent.id)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
+                        >
+                          <SlidersHorizontal size={14} />
+                          Open
+                        </button>
+                      ) : null}
+                    >
                         {showMedia && (nodeMediaLoading || nodeMediaError || nodeMedia.length > 0 || canEditCurrentBook) && (
                           <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
                             <div className="mb-2 flex items-center justify-between gap-2">
@@ -19890,7 +20716,7 @@ function ScripturesContent() {
                             </div>
                           </div>
                         )}
-                      </>
+                    </BrowseSection>
                     )}
 
                   </div>
@@ -20015,7 +20841,7 @@ function ScripturesContent() {
                     </label>
                     <label className="flex flex-col gap-1 sm:col-span-2">
                       <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Primary / Sanskrit
+                        Title (Primary / Sanskrit)
                       </span>
                       <input
                         type="text"
@@ -20031,7 +20857,7 @@ function ScripturesContent() {
                       />
                     </label>
                     <label className="flex flex-col gap-1">
-                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Transliteration (IAST)</span>
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (Transliteration, IAST)</span>
                       <input
                         type="text"
                         value={propertiesBookTitleTransliteration}
@@ -20046,7 +20872,7 @@ function ScripturesContent() {
                       />
                     </label>
                     <label className="flex flex-col gap-1">
-                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">English</span>
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Title (English)</span>
                       <input
                         type="text"
                         value={propertiesBookTitleEnglish}
@@ -20058,6 +20884,64 @@ function ScripturesContent() {
                         }}
                         className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
                         placeholder="e.g. Yoga Vasistha"
+                      />
+                    </label>
+                    <p className="text-xs text-zinc-500 sm:col-span-2">
+                      Note: these are title metadata fields. Book content SA/TR/EN is edited in the Book Content block in Preview.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {propertiesScope === "book" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Book Content
+                  </div>
+                  <div className="grid gap-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Sanskrit</span>
+                      <textarea
+                        value={propertiesBookContentSanskrit}
+                        onChange={(event) => {
+                          setPropertiesBookContentSanskrit(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        rows={3}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="Book content Sanskrit"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Transliteration</span>
+                      <textarea
+                        value={propertiesBookContentTransliteration}
+                        onChange={(event) => {
+                          setPropertiesBookContentTransliteration(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        rows={3}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="Book content transliteration"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">English</span>
+                      <textarea
+                        value={propertiesBookContentEnglish}
+                        onChange={(event) => {
+                          setPropertiesBookContentEnglish(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        rows={4}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="Book content English"
                       />
                     </label>
                   </div>
@@ -21563,17 +22447,6 @@ function ScripturesContent() {
                             <BookOpen className="h-4 w-4" />
                           </button>
                         )}
-                        {previewScope === "book" && (hasEffectiveBookPreviewSummary || canEditCurrentBook) && (
-                          <label className="ml-1 flex items-center gap-1.5 rounded-full border border-black/10 bg-[color:var(--paper)] px-2.5 py-1 text-xs text-zinc-700">
-                            <input
-                              type="checkbox"
-                              checked={showPreviewBookSummary}
-                              onChange={(event) => setShowPreviewBookSummary(event.target.checked)}
-                              disabled={bookPreviewLoading || showPreviewControls}
-                            />
-                            <span>Summary</span>
-                          </label>
-                        )}
                       </>
                     );
                   })()}
@@ -21982,136 +22855,6 @@ function ScripturesContent() {
                   </div>
                 )}
 
-                {showPreviewBookSummary && (hasEffectiveBookPreviewSummary || (bookPreviewArtifact.preview_scope === "book" && canEditCurrentBook)) && (
-                  <div className="mb-1.5 rounded-lg border border-black/10 bg-[color:var(--paper)] p-2">
-                    {(() => {
-                      const previewBookId =
-                        typeof bookPreviewArtifact.book_id === "number"
-                          ? bookPreviewArtifact.book_id
-                          : null;
-                      const bookContentData = toRecord(currentBook?.content_data);
-                      const bookBasic = toRecord(bookContentData.basic);
-                      const summaryQuickEditFields =
-                        previewBookId !== null
-                          ? [
-                              {
-                                fieldPath: "content_data.basic.sanskrit",
-                                shortLabel: "SA",
-                                label: "Book Summary (Sanskrit)",
-                                value: typeof bookBasic?.sanskrit === "string" ? bookBasic.sanskrit : "",
-                              },
-                              {
-                                fieldPath: "content_data.basic.transliteration",
-                                shortLabel: "TR",
-                                label: "Book Summary (Transliteration)",
-                                value:
-                                  typeof bookBasic?.transliteration === "string"
-                                    ? bookBasic.transliteration
-                                    : "",
-                              },
-                              {
-                                fieldPath: "content_data.basic.translation",
-                                shortLabel: "EN",
-                                label: "Book Summary (Translation)",
-                                value:
-                                  typeof bookBasic?.translation === "string"
-                                    ? bookBasic.translation
-                                    : "",
-                              },
-                            ]
-                          : [];
-
-                      const hasActiveSummaryField = summaryQuickEditFields.some(
-                        (field) =>
-                          previewQuickEditDraft?.targetType === "book" &&
-                          previewQuickEditDraft?.nodeId === previewBookId &&
-                          previewQuickEditDraft?.fieldPath === field.fieldPath
-                      );
-
-                      if (!canEditCurrentBook || previewBookId === null) {
-                        return null;
-                      }
-
-                      return (
-                        <div className="mb-2">
-                          <div className="mb-1 flex items-center gap-1.5">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                              Book Summary
-                            </div>
-                            {summaryQuickEditFields.map((field) => {
-                              const isActiveField =
-                                previewQuickEditDraft?.targetType === "book" &&
-                                previewQuickEditDraft?.nodeId === previewBookId &&
-                                previewQuickEditDraft?.fieldPath === field.fieldPath;
-                              return (
-                                <button
-                                  key={`book-summary-${field.fieldPath}`}
-                                  type="button"
-                                  onClick={() => {
-                                    setPreviewQuickEditDraft({
-                                      nodeId: previewBookId,
-                                      targetType: "book",
-                                      fieldPath: field.fieldPath,
-                                      lineKey: `book-summary-${field.fieldPath}`,
-                                      value: field.value,
-                                      saving: false,
-                                      error: null,
-                                    });
-                                  }}
-                                  className={`rounded-md border border-black/10 bg-white/90 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${
-                                    isActiveField ? "border-[color:var(--accent)]/40 text-[color:var(--accent)]" : ""
-                                  }`}
-                                  aria-label={`Edit ${field.label}`}
-                                  title={field.label}
-                                >
-                                  {field.shortLabel}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {hasActiveSummaryField && (
-                            <div className="rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                              {renderPreviewQuickEditTextControl({
-                                multiline: true,
-                                clearAriaLabel: "Clear book summary field",
-                              })}
-                              {previewQuickEditDraft?.error && (
-                                <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                              )}
-                              <div className="mt-2 flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    void handleSavePreviewQuickEdit();
-                                  }}
-                                  disabled={Boolean(previewQuickEditDraft?.saving)}
-                                  className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                                >
-                                  {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewQuickEditDraft(null)}
-                                  disabled={Boolean(previewQuickEditDraft?.saving)}
-                                  className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700" style={previewBodyTextStyle}>
-                      {bookPreviewArtifact.book_template?.rendered_text?.trim() ||
-                        (canEditCurrentBook
-                          ? "No book summary yet. Use SA/TR/EN to add one."
-                          : "")}
-                    </p>
-                  </div>
-                )}
-
                 {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
                   <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 p-2">
                     <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -22143,60 +22886,6 @@ function ScripturesContent() {
                         </div>
                       );
                     })}
-                  </div>
-                )}
-
-                {authEmail && bookPreviewArtifact.preview_scope === "node" && previewBodyBlockElements.length > 1 && (
-                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">
-                        Add verse range to basket
-                      </span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        value={basketRangeStart}
-                        onChange={(event) => {
-                          setBasketRangeStart(event.target.value);
-                          if (basketRangeMessage) setBasketRangeMessage(null);
-                        }}
-                        placeholder="From"
-                        className="h-7 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-                        disabled={basketRangeSubmitting}
-                        aria-label="Start verse"
-                      />
-                      <span className="text-xs text-zinc-400">–</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        value={basketRangeEnd}
-                        onChange={(event) => {
-                          setBasketRangeEnd(event.target.value);
-                          if (basketRangeMessage) setBasketRangeMessage(null);
-                        }}
-                        placeholder="To"
-                        className="h-7 w-16 rounded-full border border-black/10 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[color:var(--accent)]"
-                        disabled={basketRangeSubmitting}
-                        aria-label="End verse"
-                      />
-                      <button
-                        type="button"
-                        onClick={addPreviewRangeToBasket}
-                        disabled={
-                          basketRangeSubmitting ||
-                          !basketRangeStart.trim() ||
-                          !basketRangeEnd.trim()
-                        }
-                        className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-xs font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {basketRangeSubmitting ? "Adding…" : "Add"}
-                      </button>
-                    </div>
-                    {basketRangeMessage && (
-                      <p className="mt-1.5 text-xs text-zinc-600">{basketRangeMessage}</p>
-                    )}
                   </div>
                 )}
 
