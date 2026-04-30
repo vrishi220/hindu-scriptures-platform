@@ -17,6 +17,7 @@ type PropertiesPanelProps = {
   open: boolean;
   title: string;
   subtitle: string;
+  nameLabel?: string;
   nameValue: string;
   onNameChange: (value: string) => void;
   descriptionValue: string;
@@ -46,6 +47,7 @@ export default function PropertiesPanel({
   open,
   title,
   subtitle,
+  nameLabel = "Name",
   nameValue,
   onNameChange,
   descriptionValue,
@@ -91,7 +93,7 @@ export default function PropertiesPanel({
 
         <div className="space-y-3 overflow-y-auto pr-1">
           <label className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Name</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">{nameLabel}</span>
             <input
               type="text"
               value={nameValue}

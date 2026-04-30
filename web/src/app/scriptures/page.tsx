@@ -642,7 +642,12 @@ const getSequenceSortValue = (node: TreeNode) => {
 };
 
 const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
-  const parsed = parseSequenceNumber(value);
+  if (value === null || value === undefined) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  const dottedMatch = raw.match(/\d+(?:\.\d+)*/);
+  if (dottedMatch) return dottedMatch[0];
+  const parsed = parseSequenceNumber(raw);
   if (parsed === null) return "";
   if (!isLeaf) return parsed.toString();
   return parsed.toString();
@@ -2992,6 +2997,8 @@ function ScripturesContent() {
   const [variantAuthorsError, setVariantAuthorsError] = useState<string | null>(null);
   const [variantAuthorsMessage, setVariantAuthorsMessage] = useState<string | null>(null);
   const [propertiesBookAuthor, setPropertiesBookAuthor] = useState("");
+  const [propertiesNodeTitleSanskrit, setPropertiesNodeTitleSanskrit] = useState("");
+  const [propertiesNodeTitleTransliteration, setPropertiesNodeTitleTransliteration] = useState("");
   const [propertiesBookTitleEnglish, setPropertiesBookTitleEnglish] = useState("");
   const [propertiesBookTitleSanskrit, setPropertiesBookTitleSanskrit] = useState("");
   const [propertiesBookTitleTransliteration, setPropertiesBookTitleTransliteration] = useState("");
@@ -4183,18 +4190,17 @@ function ScripturesContent() {
     setPropertiesName(
       scope === "book"
         ? bookNameOverride || currentBook?.book_name || ""
-        : nodeContent?.title_english ||
-            nodeContent?.title_sanskrit ||
-            nodeContent?.title_transliteration ||
-            `Node ${nodeId || ""}`
+        : nodeContent?.title_english || ""
     );
-              setPropertiesDescription("");
-              setPropertiesInitialDescription("");
+    setPropertiesDescription("");
+    setPropertiesInitialDescription("");
     if (scope === "book") {
       const metadata = getBookMetadataObject(currentBook) || {};
       const bookContentData = toRecord(currentBook?.content_data);
       const bookBasic = toRecord(bookContentData.basic);
       const bookTranslations = toTranslationRecord(bookContentData.translations);
+      setPropertiesNodeTitleSanskrit("");
+      setPropertiesNodeTitleTransliteration("");
       setPropertiesBookAuthor(typeof metadata.author === "string" ? metadata.author : "");
       setPropertiesBookTitleEnglish(
         typeof metadata.title_english === "string" ? metadata.title_english : ""
@@ -4268,6 +4274,12 @@ function ScripturesContent() {
       setSelectedOwnedBookIds([]);
       setShowOwnershipTransferDialog(false);
     } else {
+      setPropertiesNodeTitleSanskrit(
+        typeof nodeContent?.title_sanskrit === "string" ? nodeContent.title_sanskrit : ""
+      );
+      setPropertiesNodeTitleTransliteration(
+        typeof nodeContent?.title_transliteration === "string" ? nodeContent.title_transliteration : ""
+      );
       setPropertiesBookAuthor("");
       setPropertiesBookTitleEnglish("");
       setPropertiesBookTitleSanskrit("");
@@ -4785,12 +4797,7 @@ function ScripturesContent() {
     const currentName =
       propertiesScope === "book"
         ? (currentBook?.book_name || "").trim()
-        : (
-            nodeContent?.title_english ||
-            nodeContent?.title_sanskrit ||
-            nodeContent?.title_transliteration ||
-            `Node ${propertiesNodeId || ""}`
-          ).trim();
+        : (nodeContent?.title_english || "").trim();
     const currentDescription = propertiesInitialDescription.trim();
     const shouldUpdateName = nextName !== currentName;
     const shouldSaveDescription = nextDescription !== currentDescription;
@@ -4846,6 +4853,23 @@ function ScripturesContent() {
       (nextBookContentSanskrit !== currentBookContentSanskrit ||
         nextBookContentTransliteration !== currentBookContentTransliteration ||
         nextBookContentEnglish !== currentBookContentEnglish);
+    const currentNodeTitleSanskrit =
+      typeof nodeContent?.title_sanskrit === "string" ? nodeContent.title_sanskrit.trim() : "";
+    const currentNodeTitleTransliteration =
+      typeof nodeContent?.title_transliteration === "string"
+        ? nodeContent.title_transliteration.trim()
+        : "";
+    const nodeTitlePair = autoFillSanskritTransliterationPair(
+      propertiesNodeTitleSanskrit,
+      propertiesNodeTitleTransliteration
+    );
+    const nextNodeTitleSanskrit = nodeTitlePair.sanskrit;
+    const nextNodeTitleTransliteration = nodeTitlePair.transliteration;
+    const shouldSaveNodeTitles =
+      propertiesScope === "node" &&
+      (nextName !== currentName ||
+        nextNodeTitleSanskrit !== currentNodeTitleSanskrit ||
+        nextNodeTitleTransliteration !== currentNodeTitleTransliteration);
 
     const currentWordMeaningsEnabledLevels = Array.from(getWordMeaningsEnabledLevelsFromBook(currentBook));
     const nextWordMeaningsEnabledLevels = normalizeWordMeaningsEnabledLevels(
@@ -4880,7 +4904,7 @@ function ScripturesContent() {
       propertiesScope === "book" &&
       (shouldSaveBookTitles || shouldSaveWordMeanings || shouldSaveDescription);
 
-    if (!shouldUpdateName && !shouldSaveMetadata && !shouldSaveBookMetadata && !shouldSaveBookContent && !shouldSaveNodeDescription) {
+    if (!shouldSaveNodeTitles && !shouldSaveMetadata && !shouldSaveBookMetadata && !shouldSaveBookContent && !shouldSaveNodeDescription) {
       setPropertiesError("No changes to save");
       return;
     }
@@ -4905,7 +4929,7 @@ function ScripturesContent() {
       let didSaveDescription = false;
       let didSaveMetadata = false;
 
-      if (shouldUpdateName) {
+      if (shouldUpdateName || shouldSaveNodeTitles) {
         if (propertiesScope === "book") {
           if (!bookId) {
             throw new Error("Select a book first");
@@ -4947,7 +4971,11 @@ function ScripturesContent() {
             method: "PATCH",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title_english: nextName }),
+            body: JSON.stringify({
+              title_english: nextName || null,
+              title_sanskrit: nextNodeTitleSanskrit || null,
+              title_transliteration: nextNodeTitleTransliteration || null,
+            }),
           });
           const renamePayload = (await renameResponse.json().catch(() => null)) as
             | { detail?: string }
@@ -14398,7 +14426,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
             }}
           >
         <div
-          className={`flex flex-wrap items-center gap-2 text-sm ${
+          className={`flex flex-wrap items-start gap-2 text-sm ${
             isReorderGroupActive ? "rounded-md px-1 py-0.5" : ""
           } ${
             isReorderGroupActive && treeReorderDraggingNodeId === node.id
@@ -14467,13 +14495,13 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
               ) || node.id
             }`}
             id={`tree-node-${node.id}`}
-            className={`flex items-center gap-2 px-1 text-sm font-medium transition ${
+            className={`min-w-0 flex items-center gap-2 px-1 text-sm font-medium transition ${
               selectedId === node.id
                 ? "text-[color:var(--accent)]"
                 : "text-[color:var(--deep)] hover:text-[color:var(--accent)]"
             } ${canEditTreeOrder ? "select-none" : ""}`}
           >
-            <span>
+            <span className="leading-snug">
               {(() => {
                 const isLeaf = !node.children || node.children.length === 0;
                 const displaySeq =
@@ -14485,7 +14513,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                   formatValue(node.title_transliteration);
                 if (isLeaf) {
                   return titleText
-                    ? titleText
+                    ? `${displaySeq}. ${titleText}`
                     : `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
                 }
                 if (titleText) {
@@ -15077,7 +15105,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
     const syntheticBookContentBlock: BookPreviewBlock | null =
       shouldShowBookContentBlock &&
       typeof bookPreviewArtifact.book_id === "number" &&
-      (bookPreviewArtifact.preview_scope === "book" || canEditCurrentBook)
+      bookPreviewArtifact.preview_scope === "book"
         ? {
             section: "body",
             order: 0,
@@ -20812,6 +20840,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
           open={showPropertiesModal}
           title={propertiesScope === "book" ? "Book Properties" : activeNodePropertiesTitle}
           subtitle="Base properties: Name, Description, Category. Other fields are category metadata properties."
+          nameLabel={propertiesScope === "book" ? "Name" : "Title (English)"}
           nameValue={propertiesName}
           onNameChange={(value) => {
             setPropertiesName(value);
@@ -20927,6 +20956,53 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                     </label>
                     <p className="text-xs text-zinc-500 sm:col-span-2">
                       Note: these are title metadata fields. Book content SA/TR/EN is edited in the Book Content block in Preview.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {propertiesScope === "node" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Node Titles
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="flex flex-col gap-1 sm:col-span-2">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Title (Primary / Sanskrit)
+                      </span>
+                      <input
+                        type="text"
+                        value={propertiesNodeTitleSanskrit}
+                        onChange={(event) => {
+                          setPropertiesNodeTitleSanskrit(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. ब्रह्म"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 sm:col-span-2">
+                      <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+                        Title (Transliteration, IAST)
+                      </span>
+                      <input
+                        type="text"
+                        value={propertiesNodeTitleTransliteration}
+                        onChange={(event) => {
+                          setPropertiesNodeTitleTransliteration(event.target.value);
+                          setPropertiesDirty(true);
+                          setPropertiesMessage(null);
+                          setPropertiesError(null);
+                        }}
+                        className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+                        placeholder="e.g. brahma"
+                      />
+                    </label>
+                    <p className="text-xs text-zinc-500 sm:col-span-2">
+                      Title (English) is edited in the base field above.
                     </p>
                   </div>
                 </div>
