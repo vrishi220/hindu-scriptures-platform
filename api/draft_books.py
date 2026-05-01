@@ -2083,20 +2083,29 @@ def _build_template_context(
             or source_node.title_transliteration
             or ""
         )
-        english_text = _pick_preferred_translation_text(
-            merged_translations,
-            preferred_translation_language,
-            basic_data.get("english"),
-            content_data.get("text_english"),
-            content_data.get("english"),
-            content_data.get("en"),
-            summary_basic.get("english"),
-            summary_data.get("text_english"),
-            summary_data.get("english"),
-            summary_data.get("en"),
-            source_node.title_english,
-            allow_any_language_fallback=False,
-        )
+        # When the preferred language is non-English, only use that language's own
+        # content — never substitute English text into the translation slot of another
+        # language (e.g. Tamil selected but Tamil has no data → show nothing, not English).
+        _preferred_is_english = preferred_translation_language in ("en", "english", "")
+        if _preferred_is_english:
+            english_text = _pick_preferred_translation_text(
+                merged_translations,
+                "en",
+                basic_data.get("english"),
+                content_data.get("text_english"),
+                content_data.get("english"),
+                content_data.get("en"),
+                summary_basic.get("english"),
+                summary_data.get("text_english"),
+                summary_data.get("english"),
+                summary_data.get("en"),
+                source_node.title_english,
+                allow_any_language_fallback=False,
+            )
+        else:
+            english_text = _pick_translation_text_for_language_only(
+                merged_translations, preferred_translation_language
+            )
         fallback_text = (
             basic_data.get("text")
             or content_data.get("text")

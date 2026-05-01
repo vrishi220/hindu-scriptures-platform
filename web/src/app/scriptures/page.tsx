@@ -3558,14 +3558,40 @@ function ScripturesContent() {
       appliedPreviewTranslationLanguages[0] ||
       (normalizeTranslationLanguage(effectiveSourceLanguage) as EditableTranslationLanguage);
     const appendSelectedTranslationLines = () => {
-      if (!resolvedSettings.show_english) {
-        return;
-      }
       const existingValues = new Set(lines.map((line) => (line.value || "").trim()).filter(Boolean));
-      const hasEnglishLine = () => lines.some((line) => line.fieldName === "english");
       for (const language of appliedPreviewTranslationLanguages) {
         if (language === primaryPreviewTranslationLanguage) {
-          continue;
+          if (resolvedSettings.show_english) {
+            // When English is visible, the primary translation is already in rendered_lines
+            // as the "english" field. But if primary is non-English and has no own value,
+            // the backend placed English fallback text there — remove it so we don't show
+            // English when the user selected a different language with no content here.
+            if (language !== "english") {
+              const primaryOwnValue = pickTranslationTextForLanguageOnly(blockTranslations, language);
+              if (!primaryOwnValue) {
+                // Language has no content: remove the English fallback lines so we don't
+                // show English when the user selected a language with no data.
+                for (let i = lines.length - 1; i >= 0; i -= 1) {
+                  if (lines[i].fieldName === "english") {
+                    lines.splice(i, 1);
+                  }
+                }
+              } else {
+                // Language has its own content: the backend put it in the "english" template
+                // slot, so rendered_lines has fieldName="english". Re-tag those lines with
+                // the correct language fieldName so the pencil opens the right editor
+                // without relying on fragile text comparison.
+                for (const eLine of lines) {
+                  if (eLine.fieldName === "english") {
+                    eLine.fieldName = `content_data.translations.${language}`;
+                  }
+                }
+              }
+            }
+            continue;
+          }
+          // show_english is false: the primary translation was skipped in the rendered_lines
+          // loop because its field name was "english" — add it directly here.
         }
         const value = pickTranslationTextForLanguageOnly(blockTranslations, language);
         if (!value || existingValues.has(value)) {
@@ -3583,35 +3609,6 @@ function ScripturesContent() {
           isFieldStart: true,
         });
         existingValues.add(value);
-      }
-
-      // Ensure leaf previews still render text when the selected translation
-      // language has no value on this node but another translation exists.
-      if (!hasEnglishLine()) {
-        const fallbackValue = pickPreferredTranslationText(
-          blockTranslations,
-          primaryPreviewTranslationLanguage,
-        );
-        if (fallbackValue && !existingValues.has(fallbackValue)) {
-          if (isSyntheticEnglishTitleLine("english", fallbackValue)) {
-            return;
-          }
-          lines.push({
-            key: "translation-fallback",
-            label: appliedShowPreviewLabels
-              ? (primaryPreviewTranslationLanguage !== "english"
-                  ? `${translationLanguageLabel(primaryPreviewTranslationLanguage)} Translation`
-                  : metadataLabelForField("english"))
-              : "",
-            value: fallbackValue,
-            className: lineClassNameForField("english", fallbackValue),
-            fieldName: primaryPreviewTranslationLanguage !== "english"
-              ? `content_data.translations.${primaryPreviewTranslationLanguage}`
-              : "english",
-            isFieldStart: true,
-          });
-          existingValues.add(fallbackValue);
-        }
       }
     };
     if (renderedLines.length > 0) {
