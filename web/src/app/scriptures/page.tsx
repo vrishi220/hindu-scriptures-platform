@@ -1946,8 +1946,8 @@ const normalizeAuthorVariantDrafts = (
         return null;
       }
       const objectEntry = entry as Record<string, unknown>;
-      const text = typeof objectEntry.text === "string" ? objectEntry.text.trim() : "";
-      if (!text) {
+      const text = typeof objectEntry.text === "string" ? objectEntry.text.replace(/\r\n/g, "\n") : "";
+      if (!text.trim()) {
         return null;
       }
       const rawLanguage =
@@ -2087,8 +2087,8 @@ const applyTranslationDraftValue = (
     delete translations[key];
   }
 
-  const value = rawValue.trim();
-  if (!value) {
+  const value = rawValue.replace(/\r\n/g, "\n");
+  if (!value.trim()) {
     return;
   }
 
@@ -2490,20 +2490,25 @@ const isUsableBindingValueForField = (
 
 const autoFillSanskritTransliterationPair = (
   sanskritRaw: string,
-  transliterationRaw: string
+  transliterationRaw: string,
+  preserveWhitespace: boolean = false
 ): { sanskrit: string; transliteration: string } => {
-  const sanskrit = sanskritRaw.trim();
-  const transliteration = transliterationRaw.trim();
+  const sanskrit = preserveWhitespace ? sanskritRaw.replace(/\r\n/g, "\n") : sanskritRaw.trim();
+  const transliteration = preserveWhitespace
+    ? transliterationRaw.replace(/\r\n/g, "\n")
+    : transliterationRaw.trim();
+  const hasSanskrit = Boolean(sanskrit.trim());
+  const hasTransliteration = Boolean(transliteration.trim());
 
-  if (!sanskrit && !transliteration) {
+  if (!hasSanskrit && !hasTransliteration) {
     return { sanskrit: "", transliteration: "" };
   }
 
-  if (sanskrit && transliteration) {
+  if (hasSanskrit && hasTransliteration) {
     return { sanskrit, transliteration };
   }
 
-  if (!sanskrit && transliteration) {
+  if (!hasSanskrit && hasTransliteration) {
     if (hasDevanagariLetters(transliteration)) {
       return {
         sanskrit: transliteration,
@@ -2607,6 +2612,26 @@ const toDatetimeLocalValue = (value: unknown): string => {
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
+
+type BrowseSectionProps = {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+};
+
+const BrowseSection = ({ title, description, action, children }: BrowseSectionProps) => (
+  <section className="flex flex-col gap-3 rounded-[1.75rem] border border-black/10 bg-white/70 p-4 shadow-sm backdrop-blur-sm">
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">{title}</div>
+        {description ? <p className="mt-1 text-sm text-zinc-600">{description}</p> : null}
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+    <div className="flex flex-col gap-3">{children}</div>
+  </section>
+);
 
 function ScripturesContent() {
   const BOOKS_PAGE_SIZE_LIST = 18;
@@ -6420,6 +6445,12 @@ function ScripturesContent() {
   const showCommentary = preferences?.show_commentary ?? true;
   const showTransliteration =
     transliterationEnabled && (!scriptPrefersRoman || showRomanTransliteration);
+  const isCoarsePointerDevice = useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+  }, []);
   const transliterationDisplayValue = useCallback(
     (iastValue: string): string => {
       const normalized = formatValue(iastValue);
@@ -6441,6 +6472,26 @@ function ScripturesContent() {
       return transliterateBetweenScripts(normalized, transliterationScript, "iast");
     },
     [transliterationScript]
+  );
+  const browseTransliterationDraftFromStoredValue = useCallback(
+    (value: string): string => {
+      const normalized = formatValue(value);
+      if (!normalized) {
+        return "";
+      }
+      return isCoarsePointerDevice ? transliterationDisplayValue(normalized) : normalized;
+    },
+    [isCoarsePointerDevice, transliterationDisplayValue]
+  );
+  const browseTransliterationDraftToStoredValue = useCallback(
+    (value: string): string => {
+      const normalized = formatValue(value);
+      if (!normalized) {
+        return "";
+      }
+      return isCoarsePointerDevice ? transliterationInputToIast(normalized) : normalized;
+    },
+    [isCoarsePointerDevice, transliterationInputToIast]
   );
   const previewLoadingMessage =
     bookPreviewLoadingScope === "node" ? "Building reader view..." : "Building book preview...";
@@ -9873,7 +9924,7 @@ function ScripturesContent() {
       if (inferredLanguage && inferredLanguage !== "en") {
         return `content_data.translations.${inferredLanguage}`;
       }
-      return "content_data.basic.translation";
+      return "content_data.translations.english";
     }
 
     if (normalizedField.startsWith("content_data.translations.")) {
@@ -9897,7 +9948,7 @@ function ScripturesContent() {
       if (inferredLanguage) {
         return `content_data.translations.${inferredLanguage}`;
       }
-      return "content_data.basic.translation";
+      return "content_data.translations.english";
     }
 
     return null;
@@ -10326,7 +10377,8 @@ function ScripturesContent() {
           "replace",
           0,
           false,
-          scopeNodeId
+          scopeNodeId,
+          true
         );
       }
 
@@ -10655,6 +10707,23 @@ function ScripturesContent() {
             autoFocus
             value={previewQuickEditDraft?.value || ""}
             onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key === "NumpadEnter")) {
+                event.preventDefault();
+                event.stopPropagation();
+                void handleSavePreviewQuickEdit();
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setPreviewQuickEditDraft(null);
+                return;
+              }
+              if (event.key === "Enter" || event.key === "NumpadEnter") {
+                event.stopPropagation();
+              }
+            }}
             onFocus={focusPreviewQuickEditFieldStart}
             disabled={Boolean(previewQuickEditDraft?.saving)}
             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
@@ -10665,6 +10734,17 @@ function ScripturesContent() {
             autoFocus
             value={previewQuickEditDraft?.value || ""}
             onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setPreviewQuickEditDraft(null);
+                return;
+              }
+              if (event.key === "Enter" || event.key === "NumpadEnter") {
+                event.preventDefault();
+                void handleSavePreviewQuickEdit();
+              }
+            }}
             onFocus={focusPreviewQuickEditFieldStart}
             disabled={Boolean(previewQuickEditDraft?.saving)}
             className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
@@ -10734,7 +10814,10 @@ function ScripturesContent() {
     const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
     const currentBookSnapshot = currentBook ? ({ ...currentBook } as BookDetails) : null;
     const draft = previewQuickEditDraft;
-    const trimmedValue = draft.value.trim();
+    const rawValue = draft.value.replace(/\r\n/g, "\n");
+    const isMultilineField = isPreviewQuickEditMultiLineField(draft.fieldPath);
+    const normalizedValue = isMultilineField ? rawValue : rawValue.trim();
+    const trimmedValue = rawValue.trim();
     if (draft.fieldPath === "book_name" && !trimmedValue) {
       setPreviewQuickEditDraft((prev) =>
         prev
@@ -10747,7 +10830,7 @@ function ScripturesContent() {
       );
       return;
     }
-    const nextValue = trimmedValue.length > 0 ? trimmedValue : null;
+    const nextValue = trimmedValue.length > 0 ? normalizedValue : null;
 
     setPreviewQuickEditDraft((prev) =>
       prev
@@ -10843,7 +10926,7 @@ function ScripturesContent() {
         );
       }
 
-      if ((draft.targetType ?? "node") === "book" && bookPreviewArtifact) {
+      if (bookPreviewArtifact) {
         const currentScope =
           bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
         const scopeNodeId =
@@ -10858,7 +10941,8 @@ function ScripturesContent() {
           "replace",
           0,
           false,
-          scopeNodeId
+          scopeNodeId,
+          true
         );
       }
 
@@ -10894,7 +10978,8 @@ function ScripturesContent() {
     historyMode: "push" | "replace" = "push",
     pageOffset: number = 0,
     append: boolean = false,
-    targetNodeId?: number | null
+    targetNodeId?: number | null,
+    forceRefresh: boolean = false
   ) => {
     const previewBookId = targetBookId ?? bookId;
     if (!previewBookId) return;
@@ -10940,7 +11025,7 @@ function ScripturesContent() {
       sourceLanguage
     );
     const pageLimit = scope === "book" ? BOOK_PREVIEW_PAGE_SIZE : 5000;
-    const previewArtifactCacheKey = append
+    const previewArtifactCacheKey = append || forceRefresh
       ? null
       : buildPreviewArtifactCacheKey({
           scope,
@@ -10958,7 +11043,7 @@ function ScripturesContent() {
           sourceLanguage: translationLanguageToCode(preferences?.source_language),
         });
 
-    if (!append && previewArtifactCacheKey) {
+    if (!append && !forceRefresh && previewArtifactCacheKey) {
       const cachedArtifact = readCachedPreviewArtifact(previewArtifactCacheKey);
       if (cachedArtifact) {
         setBookPreviewLoadingScope(scope);
@@ -12909,7 +12994,7 @@ function ScripturesContent() {
       sequenceNumber: value.sequenceNumber.trim(),
       hasContent: Boolean(value.hasContent),
       contentSanskrit: value.contentSanskrit.trim(),
-      contentTransliteration: value.contentTransliteration.trim(),
+      contentTransliteration: browseTransliterationDraftToStoredValue(value.contentTransliteration).trim(),
       contentEnglish: value.contentEnglish.trim(),
       tags: value.tags
         .split(",")
@@ -12928,26 +13013,6 @@ function ScripturesContent() {
 
     return normalized;
   };
-
-type BrowseSectionProps = {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children: ReactNode;
-};
-
-const BrowseSection = ({ title, description, action, children }: BrowseSectionProps) => (
-  <section className="flex flex-col gap-3 rounded-[1.75rem] border border-black/10 bg-white/70 p-4 shadow-sm backdrop-blur-sm">
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-zinc-500">{title}</div>
-        {description ? <p className="mt-1 text-sm text-zinc-600">{description}</p> : null}
-      </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
-    </div>
-    <div className="flex flex-col gap-3">{children}</div>
-  </section>
-);
 
   function hasUnsavedInlineChanges() {
     if (!inlineEditMode || !nodeContent) {
@@ -13042,7 +13107,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
   }, [inlineHasChanges]);
 
   useEffect(() => {
-    if (nodeContent) {
+    if (nodeContent && !inlineEditMode) {
       setInlineFormData(buildFormDataFromNode(nodeContent));
       const translationState = buildTranslationEditorStateFromNode(nodeContent);
       setInlineTranslationDrafts(translationState.drafts);
@@ -13051,7 +13116,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
       setInlineTranslationVariants(variantState.translationVariants);
       setInlineCommentaryVariants(variantState.commentaryVariants);
     }
-  }, [nodeContent]);
+  }, [nodeContent, inlineEditMode]);
 
   const currentBookSchemaLevels = useMemo<string[]>(() => {
     if (!currentBook?.schema?.levels || !Array.isArray(currentBook.schema.levels)) {
@@ -13500,7 +13565,8 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
       );
       const contentPair = autoFillSanskritTransliterationPair(
         formData.contentSanskrit,
-        formData.contentTransliteration
+        formData.contentTransliteration,
+        true
       );
 
       const contentData: Record<string, unknown> = {};
@@ -13520,7 +13586,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
         );
 
         for (const language of selectedTranslationLanguages) {
-          const value = (modalTranslationDrafts[language] || "").trim();
+          const value = (modalTranslationDrafts[language] || "").replace(/\r\n/g, "\n");
           applyTranslationDraftValue(nextTranslations, language, value);
         }
 
@@ -13842,7 +13908,8 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
       );
       const contentPair = autoFillSanskritTransliterationPair(
         inlineFormData.contentSanskrit,
-        inlineFormData.contentTransliteration
+        browseTransliterationDraftToStoredValue(inlineFormData.contentTransliteration),
+        true
       );
 
       const contentData: Record<string, unknown> = {};
@@ -13862,7 +13929,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
         );
 
         for (const language of selectedTranslationLanguages) {
-          const value = (inlineTranslationDrafts[language] || "").trim();
+          const value = (inlineTranslationDrafts[language] || "").replace(/\r\n/g, "\n");
           applyTranslationDraftValue(nextTranslations, language, value);
         }
 
@@ -13956,7 +14023,13 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
 
   const handleStartInlineEdit = () => {
     if (!nodeContent || !canEditCurrentBook) return;
-    setInlineFormData(buildFormDataFromNode(nodeContent));
+    const initialFormData = buildFormDataFromNode(nodeContent);
+    setInlineFormData({
+      ...initialFormData,
+      contentTransliteration: browseTransliterationDraftFromStoredValue(
+        initialFormData.contentTransliteration
+      ),
+    });
     const translationState = buildTranslationEditorStateFromNode(nodeContent);
     setInlineTranslationDrafts(translationState.drafts);
     setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
@@ -13969,7 +14042,13 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
 
   const handleCancelInlineEdit = () => {
     if (nodeContent) {
-      setInlineFormData(buildFormDataFromNode(nodeContent));
+      const resetFormData = buildFormDataFromNode(nodeContent);
+      setInlineFormData({
+        ...resetFormData,
+        contentTransliteration: browseTransliterationDraftFromStoredValue(
+          resetFormData.contentTransliteration
+        ),
+      });
       const translationState = buildTranslationEditorStateFromNode(nodeContent);
       setInlineTranslationDrafts(translationState.drafts);
       setInlineSelectedTranslationLanguages(translationState.selectedLanguages);
@@ -13988,7 +14067,9 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
     const bookTranslations = toTranslationRecord(bookContentData.translations);
     setBookContentInlineSanskrit(typeof bookBasic.sanskrit === "string" ? bookBasic.sanskrit : "");
     setBookContentInlineTransliteration(
-      typeof bookBasic.transliteration === "string" ? bookBasic.transliteration : ""
+      browseTransliterationDraftFromStoredValue(
+        typeof bookBasic.transliteration === "string" ? bookBasic.transliteration : ""
+      )
     );
     setBookContentInlineTranslationDrafts(buildEditableTranslationDrafts(bookTranslations));
     const selectedLangs = normalizeSelectedEditableTranslationLanguages(
@@ -14029,7 +14110,8 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
     try {
       const contentPair = autoFillSanskritTransliterationPair(
         bookContentInlineSanskrit,
-        bookContentInlineTransliteration
+        browseTransliterationDraftToStoredValue(bookContentInlineTransliteration),
+        true
       );
       const existingTranslations = toTranslationRecord(
         toRecord(currentBook.content_data).translations
@@ -14040,7 +14122,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
         sourceLanguage
       );
       for (const language of selectedLangs) {
-        const value = (bookContentInlineTranslationDrafts[language] || "").trim();
+        const value = (bookContentInlineTranslationDrafts[language] || "").replace(/\r\n/g, "\n");
         applyTranslationDraftValue(nextTranslations, language, value);
       }
       const englishFallback = pickTranslationTextForLanguageOnly(nextTranslations, "english");
@@ -19145,6 +19227,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                               </label>
                               <div className="group relative mt-1">
                                 <textarea
+                                  data-browse-editor-id="book-content-sanskrit"
                                   rows={3}
                                   value={bookContentInlineSanskrit}
                                   onChange={(e) => setBookContentInlineSanskrit(e.target.value)}
@@ -19164,13 +19247,10 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                               </label>
                               <div className="group relative mt-1">
                                 <textarea
+                                  data-browse-editor-id="book-content-transliteration"
                                   rows={3}
-                                  value={transliterationDisplayValue(bookContentInlineTransliteration)}
-                                  onChange={(e) =>
-                                    setBookContentInlineTransliteration(
-                                      transliterationInputToIast(e.target.value)
-                                    )
-                                  }
+                                  value={bookContentInlineTransliteration}
+                                  onChange={(e) => setBookContentInlineTransliteration(e.target.value)}
                                   className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
                                 />
                                 <InlineClearButton
@@ -19210,6 +19290,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                     </label>
                                     <div className="group relative mt-1">
                                       <textarea
+                                        data-browse-editor-id={`book-content-translation-${language}`}
                                         rows={3}
                                         value={bookContentInlineTranslationDrafts[language] || ""}
                                         onChange={(e) =>
@@ -19291,6 +19372,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                         </select>
                                       </label>
                                       <textarea
+                                        data-browse-editor-id={`book-translation-variant-${index}`}
                                         value={entry.text}
                                         onChange={(e) =>
                                           setBookContentInlineTranslationVariants((prev) =>
@@ -19386,6 +19468,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                         </select>
                                       </label>
                                       <textarea
+                                        data-browse-editor-id={`book-commentary-variant-${index}`}
                                         value={entry.text}
                                         onChange={(e) =>
                                           setBookContentInlineCommentaryVariants((prev) =>
@@ -19984,6 +20067,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                   </label>
                                   <div className="group relative mt-1">
                                     <textarea
+                                      data-browse-editor-id="inline-content-sanskrit"
                                       rows={3}
                                       value={inlineFormData.contentSanskrit}
                                       onChange={(event) =>
@@ -20011,12 +20095,13 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                   </label>
                                   <div className="group relative mt-1">
                                     <textarea
+                                      data-browse-editor-id="inline-content-transliteration"
                                       rows={3}
-                                      value={transliterationDisplayValue(inlineFormData.contentTransliteration)}
+                                      value={inlineFormData.contentTransliteration}
                                       onChange={(event) =>
                                         setInlineFormData((prev) => ({
                                           ...prev,
-                                          contentTransliteration: transliterationInputToIast(event.target.value),
+                                          contentTransliteration: event.target.value,
                                         }))
                                       }
                                       className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
@@ -20064,6 +20149,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                         </label>
                                         <div className="group relative mt-1">
                                           <textarea
+                                            data-browse-editor-id={`inline-translation-${language}`}
                                             rows={3}
                                             value={inlineTranslationDrafts[language] || ""}
                                             onChange={(event) =>
@@ -20147,6 +20233,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                             </label>
                                           </div>
                                           <textarea
+                                            data-browse-editor-id={`inline-translation-variant-${index}`}
                                             value={entry.text}
                                             onChange={(event) =>
                                               setInlineTranslationVariants((prev) =>
@@ -20248,6 +20335,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                                             </label>
                                           </div>
                                           <textarea
+                                            data-browse-editor-id={`inline-commentary-variant-${index}`}
                                             value={entry.text}
                                             onChange={(event) =>
                                               setInlineCommentaryVariants((prev) =>
