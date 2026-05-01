@@ -6585,6 +6585,54 @@ function ScripturesContent() {
     return repaired.normalize("NFC");
   };
 
+  const resolveDisplayedTranslationQuickEditFieldPath = (
+    initialFieldPath: string | null,
+    displayedValue: string,
+    translationsValue: unknown,
+    preferredLanguages: string[],
+    englishVisible: boolean,
+  ): string | null => {
+    if (initialFieldPath !== "content_data.translations.english") {
+      return initialFieldPath;
+    }
+
+    const transMap = toTranslationRecord(translationsValue);
+    const normalizedDisplayed = normalizeTextForDisplay(displayedValue || "").trim();
+    const uniquePreferredLanguages = Array.from(
+      new Set(preferredLanguages.map((lang) => normalizeTranslationLanguage(lang || ""))).values()
+    ).filter(Boolean);
+
+    if (normalizedDisplayed) {
+      for (const canonical of uniquePreferredLanguages) {
+        if (canonical === "english") {
+          continue;
+        }
+        const code = translationLanguageToCode(canonical);
+        const candidate = transMap[canonical] || transMap[code] || "";
+        if (normalizeTextForDisplay(candidate).trim() === normalizedDisplayed) {
+          return `content_data.translations.${canonical}`;
+        }
+      }
+
+      const storedEnglish = transMap.english || transMap.en || "";
+      if (normalizeTextForDisplay(storedEnglish).trim() === normalizedDisplayed) {
+        return initialFieldPath;
+      }
+    }
+
+    const primaryLang = normalizeTranslationLanguage(preferredLanguages[0] || "");
+    if (!englishVisible && primaryLang && primaryLang !== "english") {
+      return `content_data.translations.${primaryLang}`;
+    }
+
+    const storedEnglish = transMap.english || transMap.en || "";
+    if (!storedEnglish && primaryLang && primaryLang !== "english") {
+      return `content_data.translations.${primaryLang}`;
+    }
+
+    return initialFieldPath;
+  };
+
   const renderTransliterationByPreference = (value: string): string => {
     const normalizedValue = normalizeTextForDisplay(value);
     if (!normalizedValue) return "";
@@ -15959,16 +16007,13 @@ function ScripturesContent() {
                     return <div key={`blank-${lineIndex}`} className="h-3" />;
                   }
                   const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
-                  const correctedFieldPath = (() => {
-                    if (fieldPath !== "content_data.translations.english") {
-                      return fieldPath;
-                    }
-                    const primaryLang = normalizeTranslationLanguage(appliedPreviewTranslationLanguages[0] || "");
-                    if (!appliedBookPreviewLanguageSettings.show_english && primaryLang && primaryLang !== "english") {
-                      return `content_data.translations.${primaryLang}`;
-                    }
-                    return fieldPath;
-                  })();
+                  const correctedFieldPath = resolveDisplayedTranslationQuickEditFieldPath(
+                    fieldPath,
+                    line.value,
+                    block.content.translations,
+                    appliedPreviewTranslationLanguages as string[],
+                    appliedBookPreviewLanguageSettings.show_english,
+                  );
                   const canQuickEditLine =
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number" &&
@@ -16343,38 +16388,13 @@ function ScripturesContent() {
                     // the "english" template slot, the rendered line has fieldName="english"
                     // but its value is actually e.g. Telugu. Correct the fieldPath so the
                     // pencil edits (and saves to) the right translation field.
-                    const correctedFieldPath = (() => {
-                      if (fieldPath !== "content_data.translations.english" || !firstLine.value) {
-                        return fieldPath;
-                      }
-                      const primaryLang = normalizeTranslationLanguage((appliedPreviewTranslationLanguages as string[])[0] || "");
-                      if (!appliedBookPreviewLanguageSettings.show_english && primaryLang && primaryLang !== "english") {
-                        return `content_data.translations.${primaryLang}`;
-                      }
-                      const transMap = block.content.translations as Record<string, string> | undefined;
-                      const storedEnglish = transMap ? (transMap["english"] || transMap["en"] || "") : "";
-                      // If stored English value matches, it genuinely is an English field
-                      const nfcVal = firstLine.value.trim().normalize("NFC");
-                      if (storedEnglish && storedEnglish.trim().normalize("NFC") === nfcVal) {
-                        return fieldPath;
-                      }
-                      // Try to match against selected non-English translation languages
-                      for (const lang of (appliedPreviewTranslationLanguages as string[])) {
-                        const canonical = normalizeTranslationLanguage(lang);
-                        if (canonical === "english") continue;
-                        const code = translationLanguageToCode(canonical);
-                        const v = transMap ? (transMap[canonical] || transMap[code] || "") : "";
-                        if (v && v.trim().normalize("NFC") === nfcVal) {
-                          return `content_data.translations.${canonical}`;
-                        }
-                      }
-                      // Fallback: if primary is non-English and no English is stored,
-                      // the displayed value must belong to the primary language
-                      if (primaryLang && primaryLang !== "english" && !storedEnglish) {
-                        return `content_data.translations.${primaryLang}`;
-                      }
-                      return fieldPath;
-                    })();
+                    const correctedFieldPath = resolveDisplayedTranslationQuickEditFieldPath(
+                      fieldPath,
+                      firstLine.value || "",
+                      block.content.translations,
+                      appliedPreviewTranslationLanguages as string[],
+                      appliedBookPreviewLanguageSettings.show_english,
+                    );
                     const canQuickEditLine =
                       canEditCurrentBook &&
                       typeof quickEditNodeId === "number" &&
