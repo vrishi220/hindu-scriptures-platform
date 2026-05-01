@@ -3558,13 +3558,14 @@ function ScripturesContent() {
       appliedPreviewTranslationLanguages[0] ||
       (normalizeTranslationLanguage(effectiveSourceLanguage) as EditableTranslationLanguage);
     const appendSelectedTranslationLines = () => {
-      if (!resolvedSettings.show_english) {
-        return;
-      }
       const existingValues = new Set(lines.map((line) => (line.value || "").trim()).filter(Boolean));
       const hasEnglishLine = () => lines.some((line) => line.fieldName === "english");
       for (const language of appliedPreviewTranslationLanguages) {
-        if (language === primaryPreviewTranslationLanguage) {
+        // When English is visible, the primary translation is already rendered via
+        // rendered_lines (the backend puts it in the "english" slot), so skip it.
+        // When English is hidden, rendered_lines are skipped for "english", so we
+        // must add the primary language here too.
+        if (language === primaryPreviewTranslationLanguage && resolvedSettings.show_english) {
           continue;
         }
         const value = pickTranslationTextForLanguageOnly(blockTranslations, language);
