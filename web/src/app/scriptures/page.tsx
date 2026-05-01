@@ -3593,9 +3593,16 @@ function ScripturesContent() {
                     }
                   }
                 } else {
-                  // Language should not be visible: remove the lines
+                  // Language should not be visible: remove ALL lines that belong to this language
+                  // This includes both "english" (from backend template) and inherited field lines
                   for (let i = lines.length - 1; i >= 0; i -= 1) {
-                    if (lines[i].fieldName === "english") {
+                    const line = lines[i];
+                    // Remove "english" lines (backend template)
+                    if (line.fieldName === "english") {
+                      lines.splice(i, 1);
+                    }
+                    // Remove inherited lines from this language (e.g., "sanskrit" field lines)
+                    else if (language === "sanskrit" && line.fieldName === "sanskrit") {
                       lines.splice(i, 1);
                     }
                   }
@@ -3695,6 +3702,19 @@ function ScripturesContent() {
         });
 
         previousFieldName = fieldName;
+      }
+
+      // If primary language is Sanskrit but show_sanskrit is false, remove all Sanskrit lines
+      // that came from rendered_lines (fieldName="english" with Sanskrit content from backend)
+      if (
+        primaryPreviewTranslationLanguage === "sanskrit" &&
+        !visibleByKey.sanskrit
+      ) {
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          if (lines[i].fieldName === "english" || lines[i].fieldName === "sanskrit") {
+            lines.splice(i, 1);
+          }
+        }
       }
 
       appendSelectedTranslationLines();
