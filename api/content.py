@@ -4137,6 +4137,7 @@ def create_node(
 
     insert_after_node: ContentNode | None = None
     resolved_parent_node_id = payload.parent_node_id
+    resolved_level_order = payload.level_order
 
     if payload.insert_after_node_id is not None:
         if payload.insert_after_node_id <= 0:
@@ -4166,21 +4167,10 @@ def create_node(
             schema_levels,
             level_name_overrides,
         )
-        if insert_after_level_name != resolved_level_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same level",
-            )
-
-        if (
-            payload.level_order is not None
-            and insert_after_node.level_order is not None
-            and insert_after_node.level_order != payload.level_order
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insert-after node must share the same level order",
-            )
+        # Insert-after always implies sibling insertion, so inherit sibling level context.
+        resolved_level_name = insert_after_level_name
+        if insert_after_node.level_order is not None:
+            resolved_level_order = insert_after_node.level_order
 
     # Validate hierarchy against schema if book has one
     if book.schema and book.schema.levels:
@@ -4358,7 +4348,7 @@ def create_node(
         parent_node_id=resolved_parent_node_id,
         referenced_node_id=payload.referenced_node_id,
         level_name=resolved_level_name,
-        level_order=payload.level_order,
+        level_order=resolved_level_order,
         sequence_number=sequence_number,
         title_sanskrit=title_sanskrit,
         title_transliteration=title_transliteration,

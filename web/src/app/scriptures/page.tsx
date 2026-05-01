@@ -13572,23 +13572,33 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
         : null;
 
       const schemaLevels = currentBook?.schema?.levels || [];
+      const insertAfterNodeForCreate =
+        isAddAction && createInsertAfterNodeId !== null
+          ? findNodeById(treeData, createInsertAfterNodeId)
+          : null;
       let resolvedLevelName = formData.levelName;
-      if (schemaLevels.length > 0) {
-        const matchedLevel = getSchemaMatchedLevelName(
-          formData.levelName,
-          actionNode?.level_order
-        );
+      if (insertAfterNodeForCreate) {
+        resolvedLevelName = insertAfterNodeForCreate.level_name || formData.levelName;
+      }
 
-        if (matchedLevel && schemaLevels.includes(matchedLevel)) {
-          resolvedLevelName = matchedLevel;
-        } else if (isAddAction && createInsertAfterNodeId !== null) {
+      if (schemaLevels.length > 0) {
+        if (insertAfterNodeForCreate) {
+          // For sibling inserts, always align to the insert-after node level.
           resolvedLevelName = getSchemaMatchedLevelName(
-            formData.levelName || getNextLevelName(actionNode),
+            insertAfterNodeForCreate.level_name || formData.levelName,
+            insertAfterNodeForCreate.level_order
+          );
+        } else {
+          const matchedLevel = getSchemaMatchedLevelName(
+            formData.levelName,
             actionNode?.level_order
           );
-        } else if (isAddAction && resolvedParentNodeId === null) {
-          resolvedLevelName = schemaLevels[0];
-        } else if (isAddAction) {
+
+          if (matchedLevel && schemaLevels.includes(matchedLevel)) {
+            resolvedLevelName = matchedLevel;
+          } else if (isAddAction && resolvedParentNodeId === null) {
+            resolvedLevelName = schemaLevels[0];
+          } else if (isAddAction) {
           const parentNode =
             resolvedParentNodeId !== null
               ? findNodeById(treeData, resolvedParentNodeId)
@@ -13596,19 +13606,19 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
           const nextLevel = parentNode ? getNextLevelName(parentNode) : "";
           resolvedLevelName = nextLevel || schemaLevels[0];
         } else {
-          resolvedLevelName = getSchemaMatchedLevelName(
-            formData.levelName || actionNode?.level_name || "",
-            actionNode?.level_order
-          );
+            resolvedLevelName = getSchemaMatchedLevelName(
+              formData.levelName || actionNode?.level_name || "",
+              actionNode?.level_order
+            );
+          }
         }
       }
 
       // Calculate level_order based on parent or sibling-insert context
       let levelOrder = 1;
       if (isAddAction && actionNode) {
-        if (createInsertAfterNodeId !== null) {
-          const insertAfterNode = findNodeById(treeData, createInsertAfterNodeId);
-          levelOrder = insertAfterNode?.level_order || actionNode.level_order || 1;
+        if (insertAfterNodeForCreate) {
+          levelOrder = insertAfterNodeForCreate.level_order || actionNode.level_order || 1;
         } else {
           // When adding a child node
           if (actionNode.level_name?.toUpperCase() === "BOOK") {

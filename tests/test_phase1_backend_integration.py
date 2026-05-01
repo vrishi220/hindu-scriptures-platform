@@ -612,6 +612,86 @@ class TestNodeInsertAfterParentResolution:
         assert sibling_payload["parent_node_id"] == chapter_one_id
         assert sibling_payload["level_name"] == "Verse"
 
+    def test_create_sibling_with_insert_after_ignores_stale_level_context(self, client):
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Insert After Level Schema {uuid4().hex[:8]}",
+                "description": "Schema for insert-after stale level context",
+                "levels": ["Chapter", "Section", "Verse"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Insert After Level Book {uuid4().hex[:6]}",
+                "book_code": f"insert-after-level-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        chapter_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": None,
+                "level_name": "Chapter",
+                "level_order": 1,
+                "sequence_number": "1",
+                "title_english": "Chapter 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert chapter_response.status_code == status.HTTP_201_CREATED
+        chapter_id = chapter_response.json()["id"]
+
+        section_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "parent_node_id": chapter_id,
+                "level_name": "Section",
+                "level_order": 2,
+                "sequence_number": "1",
+                "title_english": "Section 1",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+        assert section_response.status_code == status.HTTP_201_CREATED
+        section_id = section_response.json()["id"]
+
+        sibling_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "insert_after_node_id": section_id,
+                # Intentionally stale/incorrect values (from parent context).
+                "level_name": "Chapter",
+                "level_order": 1,
+                "title_english": "Section 2",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+
+        assert sibling_response.status_code == status.HTTP_201_CREATED
+        sibling_payload = sibling_response.json()
+        assert sibling_payload["parent_node_id"] == chapter_id
+        assert sibling_payload["level_name"] == "Section"
+        assert sibling_payload["level_order"] == 2
+
 
 class TestNodeDeleteSequenceRenumbering:
     def test_delete_node_renumbers_remaining_siblings(self, client):
