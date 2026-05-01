@@ -16370,7 +16370,6 @@ function ScripturesContent() {
                       }
                       // Fallback: if primary is non-English and no English is stored,
                       // the displayed value must belong to the primary language
-                      const primaryLang = normalizeTranslationLanguage((appliedPreviewTranslationLanguages as string[])[0] || "");
                       if (primaryLang && primaryLang !== "english" && !storedEnglish) {
                         return `content_data.translations.${primaryLang}`;
                       }
