@@ -689,8 +689,71 @@ class TestNodeInsertAfterParentResolution:
         assert sibling_response.status_code == status.HTTP_201_CREATED
         sibling_payload = sibling_response.json()
         assert sibling_payload["parent_node_id"] == chapter_id
+        # insert-after node level "Section" is in schema → wins over stale payload "Chapter"
         assert sibling_payload["level_name"] == "Section"
         assert sibling_payload["level_order"] == 2
+
+    def test_create_sibling_with_insert_after_and_stale_node_level_uses_payload_level(self, client):
+        """When the insert-after node has a level_name that no longer exists in the schema
+        (e.g., schema was changed after nodes were created), the payload's valid level wins."""
+        headers = _register_and_login(client)
+
+        schema_response = client.post(
+            "/api/content/schemas",
+            json={
+                "name": f"Stale Level Schema {uuid4().hex[:8]}",
+                "description": "Schema for stale-level regression",
+                "levels": ["Adhyaya", "Shloka"],
+            },
+            headers=headers,
+        )
+        assert schema_response.status_code == status.HTTP_201_CREATED
+        schema_id = schema_response.json()["id"]
+
+        book_response = client.post(
+            "/api/content/books",
+            json={
+                "schema_id": schema_id,
+                "book_name": f"Stale Level Book {uuid4().hex[:6]}",
+                "book_code": f"stale-level-{uuid4().hex[:6]}",
+                "language_primary": "sanskrit",
+            },
+            headers=headers,
+        )
+        assert book_response.status_code == status.HTTP_201_CREATED
+        book_id = book_response.json()["id"]
+
+        # Create a root node via raw SQL with legacy level_name not in schema
+        db_url = "postgresql://postgres@127.0.0.1:5432/hindu_scriptures"
+        import sqlalchemy as _sa
+        _engine = _sa.create_engine(db_url)
+        with _engine.connect() as conn:
+            result = conn.execute(_sa.text(
+                "INSERT INTO content_nodes (book_id, level_name, level_order, sequence_number, has_content, created_by, last_modified_by) "
+                "VALUES (:book_id, 'Prakarana', 1, '1', false, 1, 1) RETURNING id"
+            ), {"book_id": book_id})
+            conn.commit()
+            legacy_node_id = result.scalar()
+        _engine.dispose()
+
+        sibling_response = client.post(
+            "/api/content/nodes",
+            json={
+                "book_id": book_id,
+                "insert_after_node_id": legacy_node_id,
+                # Frontend correctly resolves "Adhyaya" based on level_order fallback
+                "level_name": "Adhyaya",
+                "level_order": 1,
+                "title_english": "Adhyaya 2",
+                "has_content": False,
+            },
+            headers=headers,
+        )
+
+        assert sibling_response.status_code == status.HTTP_201_CREATED
+        sibling_payload = sibling_response.json()
+        assert sibling_payload["level_name"] == "Adhyaya"
+        assert sibling_payload["level_order"] == 1
 
 
 class TestNodeDeleteSequenceRenumbering:

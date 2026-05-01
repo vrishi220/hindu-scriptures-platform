@@ -4167,8 +4167,11 @@ def create_node(
             schema_levels,
             level_name_overrides,
         )
-        # Insert-after always implies sibling insertion, so inherit sibling level context.
-        resolved_level_name = insert_after_level_name
+        # Only adopt the insert-after node's level if it resolves to a known schema
+        # level. If the schema was changed after nodes were created, the stored
+        # level_name may be stale; in that case keep the payload's resolved level.
+        if not schema_levels or insert_after_level_name in schema_levels:
+            resolved_level_name = insert_after_level_name
         if insert_after_node.level_order is not None:
             resolved_level_order = insert_after_node.level_order
 
