@@ -698,6 +698,11 @@ class TestNodeInsertAfterParentResolution:
         (e.g., schema was changed after nodes were created), the payload's valid level wins."""
         headers = _register_and_login(client)
 
+        # Get the actual user ID for use in raw SQL inserts
+        me_response = client.get("/api/me", headers=headers)
+        assert me_response.status_code == status.HTTP_200_OK
+        current_user_id = me_response.json()["id"]
+
         schema_response = client.post(
             "/api/content/schemas",
             json={
@@ -724,14 +729,20 @@ class TestNodeInsertAfterParentResolution:
         book_id = book_response.json()["id"]
 
         # Create a root node via raw SQL with legacy level_name not in schema
-        db_url = "postgresql://postgres@127.0.0.1:5432/hindu_scriptures"
+        import os as _os
+        import getpass as _getpass
         import sqlalchemy as _sa
+        _current_user = _getpass.getuser()
+        db_url = _os.environ.get(
+            "TEST_DATABASE_URL",
+            f"postgresql+psycopg2://{_current_user}@localhost/test_scriptures",
+        )
         _engine = _sa.create_engine(db_url)
         with _engine.connect() as conn:
             result = conn.execute(_sa.text(
                 "INSERT INTO content_nodes (book_id, level_name, level_order, sequence_number, has_content, created_by, last_modified_by) "
-                "VALUES (:book_id, 'Prakarana', 1, '1', false, 1, 1) RETURNING id"
-            ), {"book_id": book_id})
+                "VALUES (:book_id, 'Prakarana', 1, '1', false, :user_id, :user_id) RETURNING id"
+            ), {"book_id": book_id, "user_id": current_user_id})
             conn.commit()
             legacy_node_id = result.scalar()
         _engine.dispose()
