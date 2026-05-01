@@ -16315,52 +16315,81 @@ function ScripturesContent() {
                   return groups.map((group) => {
                     const firstLine = group.lines[0];
                     const fieldPath = resolvePreviewQuickEditFieldPath(firstLine.fieldName, firstLine.label);
+                    // When the backend substitutes the preferred non-English translation into
+                    // the "english" template slot, the rendered line has fieldName="english"
+                    // but its value is actually e.g. Telugu. Correct the fieldPath so the
+                    // pencil edits (and saves to) the right translation field.
+                    const correctedFieldPath = (() => {
+                      if (
+                        fieldPath !== "content_data.translations.english" ||
+                        !firstLine.value ||
+                        typeof block.content.translations !== "object" ||
+                        !block.content.translations
+                      ) {
+                        return fieldPath;
+                      }
+                      const translations = block.content.translations as Record<string, string>;
+                      const storedEnglish = translations["english"] || translations["en"] || "";
+                      if (!storedEnglish || storedEnglish.trim() === firstLine.value.trim()) {
+                        return fieldPath;
+                      }
+                      for (const lang of appliedPreviewTranslationLanguages) {
+                        const canonical = normalizeTranslationLanguage(lang);
+                        if (canonical === "english") continue;
+                        const code = translationLanguageToCode(canonical);
+                        const v = translations[canonical] || translations[code] || "";
+                        if (v.trim() === firstLine.value.trim()) {
+                          return `content_data.translations.${canonical}`;
+                        }
+                      }
+                      return fieldPath;
+                    })();
                     const canQuickEditLine =
                       canEditCurrentBook &&
                       typeof quickEditNodeId === "number" &&
-                      Boolean(fieldPath);
+                      Boolean(correctedFieldPath);
                     const isActiveField =
                       canQuickEditLine &&
                       previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                      previewQuickEditDraft?.fieldPath === fieldPath;
-                    const fullFieldValue = !fieldPath ? (firstLine.value || "")
-                      : fieldPath === "content_data.basic.translation" ? (
+                      previewQuickEditDraft?.fieldPath === correctedFieldPath;
+                    const fullFieldValue = !correctedFieldPath ? (firstLine.value || "")
+                      : correctedFieldPath === "content_data.basic.translation" ? (
                           typeof block.content.english === "string" ? block.content.english
                           : typeof block.content.translations?.en === "string" ? block.content.translations.en
                           : typeof block.content.translations?.english === "string" ? block.content.translations.english
                           : (firstLine.value || "")
                         )
-                      : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : (firstLine.value || ""); })()
+                      : correctedFieldPath.startsWith("content_data.translations.") ? (() => { const lang = correctedFieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? (block.content.translations as Record<string, string>)[lang] : (firstLine.value || ""); })()
                       : (firstLine.value || "");
-                    const isFirstForField = firstLine.isFieldStart && Boolean(fieldPath) && !seenTranslationFields.has(fieldPath ?? "");
-                    const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                    const isFirstForField = firstLine.isFieldStart && Boolean(correctedFieldPath) && !seenTranslationFields.has(correctedFieldPath ?? "");
+                    const selectOptions = correctedFieldPath ? getPreviewQuickEditSelectOptions(correctedFieldPath) : null;
                     const normalizedLineLabel = (firstLine.label || "").trim().toLowerCase();
                     const normalizedLineField = (firstLine.fieldName || "").trim().toLowerCase();
                     const isExplicitSingleLineField =
-                      Boolean(fieldPath) &&
-                      (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
+                      Boolean(correctedFieldPath) &&
+                      (isPreviewQuickEditSingleLineField(correctedFieldPath ?? "") ||
                         normalizedLineLabel.includes("title") ||
                         normalizedLineLabel.includes("sequence") ||
                         normalizedLineField.includes("title") ||
                         normalizedLineField.includes("sequence"));
                     const forceMultilineForBookContent =
                       quickEditTargetType === "book" &&
-                      (fieldPath === "content_data.basic.sanskrit" ||
-                        fieldPath === "content_data.basic.transliteration" ||
-                        fieldPath === "content_data.basic.translation");
+                      (correctedFieldPath === "content_data.basic.sanskrit" ||
+                        correctedFieldPath === "content_data.basic.transliteration" ||
+                        correctedFieldPath === "content_data.basic.translation");
                     const shouldUseMultilineInput =
-                      Boolean(fieldPath) &&
+                      Boolean(correctedFieldPath) &&
                       !selectOptions &&
                       (forceMultilineForBookContent ||
-                        isPreviewQuickEditMultiLineField(fieldPath as string)) &&
+                        isPreviewQuickEditMultiLineField(correctedFieldPath as string)) &&
                       !isExplicitSingleLineField;
                     const useSingleLineInput =
-                      fieldPath
+                      correctedFieldPath
                         ? !shouldUseMultilineInput && !selectOptions
                         : false;
                     const panelLineKey = `${firstLine.key}-translation-${group.startIndex}`;
-                    if (firstLine.isFieldStart && fieldPath) {
-                      seenTranslationFields.add(fieldPath);
+                    if (firstLine.isFieldStart && correctedFieldPath) {
+                      seenTranslationFields.add(correctedFieldPath);
                     }
 
                     return (
@@ -16389,14 +16418,14 @@ function ScripturesContent() {
                               );
                             })}
                           </div>
-                          {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
+                          {canQuickEditLine && correctedFieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                             <button
                               type="button"
                               onClick={() => {
                                 setPreviewQuickEditDraft({
                                   nodeId: quickEditNodeId as number,
                                   targetType: quickEditTargetType,
-                                  fieldPath,
+                                  fieldPath: correctedFieldPath,
                                   lineKey: panelLineKey,
                                   value: fullFieldValue,
                                   saving: false,
@@ -16404,8 +16433,8 @@ function ScripturesContent() {
                                 });
                               }}
                               className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                              aria-label={previewQuickEditFieldTooltip(fieldPath, firstLine.label)}
-                              title={previewQuickEditFieldTooltip(fieldPath, firstLine.label)}
+                              aria-label={previewQuickEditFieldTooltip(correctedFieldPath, firstLine.label)}
+                              title={previewQuickEditFieldTooltip(correctedFieldPath, firstLine.label)}
                             >
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
@@ -16426,7 +16455,7 @@ function ScripturesContent() {
                                 className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                               >
                                 {selectOptions.map((option) => (
-                                  <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
+                                  <option key={`${correctedFieldPath}-${option.value || "empty"}`} value={option.value}>
                                     {option.label}
                                   </option>
                                 ))}
