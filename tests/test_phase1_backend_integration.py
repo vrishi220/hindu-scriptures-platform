@@ -699,7 +699,7 @@ class TestNodeInsertAfterParentResolution:
         headers = _register_and_login(client)
 
         # Get the actual user ID for use in raw SQL inserts
-        me_response = client.get("/api/me", headers=headers)
+        me_response = client.get("/api/users/me", headers=headers)
         assert me_response.status_code == status.HTTP_200_OK
         current_user_id = me_response.json()["id"]
 
@@ -740,8 +740,8 @@ class TestNodeInsertAfterParentResolution:
         _engine = _sa.create_engine(db_url)
         with _engine.connect() as conn:
             result = conn.execute(_sa.text(
-                "INSERT INTO content_nodes (book_id, level_name, level_order, sequence_number, has_content, created_by, last_modified_by) "
-                "VALUES (:book_id, 'Prakarana', 1, '1', false, :user_id, :user_id) RETURNING id"
+                "INSERT INTO content_nodes (book_id, level_name, level_order, sequence_number, has_content, created_by, last_modified_by, status, visibility, language_code) "
+                "VALUES (:book_id, 'Prakarana', 1, '1', false, :user_id, :user_id, 'draft', 'private', 'en') RETURNING id"
             ), {"book_id": book_id, "user_id": current_user_id})
             conn.commit()
             legacy_node_id = result.scalar()
