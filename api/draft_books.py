@@ -2248,6 +2248,7 @@ def _render_liquid_lines(
     for raw_line in rendered.splitlines():
         line = raw_line.strip()
         if not line:
+            lines.append({"field": "blank", "label": "", "value": ""})
             continue
 
         label_prefix = ""

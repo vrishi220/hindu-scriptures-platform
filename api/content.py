@@ -861,6 +861,13 @@ def _normalize_single_field_patch_value(value: object) -> object:
     return value
 
 
+def _normalize_content_field_patch_value(value: object) -> object:
+    if isinstance(value, str):
+        normalized = value.replace("\r\n", "\n")
+        return normalized if normalized.strip() else None
+    return value
+
+
 def _clone_content_data(value: object) -> dict:
     if isinstance(value, dict):
         return json.loads(json.dumps(value))
@@ -880,6 +887,22 @@ def _set_basic_content_field(content_data: dict, field_path: str, next_value: ob
         content_data["basic"] = basic
     else:
         content_data.pop("basic", None)
+
+    # Keep English translation aliases synchronized when basic.translation changes.
+    if basic_key == "translation":
+        translations = content_data.get("translations")
+        if not isinstance(translations, dict):
+            translations = {}
+        if next_value is None:
+            translations.pop("en", None)
+            translations.pop("english", None)
+        else:
+            translations["en"] = next_value
+            translations["english"] = next_value
+        if translations:
+            content_data["translations"] = translations
+        else:
+            content_data.pop("translations", None)
 
 
 def _set_translation_content_field(content_data: dict, field_path: str, next_value: object) -> None:
@@ -903,6 +926,20 @@ def _set_translation_content_field(content_data: dict, field_path: str, next_val
         content_data["translations"] = translations
     else:
         content_data.pop("translations", None)
+
+    # Keep basic.translation synchronized when English aliases are patched.
+    if translation_key in {"en", "english"}:
+        basic = content_data.get("basic")
+        if not isinstance(basic, dict):
+            basic = {}
+        if next_value is None:
+            basic.pop("translation", None)
+        else:
+            basic["translation"] = next_value
+        if basic:
+            content_data["basic"] = basic
+        else:
+            content_data.pop("basic", None)
 
 
 def _normalize_variant_payload(value: object) -> dict:
@@ -4671,13 +4708,14 @@ def update_node_single_field(
             )
 
     field_path = payload.field_path.strip()
-    next_value = _normalize_single_field_patch_value(payload.value)
 
     patch_updates: dict[str, object] = {}
 
     if field_path in _NODE_SIMPLE_PATCH_FIELDS:
+        next_value = _normalize_single_field_patch_value(payload.value)
         patch_updates[field_path] = next_value
     elif field_path.startswith("content_data."):
+        next_value = _normalize_content_field_patch_value(payload.value)
         content_target = source_node if source_node is not None else node
         content_data = _clone_content_data(content_target.content_data)
         normalized_content_data = _validate_word_meanings_content_data(
@@ -4713,15 +4751,16 @@ def update_book_single_field(
     _ensure_book_edit_access(db, current_user, book)
 
     field_path = payload.field_path.strip()
-    next_value = _normalize_single_field_patch_value(payload.value)
 
     metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
     next_metadata = dict(metadata)
     book_node_payload = _book_node_payload_from_metadata(next_metadata)
 
     if field_path in _BOOK_SIMPLE_PATCH_FIELDS:
+        next_value = _normalize_single_field_patch_value(payload.value)
         book_node_payload[field_path] = next_value
     elif field_path.startswith("content_data."):
+        next_value = _normalize_content_field_patch_value(payload.value)
         content_data = _clone_content_data(book_node_payload.get("content_data"))
         normalized_content_data = _validate_word_meanings_content_data(
             _apply_content_data_field_patch(content_data, field_path, next_value)

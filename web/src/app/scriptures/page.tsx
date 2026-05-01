@@ -2047,14 +2047,14 @@ const pickPreferredTranslationText = (
 
   for (const value of candidateValues) {
     if (typeof value === "string" && value.trim()) {
-      return value.trim();
+      return value;
     }
   }
   // Last resort: return any available translation value (e.g. translations.te
   // when preferred language is English but only Telugu is stored).
   for (const v of Object.values(translations)) {
     if (typeof v === "string" && v.trim()) {
-      return v.trim();
+      return v;
     }
   }
   return "";
@@ -2068,7 +2068,7 @@ const pickTranslationTextForLanguageOnly = (
   for (const key of keys) {
     const value = translations[key];
     if (typeof value === "string" && value.trim()) {
-      return value.trim();
+      return value;
     }
   }
   return "";
@@ -2878,6 +2878,7 @@ function ScripturesContent() {
     saving: boolean;
     error: string | null;
   } | null>(null);
+  const previewQuickEditPanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [wmPreviewTableEditNodeId, setWmPreviewTableEditNodeId] = useState<number | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
@@ -3612,11 +3613,27 @@ function ScripturesContent() {
       for (let index = 0; index < renderedLines.length; index += 1) {
         const line = renderedLines[index];
         const rawValue = normalizeTextForDisplay((line?.value || "").trim());
+        const rawFieldName = (line?.field || "text").trim().toLowerCase();
         if (!rawValue) {
+          if (rawFieldName === "blank") {
+            const inheritedBlankFieldName =
+              previousFieldName === "sanskrit" ||
+              previousFieldName === "transliteration" ||
+              previousFieldName === "english"
+                ? previousFieldName
+                : "blank";
+            lines.push({
+              key: `blank-${index}`,
+              label: "",
+              value: "",
+              className: "",
+              fieldName: inheritedBlankFieldName,
+              isFieldStart: false,
+            });
+          }
           continue;
         }
 
-        const rawFieldName = (line?.field || "text").trim().toLowerCase();
         const rawLabel = (line?.label || "").trim();
         const previousFieldIsContinuable =
           previousFieldName === "sanskrit" ||
@@ -10507,11 +10524,6 @@ function ScripturesContent() {
       element.scrollTop = 0;
       element.scrollLeft = 0;
     }
-    const editorContainer = element.parentElement;
-    const isTouchDevice = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
-    if (!isTouchDevice && editorContainer instanceof HTMLElement) {
-      editorContainer.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
-    }
   };
 
   const previewQuickEditAffordanceClass = (isVisible: boolean): string => {
@@ -10520,6 +10532,109 @@ function ScripturesContent() {
     }
     return "opacity-0 pointer-events-none";
   };
+
+  const setPreviewQuickEditPanelRef = useCallback((lineKey: string, element: HTMLDivElement | null) => {
+    if (element) {
+      previewQuickEditPanelRefs.current[lineKey] = element;
+      return;
+    }
+    delete previewQuickEditPanelRefs.current[lineKey];
+  }, []);
+
+  useEffect(() => {
+    if (!previewQuickEditDraft || typeof window === "undefined") {
+      return;
+    }
+    const activeLineKey = previewQuickEditDraft.lineKey;
+    const scrollBehavior: ScrollBehavior = "auto";
+    const keyboardGapPx = 12;
+    const topSafetyPx = 16;
+    const retryTimers: number[] = [];
+    let cleanupViewportListener: (() => void) | null = null;
+
+    const findScrollableAncestor = (node: HTMLElement): HTMLElement | null => {
+      let ancestor: HTMLElement | null = node.parentElement;
+      while (ancestor) {
+        const style = window.getComputedStyle(ancestor);
+        const overflowY = style.overflowY;
+        const canScrollVertically =
+          (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") &&
+          ancestor.scrollHeight > ancestor.clientHeight + 1;
+        if (canScrollVertically) {
+          return ancestor;
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return null;
+    };
+
+    const scrollPanelIntoComfortZone = (): boolean => {
+      const panel = previewQuickEditPanelRefs.current[activeLineKey];
+      if (!panel) {
+        return false;
+      }
+      const scroller = bookPreviewScrollContainerRef.current || findScrollableAncestor(panel);
+      if (!scroller) {
+        panel.scrollIntoView({ block: "nearest", inline: "nearest", behavior: scrollBehavior });
+        return true;
+      }
+
+      const visualViewport = window.visualViewport;
+      const viewportBottom = visualViewport ? visualViewport.height : window.innerHeight;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const desiredTop = scrollerRect.top + topSafetyPx;
+      const desiredBottom = Math.min(scrollerRect.bottom, viewportBottom) - keyboardGapPx;
+
+      let delta = 0;
+      if (panelRect.bottom > desiredBottom) {
+        delta = panelRect.bottom - desiredBottom;
+      } else if (panelRect.top < desiredTop) {
+        delta = panelRect.top - desiredTop;
+      }
+
+      if (Math.abs(delta) < 1) {
+        return true;
+      }
+
+      const nextTop = scroller.scrollTop + delta;
+      const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const clampedTop = Math.max(0, Math.min(nextTop, maxScrollTop));
+      scroller.scrollTo({ top: clampedTop, behavior: scrollBehavior });
+      return true;
+    };
+
+    const frame = window.requestAnimationFrame(() => {
+      scrollPanelIntoComfortZone();
+
+      // iOS keyboard / viewport transitions can take multiple frames; retry briefly.
+      [120, 280, 520].forEach((delayMs) => {
+        const timer = window.setTimeout(() => {
+          scrollPanelIntoComfortZone();
+        }, delayMs);
+        retryTimers.push(timer);
+      });
+
+      if (window.visualViewport) {
+        const onViewportResize = () => {
+          scrollPanelIntoComfortZone();
+        };
+        window.visualViewport.addEventListener("resize", onViewportResize);
+        cleanupViewportListener = () => {
+          window.visualViewport?.removeEventListener("resize", onViewportResize);
+        };
+        window.setTimeout(() => {
+          cleanupViewportListener?.();
+          cleanupViewportListener = null;
+        }, 1200);
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      retryTimers.forEach((timer) => window.clearTimeout(timer));
+      cleanupViewportListener?.();
+    };
+  }, [previewQuickEditDraft?.lineKey]);
 
   const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number, toggle = false): void => {
     setBookSummaryAffordancesVisible(false);
@@ -10698,13 +10813,14 @@ function ScripturesContent() {
         previewQuickEditDraft?.fieldPath === "content_data.basic.transliteration" ||
         previewQuickEditDraft?.fieldPath === "content_data.basic.translation");
     const multiline = (options.multiline ?? false) || isBookBasicField;
+    const shouldAutoFocusQuickEdit = true;
 
     return (
       <div className="group relative">
         {multiline ? (
           <textarea
             rows={6}
-            autoFocus
+            autoFocus={shouldAutoFocusQuickEdit}
             value={previewQuickEditDraft?.value || ""}
             onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
             onKeyDown={(event) => {
@@ -10731,7 +10847,7 @@ function ScripturesContent() {
         ) : (
           <input
             type="text"
-            autoFocus
+            autoFocus={shouldAutoFocusQuickEdit}
             value={previewQuickEditDraft?.value || ""}
             onChange={(event) => updatePreviewQuickEditDraftValue(event.target.value)}
             onKeyDown={(event) => {
@@ -15287,6 +15403,9 @@ function ScripturesContent() {
       const deduplicatedLines = contentLines.filter((line, index) => {
         if (index === 0) return true;
         const prevLine = contentLines[index - 1];
+        if (!line.value && !prevLine.value) {
+          return true;
+        }
         return line.value !== prevLine.value;
       });
       const isTranslationLine = (fieldName: string) =>
@@ -15664,36 +15783,39 @@ function ScripturesContent() {
                         if (!activeTitleField) {
                           return null;
                         }
+                        const activeTitleLineKey = `${blockGestureKey}-${activeTitleField.fieldPath}`;
                         return (
                           <>
-                            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                              {activeTitleField.label}
-                            </div>
-                            {renderPreviewQuickEditTextControl({
-                              clearAriaLabel: `Clear ${activeTitleField.label}`,
-                            })}
-                            {previewQuickEditDraft?.error && (
-                              <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                            )}
-                            <div className="mt-2 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void handleSavePreviewQuickEdit();
-                                }}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                              >
-                                {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setPreviewQuickEditDraft(null)}
-                                disabled={Boolean(previewQuickEditDraft?.saving)}
-                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                              >
-                                Cancel
-                              </button>
+                            <div ref={(element) => setPreviewQuickEditPanelRef(activeTitleLineKey, element)}>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                                {activeTitleField.label}
+                              </div>
+                              {renderPreviewQuickEditTextControl({
+                                clearAriaLabel: `Clear ${activeTitleField.label}`,
+                              })}
+                              {previewQuickEditDraft?.error && (
+                                <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
+                              )}
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleSavePreviewQuickEdit();
+                                  }}
+                                  disabled={Boolean(previewQuickEditDraft?.saving)}
+                                  className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                                >
+                                  {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewQuickEditDraft(null)}
+                                  disabled={Boolean(previewQuickEditDraft?.saving)}
+                                  className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
                           </>
                         );
@@ -15827,6 +15949,9 @@ function ScripturesContent() {
             return (
               <div className="mt-0.5">
                 {nonTranslationLines.map((line, lineIndex) => {
+                  if (!line.value) {
+                    return <div key={`blank-${lineIndex}`} className="h-3" />;
+                  }
                   const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
                   const canQuickEditLine =
                     canEditCurrentBook &&
@@ -15867,6 +15992,7 @@ function ScripturesContent() {
                     fieldPath
                       ? !shouldUseMultilineInput && !selectOptions
                       : false;
+                  const panelLineKey = `${line.key}-${lineIndex}`;
                   if (line.isFieldStart && fieldPath) {
                     seenNonTransFields.add(fieldPath);
                   }
@@ -15883,8 +16009,8 @@ function ScripturesContent() {
                       {appliedShowPreviewLabels && line.label && (
                         <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
                       )}
-                      <div className="group relative">
-                        <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle}>{line.value}</p>
+                      <div className="group grid">
+                        <p className={`${line.className} col-start-1 row-start-1 min-w-0 break-words`} style={previewBodyTextStyle}>{line.value}</p>
                         {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
                             type="button"
@@ -15893,13 +16019,13 @@ function ScripturesContent() {
                                 nodeId: quickEditNodeId as number,
                                 targetType: quickEditTargetType,
                                 fieldPath,
-                                lineKey: `${line.key}-${lineIndex}`,
+                                lineKey: panelLineKey,
                                 value: fullFieldValue,
                                 saving: false,
                                 error: null,
                               });
                             }}
-                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label={previewQuickEditFieldTooltip(fieldPath, line.label)}
                             title={previewQuickEditFieldTooltip(fieldPath, line.label)}
                           >
@@ -15908,7 +16034,7 @@ function ScripturesContent() {
                         )}
                       </div>
                       {isActiveField && isFirstForField && (
-                        <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                        <div ref={(element) => setPreviewQuickEditPanelRef(panelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           {selectOptions ? (
                             <select
                               autoFocus
@@ -16166,149 +16292,184 @@ function ScripturesContent() {
             const seenTranslationFields = new Set<string>();
             return (
               <div className="mt-1 border-t border-black/10 pt-1">
-                {translationLines.map((line, lineIndex) => {
-                  const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
-                  const canQuickEditLine =
-                    canEditCurrentBook &&
-                    typeof quickEditNodeId === "number" &&
-                    Boolean(fieldPath);
-                  const isActiveField =
-                    canQuickEditLine &&
-                    previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                    previewQuickEditDraft?.fieldPath === fieldPath;
-                  const fullFieldValue = !fieldPath ? line.value
-                    : fieldPath === "content_data.basic.translation" ? (
-                        typeof block.content.english === "string" ? block.content.english
-                        : typeof block.content.translations?.en === "string" ? block.content.translations.en
-                        : typeof block.content.translations?.english === "string" ? block.content.translations.english
-                        : line.value
-                      )
-                    : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : line.value; })()
-                    : line.value;
-                  const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenTranslationFields.has(fieldPath ?? "");
-                  const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
-                  const normalizedLineLabel = (line.label || "").trim().toLowerCase();
-                  const normalizedLineField = (line.fieldName || "").trim().toLowerCase();
-                  const isExplicitSingleLineField =
-                    Boolean(fieldPath) &&
-                    (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
-                      normalizedLineLabel.includes("title") ||
-                      normalizedLineLabel.includes("sequence") ||
-                      normalizedLineField.includes("title") ||
-                      normalizedLineField.includes("sequence"));
-                  const forceMultilineForBookContent =
-                    quickEditTargetType === "book" &&
-                    (fieldPath === "content_data.basic.sanskrit" ||
-                      fieldPath === "content_data.basic.transliteration" ||
-                      fieldPath === "content_data.basic.translation");
-                  const shouldUseMultilineInput =
-                    Boolean(fieldPath) &&
-                    !selectOptions &&
-                    (forceMultilineForBookContent ||
-                      isPreviewQuickEditMultiLineField(fieldPath as string)) &&
-                    !isExplicitSingleLineField;
-                  const useSingleLineInput =
-                    fieldPath
-                      ? !shouldUseMultilineInput && !selectOptions
-                      : false;
-                  if (line.isFieldStart && fieldPath) {
-                    seenTranslationFields.add(fieldPath);
+                {(() => {
+                  const groups: Array<{
+                    startIndex: number;
+                    lines: typeof translationLines;
+                  }> = [];
+                  let currentGroup: { startIndex: number; lines: typeof translationLines } | null = null;
+                  translationLines.forEach((line, idx) => {
+                    if (!currentGroup || line.isFieldStart) {
+                      if (currentGroup) {
+                        groups.push(currentGroup);
+                      }
+                      currentGroup = { startIndex: idx, lines: [line] };
+                      return;
+                    }
+                    currentGroup.lines.push(line);
+                  });
+                  if (currentGroup) {
+                    groups.push(currentGroup);
                   }
 
-                  return (
-                    <div
-                      key={`${line.key}-translation-${lineIndex}`}
-                      className={
-                        lineIndex === 0 || !line.isFieldStart
-                          ? ""
-                          : "mt-1 border-t border-black/10 pt-1"
-                      }
-                    >
-                      {appliedShowPreviewLabels && line.label && (
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{line.label}</div>
-                      )}
-                      <div className="group relative">
-                        <p className={`${line.className} flex-1 min-w-0 break-words`} style={previewBodyTextStyle} lang={scriptLangForText(line.value)}>{line.value}</p>
-                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPreviewQuickEditDraft({
-                                nodeId: quickEditNodeId as number,
-                                targetType: quickEditTargetType,
-                                fieldPath,
-                                lineKey: `${line.key}-translation-${lineIndex}`,
-                                value: fullFieldValue,
-                                saving: false,
-                                error: null,
-                              });
-                            }}
-                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                            aria-label={previewQuickEditFieldTooltip(fieldPath, line.label)}
-                            title={previewQuickEditFieldTooltip(fieldPath, line.label)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                  return groups.map((group) => {
+                    const firstLine = group.lines[0];
+                    const fieldPath = resolvePreviewQuickEditFieldPath(firstLine.fieldName, firstLine.label);
+                    const canQuickEditLine =
+                      canEditCurrentBook &&
+                      typeof quickEditNodeId === "number" &&
+                      Boolean(fieldPath);
+                    const isActiveField =
+                      canQuickEditLine &&
+                      previewQuickEditDraft?.nodeId === quickEditNodeId &&
+                      previewQuickEditDraft?.fieldPath === fieldPath;
+                    const fullFieldValue = !fieldPath ? (firstLine.value || "")
+                      : fieldPath === "content_data.basic.translation" ? (
+                          typeof block.content.english === "string" ? block.content.english
+                          : typeof block.content.translations?.en === "string" ? block.content.translations.en
+                          : typeof block.content.translations?.english === "string" ? block.content.translations.english
+                          : (firstLine.value || "")
+                        )
+                      : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : (firstLine.value || ""); })()
+                      : (firstLine.value || "");
+                    const isFirstForField = firstLine.isFieldStart && Boolean(fieldPath) && !seenTranslationFields.has(fieldPath ?? "");
+                    const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                    const normalizedLineLabel = (firstLine.label || "").trim().toLowerCase();
+                    const normalizedLineField = (firstLine.fieldName || "").trim().toLowerCase();
+                    const isExplicitSingleLineField =
+                      Boolean(fieldPath) &&
+                      (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
+                        normalizedLineLabel.includes("title") ||
+                        normalizedLineLabel.includes("sequence") ||
+                        normalizedLineField.includes("title") ||
+                        normalizedLineField.includes("sequence"));
+                    const forceMultilineForBookContent =
+                      quickEditTargetType === "book" &&
+                      (fieldPath === "content_data.basic.sanskrit" ||
+                        fieldPath === "content_data.basic.transliteration" ||
+                        fieldPath === "content_data.basic.translation");
+                    const shouldUseMultilineInput =
+                      Boolean(fieldPath) &&
+                      !selectOptions &&
+                      (forceMultilineForBookContent ||
+                        isPreviewQuickEditMultiLineField(fieldPath as string)) &&
+                      !isExplicitSingleLineField;
+                    const useSingleLineInput =
+                      fieldPath
+                        ? !shouldUseMultilineInput && !selectOptions
+                        : false;
+                    const panelLineKey = `${firstLine.key}-translation-${group.startIndex}`;
+                    if (firstLine.isFieldStart && fieldPath) {
+                      seenTranslationFields.add(fieldPath);
+                    }
+
+                    return (
+                      <div
+                        key={`${firstLine.key}-translation-group-${group.startIndex}`}
+                        className={group.startIndex === 0 ? "" : "mt-1 border-t border-black/10 pt-1"}
+                      >
+                        {appliedShowPreviewLabels && firstLine.label && (
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{firstLine.label}</div>
                         )}
-                      </div>
-                      {isActiveField && isFirstForField && (
-                        <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                          {selectOptions ? (
-                            <select
-                              autoFocus
-                              value={previewQuickEditDraft?.value || ""}
-                              onChange={(event) =>
-                                setPreviewQuickEditDraft((prev) =>
-                                  prev ? { ...prev, value: event.target.value, error: null } : prev
-                                )
+                        <div className="group grid">
+                          <div className="col-start-1 row-start-1 min-w-0">
+                            {group.lines.map((line, innerIndex) => {
+                              if (!line.value) {
+                                return <div key={`blank-trans-${group.startIndex}-${innerIndex}`} className="h-3" />;
                               }
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                            >
-                              {selectOptions.map((option) => (
-                                <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          ) : useSingleLineInput ? (
-                            renderPreviewQuickEditTextControl({
-                              clearAriaLabel: `Clear ${line.label || "field"}`,
-                            })
-                          ) : (
-                            renderPreviewQuickEditTextControl({
-                              multiline: true,
-                              clearAriaLabel: `Clear ${line.label || "field"}`,
-                            })
-                          )}
-                          {previewQuickEditDraft?.error && (
-                            <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
-                          )}
-                          <div className="mt-2 flex items-center gap-2">
+                              return (
+                                <p
+                                  key={`${line.key}-translation-${group.startIndex}-${innerIndex}`}
+                                  className={`${line.className} min-w-0 break-words`}
+                                  style={previewBodyTextStyle}
+                                  lang={scriptLangForText(line.value)}
+                                >
+                                  {line.value}
+                                </p>
+                              );
+                            })}
+                          </div>
+                          {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                             <button
                               type="button"
                               onClick={() => {
-                                void handleSavePreviewQuickEdit();
+                                setPreviewQuickEditDraft({
+                                  nodeId: quickEditNodeId as number,
+                                  targetType: quickEditTargetType,
+                                  fieldPath,
+                                  lineKey: panelLineKey,
+                                  value: fullFieldValue,
+                                  saving: false,
+                                  error: null,
+                                });
                               }}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                              className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                              aria-label={previewQuickEditFieldTooltip(fieldPath, firstLine.label)}
+                              title={previewQuickEditFieldTooltip(fieldPath, firstLine.label)}
                             >
-                              {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
+                              <Pencil className="h-3.5 w-3.5" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setPreviewQuickEditDraft(null)}
-                              disabled={Boolean(previewQuickEditDraft?.saving)}
-                              className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
-                            >
-                              Cancel
-                            </button>
-                          </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
+                        {isActiveField && isFirstForField && (
+                          <div ref={(element) => setPreviewQuickEditPanelRef(panelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                            {selectOptions ? (
+                              <select
+                                autoFocus
+                                value={previewQuickEditDraft?.value || ""}
+                                onChange={(event) =>
+                                  setPreviewQuickEditDraft((prev) =>
+                                    prev ? { ...prev, value: event.target.value, error: null } : prev
+                                  )
+                                }
+                                disabled={Boolean(previewQuickEditDraft?.saving)}
+                                className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
+                              >
+                                {selectOptions.map((option) => (
+                                  <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : useSingleLineInput ? (
+                              renderPreviewQuickEditTextControl({
+                                clearAriaLabel: `Clear ${firstLine.label || "field"}`,
+                              })
+                            ) : (
+                              renderPreviewQuickEditTextControl({
+                                multiline: true,
+                                clearAriaLabel: `Clear ${firstLine.label || "field"}`,
+                              })
+                            )}
+                            {previewQuickEditDraft?.error && (
+                              <div className="mt-1 text-xs text-red-600">{previewQuickEditDraft.error}</div>
+                            )}
+                            <div className="mt-2 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleSavePreviewQuickEdit();
+                                }}
+                                disabled={Boolean(previewQuickEditDraft?.saving)}
+                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                              >
+                                {previewQuickEditDraft?.saving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewQuickEditDraft(null)}
+                                disabled={Boolean(previewQuickEditDraft?.saving)}
+                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             );
           })()}
@@ -16340,6 +16501,7 @@ function ScripturesContent() {
               <div className="mt-1 flex flex-col gap-1">
                 {visibleTranslationVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.translation_variants.${entry.originalIndex}.text`;
+                  const textPanelLineKey = `translation-variant-${entry.originalIndex}`;
                   const authorFieldPath = `content_data.translation_variants.${entry.originalIndex}.author`;
                   const languageFieldPath = `content_data.translation_variants.${entry.originalIndex}.language`;
                   const canQuickEditVariant =
@@ -16430,8 +16592,8 @@ function ScripturesContent() {
                           </button>
                         )}
                       </div>
-                      <div className="group relative">
-                        <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                      <div className="group grid">
+                        <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700 col-start-1 row-start-1 min-w-0" style={previewBodyTextStyle}>{entry.text}</p>
                         {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
                             type="button"
@@ -16440,13 +16602,13 @@ function ScripturesContent() {
                                 nodeId: quickEditNodeId as number,
                                 targetType: quickEditTargetType,
                                 fieldPath: textFieldPath,
-                                lineKey: `translation-variant-${entry.originalIndex}`,
+                                lineKey: textPanelLineKey,
                                 value: entry.text,
                                 saving: false,
                                 error: null,
                               });
                             }}
-                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit translation variant"
                             title="Edit translation variant"
                           >
@@ -16541,7 +16703,7 @@ function ScripturesContent() {
                         </div>
                       )}
                       {isActiveText && (
-                        <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                        <div ref={(element) => setPreviewQuickEditPanelRef(textPanelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           {renderPreviewQuickEditTextControl({
                             multiline: true,
                             clearAriaLabel: "Clear translation variant",
@@ -16605,6 +16767,7 @@ function ScripturesContent() {
               <div className="mt-1 flex flex-col gap-1">
                 {visibleCommentaryVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.commentary_variants.${entry.originalIndex}.text`;
+                  const textPanelLineKey = `commentary-variant-${entry.originalIndex}`;
                   const authorFieldPath = `content_data.commentary_variants.${entry.originalIndex}.author`;
                   const languageFieldPath = `content_data.commentary_variants.${entry.originalIndex}.language`;
                   const canQuickEditVariant =
@@ -16695,8 +16858,8 @@ function ScripturesContent() {
                           </button>
                         )}
                       </div>
-                      <div className="group relative">
-                        <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>{entry.text}</p>
+                      <div className="group grid">
+                        <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700 col-start-1 row-start-1 min-w-0" style={previewBodyTextStyle}>{entry.text}</p>
                         {canQuickEditVariant && !isActiveText && showQuickEditAffordances && (
                           <button
                             type="button"
@@ -16705,13 +16868,13 @@ function ScripturesContent() {
                                 nodeId: quickEditNodeId as number,
                                 targetType: quickEditTargetType,
                                 fieldPath: textFieldPath,
-                                lineKey: `commentary-variant-${entry.originalIndex}`,
+                                lineKey: textPanelLineKey,
                                 value: entry.text,
                                 saving: false,
                                 error: null,
                               });
                             }}
-                            className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                            className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
                             aria-label="Edit commentary variant"
                             title="Edit commentary variant"
                           >
@@ -16806,7 +16969,7 @@ function ScripturesContent() {
                         </div>
                       )}
                       {isActiveText && (
-                        <div className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                        <div ref={(element) => setPreviewQuickEditPanelRef(textPanelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
                           {renderPreviewQuickEditTextControl({
                             multiline: true,
                             clearAriaLabel: "Clear commentary variant",
