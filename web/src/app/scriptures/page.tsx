@@ -6597,10 +6597,16 @@ function ScripturesContent() {
     }
 
     const transMap = toTranslationRecord(translationsValue);
-    const normalizedDisplayed = normalizeTextForDisplay(displayedValue || "").trim();
+    const normalizeForCompare = (value: string): string =>
+      normalizeTextForDisplay(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const normalizedDisplayed = normalizeForCompare(displayedValue || "");
     const uniquePreferredLanguages = Array.from(
       new Set(preferredLanguages.map((lang) => normalizeTranslationLanguage(lang || ""))).values()
     ).filter(Boolean);
+    const firstNonEnglishPreferred =
+      uniquePreferredLanguages.find((lang) => lang !== "english") || "";
 
     if (normalizedDisplayed) {
       for (const canonical of uniquePreferredLanguages) {
@@ -6609,23 +6615,23 @@ function ScripturesContent() {
         }
         const code = translationLanguageToCode(canonical);
         const candidate = transMap[canonical] || transMap[code] || "";
-        if (normalizeTextForDisplay(candidate).trim() === normalizedDisplayed) {
+        if (normalizeForCompare(candidate) === normalizedDisplayed) {
           return `content_data.translations.${canonical}`;
         }
       }
 
       const storedEnglish = transMap.english || transMap.en || "";
-      if (normalizeTextForDisplay(storedEnglish).trim() === normalizedDisplayed) {
+      if (normalizeForCompare(storedEnglish) === normalizedDisplayed) {
         return initialFieldPath;
       }
     }
 
-    const primaryLang = normalizeTranslationLanguage(preferredLanguages[0] || "");
-    if (!englishVisible && primaryLang && primaryLang !== "english") {
-      return `content_data.translations.${primaryLang}`;
+    if (!englishVisible && firstNonEnglishPreferred) {
+      return `content_data.translations.${firstNonEnglishPreferred}`;
     }
 
     const storedEnglish = transMap.english || transMap.en || "";
+    const primaryLang = normalizeTranslationLanguage(preferredLanguages[0] || "");
     if (!storedEnglish && primaryLang && primaryLang !== "english") {
       return `content_data.translations.${primaryLang}`;
     }
@@ -15616,13 +15622,20 @@ function ScripturesContent() {
           segment: "non-translation" | "translation"
         ) => {
           const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
-          if (!fieldPath || seenFieldPaths.has(fieldPath)) {
+          const correctedFieldPath = resolveDisplayedTranslationQuickEditFieldPath(
+            fieldPath,
+            line.value,
+            block.content.translations,
+            appliedPreviewTranslationLanguages as string[],
+            appliedBookPreviewLanguageSettings.show_english,
+          );
+          if (!correctedFieldPath || seenFieldPaths.has(correctedFieldPath)) {
             return null;
           }
-          seenFieldPaths.add(fieldPath);
+          seenFieldPaths.add(correctedFieldPath);
 
           const value =
-            fieldPath === "content_data.basic.translation"
+            correctedFieldPath === "content_data.basic.translation"
               ? typeof block.content.english === "string"
                 ? block.content.english
                 : typeof block.content.translations?.en === "string"
@@ -15630,25 +15643,30 @@ function ScripturesContent() {
                   : typeof block.content.translations?.english === "string"
                     ? block.content.translations.english
                     : line.value
-              : fieldPath === "content_data.basic.sanskrit"
+              : correctedFieldPath === "content_data.basic.sanskrit"
                 ? typeof block.content.sanskrit === "string"
                   ? block.content.sanskrit
                   : line.value
-                : fieldPath === "content_data.basic.transliteration"
+                : correctedFieldPath === "content_data.basic.transliteration"
                   ? typeof block.content.transliteration === "string"
                     ? block.content.transliteration
                     : line.value
-                  : fieldPath.startsWith("content_data.translations.")
+                  : correctedFieldPath.startsWith("content_data.translations.")
                     ? (() => {
-                        const language = fieldPath.slice("content_data.translations.".length);
-                        return typeof block.content.translations?.[language] === "string"
-                          ? block.content.translations[language]
-                          : line.value;
+                        const language = correctedFieldPath.slice("content_data.translations.".length);
+                        const transMap = block.content.translations as Record<string, string> | undefined;
+                        if (!transMap) {
+                          return line.value;
+                        }
+                        const canonical = normalizeTranslationLanguage(language);
+                        const code = translationLanguageToCode(canonical);
+                        const translated = transMap[language] ?? transMap[canonical] ?? transMap[code];
+                        return typeof translated === "string" ? translated : line.value;
                       })()
                     : line.value;
 
           return {
-            fieldPath,
+            fieldPath: correctedFieldPath,
             value,
             lineKey: `${blockGestureKey}-header-${segment}-${lineIndex}`,
           };
