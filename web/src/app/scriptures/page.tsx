@@ -3671,6 +3671,9 @@ function ScripturesContent() {
             : "";
         const fieldName = inheritedFieldCandidate || rawFieldName;
         if (fieldName in visibleByKey && !visibleByKey[fieldName]) {
+          // Still update previousFieldName so continuation lines ("text" with no label)
+          // inherit this field and are also hidden rather than falling through as "text"
+          previousFieldName = fieldName;
           continue;
         }
 
