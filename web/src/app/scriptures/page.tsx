@@ -3577,13 +3577,27 @@ function ScripturesContent() {
                   }
                 }
               } else {
-                // Language has its own content: the backend put it in the "english" template
-                // slot, so rendered_lines has fieldName="english". Re-tag those lines with
-                // the correct language fieldName so the pencil opens the right editor
-                // without relying on fragile text comparison.
-                for (const eLine of lines) {
-                  if (eLine.fieldName === "english") {
-                    eLine.fieldName = `content_data.translations.${language}`;
+                // Language has its own content. Check if it should be visible:
+                // - "sanskrit" → check visibleByKey.sanskrit
+                // - other languages (tamil, telugu, etc.) → always re-tag (controlled by appliedPreviewTranslationLanguages)
+                const languageIsVisible =
+                  language === "sanskrit"
+                    ? visibleByKey.sanskrit
+                    : true;
+
+                if (languageIsVisible) {
+                  // Re-tag "english" lines with the correct language fieldName so pencil opens the right editor
+                  for (const eLine of lines) {
+                    if (eLine.fieldName === "english") {
+                      eLine.fieldName = `content_data.translations.${language}`;
+                    }
+                  }
+                } else {
+                  // Language should not be visible: remove the lines
+                  for (let i = lines.length - 1; i >= 0; i -= 1) {
+                    if (lines[i].fieldName === "english") {
+                      lines.splice(i, 1);
+                    }
                   }
                 }
               }
