@@ -3704,12 +3704,8 @@ function ScripturesContent() {
         previousFieldName = fieldName;
       }
 
-      // If primary language is Sanskrit but show_sanskrit is false, remove all Sanskrit lines
-      // that came from rendered_lines (fieldName="english" with Sanskrit content from backend)
-      if (
-        primaryPreviewTranslationLanguage === "sanskrit" &&
-        !visibleByKey.sanskrit
-      ) {
+      // Remove Sanskrit lines if show_sanskrit is false, regardless of primary language
+      if (!visibleByKey.sanskrit) {
         for (let i = lines.length - 1; i >= 0; i -= 1) {
           if (lines[i].fieldName === "english" || lines[i].fieldName === "sanskrit") {
             lines.splice(i, 1);
