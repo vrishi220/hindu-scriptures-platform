@@ -14441,7 +14441,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
             }}
           >
         <div
-          className={`flex flex-wrap items-start gap-2 text-sm ${
+          className={`flex flex-nowrap items-start gap-2 text-sm ${
             isReorderGroupActive ? "rounded-md px-1 py-0.5" : ""
           } ${
             isReorderGroupActive && treeReorderDraggingNodeId === node.id
@@ -14516,7 +14516,7 @@ const BrowseSection = ({ title, description, action, children }: BrowseSectionPr
                 : "text-[color:var(--deep)] hover:text-[color:var(--accent)]"
             } ${canEditTreeOrder ? "select-none" : ""}`}
           >
-            <span className="leading-snug">
+            <span className="leading-snug truncate">
               {(() => {
                 const isLeaf = !node.children || node.children.length === 0;
                 const displaySeq =
