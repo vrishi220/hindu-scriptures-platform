@@ -15959,48 +15959,66 @@ function ScripturesContent() {
                     return <div key={`blank-${lineIndex}`} className="h-3" />;
                   }
                   const fieldPath = resolvePreviewQuickEditFieldPath(line.fieldName, line.label);
+                  const correctedFieldPath = (() => {
+                    if (fieldPath !== "content_data.translations.english") {
+                      return fieldPath;
+                    }
+                    const primaryLang = normalizeTranslationLanguage(appliedPreviewTranslationLanguages[0] || "");
+                    if (!appliedBookPreviewLanguageSettings.show_english && primaryLang && primaryLang !== "english") {
+                      return `content_data.translations.${primaryLang}`;
+                    }
+                    return fieldPath;
+                  })();
                   const canQuickEditLine =
                     canEditCurrentBook &&
                     typeof quickEditNodeId === "number" &&
-                    Boolean(fieldPath);
+                    Boolean(correctedFieldPath);
                   const isActiveField =
                     canQuickEditLine &&
                     previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                    previewQuickEditDraft?.fieldPath === fieldPath;
-                  const fullFieldValue = !fieldPath ? line.value
-                    : fieldPath === "content_data.basic.sanskrit" ? (typeof block.content.sanskrit === "string" ? block.content.sanskrit : line.value)
-                    : fieldPath === "content_data.basic.transliteration" ? (typeof block.content.transliteration === "string" ? block.content.transliteration : line.value)
-                    : fieldPath.startsWith("content_data.translations.") ? (() => { const lang = fieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? block.content.translations[lang] : line.value; })()
+                    previewQuickEditDraft?.fieldPath === correctedFieldPath;
+                  const fullFieldValue = !correctedFieldPath ? line.value
+                    : correctedFieldPath === "content_data.basic.sanskrit" ? (typeof block.content.sanskrit === "string" ? block.content.sanskrit : line.value)
+                    : correctedFieldPath === "content_data.basic.transliteration" ? (typeof block.content.transliteration === "string" ? block.content.transliteration : line.value)
+                    : correctedFieldPath.startsWith("content_data.translations.") ? (() => {
+                        const langKey = correctedFieldPath.slice("content_data.translations.".length);
+                        const transMap = block.content.translations as Record<string, string> | undefined;
+                        if (!transMap) return line.value;
+                        const canonical = normalizeTranslationLanguage(langKey);
+                        const code = translationLanguageToCode(canonical);
+                        const v = transMap[langKey] ?? transMap[canonical] ?? transMap[code];
+                        return typeof v === "string" ? v : line.value;
+                      })()
                     : line.value;
-                  const isFirstForField = line.isFieldStart && Boolean(fieldPath) && !seenNonTransFields.has(fieldPath ?? "");
-                  const selectOptions = fieldPath ? getPreviewQuickEditSelectOptions(fieldPath) : null;
+                  const isFirstForField = line.isFieldStart && Boolean(correctedFieldPath) && !seenNonTransFields.has(correctedFieldPath ?? "");
+                  const selectOptions = correctedFieldPath ? getPreviewQuickEditSelectOptions(correctedFieldPath) : null;
                   const normalizedLineLabel = (line.label || "").trim().toLowerCase();
                   const normalizedLineField = (line.fieldName || "").trim().toLowerCase();
                   const isExplicitSingleLineField =
-                    Boolean(fieldPath) &&
-                    (isPreviewQuickEditSingleLineField(fieldPath ?? "") ||
+                    Boolean(correctedFieldPath) &&
+                    (isPreviewQuickEditSingleLineField(correctedFieldPath ?? "") ||
                       normalizedLineLabel.includes("title") ||
                       normalizedLineLabel.includes("sequence") ||
                       normalizedLineField.includes("title") ||
                       normalizedLineField.includes("sequence"));
                   const forceMultilineForBookContent =
                     quickEditTargetType === "book" &&
-                    (fieldPath === "content_data.basic.sanskrit" ||
-                      fieldPath === "content_data.basic.transliteration" ||
-                      fieldPath === "content_data.basic.translation");
+                    (correctedFieldPath === "content_data.basic.sanskrit" ||
+                      correctedFieldPath === "content_data.basic.transliteration" ||
+                      correctedFieldPath === "content_data.basic.translation");
                   const shouldUseMultilineInput =
-                    Boolean(fieldPath) &&
+                    Boolean(correctedFieldPath) &&
                     !selectOptions &&
                     (forceMultilineForBookContent ||
-                      isPreviewQuickEditMultiLineField(fieldPath as string)) &&
+                      isPreviewQuickEditMultiLineField(correctedFieldPath as string)) &&
                     !isExplicitSingleLineField;
                   const useSingleLineInput =
-                    fieldPath
+                    correctedFieldPath
                       ? !shouldUseMultilineInput && !selectOptions
                       : false;
                   const panelLineKey = `${line.key}-${lineIndex}`;
-                  if (line.isFieldStart && fieldPath) {
-                    seenNonTransFields.add(fieldPath);
+                  if (line.isFieldStart && correctedFieldPath) {
+                    seenNonTransFields.add(correctedFieldPath);
                   }
 
                   return (
@@ -16017,14 +16035,14 @@ function ScripturesContent() {
                       )}
                       <div className="group grid">
                         <p className={`${line.className} col-start-1 row-start-1 min-w-0 break-words`} style={previewBodyTextStyle}>{line.value}</p>
-                        {canQuickEditLine && fieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
+                        {canQuickEditLine && correctedFieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
                           <button
                             type="button"
                             onClick={() => {
                               setPreviewQuickEditDraft({
                                 nodeId: quickEditNodeId as number,
                                 targetType: quickEditTargetType,
-                                fieldPath,
+                                fieldPath: correctedFieldPath,
                                 lineKey: panelLineKey,
                                 value: fullFieldValue,
                                 saving: false,
@@ -16032,8 +16050,8 @@ function ScripturesContent() {
                               });
                             }}
                             className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                            aria-label={previewQuickEditFieldTooltip(fieldPath, line.label)}
-                            title={previewQuickEditFieldTooltip(fieldPath, line.label)}
+                            aria-label={previewQuickEditFieldTooltip(correctedFieldPath, line.label)}
+                            title={previewQuickEditFieldTooltip(correctedFieldPath, line.label)}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
@@ -16054,7 +16072,7 @@ function ScripturesContent() {
                               className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                             >
                               {selectOptions.map((option) => (
-                                <option key={`${fieldPath}-${option.value || "empty"}`} value={option.value}>
+                                <option key={`${correctedFieldPath}-${option.value || "empty"}`} value={option.value}>
                                   {option.label}
                                 </option>
                               ))}
@@ -16328,6 +16346,10 @@ function ScripturesContent() {
                     const correctedFieldPath = (() => {
                       if (fieldPath !== "content_data.translations.english" || !firstLine.value) {
                         return fieldPath;
+                      }
+                      const primaryLang = normalizeTranslationLanguage((appliedPreviewTranslationLanguages as string[])[0] || "");
+                      if (!appliedBookPreviewLanguageSettings.show_english && primaryLang && primaryLang !== "english") {
+                        return `content_data.translations.${primaryLang}`;
                       }
                       const transMap = block.content.translations as Record<string, string> | undefined;
                       const storedEnglish = transMap ? (transMap["english"] || transMap["en"] || "") : "";
