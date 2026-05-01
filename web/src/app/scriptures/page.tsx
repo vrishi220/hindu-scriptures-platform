@@ -3598,10 +3598,16 @@ function ScripturesContent() {
           }
           lines.push({
             key: "translation-fallback",
-            label: appliedShowPreviewLabels ? metadataLabelForField("english") : "",
+            label: appliedShowPreviewLabels
+              ? (primaryPreviewTranslationLanguage !== "english"
+                  ? `${translationLanguageLabel(primaryPreviewTranslationLanguage)} Translation`
+                  : metadataLabelForField("english"))
+              : "",
             value: fallbackValue,
             className: lineClassNameForField("english", fallbackValue),
-            fieldName: "english",
+            fieldName: primaryPreviewTranslationLanguage !== "english"
+              ? `content_data.translations.${primaryPreviewTranslationLanguage}`
+              : "english",
             isFieldStart: true,
           });
           existingValues.add(fallbackValue);
@@ -16320,27 +16326,31 @@ function ScripturesContent() {
                     // but its value is actually e.g. Telugu. Correct the fieldPath so the
                     // pencil edits (and saves to) the right translation field.
                     const correctedFieldPath = (() => {
-                      if (
-                        fieldPath !== "content_data.translations.english" ||
-                        !firstLine.value ||
-                        typeof block.content.translations !== "object" ||
-                        !block.content.translations
-                      ) {
+                      if (fieldPath !== "content_data.translations.english" || !firstLine.value) {
                         return fieldPath;
                       }
-                      const translations = block.content.translations as Record<string, string>;
-                      const storedEnglish = translations["english"] || translations["en"] || "";
-                      if (!storedEnglish || storedEnglish.trim() === firstLine.value.trim()) {
+                      const transMap = block.content.translations as Record<string, string> | undefined;
+                      const storedEnglish = transMap ? (transMap["english"] || transMap["en"] || "") : "";
+                      // If stored English value matches, it genuinely is an English field
+                      const nfcVal = firstLine.value.trim().normalize("NFC");
+                      if (storedEnglish && storedEnglish.trim().normalize("NFC") === nfcVal) {
                         return fieldPath;
                       }
-                      for (const lang of appliedPreviewTranslationLanguages) {
+                      // Try to match against selected non-English translation languages
+                      for (const lang of (appliedPreviewTranslationLanguages as string[])) {
                         const canonical = normalizeTranslationLanguage(lang);
                         if (canonical === "english") continue;
                         const code = translationLanguageToCode(canonical);
-                        const v = translations[canonical] || translations[code] || "";
-                        if (v.trim() === firstLine.value.trim()) {
+                        const v = transMap ? (transMap[canonical] || transMap[code] || "") : "";
+                        if (v && v.trim().normalize("NFC") === nfcVal) {
                           return `content_data.translations.${canonical}`;
                         }
+                      }
+                      // Fallback: if primary is non-English and no English is stored,
+                      // the displayed value must belong to the primary language
+                      const primaryLang = normalizeTranslationLanguage((appliedPreviewTranslationLanguages as string[])[0] || "");
+                      if (primaryLang && primaryLang !== "english" && !storedEnglish) {
+                        return `content_data.translations.${primaryLang}`;
                       }
                       return fieldPath;
                     })();
@@ -16359,7 +16369,15 @@ function ScripturesContent() {
                           : typeof block.content.translations?.english === "string" ? block.content.translations.english
                           : (firstLine.value || "")
                         )
-                      : correctedFieldPath.startsWith("content_data.translations.") ? (() => { const lang = correctedFieldPath.slice("content_data.translations.".length); return typeof block.content.translations?.[lang] === "string" ? (block.content.translations as Record<string, string>)[lang] : (firstLine.value || ""); })()
+                      : correctedFieldPath.startsWith("content_data.translations.") ? (() => {
+                          const langKey = correctedFieldPath.slice("content_data.translations.".length);
+                          const transMap = block.content.translations as Record<string, string> | undefined;
+                          if (!transMap) return firstLine.value || "";
+                          const canonical = normalizeTranslationLanguage(langKey);
+                          const code = translationLanguageToCode(canonical);
+                          const v = transMap[langKey] ?? transMap[canonical] ?? transMap[code];
+                          return typeof v === "string" ? v : (firstLine.value || "");
+                        })()
                       : (firstLine.value || "");
                     const isFirstForField = firstLine.isFieldStart && Boolean(correctedFieldPath) && !seenTranslationFields.has(correctedFieldPath ?? "");
                     const selectOptions = correctedFieldPath ? getPreviewQuickEditSelectOptions(correctedFieldPath) : null;
