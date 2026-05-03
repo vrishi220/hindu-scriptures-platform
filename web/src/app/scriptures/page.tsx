@@ -389,6 +389,18 @@ type BookPreviewBlock = {
         fallback_badge_visible?: boolean;
       };
     }>;
+    word_meanings?: {
+      rows?: Array<{
+        id?: string;
+        order?: number;
+        source?: {
+          language?: string | null;
+          script_text?: string | null;
+          transliteration?: Record<string, string | null | undefined> | null;
+        };
+        meanings?: Record<string, { text?: string } | null>;
+      }>;
+    };
     media_items?: Array<{
       id?: number | null;
       media_type?: string;
@@ -1793,6 +1805,7 @@ const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
 
 const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
 const PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY = "scriptures.preview.fontSizePercent";
+const PREVIEW_EDIT_MODE_SESSION_STORAGE_KEY = "scriptures.preview.editMode";
 const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
 const IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES = 512 * 1024;
 const PREVIEW_FONT_SIZE_PERCENT_MIN = 75;
@@ -2826,6 +2839,18 @@ function ScripturesContent() {
   const [pendingImportBookName, setPendingImportBookName] = useState<string | null>(null);
   const [pendingImportBookCode, setPendingImportBookCode] = useState<string | null>(null);
   const [showImportUploadConfirm, setShowImportUploadConfirm] = useState(false);
+  type BulkFileStatus = "pending" | "uploading" | "success" | "skipped" | "error";
+  type BulkFileResult = {
+    name: string;
+    status: BulkFileStatus;
+    message: string;
+    elapsedMs?: number;
+    progressMessage?: string | null;
+    progressCurrent?: number | null;
+    progressTotal?: number | null;
+  };
+  const [bulkFileResults, setBulkFileResults] = useState<BulkFileResult[]>([]);
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
@@ -2879,7 +2904,15 @@ function ScripturesContent() {
     error: string | null;
   } | null>(null);
   const previewQuickEditPanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [wmPreviewTableEditNodeId, setWmPreviewTableEditNodeId] = useState<number | null>(null);
+  const [previewEditModeEnabled, setPreviewEditModeEnabled] = useState(false);
+  const [previewWordMeaningsQuickEditDraft, setPreviewWordMeaningsQuickEditDraft] = useState<{
+    nodeId: number;
+    languageCode: string;
+    lineKey: string;
+    value: string;
+    saving: boolean;
+    error: string | null;
+  } | null>(null);
   const [bookPreviewArtifact, setBookPreviewArtifact] = useState<BookPreviewArtifact | null>(null);
   const [bookPreviewLanguageSettings, setBookPreviewLanguageSettings] =
     useState<BookPreviewLanguageSettings>({
@@ -3124,28 +3157,26 @@ function ScripturesContent() {
     bookBrowserDensity,
     authEmail,
     booksScrollContainerRef,
-    nestFlatTreeNodes: (nodes: any) => {
-      // Temporarily using any to avoid type conflicts during integration
-      // TODO: Align TreeNode types between hook and page component
-      const isAlreadyNested = nodes.length > 0 && nodes.some((node: any) => 
-        Array.isArray(node.children) && node.children.length > 0
+    nestFlatTreeNodes: (nodes: TreeNode[]) => {
+      const isAlreadyNested = nodes.length > 0 && nodes.some((node: TreeNode) =>
+        Array.isArray(node.children) && (node.children?.length ?? 0) > 0
       );
 
       if (isAlreadyNested) {
         return nodes;
       }
 
-      const nodeMap = new Map<number, any>();
-      const roots: any[] = [];
+      const nodeMap = new Map<number, TreeNode>();
+      const roots: TreeNode[] = [];
 
-      nodes.forEach((node: any) => {
+      nodes.forEach((node: TreeNode) => {
         nodeMap.set(node.id, {
           ...node,
           children: [],
         });
       });
 
-      nodes.forEach((node: any) => {
+      nodes.forEach((node: TreeNode) => {
         const parentId = node.parent_node_id;
         const parent = parentId ? nodeMap.get(parentId) : null;
         if (parent) {
@@ -3789,15 +3820,65 @@ function ScripturesContent() {
     );
     const rows = Array.isArray(block.content.word_meanings_rows)
       ? block.content.word_meanings_rows
-      : [];
+      : Array.isArray(block.content.word_meanings?.rows)
+        ? block.content.word_meanings.rows.map((row, index) => {
+            const source = row?.source || {};
+            const meanings = row?.meanings && typeof row.meanings === "object" ? row.meanings : {};
+            const scriptText = typeof source.script_text === "string" ? source.script_text : "";
+            const iast =
+              source.transliteration && typeof source.transliteration === "object" && typeof source.transliteration.iast === "string"
+                ? source.transliteration.iast
+                : "";
+            const resolvedSourceText = scriptText.trim() || iast.trim();
+
+            return {
+              id: row?.id,
+              order: row?.order,
+              source,
+              meanings,
+              resolved_source: {
+                text: resolvedSourceText,
+                mode: "script",
+                scheme: "",
+              },
+              _fallback_index: index,
+            };
+          })
+        : [];
 
     return rows
       .map((row, index) => {
         const sourceText = (row?.resolved_source?.text || "").trim();
         const sourceMode = (row?.resolved_source?.mode || "").trim().toLowerCase();
         const sourceScheme = (row?.resolved_source?.scheme || "").trim().toLowerCase();
-        const meaningText = (row?.resolved_meaning?.text || "").trim();
-        if (!sourceText && !meaningText) {
+
+        // Collect meanings for all selected preview languages from raw meanings dict
+        // (path 2: word_meanings.rows). For pre-resolved rows (path 1: word_meanings_rows)
+        // fall back to the single resolved_meaning value.
+        const rawMeanings = (row as { meanings?: Record<string, { text?: string } | null> })?.meanings;
+        const resolvedMeanings: Array<{ language: string; text: string }> = [];
+        if (rawMeanings && typeof rawMeanings === "object" && Object.keys(rawMeanings).length > 0) {
+          for (const lang of appliedPreviewTranslationLanguages) {
+            const code = translationLanguageToCode(lang);
+            const entry = rawMeanings[code];
+            const text = typeof entry?.text === "string" ? entry.text.trim() : "";
+            if (text) {
+              resolvedMeanings.push({ language: code, text });
+            }
+          }
+        } else {
+          // Pre-resolved path: use single resolved_meaning
+          const resolvedMeaning = (row as {
+            resolved_meaning?: { text?: string; language?: string } | null;
+          })?.resolved_meaning;
+          const text = (resolvedMeaning?.text || "").trim();
+          const lang = (resolvedMeaning?.language || "en").trim().toLowerCase();
+          if (text) {
+            resolvedMeanings.push({ language: lang, text });
+          }
+        }
+
+        if (!sourceText && resolvedMeanings.length === 0) {
           return null;
         }
 
@@ -3856,9 +3937,7 @@ function ScripturesContent() {
           rowIndex: index,
           sourceRawText: sourceText,
           sourceText: renderedSourceText,
-          meaningText,
-          meaningLanguage: (row?.resolved_meaning?.language || "").trim().toLowerCase(),
-          fallbackBadgeVisible: Boolean(row?.resolved_meaning?.fallback_badge_visible),
+          meanings: resolvedMeanings,
         };
       })
       .filter((row): row is {
@@ -3866,11 +3945,9 @@ function ScripturesContent() {
         rowIndex: number;
         sourceRawText: string;
         sourceText: string;
-        meaningText: string;
-        meaningLanguage: string;
-        fallbackBadgeVisible: boolean;
+        meanings: Array<{ language: string; text: string }>;
       } => Boolean(row));
-  }, [appliedBookPreviewTransliterationScript]);
+  }, [appliedBookPreviewTransliterationScript, appliedPreviewTranslationLanguages]);
 
   const loadMetadataCategories = async (): Promise<MetadataCategory[]> => {
     setMetadataCategoriesLoading(true);
@@ -10377,15 +10454,38 @@ function ScripturesContent() {
     };
   };
 
-  const handleWmPreviewReplaceRows = async (nodeId: number, newRows: WordMeaningRow[]) => {
-    if (!bookPreviewArtifact) return;
+  const serializePreviewWordMeaningTokens = useCallback(
+    (rows: Array<{ sourceRawText: string; sourceText: string; meaningText: string }>) =>
+      rows
+        .map((row) => {
+          const source = (row.sourceRawText || row.sourceText || "").trim();
+          const meaning = (row.meaningText || "").trim();
+          if (!source && !meaning) {
+            return "";
+          }
+          return meaning ? `${source}=${meaning}` : source;
+        })
+        .filter(Boolean)
+        .join("; "),
+    []
+  );
+
+  const handlePreviewWordMeaningsTokenSave = async (nodeId: number, languageCode: string) => {
+    if (!bookPreviewArtifact || !previewWordMeaningsQuickEditDraft) return;
     const snapshot = JSON.parse(JSON.stringify(bookPreviewArtifact)) as BookPreviewArtifact;
-    const rawRows = mapWordMeaningRowsForPayload(newRows);
     try {
-      const res = await patchPreviewFieldWithSessionRecovery(nodeId, {
-        field_path: "content_data.word_meanings_rows.replace_all",
-        value: rawRows,
-        edit_reason: "Word meanings table edit",
+      setPreviewWordMeaningsQuickEditDraft((prev) =>
+        prev ? { ...prev, saving: true, error: null } : prev
+      );
+      const res = await fetch(`/api/content/nodes/${nodeId}/word-meanings`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language_code: languageCode,
+          tokens: previewWordMeaningsQuickEditDraft.value,
+          edit_reason: `Preview word meanings edit (${languageCode})`,
+        }),
       });
       if (!res.ok) {
         const p = (await res.json().catch(() => null)) as { detail?: string } | null;
@@ -10398,12 +10498,20 @@ function ScripturesContent() {
           prev ? applySavedNodeToPreviewArtifact(prev, payload) : prev
         );
       }
-      setWmPreviewTableEditNodeId(null);
+      setPreviewWordMeaningsQuickEditDraft(null);
       setPreviewLinkMessage("Saved.");
       window.setTimeout(() => setPreviewLinkMessage(null), 1200);
     } catch (err) {
       setBookPreviewArtifact(snapshot);
-      console.error("Failed to save word meanings:", err);
+      setPreviewWordMeaningsQuickEditDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              saving: false,
+              error: err instanceof Error ? err.message : "Save failed.",
+            }
+          : prev
+      );
     }
   };
 
@@ -10627,6 +10735,9 @@ function ScripturesContent() {
     return "opacity-0 pointer-events-none";
   };
 
+  const activePreviewQuickEditLineKey =
+    previewQuickEditDraft?.lineKey || previewWordMeaningsQuickEditDraft?.lineKey || null;
+
   const setPreviewQuickEditPanelRef = useCallback((lineKey: string, element: HTMLDivElement | null) => {
     if (element) {
       previewQuickEditPanelRefs.current[lineKey] = element;
@@ -10636,10 +10747,10 @@ function ScripturesContent() {
   }, []);
 
   useEffect(() => {
-    if (!previewQuickEditDraft || typeof window === "undefined") {
+    if (!activePreviewQuickEditLineKey || typeof window === "undefined") {
       return;
     }
-    const activeLineKey = previewQuickEditDraft.lineKey;
+    const activeLineKey = activePreviewQuickEditLineKey;
     const scrollBehavior: ScrollBehavior = "auto";
     const keyboardGapPx = 12;
     const topSafetyPx = 16;
@@ -10728,17 +10839,50 @@ function ScripturesContent() {
       retryTimers.forEach((timer) => window.clearTimeout(timer));
       cleanupViewportListener?.();
     };
-  }, [previewQuickEditDraft?.lineKey]);
+  }, [activePreviewQuickEditLineKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const storedValue = window.sessionStorage.getItem(PREVIEW_EDIT_MODE_SESSION_STORAGE_KEY);
+    setPreviewEditModeEnabled(storedValue === "1");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.sessionStorage.setItem(
+      PREVIEW_EDIT_MODE_SESSION_STORAGE_KEY,
+      previewEditModeEnabled ? "1" : "0"
+    );
+  }, [previewEditModeEnabled]);
+
+  useEffect(() => {
+    if (previewEditModeEnabled && canEditCurrentBook) {
+      return;
+    }
+    setPreviewQuickEditDraft(null);
+    setPreviewWordMeaningsQuickEditDraft(null);
+    setPreviewQuickEditGestureBlockKey(null);
+    setBookSummaryAffordancesVisible(false);
+  }, [previewEditModeEnabled, canEditCurrentBook]);
 
   const activatePreviewQuickEditBlock = (blockGestureKey: string, quickEditNodeId: number, toggle = false): void => {
+    if (!previewEditModeEnabled) {
+      return;
+    }
     setBookSummaryAffordancesVisible(false);
     setPreviewQuickEditGestureBlockKey((prev) => {
       if (toggle && prev === blockGestureKey) {
         setPreviewQuickEditDraft(null);
+        setPreviewWordMeaningsQuickEditDraft(null);
         return null;
       }
       if (prev !== blockGestureKey) {
         setPreviewQuickEditDraft(null);
+        setPreviewWordMeaningsQuickEditDraft(null);
       }
       return blockGestureKey;
     });
@@ -12533,10 +12677,298 @@ function ScripturesContent() {
     }
   };
 
+  // Helper: update one entry in bulkFileResults by index
+  const updateBulkRow = (index: number, patch: Partial<BulkFileResult>) => {
+    setBulkFileResults((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  };
+
+  const runBulkImportFiles = async (files: File[]) => {
+    if (files.length === 0 || !canImport) return;
+    setBulkRunning(true);
+    setBulkFileResults(
+      files.map((f) => ({ name: f.name, status: "pending", message: "" }))
+    );
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      // Parse the full JSON locally (CPU only, no network) to reliably extract
+      // book_name / book_code before touching the upload API.
+      let payload: Record<string, unknown> | null = null;
+      try {
+        payload = JSON.parse(await file.text()) as Record<string, unknown>;
+      } catch {
+        updateBulkRow(i, { status: "error", message: "Invalid JSON — not an HSP file" });
+        continue;
+      }
+
+      // Validate it's actually an HSP book JSON export.
+      if (payload?.schema_version !== "hsp-book-json-v1") {
+        updateBulkRow(i, { status: "error", message: "Not an HSP book JSON (missing schema_version)" });
+        continue;
+      }
+
+      const bookObj = payload?.book as Record<string, unknown> | undefined;
+      const bookName = typeof bookObj?.book_name === "string" ? bookObj.book_name : file.name;
+      const bookCode = typeof bookObj?.book_code === "string" ? bookObj.book_code : null;
+
+      // Ask the API whether a book with this name/code already exists.
+      // Uses exact-match params — no fuzzy scoring, no false negatives.
+      updateBulkRow(i, { message: `Checking "${bookName}"…` });
+      try {
+        type BookCheck = { book_name?: string; book_code?: string };
+        // Check by book_code first (most precise), then fall back to book_name.
+        const checkByCode = bookCode
+          ? await fetch(`/api/content/books?book_code=${encodeURIComponent(bookCode)}`, { credentials: "include" })
+          : null;
+        const codeExists =
+          checkByCode?.ok &&
+          ((await checkByCode.json()) as BookCheck[]).length > 0;
+
+        if (!codeExists) {
+          const checkByName = await fetch(
+            `/api/content/books?book_name=${encodeURIComponent(bookName)}`,
+            { credentials: "include" }
+          );
+          const nameExists =
+            checkByName.ok && ((await checkByName.json()) as BookCheck[]).length > 0;
+          if (nameExists) {
+            updateBulkRow(i, { status: "skipped", message: "Already exists — skipped" });
+            continue;
+          }
+        } else {
+          updateBulkRow(i, { status: "skipped", message: "Already exists — skipped" });
+          continue;
+        }
+      } catch {
+        // Non-fatal — if the check fails just proceed with the upload
+      }
+
+      const t0 = performance.now();
+
+      try {
+        // ── Phase 1: init chunked upload ──────────────────────────────────────
+        updateBulkRow(i, {
+          status: "uploading",
+          message: `Uploading "${bookName}"…`,
+          progressMessage: "Preparing upload…",
+          progressCurrent: null,
+          progressTotal: null,
+        });
+
+        const initResponse = await fetch("/api/content/import/canonical-uploads/init", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+        });
+        const initRaw = await initResponse.text();
+        type BulkUploadInit = { upload_id?: string; chunk_size_bytes?: number; max_size_bytes?: number; detail?: string; error?: string };
+        let initResult: BulkUploadInit | null = null;
+        try { initResult = JSON.parse(initRaw) as BulkUploadInit; } catch { /* */ }
+
+        if (!initResponse.ok) {
+          const msg = initResult?.detail || initResult?.error || `Upload init failed (${initResponse.status})`;
+          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
+        if (!uploadId) {
+          updateBulkRow(i, { status: "error", message: "Upload init returned no upload ID", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        const chunkSizeBytes =
+          typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
+            ? initResult.chunk_size_bytes
+            : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
+        const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
+
+        // ── Phase 2: upload chunks ───────────────────────────────────────────
+        updateBulkRow(i, { progressMessage: `Uploading… (0 / ${totalChunks} chunks)`, progressCurrent: 0, progressTotal: totalChunks });
+
+        let chunkFailed = false;
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          const start = chunkIndex * chunkSizeBytes;
+          const end = Math.min(start + chunkSizeBytes, file.size);
+          const chunkBlob = file.slice(start, end);
+          const chunkForm = new FormData();
+          chunkForm.append("index", String(chunkIndex));
+          chunkForm.append("chunk", new File([chunkBlob], `${file.name}.part`, { type: "application/octet-stream" }));
+
+          const chunkResponse = await fetch(
+            `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
+            { method: "POST", credentials: "include", body: chunkForm }
+          );
+          const chunkRaw = await chunkResponse.text();
+          type BulkUploadChunk = { detail?: string; error?: string };
+          let chunkResult: BulkUploadChunk | null = null;
+          try { chunkResult = JSON.parse(chunkRaw) as BulkUploadChunk; } catch { /* */ }
+
+          if (!chunkResponse.ok) {
+            const msg = chunkResult?.detail || chunkResult?.error || `Chunk upload failed (${chunkResponse.status})`;
+            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+            chunkFailed = true;
+            break;
+          }
+
+          updateBulkRow(i, { progressMessage: `Uploading… (${chunkIndex + 1} / ${totalChunks} chunks)`, progressCurrent: chunkIndex + 1 });
+        }
+        if (chunkFailed) continue;
+
+        // ── Phase 3: complete upload ─────────────────────────────────────────
+        updateBulkRow(i, { progressMessage: "Finalizing upload…", progressCurrent: null, progressTotal: null });
+
+        const completeResponse = await fetch(
+          `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
+          { method: "POST", credentials: "include" }
+        );
+        const completeRaw = await completeResponse.text();
+        type BulkUploadComplete = { canonical_json_url?: string; detail?: string; error?: string };
+        let completeResult: BulkUploadComplete | null = null;
+        try { completeResult = JSON.parse(completeRaw) as BulkUploadComplete; } catch { /* */ }
+
+        if (!completeResponse.ok) {
+          const msg = completeResult?.detail || completeResult?.error || `Upload completion failed (${completeResponse.status})`;
+          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        const canonicalJsonUrl = typeof completeResult?.canonical_json_url === "string" ? completeResult.canonical_json_url.trim() : "";
+        if (!canonicalJsonUrl) {
+          updateBulkRow(i, { status: "error", message: "Upload did not return a canonical URL", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        // ── Phase 4: start import job ────────────────────────────────────────
+        updateBulkRow(i, { progressMessage: "Starting import…", progressCurrent: null, progressTotal: null });
+
+        const jobResponse = await fetch("/api/content/import/jobs", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ import_type: "json", schema_version: "hsp-book-json-v1", canonical_json_url: canonicalJsonUrl }),
+        });
+        const jobRaw = await jobResponse.text();
+        type BulkJobStart = { job_id?: string; status?: string; detail?: string; error?: string };
+        let jobResult: BulkJobStart | null = null;
+        try { jobResult = JSON.parse(jobRaw) as BulkJobStart; } catch { /* */ }
+
+        if (!jobResponse.ok) {
+          const msg = jobResult?.detail || jobResult?.error || `Import start failed (${jobResponse.status})`;
+          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        const jobId = typeof jobResult?.job_id === "string" ? jobResult.job_id : "";
+        if (!jobId) {
+          updateBulkRow(i, { status: "error", message: "Import job returned no job ID", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        // ── Phase 5: poll import job ─────────────────────────────────────────
+        type BulkJobStatus = { status?: string; progress_message?: string; progress_current?: number; progress_total?: number; error?: string; result?: { success?: boolean; error?: string; nodes_created?: number } };
+        const maxAttempts = 900;
+        let finalJobResult: BulkJobStatus["result"] | null = null;
+        let pollFailed = false;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
+            method: "GET",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          const pollRaw = await pollResponse.text();
+          let pollStatus: BulkJobStatus | null = null;
+          try { pollStatus = JSON.parse(pollRaw) as BulkJobStatus; } catch { /* */ }
+
+          if (!pollResponse.ok) {
+            const msg = pollStatus?.error || `Status poll failed (${pollResponse.status})`;
+            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+            pollFailed = true;
+            break;
+          }
+
+          const jobStatus = pollStatus?.status || "running";
+          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
+          const jobCurrent = typeof pollStatus?.progress_current === "number" ? pollStatus.progress_current : null;
+          const jobTotal = typeof pollStatus?.progress_total === "number" ? pollStatus.progress_total : null;
+          updateBulkRow(i, { progressMessage: jobMsg, progressCurrent: jobCurrent, progressTotal: jobTotal });
+
+          if (jobStatus === "queued" || jobStatus === "running") continue;
+
+          if (jobStatus === "failed") {
+            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
+            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+            pollFailed = true;
+            break;
+          }
+
+          finalJobResult = pollStatus?.result ?? null;
+          break;
+        }
+
+        if (pollFailed) continue;
+        if (!finalJobResult) {
+          updateBulkRow(i, { status: "error", message: "Import timed out", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          continue;
+        }
+
+        if (finalJobResult.success === false) {
+          const errorMsg = finalJobResult.error ?? "Import failed";
+          if (errorMsg.toLowerCase().includes("already")) {
+            updateBulkRow(i, { status: "skipped", message: "Already exists — skipped", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          } else {
+            updateBulkRow(i, { status: "error", message: errorMsg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
+          }
+          continue;
+        }
+
+        const nodes = finalJobResult.nodes_created ?? 0;
+        updateBulkRow(i, {
+          status: "success",
+          message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
+          progressMessage: null,
+          progressCurrent: null,
+          progressTotal: null,
+          elapsedMs: Math.round(performance.now() - t0),
+        });
+      } catch (err) {
+        updateBulkRow(i, {
+          status: "error",
+          message: err instanceof Error ? err.message : "Unknown error",
+          progressMessage: null,
+          progressCurrent: null,
+          progressTotal: null,
+          elapsedMs: Math.round(performance.now() - t0),
+        });
+      }
+    }
+
+    setBulkRunning(false);
+    void loadBooksRefresh();
+  };
+
   const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    // Snapshot into Array before clearing the input — clearing input.value invalidates the FileList in some browsers
+    const filesArray = Array.from(event.target.files ?? []);
     event.currentTarget.value = "";
-    if (!file || !canImport) return;
+    if (filesArray.length === 0 || !canImport) return;
+
+    // Multiple files → bulk import flow (no confirmation dialog)
+    if (filesArray.length > 1) {
+      void runBulkImportFiles(filesArray);
+      return;
+    }
+
+    const file = filesArray[0];
 
     let detectedBookName: string | null = null;
     let detectedBookCode: string | null = null;
@@ -13277,6 +13709,11 @@ function ScripturesContent() {
     inlineWordMeaningValidationErrors.some((error) =>
       error.includes(`meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`)
     );
+
+  const propertiesNodeWordMeaningRows =
+    propertiesScope === "node" && nodeContent
+      ? mapWordMeaningsRowsFromContent(nodeContent)
+      : [];
 
   const modalWordMeaningsEnabled = isWordMeaningsEnabledForLevel(
     formData.levelName || actionNode?.level_name
@@ -15551,11 +15988,149 @@ function ScripturesContent() {
       const wordMeaningRows = resolvePreviewWordMeanings(block);
       const quickEditNodeId = resolvePreviewQuickEditNodeId(block);
       const quickEditTargetType = resolvePreviewQuickEditTargetType(block);
+      const translationGroups = (() => {
+        const groups: Array<{
+          startIndex: number;
+          lines: typeof translationLines;
+        }> = [];
+        let currentGroup: { startIndex: number; lines: typeof translationLines } | null = null;
+
+        translationLines.forEach((line, idx) => {
+          if (!currentGroup || line.isFieldStart) {
+            if (currentGroup) {
+              groups.push(currentGroup);
+            }
+            currentGroup = { startIndex: idx, lines: [line] };
+            return;
+          }
+          currentGroup.lines.push(line);
+        });
+        if (currentGroup) {
+          groups.push(currentGroup);
+        }
+
+        return groups.map((group) => {
+          const firstLine = group.lines[0];
+          const fieldPath = resolvePreviewQuickEditFieldPath(firstLine.fieldName, firstLine.label);
+          const correctedFieldPath = resolveDisplayedTranslationQuickEditFieldPath(
+            fieldPath,
+            firstLine.value || "",
+            block.content.translations,
+            appliedPreviewTranslationLanguages as string[],
+            appliedBookPreviewLanguageSettings.show_english,
+          );
+          const canQuickEditLine =
+            canEditCurrentBook &&
+            typeof quickEditNodeId === "number" &&
+            Boolean(correctedFieldPath);
+          const isActiveField =
+            canQuickEditLine &&
+            previewQuickEditDraft?.nodeId === quickEditNodeId &&
+            previewQuickEditDraft?.fieldPath === correctedFieldPath;
+          const fullFieldValue = !correctedFieldPath ? (firstLine.value || "")
+            : correctedFieldPath === "content_data.basic.translation" ? (
+                typeof block.content.english === "string" ? block.content.english
+                : typeof block.content.translations?.en === "string" ? block.content.translations.en
+                : typeof block.content.translations?.english === "string" ? block.content.translations.english
+                : (firstLine.value || "")
+              )
+            : correctedFieldPath.startsWith("content_data.translations.") ? (() => {
+                const langKey = correctedFieldPath.slice("content_data.translations.".length);
+                const transMap = block.content.translations as Record<string, string> | undefined;
+                if (!transMap) return firstLine.value || "";
+                const canonical = normalizeTranslationLanguage(langKey);
+                const code = translationLanguageToCode(canonical);
+                const value = transMap[langKey] ?? transMap[canonical] ?? transMap[code];
+                return typeof value === "string" ? value : (firstLine.value || "");
+              })()
+            : (firstLine.value || "");
+          const selectOptions = correctedFieldPath ? getPreviewQuickEditSelectOptions(correctedFieldPath) : null;
+          const normalizedLineLabel = (firstLine.label || "").trim().toLowerCase();
+          const normalizedLineField = (firstLine.fieldName || "").trim().toLowerCase();
+          const isExplicitSingleLineField =
+            Boolean(correctedFieldPath) &&
+            (isPreviewQuickEditSingleLineField(correctedFieldPath ?? "") ||
+              normalizedLineLabel.includes("title") ||
+              normalizedLineLabel.includes("sequence") ||
+              normalizedLineField.includes("title") ||
+              normalizedLineField.includes("sequence"));
+          const forceMultilineForBookContent =
+            quickEditTargetType === "book" &&
+            (correctedFieldPath === "content_data.basic.sanskrit" ||
+              correctedFieldPath === "content_data.basic.transliteration" ||
+              correctedFieldPath === "content_data.basic.translation");
+          const shouldUseMultilineInput =
+            Boolean(correctedFieldPath) &&
+            !selectOptions &&
+            (forceMultilineForBookContent ||
+              isPreviewQuickEditMultiLineField(correctedFieldPath as string)) &&
+            !isExplicitSingleLineField;
+          const useSingleLineInput =
+            correctedFieldPath
+              ? !shouldUseMultilineInput && !selectOptions
+              : false;
+          const panelLineKey = `${firstLine.key}-translation-${group.startIndex}`;
+          const fallbackLanguage = firstLine.fieldName === "english"
+            ? "english"
+            : firstLine.fieldName.startsWith("content_data.translations.")
+              ? firstLine.fieldName.slice("content_data.translations.".length)
+              : "english";
+          const canonicalLanguage = correctedFieldPath === "content_data.basic.translation"
+            ? "english"
+            : correctedFieldPath?.startsWith("content_data.translations.")
+              ? correctedFieldPath.slice("content_data.translations.".length)
+              : fallbackLanguage;
+          const normalizedLanguage = normalizeTranslationLanguage(canonicalLanguage);
+
+          return {
+            ...group,
+            firstLine,
+            correctedFieldPath,
+            canQuickEditLine,
+            isActiveField,
+            fullFieldValue,
+            selectOptions,
+            useSingleLineInput,
+            panelLineKey,
+            language: normalizedLanguage,
+            languageCode: translationLanguageToCode(normalizedLanguage),
+          };
+        });
+      })();
+      const previewLanguageGroups = appliedPreviewTranslationLanguages
+        .map((language) => {
+          const normalizedLanguage = normalizeTranslationLanguage(language);
+          const languageCode = translationLanguageToCode(normalizedLanguage);
+          const translationGroup =
+            translationGroups.find((group) => group.language === normalizedLanguage) || null;
+          const languageWordMeaningRows = wordMeaningRows
+            .map((row) => {
+              const meaning = row.meanings.find((entry) => entry.language === languageCode);
+              if (!meaning) {
+                return null;
+              }
+              return {
+                ...row,
+                meaningText: meaning.text,
+              };
+            })
+            .filter((row): row is (typeof wordMeaningRows)[number] & { meaningText: string } => Boolean(row));
+
+          if (!translationGroup && languageWordMeaningRows.length === 0) {
+            return null;
+          }
+
+          return {
+            language: normalizedLanguage,
+            languageCode,
+            label: translationLanguageLabel(normalizedLanguage),
+            translationGroup,
+            wordMeaningRows: languageWordMeaningRows,
+          };
+        })
+        .filter((group): group is NonNullable<typeof group> => Boolean(group));
       const previewSourceNode =
         typeof quickEditNodeId === "number" ? findNodeById(treeData, quickEditNodeId) : null;
-      const wordMeaningsEnabledForPreviewBlock = isWordMeaningsEnabledForLevel(
-        block.content.level_name || previewSourceNode?.level_name
-      );
       const rawTitle = previewSourceNode
         ? resolvePreviewTitleBySettings(
             formatValue(previewSourceNode.title_sanskrit),
@@ -15616,9 +16191,12 @@ function ScripturesContent() {
             : structuralHeading
           : "";
       const blockGestureKey = `${block.section}-${block.order}-${block.source_node_id ?? "none"}-${block.template_key}-${blockIndex}`;
-      const showQuickEditAffordances =
+      const canPreviewQuickEditBlock =
+        previewEditModeEnabled &&
         canEditCurrentBook &&
-        typeof quickEditNodeId === "number" &&
+        typeof quickEditNodeId === "number";
+      const showQuickEditAffordances =
+        canPreviewQuickEditBlock &&
         previewQuickEditGestureBlockKey === blockGestureKey;
       const blockHasContentEnabled =
         quickEditTargetType === "book"
@@ -15742,10 +16320,10 @@ function ScripturesContent() {
           key={blockGestureKey}
           className="group/preview-block min-w-0 border-b border-black/10 px-0.5 py-1.5"
           onPointerDown={(event) => {
-            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+            if (!canPreviewQuickEditBlock) {
               return;
             }
-            if (previewQuickEditDraft) {
+            if (previewQuickEditDraft || previewWordMeaningsQuickEditDraft) {
               return;
             }
             if (event.pointerType === "touch") {
@@ -15758,10 +16336,10 @@ function ScripturesContent() {
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
           }}
           onMouseEnter={(event) => {
-            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+            if (!canPreviewQuickEditBlock) {
               return;
             }
-            if (previewQuickEditDraft) {
+            if (previewQuickEditDraft || previewWordMeaningsQuickEditDraft) {
               return;
             }
             const target = event.target as HTMLElement | null;
@@ -15778,10 +16356,10 @@ function ScripturesContent() {
             }
           }}
           onTouchEnd={(event) => {
-            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+            if (!canPreviewQuickEditBlock) {
               return;
             }
-            if (previewQuickEditDraft) {
+            if (previewQuickEditDraft || previewWordMeaningsQuickEditDraft) {
               return;
             }
             const target = event.target as HTMLElement | null;
@@ -15801,7 +16379,7 @@ function ScripturesContent() {
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId, true);
           }}
           onClick={(event) => {
-            if (!canEditCurrentBook || typeof quickEditNodeId !== "number") {
+            if (!canPreviewQuickEditBlock) {
               return;
             }
             const target = event.target as HTMLElement | null;
@@ -15813,7 +16391,7 @@ function ScripturesContent() {
               return;
             }
             // If an edit field is open, don't toggle
-            if (previewQuickEditDraft) {
+            if (previewQuickEditDraft || previewWordMeaningsQuickEditDraft) {
               return;
             }
             activatePreviewQuickEditBlock(blockGestureKey, quickEditNodeId);
@@ -15834,7 +16412,7 @@ function ScripturesContent() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <div className="min-w-0 truncate text-sm font-semibold text-[color:var(--deep)]">{displayTitle}</div>
-                    {canEditCurrentBook && typeof quickEditNodeId === "number" && titleQuickEditFields.length > 0 && (
+                    {previewEditModeEnabled && canEditCurrentBook && typeof quickEditNodeId === "number" && titleQuickEditFields.length > 0 && (
                       <div className="flex items-center gap-1">
                         {titleQuickEditFields.map((field) => {
                           const isActiveTitleField =
@@ -15983,7 +16561,7 @@ function ScripturesContent() {
                     </button>
                   );
                 })()}
-                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                {previewEditModeEnabled && canEditCurrentBook && typeof quickEditNodeId === "number" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -16016,7 +16594,7 @@ function ScripturesContent() {
                     <Pencil className="h-3 w-3" />
                   </button>
                 )}
-                {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+                {previewEditModeEnabled && canEditCurrentBook && typeof quickEditNodeId === "number" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -16273,244 +16851,37 @@ function ScripturesContent() {
               </div>
             </div>
           )}
-          {wordMeaningsEnabledForPreviewBlock &&
-            (wordMeaningRows.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) &&
-            appliedPreviewWordMeaningsDisplayMode !== "hide" && (
+          {previewLanguageGroups.length > 0 && (
             <div className="mt-1 border-t border-black/10 pt-1">
-              {canEditCurrentBook && typeof quickEditNodeId === "number" && wmPreviewTableEditNodeId === quickEditNodeId ? (
-                <div>
-                  <WordMeaningsEditor
-                    rows={(() => {
-                      const rawRows = Array.isArray(block.content.word_meanings_rows)
-                        ? (block.content.word_meanings_rows as Record<string, unknown>[])
-                        : [];
-                      return rawRows.map((row, index) => {
-                        const normalizedSource = normalizeWordMeaningSourceForms(
-                          row?.source as { script_text?: string; transliteration?: Record<string, string | undefined> } | undefined
-                        );
-                        const rawMeanings = row?.meanings;
-                        const mapped: Record<string, string> = {};
-                        if (rawMeanings && typeof rawMeanings === "object") {
-                          Object.entries(rawMeanings as Record<string, unknown>).forEach(([lang, payload]) => {
-                            mapped[lang] = (payload as Record<string, string> | null)?.text || "";
-                          });
-                        }
-                        if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in mapped)) {
-                          mapped[WORD_MEANINGS_REQUIRED_LANGUAGE] = "";
-                        }
-                        const firstNonEmpty = Object.entries(mapped).find(([, t]) => t.trim())?.[0] || WORD_MEANINGS_REQUIRED_LANGUAGE;
-                        return {
-                          id: typeof row?.id === "string" && (row.id as string).trim() ? (row.id as string) : `wm_row_${index + 1}`,
-                          order: typeof row?.order === "number" ? (row.order as number) : index + 1,
-                          sourceLanguage: typeof (row?.source as Record<string, unknown> | undefined)?.language === "string"
-                            ? String((row?.source as Record<string, unknown>).language)
-                            : "sa",
-                          sourceScriptText: normalizedSource.sourceScriptText,
-                          sourceTransliterationIast: normalizedSource.sourceTransliterationIast,
-                          meanings: mapped,
-                          activeMeaningLanguage: firstNonEmpty,
-                        };
-                      });
-                    })()}
-                    validationErrors={[]}
-                    missingRequired={false}
-                    requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
-                    allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
-                    sourceDisplayScript={normalizeTransliterationScript(appliedBookPreviewTransliterationScript)}
-                    onAddRow={() => { /* handled by editor toolbar */ }}
-                    onReplaceRows={(newRows) => { void handleWmPreviewReplaceRows(quickEditNodeId as number, newRows); }}
-                    onMoveRow={() => { /* handled by editor toolbar */ }}
-                    onRemoveRow={() => { /* handled by editor toolbar */ }}
-                    onSourceFieldChange={() => { /* handled by editor toolbar */ }}
-                    onSelectMeaningLanguage={() => { /* handled by editor toolbar */ }}
-                    onMeaningTextChange={() => { /* handled by editor toolbar */ }}
-                    autoEnterTableEdit
-                    initialEditorMode="table"
-                    onRequestClose={() => setWmPreviewTableEditNodeId(null)}
-                    blendWithParent
-                  />
-                </div>
-              ) : (
-                <div className="group relative">
-                  {canEditCurrentBook && typeof quickEditNodeId === "number" && (
-                    <button
-                      type="button"
-                      onClick={() => setWmPreviewTableEditNodeId(quickEditNodeId as number)}
-                      className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                      aria-label="Edit word meanings"
-                      title="Edit word meanings"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  {appliedPreviewWordMeaningsDisplayMode === "table" ? (
-                    <div className="overflow-x-auto rounded-lg border border-black/10 bg-transparent">
-                      <table className="min-w-full border-collapse text-sm text-zinc-700">
-                        <thead className="bg-transparent text-xs uppercase tracking-[0.14em] text-zinc-500">
-                          <tr>
-                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
-                              Source
-                            </th>
-                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
-                              Meaning
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {wordMeaningRows.map((row) => (
-                            <tr key={row.key} className="border-b border-black/5 last:border-b-0">
-                              <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
-                                {row.sourceText || "—"}
-                              </td>
-                              <td className="px-2 py-1 align-top text-zinc-700">
-                                {row.meaningText || "—"}
-                                {row.fallbackBadgeVisible && row.meaningLanguage ? (
-                                  <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
-                                    ({row.meaningLanguage})
-                                  </span>
-                                ) : null}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="px-1 py-0.5">
-                      <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
-                        {wordMeaningRows.map((row, rowIndex) => {
-                          const source = row.sourceText || "—";
-                          const meaning = row.meaningText || "—";
-                          const fallbackLabel =
-                            row.fallbackBadgeVisible && row.meaningLanguage
-                              ? ` (${row.meaningLanguage})`
-                              : "";
-                          return (
-                            <span key={row.key}>
-                              <span className="transliteration-highlight">{source}</span>
-                              <span>{` : ${meaning}${fallbackLabel}`}</span>
-                              {rowIndex < wordMeaningRows.length - 1 ? <span>; </span> : null}
-                            </span>
-                          );
-                        })}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {translationLines.length > 0 && (() => {
-            const seenTranslationFields = new Set<string>();
-            return (
-              <div className="mt-1 border-t border-black/10 pt-1">
-                {(() => {
-                  const groups: Array<{
-                    startIndex: number;
-                    lines: typeof translationLines;
-                  }> = [];
-                  let currentGroup: { startIndex: number; lines: typeof translationLines } | null = null;
-                  translationLines.forEach((line, idx) => {
-                    if (!currentGroup || line.isFieldStart) {
-                      if (currentGroup) {
-                        groups.push(currentGroup);
-                      }
-                      currentGroup = { startIndex: idx, lines: [line] };
-                      return;
-                    }
-                    currentGroup.lines.push(line);
-                  });
-                  if (currentGroup) {
-                    groups.push(currentGroup);
-                  }
+              {previewLanguageGroups.map((languageGroup, groupIndex) => {
+                const translationGroup = languageGroup.translationGroup;
+                const showWordMeanings =
+                  appliedPreviewWordMeaningsDisplayMode !== "hide" &&
+                  languageGroup.wordMeaningRows.length > 0;
+                const wordMeaningsLineKey = `${blockGestureKey}-word-meanings-${languageGroup.languageCode}`;
+                const isEditingWordMeanings =
+                  previewWordMeaningsQuickEditDraft?.nodeId === quickEditNodeId &&
+                  previewWordMeaningsQuickEditDraft?.languageCode === languageGroup.languageCode;
 
-                  return groups.map((group) => {
-                    const firstLine = group.lines[0];
-                    const fieldPath = resolvePreviewQuickEditFieldPath(firstLine.fieldName, firstLine.label);
-                    // When the backend substitutes the preferred non-English translation into
-                    // the "english" template slot, the rendered line has fieldName="english"
-                    // but its value is actually e.g. Telugu. Correct the fieldPath so the
-                    // pencil edits (and saves to) the right translation field.
-                    const correctedFieldPath = resolveDisplayedTranslationQuickEditFieldPath(
-                      fieldPath,
-                      firstLine.value || "",
-                      block.content.translations,
-                      appliedPreviewTranslationLanguages as string[],
-                      appliedBookPreviewLanguageSettings.show_english,
-                    );
-                    const canQuickEditLine =
-                      canEditCurrentBook &&
-                      typeof quickEditNodeId === "number" &&
-                      Boolean(correctedFieldPath);
-                    const isActiveField =
-                      canQuickEditLine &&
-                      previewQuickEditDraft?.nodeId === quickEditNodeId &&
-                      previewQuickEditDraft?.fieldPath === correctedFieldPath;
-                    const fullFieldValue = !correctedFieldPath ? (firstLine.value || "")
-                      : correctedFieldPath === "content_data.basic.translation" ? (
-                          typeof block.content.english === "string" ? block.content.english
-                          : typeof block.content.translations?.en === "string" ? block.content.translations.en
-                          : typeof block.content.translations?.english === "string" ? block.content.translations.english
-                          : (firstLine.value || "")
-                        )
-                      : correctedFieldPath.startsWith("content_data.translations.") ? (() => {
-                          const langKey = correctedFieldPath.slice("content_data.translations.".length);
-                          const transMap = block.content.translations as Record<string, string> | undefined;
-                          if (!transMap) return firstLine.value || "";
-                          const canonical = normalizeTranslationLanguage(langKey);
-                          const code = translationLanguageToCode(canonical);
-                          const v = transMap[langKey] ?? transMap[canonical] ?? transMap[code];
-                          return typeof v === "string" ? v : (firstLine.value || "");
-                        })()
-                      : (firstLine.value || "");
-                    const isFirstForField = firstLine.isFieldStart && Boolean(correctedFieldPath) && !seenTranslationFields.has(correctedFieldPath ?? "");
-                    const selectOptions = correctedFieldPath ? getPreviewQuickEditSelectOptions(correctedFieldPath) : null;
-                    const normalizedLineLabel = (firstLine.label || "").trim().toLowerCase();
-                    const normalizedLineField = (firstLine.fieldName || "").trim().toLowerCase();
-                    const isExplicitSingleLineField =
-                      Boolean(correctedFieldPath) &&
-                      (isPreviewQuickEditSingleLineField(correctedFieldPath ?? "") ||
-                        normalizedLineLabel.includes("title") ||
-                        normalizedLineLabel.includes("sequence") ||
-                        normalizedLineField.includes("title") ||
-                        normalizedLineField.includes("sequence"));
-                    const forceMultilineForBookContent =
-                      quickEditTargetType === "book" &&
-                      (correctedFieldPath === "content_data.basic.sanskrit" ||
-                        correctedFieldPath === "content_data.basic.transliteration" ||
-                        correctedFieldPath === "content_data.basic.translation");
-                    const shouldUseMultilineInput =
-                      Boolean(correctedFieldPath) &&
-                      !selectOptions &&
-                      (forceMultilineForBookContent ||
-                        isPreviewQuickEditMultiLineField(correctedFieldPath as string)) &&
-                      !isExplicitSingleLineField;
-                    const useSingleLineInput =
-                      correctedFieldPath
-                        ? !shouldUseMultilineInput && !selectOptions
-                        : false;
-                    const panelLineKey = `${firstLine.key}-translation-${group.startIndex}`;
-                    if (firstLine.isFieldStart && correctedFieldPath) {
-                      seenTranslationFields.add(correctedFieldPath);
-                    }
-
-                    return (
-                      <div
-                        key={`${firstLine.key}-translation-group-${group.startIndex}`}
-                        className={group.startIndex === 0 ? "" : "mt-1 border-t border-black/10 pt-1"}
-                      >
-                        {appliedShowPreviewLabels && firstLine.label && (
-                          <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">{firstLine.label}</div>
-                        )}
+                return (
+                  <div
+                    key={`${blockGestureKey}-language-group-${languageGroup.languageCode}`}
+                    className={groupIndex === 0 ? "" : "mt-1 border-t border-black/10 pt-1"}
+                  >
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                      {languageGroup.label}
+                    </div>
+                    {translationGroup && (
+                      <>
                         <div className="group grid">
                           <div className="col-start-1 row-start-1 min-w-0">
-                            {group.lines.map((line, innerIndex) => {
+                            {translationGroup.lines.map((line, innerIndex) => {
                               if (!line.value) {
-                                return <div key={`blank-trans-${group.startIndex}-${innerIndex}`} className="h-3" />;
+                                return <div key={`blank-trans-${translationGroup.startIndex}-${innerIndex}`} className="h-3" />;
                               }
                               return (
                                 <p
-                                  key={`${line.key}-translation-${group.startIndex}-${innerIndex}`}
+                                  key={`${line.key}-translation-${translationGroup.startIndex}-${innerIndex}`}
                                   className={`${line.className} min-w-0 break-words`}
                                   style={previewBodyTextStyle}
                                   lang={scriptLangForText(line.value)}
@@ -16520,31 +16891,34 @@ function ScripturesContent() {
                               );
                             })}
                           </div>
-                          {canQuickEditLine && correctedFieldPath && isFirstForField && !isActiveField && showQuickEditAffordances && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPreviewQuickEditDraft({
-                                  nodeId: quickEditNodeId as number,
-                                  targetType: quickEditTargetType,
-                                  fieldPath: correctedFieldPath,
-                                  lineKey: panelLineKey,
-                                  value: fullFieldValue,
-                                  saving: false,
-                                  error: null,
-                                });
-                              }}
-                              className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
-                              aria-label={previewQuickEditFieldTooltip(correctedFieldPath, firstLine.label)}
-                              title={previewQuickEditFieldTooltip(correctedFieldPath, firstLine.label)}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                          )}
+                          {translationGroup.canQuickEditLine &&
+                            translationGroup.correctedFieldPath &&
+                            !translationGroup.isActiveField &&
+                            showQuickEditAffordances && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewQuickEditDraft({
+                                    nodeId: quickEditNodeId as number,
+                                    targetType: quickEditTargetType,
+                                    fieldPath: translationGroup.correctedFieldPath!,
+                                    lineKey: translationGroup.panelLineKey,
+                                    value: translationGroup.fullFieldValue,
+                                    saving: false,
+                                    error: null,
+                                  });
+                                }}
+                                className={`col-start-1 row-start-1 ml-auto justify-self-end self-start sticky top-2 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                                aria-label={previewQuickEditFieldTooltip(translationGroup.correctedFieldPath, translationGroup.firstLine.label)}
+                                title={previewQuickEditFieldTooltip(translationGroup.correctedFieldPath, translationGroup.firstLine.label)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                         </div>
-                        {isActiveField && isFirstForField && (
-                          <div ref={(element) => setPreviewQuickEditPanelRef(panelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
-                            {selectOptions ? (
+                        {translationGroup.isActiveField && (
+                          <div ref={(element) => setPreviewQuickEditPanelRef(translationGroup.panelLineKey, element)} className="mt-1 rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2">
+                            {translationGroup.selectOptions ? (
                               <select
                                 autoFocus
                                 value={previewQuickEditDraft?.value || ""}
@@ -16556,20 +16930,20 @@ function ScripturesContent() {
                                 disabled={Boolean(previewQuickEditDraft?.saving)}
                                 className="w-full rounded-md border border-black/10 bg-white px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
                               >
-                                {selectOptions.map((option) => (
-                                  <option key={`${correctedFieldPath}-${option.value || "empty"}`} value={option.value}>
+                                {translationGroup.selectOptions.map((option) => (
+                                  <option key={`${translationGroup.correctedFieldPath}-${option.value || "empty"}`} value={option.value}>
                                     {option.label}
                                   </option>
                                 ))}
                               </select>
-                            ) : useSingleLineInput ? (
+                            ) : translationGroup.useSingleLineInput ? (
                               renderPreviewQuickEditTextControl({
-                                clearAriaLabel: `Clear ${firstLine.label || "field"}`,
+                                clearAriaLabel: `Clear ${translationGroup.firstLine.label || "field"}`,
                               })
                             ) : (
                               renderPreviewQuickEditTextControl({
                                 multiline: true,
-                                clearAriaLabel: `Clear ${firstLine.label || "field"}`,
+                                clearAriaLabel: `Clear ${translationGroup.firstLine.label || "field"}`,
                               })
                             )}
                             {previewQuickEditDraft?.error && (
@@ -16597,13 +16971,129 @@ function ScripturesContent() {
                             </div>
                           </div>
                         )}
+                      </>
+                    )}
+                    {showWordMeanings && (
+                      <div className={translationGroup ? "mt-1" : "mt-0.5"}>
+                        {isEditingWordMeanings ? (
+                          <div
+                            ref={(element) => setPreviewQuickEditPanelRef(wordMeaningsLineKey, element)}
+                            className="rounded-lg border border-[color:var(--accent)]/30 bg-white/95 p-2"
+                          >
+                            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                              Word meanings ({languageGroup.label})
+                            </div>
+                            <textarea
+                              autoFocus
+                              value={previewWordMeaningsQuickEditDraft?.value || ""}
+                              onChange={(event) =>
+                                setPreviewWordMeaningsQuickEditDraft((prev) =>
+                                  prev ? { ...prev, value: event.target.value, error: null } : prev
+                                )
+                              }
+                              disabled={Boolean(previewWordMeaningsQuickEditDraft?.saving)}
+                              className="min-h-[120px] w-full rounded-md border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-[color:var(--accent)]"
+                              placeholder="word=meaning; word=meaning;"
+                            />
+                            <div className="mt-1 text-[11px] text-zinc-500">
+                              Use semicolons between entries, for example: ईश्वर=Lord; पुंसाम्=of people;
+                            </div>
+                            {previewWordMeaningsQuickEditDraft?.error && (
+                              <div className="mt-1 text-xs text-red-600">{previewWordMeaningsQuickEditDraft.error}</div>
+                            )}
+                            <div className="mt-2 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handlePreviewWordMeaningsTokenSave(
+                                    quickEditNodeId as number,
+                                    languageGroup.languageCode
+                                  );
+                                }}
+                                disabled={Boolean(previewWordMeaningsQuickEditDraft?.saving)}
+                                className="rounded-md border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                              >
+                                {previewWordMeaningsQuickEditDraft?.saving ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setPreviewWordMeaningsQuickEditDraft(null)}
+                                disabled={Boolean(previewWordMeaningsQuickEditDraft?.saving)}
+                                className="rounded-md border border-black/10 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="group relative">
+                            {canPreviewQuickEditBlock && quickEditTargetType === "node" && showQuickEditAffordances && !previewWordMeaningsQuickEditDraft && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPreviewWordMeaningsQuickEditDraft({
+                                    nodeId: quickEditNodeId as number,
+                                    languageCode: languageGroup.languageCode,
+                                    lineKey: wordMeaningsLineKey,
+                                    value: serializePreviewWordMeaningTokens(languageGroup.wordMeaningRows),
+                                    saving: false,
+                                    error: null,
+                                  });
+                                }}
+                                className={`absolute right-0 top-0 z-10 rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 shadow-sm transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                                aria-label={`Edit word meanings (${languageGroup.label})`}
+                                title={`Edit word meanings (${languageGroup.label})`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {appliedPreviewWordMeaningsDisplayMode === "table" ? (
+                              <div className="overflow-x-auto rounded-lg border border-black/10 bg-transparent">
+                                <table className="min-w-full border-collapse text-sm text-zinc-700">
+                                  <thead className="bg-transparent text-xs uppercase tracking-[0.14em] text-zinc-500">
+                                    <tr>
+                                      <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
+                                        Source
+                                      </th>
+                                      <th className="border-b border-black/10 px-2 py-1 text-left font-medium">
+                                        Meaning
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {languageGroup.wordMeaningRows.map((row) => (
+                                      <tr key={`${row.key}-${languageGroup.languageCode}`} className="border-b border-black/5 last:border-b-0">
+                                        <td className="transliteration-highlight px-2 py-1 align-top text-zinc-800">
+                                          {row.sourceText || "—"}
+                                        </td>
+                                        <td className="px-2 py-1 align-top text-zinc-700">{row.meaningText || "—"}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="px-1 py-0.5">
+                                <p className="whitespace-pre-wrap text-sm leading-normal text-zinc-700" style={previewBodyTextStyle}>
+                                  {languageGroup.wordMeaningRows.map((row, rowIndex) => (
+                                    <span key={`${row.key}-${languageGroup.languageCode}`}>
+                                      <span className="transliteration-highlight">{row.sourceText || "—"}</span>
+                                      <span>{` : ${row.meaningText || "—"}`}</span>
+                                      {rowIndex < languageGroup.wordMeaningRows.length - 1 ? <span>; </span> : null}
+                                    </span>
+                                  ))}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    );
-                  });
-                })()}
-              </div>
-            );
-          })()}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {(visibleTranslationVariants.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
@@ -17194,12 +17684,14 @@ function ScripturesContent() {
     renderInlineMediaPreview,
     previewQuickEditGestureBlockKey,
     previewQuickEditDraft,
-    wmPreviewTableEditNodeId,
+    previewEditModeEnabled,
+    previewWordMeaningsQuickEditDraft,
     canEditCurrentBook,
     resolvePreviewQuickEditFieldPath,
     resolvePreviewQuickEditNodeId,
     handleSavePreviewQuickEdit,
-    handleWmPreviewReplaceRows,
+    handlePreviewWordMeaningsTokenSave,
+    serializePreviewWordMeaningTokens,
     openPreviewNodeInFullEditor,
     authEmail,
     basketItems,
@@ -18136,10 +18628,11 @@ function ScripturesContent() {
                     ref={importBookInputRef}
                     type="file"
                     accept="application/json,.json"
+                    multiple
                     onChange={(event) => {
                       void handleImportBookFile(event);
                     }}
-                    className="hidden"
+                    className="sr-only"
                   />
                   <button
                     type="button"
@@ -18268,6 +18761,66 @@ function ScripturesContent() {
                   )}
                 </div>
               </div>
+            </div>
+          )}
+          {canImport && bulkFileResults.length > 0 && (
+            <div className="mt-2 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+              {!bulkRunning && (
+                <div className="flex gap-4 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-xs font-medium">
+                  <span className="text-emerald-600">✓ {bulkFileResults.filter((r) => r.status === "success").length} imported</span>
+                  <span className="text-zinc-400">⏭ {bulkFileResults.filter((r) => r.status === "skipped").length} skipped</span>
+                  <span className="text-red-500">✕ {bulkFileResults.filter((r) => r.status === "error").length} failed</span>
+                  <button
+                    type="button"
+                    onClick={() => setBulkFileResults([])}
+                    className="ml-auto text-zinc-400 hover:text-zinc-600"
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <ul className="max-h-64 divide-y divide-zinc-100 overflow-y-auto">
+                {bulkFileResults.map((r, idx) => {
+                  const icon = r.status === "success" ? "✅" : r.status === "skipped" ? "⏭" : r.status === "error" ? "❌" : "⏳";
+                  const elapsed = r.elapsedMs !== undefined ? (r.elapsedMs >= 1000 ? `${(r.elapsedMs / 1000).toFixed(1)}s` : `${r.elapsedMs}ms`) : null;
+                  const isActive = r.status === "uploading" || r.status === "pending";
+                  const hasProgress = typeof r.progressCurrent === "number" && typeof r.progressTotal === "number" && r.progressTotal > 0;
+                  return (
+                    <li key={idx} className="px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="shrink-0">{icon}</span>
+                        <span className="min-w-0 flex-1 truncate font-medium text-zinc-800">{r.name}</span>
+                        {isActive && r.progressMessage ? (
+                          <span className="shrink-0 text-zinc-500">{r.progressMessage}</span>
+                        ) : (
+                          <span className="shrink-0 text-zinc-500">{r.message}</span>
+                        )}
+                        {hasProgress && (
+                          <span className="shrink-0 font-mono text-zinc-400">
+                            {r.progressCurrent} / {r.progressTotal}
+                          </span>
+                        )}
+                        {elapsed && (
+                          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-zinc-400">{elapsed}</span>
+                        )}
+                      </div>
+                      {isActive && (
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-blue-100">
+                          {hasProgress ? (
+                            <div
+                              className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                              style={{ width: `${Math.max(2, Math.min(100, ((r.progressCurrent ?? 0) / (r.progressTotal ?? 1)) * 100))}%` }}
+                            />
+                          ) : (
+                            <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 
@@ -21415,6 +21968,50 @@ function ScripturesContent() {
                 </div>
               )}
 
+              {propertiesScope === "node" && (
+                <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
+                  <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+                    Word-to-Word Meanings
+                  </div>
+                  {propertiesNodeWordMeaningRows.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No word meanings available for this node.</p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
+                      <table className="min-w-full border-collapse text-sm text-zinc-700">
+                        <thead className="bg-zinc-50 text-xs uppercase tracking-[0.14em] text-zinc-500">
+                          <tr>
+                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">Source</th>
+                            <th className="border-b border-black/10 px-2 py-1 text-left font-medium">Meaning</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {propertiesNodeWordMeaningRows.map((row) => {
+                            const preferredLanguage = row.activeMeaningLanguage || WORD_MEANINGS_REQUIRED_LANGUAGE;
+                            const meaningText =
+                              row.meanings[preferredLanguage] || row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE] || "";
+                            return (
+                              <tr key={row.id} className="border-b border-black/5 last:border-b-0">
+                                <td className="px-2 py-1 align-top text-zinc-800">
+                                  {row.sourceScriptText || row.sourceTransliterationIast || "-"}
+                                </td>
+                                <td className="px-2 py-1 align-top text-zinc-700">
+                                  {meaningText || "-"}
+                                  {preferredLanguage !== WORD_MEANINGS_REQUIRED_LANGUAGE ? (
+                                    <span className="ml-1 text-xs uppercase tracking-[0.12em] text-zinc-500">
+                                      ({preferredLanguage})
+                                    </span>
+                                  ) : null}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {propertiesScope === "book" && (
                 <div className="rounded-2xl border border-black/10 bg-white/70 p-3">
                   <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
@@ -23076,6 +23673,17 @@ function ScripturesContent() {
                                 />
                                 Show multimedia
                               </label>
+                              {canEditCurrentBook && (
+                                <label className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={previewEditModeEnabled}
+                                    onChange={(event) => setPreviewEditModeEnabled(event.target.checked)}
+                                    disabled={bookPreviewLoading}
+                                  />
+                                  Edit Mode
+                                </label>
+                              )}
                               <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
                                 Word meanings
                                 <select

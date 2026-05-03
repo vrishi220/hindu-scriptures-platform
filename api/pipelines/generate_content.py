@@ -26,6 +26,9 @@ from models.provenance_record import ProvenanceRecord
 from models.translation_author import TranslationAuthor
 from models.translation_entry import TranslationEntry
 from models.translation_work import TranslationWork
+from models.word_meaning_author import WordMeaningAuthor
+from models.word_meaning_entry import WordMeaningEntry
+from models.word_meaning_work import WordMeaningWork
 
 
 DEFAULT_MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-5")
@@ -54,6 +57,16 @@ _HSP_AI_TRANSLATION_LANGUAGES: list[tuple[str, str]] = [
 	("ta", "Tamil"),
 ]
 
+_LANGUAGE_NAMES_BY_CODE: dict[str, str] = {
+	"en": "English",
+	"te": "Telugu",
+	"hi": "Hindi",
+	"ta": "Tamil",
+	"kn": "Kannada",
+	"ml": "Malayalam",
+	"sa": "Sanskrit",
+}
+
 
 SAVE_SHLOKA_CONTENT_TOOL: anthropic.types.ToolParam = {
 	"name": "save_shloka_content",
@@ -76,6 +89,15 @@ SAVE_SHLOKA_CONTENT_TOOL: anthropic.types.ToolParam = {
 				"description": (
 					"A concise explanatory commentary (2-4 sentences) illuminating the meaning "
 					"and significance of the shloka. Plain prose, no markdown."
+				),
+			},
+			"word_meanings": {
+				"type": "string",
+				"description": (
+					"Semicolon-separated word-by-word meanings in format: "
+					"sanskrit_word=meaning; sanskrit_word=meaning; ... "
+					"Example: dharma-ksetre=in the field of dharma; "
+					"kuru-ksetre=on the battlefield of Kurukshetra;"
 				),
 			},
 		},
@@ -183,6 +205,59 @@ def _seed_hsp_ai_translation_works(db: Session, author: TranslationAuthor) -> No
 		_resolve_or_create_translation_work(db, author, name, code)
 
 
+def _resolve_hsp_ai_word_meaning_author(db: Session) -> WordMeaningAuthor:
+	author = db.query(WordMeaningAuthor).filter(WordMeaningAuthor.name == "HSP AI").first()
+	if author:
+		return author
+
+	author = WordMeaningAuthor(
+		name="HSP AI",
+		bio="AI-generated word meanings on behalf of the Hindu Scriptures Platform.",
+		metadata_json={
+			"type": "ai",
+			"provider": "anthropic",
+			"model": DEFAULT_MODEL,
+		},
+	)
+	db.add(author)
+	db.flush()
+	return author
+
+
+def _resolve_or_create_word_meaning_work(
+	db: Session,
+	author: WordMeaningAuthor,
+	language_name: str,
+	language_code: str,
+) -> WordMeaningWork:
+	title = f"HSP AI Word Meanings - {language_name}"
+	work = (
+		db.query(WordMeaningWork)
+		.filter(
+			WordMeaningWork.author_id == author.id,
+			WordMeaningWork.title == title,
+		)
+		.first()
+	)
+	if work:
+		return work
+
+	work = WordMeaningWork(
+		author_id=author.id,
+		title=title,
+		description=f"AI-generated {language_name} word meanings for supported scripture nodes.",
+		metadata_json={
+			"type": "ai_word_meanings",
+			"language_code": language_code,
+			"language_name": language_name.lower(),
+			"model": DEFAULT_MODEL,
+		},
+	)
+	db.add(work)
+	db.flush()
+	return work
+
+
 def _fetch_nodes_missing_translation(
 	db: Session,
 	book: Book,
@@ -273,23 +348,53 @@ def _build_generation_prompts(
 	return system_prompt, user_message, source_text
 
 
-def _extract_tool_result_from_content(content_blocks) -> tuple[str, str] | None:
+def _extract_tool_result_from_content(content_blocks) -> tuple[str, str, str] | None:
 	for block in content_blocks or []:
 		if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "save_shloka_content":
 			inp = getattr(block, "input", {}) or {}
 			translation = (inp.get("translation") or "").strip()
 			commentary = (inp.get("commentary") or "").strip()
+			word_meanings = (inp.get("word_meanings") or "").strip()
 			if translation:
-				return translation, commentary
+				return translation, commentary, word_meanings
 
 		if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "save_shloka_content":
 			inp = block.get("input") or {}
 			translation = (inp.get("translation") or "").strip()
 			commentary = (inp.get("commentary") or "").strip()
+			word_meanings = (inp.get("word_meanings") or "").strip()
 			if translation:
-				return translation, commentary
+				return translation, commentary, word_meanings
 
 	return None
+
+
+def _parse_word_meanings(token_string: str, language_code: str) -> dict:
+	rows = []
+	for i, token in enumerate(token_string.split(";")):
+		token = token.strip()
+		if "=" not in token:
+			continue
+		sanskrit, meaning = token.split("=", 1)
+		sanskrit = sanskrit.strip()
+		meaning = meaning.strip()
+		if not sanskrit or not meaning:
+			continue
+		rows.append(
+			{
+				"id": f"wm_{language_code}_{i}",
+				"order": i + 1,
+				"source": {
+					"language": "sa",
+					"script_text": sanskrit,
+					"transliteration": {"iast": sanskrit},
+				},
+				"meanings": {
+					language_code: {"text": meaning},
+				},
+			}
+		)
+	return {"rows": rows}
 
 
 def _obj_get(value, key: str, default=None):
@@ -412,8 +517,8 @@ def _poll_batch_until_complete(client: anthropic.Anthropic, batch_id: str) -> No
 def _collect_batch_results(
 	client: anthropic.Anthropic,
 	batch_id: str,
-) -> tuple[dict[int, tuple[str, str]], dict[int, str]]:
-	successes: dict[int, tuple[str, str]] = {}
+) -> tuple[dict[int, tuple[str, str, str]], dict[int, str]]:
+	successes: dict[int, tuple[str, str, str]] = {}
 	failures: dict[int, str] = {}
 
 	for item in client.beta.messages.batches.results(batch_id):
@@ -450,7 +555,7 @@ def _call_claude(
 	node: ContentNode,
 	language_name: str,
 	language_code: str,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
 	system_prompt, user_message, _ = _build_generation_prompts(book_name, node, language_name)
 
 	response = client.messages.create(
@@ -470,11 +575,14 @@ def _write_results(
 	node: ContentNode,
 	translation: str,
 	commentary: str,
+	word_meanings_token: str | None,
 	language_code: str,
 	translation_work: TranslationWork,
 	translation_author: TranslationAuthor,
 	work: CommentaryWork,
 	author: CommentaryAuthor,
+	word_meaning_work: WordMeaningWork,
+	word_meaning_author: WordMeaningAuthor,
 	ai_job_id: int,
 	model: str,
 ) -> None:
@@ -549,6 +657,72 @@ def _write_results(
 		source_version=model,
 	)
 	db.add(prov)
+
+	if isinstance(word_meanings_token, str) and word_meanings_token.strip():
+		parsed_word_meanings = _parse_word_meanings(word_meanings_token, language_code)
+		parsed_rows = parsed_word_meanings.get("rows") if isinstance(parsed_word_meanings, dict) else []
+		if isinstance(parsed_rows, list):
+			for raw_row in parsed_rows:
+				if not isinstance(raw_row, dict):
+					continue
+				source = raw_row.get("source") if isinstance(raw_row.get("source"), dict) else {}
+				source_word = str(source.get("script_text") or "").strip()
+				if not source_word:
+					continue
+
+				translit = source.get("transliteration") if isinstance(source.get("transliteration"), dict) else {}
+				transliteration = str(translit.get("iast") or source_word).strip()
+				word_order = int(raw_row.get("order") or 0)
+				if word_order <= 0:
+					continue
+
+				meanings = raw_row.get("meanings") if isinstance(raw_row.get("meanings"), dict) else {}
+				language_payload = meanings.get(language_code) if isinstance(meanings.get(language_code), dict) else {}
+				meaning_text = str(language_payload.get("text") or "").strip()
+				if not meaning_text:
+					continue
+
+				existing_word_entry = (
+					db.query(WordMeaningEntry)
+					.filter(
+						WordMeaningEntry.node_id == node.id,
+						WordMeaningEntry.word_order == word_order,
+						WordMeaningEntry.language_code == language_code,
+						WordMeaningEntry.author_id == word_meaning_author.id,
+					)
+					.first()
+				)
+
+				if existing_word_entry:
+					existing_word_entry.source_word = source_word
+					existing_word_entry.transliteration = transliteration
+					existing_word_entry.meaning_text = meaning_text
+					existing_word_entry.display_order = word_order - 1
+					existing_word_entry.work_id = word_meaning_work.id
+					existing_word_entry.metadata_json = {
+						"ai_job_id": ai_job_id,
+						"model": model,
+						"generated_at": datetime.now(tz=timezone.utc).isoformat(),
+					}
+				else:
+					word_entry = WordMeaningEntry(
+						node_id=node.id,
+						author_id=word_meaning_author.id,
+						work_id=word_meaning_work.id,
+						source_word=source_word,
+						transliteration=transliteration,
+						word_order=word_order,
+						language_code=language_code,
+						meaning_text=meaning_text,
+						display_order=word_order - 1,
+						metadata_json={
+							"ai_job_id": ai_job_id,
+							"model": model,
+							"generated_at": datetime.now(tz=timezone.utc).isoformat(),
+						},
+					)
+					db.add(word_entry)
+
 	db.flush()
 
 
@@ -662,8 +836,17 @@ def main() -> None:
 			args.language_name,
 			args.language_code,
 		)
+		word_meaning_author = _resolve_hsp_ai_word_meaning_author(db)
+		resolved_language_name = _LANGUAGE_NAMES_BY_CODE.get(args.language_code, args.language_name)
+		word_meaning_work = _resolve_or_create_word_meaning_work(
+			db,
+			word_meaning_author,
+			resolved_language_name,
+			args.language_code,
+		)
 		db.commit()
 		print(f"TRANSLATION WORK: {translation_work.title}")
+		print(f"WORD MEANING WORK: {word_meaning_work.title}")
 
 		nodes = _fetch_nodes_missing_translation(
 			db,
@@ -714,17 +897,20 @@ def main() -> None:
 					print(f"PROCESS RESULT [{i}/{len(nodes)}]: node={node.id} seq={seq}")
 					try:
 						if node.id in batch_successes:
-							translation, commentary = batch_successes[node.id]
+							translation, commentary, word_meanings_token = batch_successes[node.id]
 							_write_results(
 								db=db,
 								node=node,
 								translation=translation,
 								commentary=commentary,
+								word_meanings_token=word_meanings_token,
 								language_code=args.language_code,
 								translation_work=translation_work,
 								translation_author=translation_author,
 								work=work,
 								author=author,
+								word_meaning_work=word_meaning_work,
+								word_meaning_author=word_meaning_author,
 								ai_job_id=job.id,
 								model=model,
 							)
@@ -774,7 +960,7 @@ def main() -> None:
 					if result is None:
 						raise ValueError("Claude did not return a tool_use block")
 
-					translation, commentary = result
+					translation, commentary, word_meanings_token = result
 					print(f"TRANSLATION RECEIVED: {translation[:80]}{'...' if len(translation) > 80 else ''}")
 
 					_write_results(
@@ -782,11 +968,14 @@ def main() -> None:
 						node=node,
 						translation=translation,
 						commentary=commentary,
+						word_meanings_token=word_meanings_token,
 						language_code=args.language_code,
 						translation_work=translation_work,
 						translation_author=translation_author,
 						work=work,
 						author=author,
+						word_meaning_work=word_meaning_work,
+						word_meaning_author=word_meaning_author,
 						ai_job_id=job.id,
 						model=model,
 					)

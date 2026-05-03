@@ -3,6 +3,7 @@ import random
 import re
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
@@ -33,6 +34,9 @@ from models.commentary_entry import CommentaryEntry
 from models.translation_author import TranslationAuthor
 from models.translation_work import TranslationWork
 from models.translation_entry import TranslationEntry
+from models.word_meaning_author import WordMeaningAuthor
+from models.word_meaning_work import WordMeaningWork
+from models.word_meaning_entry import WordMeaningEntry
 from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
@@ -58,6 +62,7 @@ from models.schemas import (
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeTreeItem,
+    ContentNodeWordMeaningsTokenPatch,
     ContentNodeUpdate,
     CommentaryAuthorCreate,
     CommentaryAuthorPublic,
@@ -401,7 +406,90 @@ def _merge_node_relational_variants(
     content_data: object,
 ) -> dict:
     with_translation = _merge_node_translation_variants(db, node, content_data)
-    return _merge_node_commentary_variants(db, node, with_translation)
+    with_commentary = _merge_node_commentary_variants(db, node, with_translation)
+    return _merge_node_word_meanings(db, node, with_commentary)
+
+
+def _merge_node_word_meanings(
+    db: Session,
+    node: ContentNode,
+    content_data: object,
+) -> dict:
+    sanitized = _sanitize_content_data_for_response(content_data)
+    existing_word_meanings = (
+        dict(sanitized.get("word_meanings"))
+        if isinstance(sanitized.get("word_meanings"), dict)
+        else {}
+    )
+    existing_rows = (
+        list(existing_word_meanings.get("rows"))
+        if isinstance(existing_word_meanings.get("rows"), list)
+        else []
+    )
+
+    rows = (
+        db.query(WordMeaningEntry)
+        .filter(WordMeaningEntry.node_id == node.id)
+        .order_by(
+            WordMeaningEntry.word_order.asc(),
+            WordMeaningEntry.display_order.asc(),
+            WordMeaningEntry.id.asc(),
+        )
+        .all()
+    )
+
+    if not rows:
+        if existing_word_meanings:
+            sanitized["word_meanings"] = existing_word_meanings
+        return sanitized
+
+    grouped: dict[int, dict] = {}
+    for entry in rows:
+        source_word = str(entry.source_word or "").strip()
+        language_code = str(entry.language_code or "").strip().lower()
+        meaning_text = str(entry.meaning_text or "").strip()
+        if not source_word or not language_code or not meaning_text:
+            continue
+
+        row_key = int(entry.word_order or 0)
+        if row_key <= 0:
+            row_key = int(entry.display_order or 0) + 1
+
+        row = grouped.get(row_key)
+        if row is None:
+            row = {
+                "id": f"wm_{node.id}_{row_key}",
+                "order": row_key,
+                "source": {
+                    "language": "sa",
+                    "script_text": source_word,
+                    "transliteration": {
+                        "iast": str(entry.transliteration or source_word).strip(),
+                    },
+                },
+                "meanings": {},
+            }
+            grouped[row_key] = row
+
+        meanings = row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
+        if language_code not in meanings:
+            meanings[language_code] = {"text": meaning_text}
+        row["meanings"] = meanings
+
+    relational_rows = [grouped[key] for key in sorted(grouped.keys())]
+    for idx, row in enumerate(relational_rows, start=1):
+        row["order"] = idx
+
+    if relational_rows:
+        sanitized["word_meanings"] = {
+            "rows": relational_rows,
+            "version": existing_word_meanings.get("version") if existing_word_meanings else "1.0",
+        }
+        sanitized["word_meanings_rows"] = _build_word_meanings_rows_from_raw(relational_rows)
+    elif existing_word_meanings:
+        sanitized["word_meanings"] = existing_word_meanings
+
+    return sanitized
 
 
 def _node_response_payload(node: ContentNode) -> dict:
@@ -1406,6 +1494,46 @@ def _apply_content_data_field_patch(content_data: dict, field_path: str, next_va
     return content_data
 
 
+_WORD_MEANING_TOKEN_SEPARATOR_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^(.*?)\s+:\s*(.+)$"),
+    re.compile(r"^(.*?)\s*=\s*(.+)$"),
+    re.compile(r"^(.*?)\s*\?\s*(.+)$"),
+    re.compile(r"^(.*?)\s+-\s*(.+)$"),
+)
+
+
+def _parse_word_meaning_token_entry(entry: str) -> tuple[str, str] | None:
+    trimmed = str(entry or "").strip()
+    if not trimmed:
+        return None
+
+    for pattern in _WORD_MEANING_TOKEN_SEPARATOR_PATTERNS:
+        match = pattern.match(trimmed)
+        if not match:
+            continue
+        source = match.group(1).strip()
+        meaning = match.group(2).strip()
+        if not source:
+            return None
+        return source, meaning
+
+    return trimmed, ""
+
+
+def _parse_word_meaning_tokens(token_text: str) -> list[tuple[str, str]]:
+    entries = [segment.strip() for segment in re.split(r"[\n;]+", str(token_text or "")) if segment.strip()]
+    parsed_entries: list[tuple[str, str]] = []
+    for entry in entries:
+        parsed = _parse_word_meaning_token_entry(entry)
+        if not parsed:
+            continue
+        source_word, meaning_text = parsed
+        if not source_word or not meaning_text:
+            continue
+        parsed_entries.append((source_word, meaning_text))
+    return parsed_entries
+
+
 def _book_search_haystacks(book: Book) -> dict[str, list[str]]:
     metadata = book.metadata_json if isinstance(book.metadata_json, dict) else {}
 
@@ -1716,11 +1844,20 @@ def delete_schema(
 @router.get("/books", response_model=list[BookPublic])
 def list_books(
     q: str | None = Query(default=None),
+    book_code: str | None = Query(default=None),
+    book_name: str | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[BookPublic]:
+    # Exact-match lookups (used for existence checks before import)
+    if book_code is not None:
+        books = db.query(Book).filter(Book.book_code == book_code.strip()).all()
+        return [_book_public_model(b) for b in books]
+    if book_name is not None:
+        books = db.query(Book).filter(Book.book_name == book_name.strip()).all()
+        return [_book_public_model(b) for b in books]
     query_text = (q or "").strip()
     if query_text:
         # Pre-filter at DB level: only load books containing at least one search term,
@@ -3532,6 +3669,8 @@ def _import_canonical_json_v1(
                 merged_variant_authors[slug_text] = name_text
         book.variant_authors = merged_variant_authors
 
+    _t_start = time.perf_counter()
+
     level_lookup = {level: idx + 1 for idx, level in enumerate(schema.levels or [])}
     old_to_new_node_ids: dict[int, int] = {}
     pending_nodes = list(canonical.nodes)
@@ -3542,6 +3681,292 @@ def _import_canonical_json_v1(
     commentary_work_cache: dict[tuple[int, str], CommentaryWork] = {}
     translation_author_cache: dict[str, TranslationAuthor] = {}
     translation_work_cache: dict[tuple[int, str], TranslationWork] = {}
+    word_meaning_author_cache: dict[str, WordMeaningAuthor] = {}
+    word_meaning_work_cache: dict[tuple[int, str], WordMeaningWork] = {}
+    language_name_by_code = {
+        "en": "English",
+        "te": "Telugu",
+        "hi": "Hindi",
+        "ta": "Tamil",
+        "kn": "Kannada",
+        "ml": "Malayalam",
+        "sa": "Sanskrit",
+    }
+
+    def _resolve_commentary_author_name(raw_variant: dict) -> str:
+        author_slug = str(raw_variant.get("author_slug") or "").strip()
+        author_name = ""
+        if author_slug:
+            mapped_name = variant_authors_lookup.get(author_slug)
+            if isinstance(mapped_name, str) and mapped_name.strip():
+                author_name = mapped_name.strip()
+            else:
+                author_name = author_slug
+        if not author_name:
+            fallback_author = str(raw_variant.get("author") or "").strip()
+            author_name = fallback_author or "unknown_author"
+        return author_name
+
+    def _resolve_translation_author_name(raw_variant: dict) -> str:
+        author_slug = str(raw_variant.get("author_slug") or "").strip()
+        author_name = ""
+        if author_slug:
+            mapped_name = variant_authors_lookup.get(author_slug)
+            if isinstance(mapped_name, str) and mapped_name.strip():
+                author_name = mapped_name.strip()
+            else:
+                author_name = author_slug
+        if not author_name:
+            fallback_author = str(raw_variant.get("author_name") or raw_variant.get("author") or "").strip()
+            author_name = fallback_author or "unknown_author"
+        return author_name
+
+    def _resolve_word_meaning_author_name(raw_row: dict, meaning_payload: object) -> tuple[str, str]:
+        author_slug = str(
+            raw_row.get("author_slug")
+            or (meaning_payload.get("author_slug") if isinstance(meaning_payload, dict) else "")
+            or ""
+        ).strip()
+        author_name = ""
+        if author_slug:
+            mapped_name = variant_authors_lookup.get(author_slug)
+            if isinstance(mapped_name, str) and mapped_name.strip():
+                author_name = mapped_name.strip()
+        if not author_name and author_slug.lower() in {"hsp_ai", "hsp-ai", "ai"}:
+            author_name = "HSP AI"
+        if not author_name:
+            maybe_author = raw_row.get("author")
+            if isinstance(maybe_author, str) and maybe_author.strip():
+                author_name = maybe_author.strip()
+        if not author_name:
+            author_name = "HSP AI"
+        return author_name, author_slug
+
+    # Pre-scan canonical nodes and preload author/work records to avoid per-row queries
+    # during variant and word-meanings migration.
+    _t_prescan_start = time.perf_counter()
+    required_commentary_author_names: set[str] = set()
+    required_translation_author_names: set[str] = set()
+    required_word_meaning_author_names: set[str] = set()
+    required_word_meaning_author_language_pairs: set[tuple[str, str]] = set()
+
+    for raw_node in canonical.nodes:
+        raw_content_data = raw_node.content_data if isinstance(raw_node.content_data, dict) else {}
+        raw_commentary_variants = (
+            raw_content_data.get("commentary_variants")
+            if isinstance(raw_content_data.get("commentary_variants"), list)
+            else []
+        )
+        for raw_variant in raw_commentary_variants:
+            if not isinstance(raw_variant, dict):
+                continue
+            text_value = str(raw_variant.get("text") or "").strip()
+            if not text_value:
+                continue
+            required_commentary_author_names.add(_resolve_commentary_author_name(raw_variant))
+
+        raw_translation_variants = (
+            raw_content_data.get("translation_variants")
+            if isinstance(raw_content_data.get("translation_variants"), list)
+            else []
+        )
+        for raw_variant in raw_translation_variants:
+            if not isinstance(raw_variant, dict):
+                continue
+            text_value = str(raw_variant.get("text") or "").strip()
+            if not text_value:
+                continue
+            required_translation_author_names.add(_resolve_translation_author_name(raw_variant))
+
+        word_meanings_obj = (
+            raw_content_data.get("word_meanings")
+            if isinstance(raw_content_data.get("word_meanings"), dict)
+            else {}
+        )
+        word_rows = (
+            word_meanings_obj.get("rows")
+            if isinstance(word_meanings_obj.get("rows"), list)
+            else (
+                raw_content_data.get("word_meanings_rows")
+                if isinstance(raw_content_data.get("word_meanings_rows"), list)
+                else []
+            )
+        )
+        for raw_row in word_rows:
+            if not isinstance(raw_row, dict):
+                continue
+            meanings = raw_row.get("meanings") if isinstance(raw_row.get("meanings"), dict) else {}
+            for language_key, meaning_payload in meanings.items():
+                language_code = str(language_key or "").strip().lower()
+                if not language_code:
+                    continue
+                meaning_text = ""
+                if isinstance(meaning_payload, dict):
+                    meaning_text = str(meaning_payload.get("text") or "").strip()
+                elif isinstance(meaning_payload, str):
+                    meaning_text = meaning_payload.strip()
+                if not meaning_text:
+                    continue
+                author_name, _ = _resolve_word_meaning_author_name(raw_row, meaning_payload)
+                required_word_meaning_author_names.add(author_name)
+                required_word_meaning_author_language_pairs.add((author_name, language_code))
+
+    _t_preload_start = time.perf_counter()
+
+    if required_commentary_author_names:
+        existing_commentary_authors = (
+            db.query(CommentaryAuthor)
+            .filter(CommentaryAuthor.name.in_(sorted(required_commentary_author_names)))
+            .all()
+        )
+        commentary_author_cache.update({str(author.name): author for author in existing_commentary_authors})
+
+        missing_commentary_authors = [
+            CommentaryAuthor(name=name, created_by=current_user.id)
+            for name in sorted(required_commentary_author_names)
+            if name not in commentary_author_cache
+        ]
+        if missing_commentary_authors:
+            db.add_all(missing_commentary_authors)
+            db.flush()
+            for author in missing_commentary_authors:
+                commentary_author_cache[str(author.name)] = author
+
+    if required_translation_author_names:
+        existing_translation_authors = (
+            db.query(TranslationAuthor)
+            .filter(TranslationAuthor.name.in_(sorted(required_translation_author_names)))
+            .all()
+        )
+        translation_author_cache.update({str(author.name): author for author in existing_translation_authors})
+
+        missing_translation_authors = [
+            TranslationAuthor(name=name)
+            for name in sorted(required_translation_author_names)
+            if name not in translation_author_cache
+        ]
+        if missing_translation_authors:
+            db.add_all(missing_translation_authors)
+            db.flush()
+            for author in missing_translation_authors:
+                translation_author_cache[str(author.name)] = author
+
+    if required_word_meaning_author_names:
+        existing_word_authors = (
+            db.query(WordMeaningAuthor)
+            .filter(WordMeaningAuthor.name.in_(sorted(required_word_meaning_author_names)))
+            .all()
+        )
+        word_meaning_author_cache.update({str(author.name): author for author in existing_word_authors})
+
+        missing_word_authors = [
+            WordMeaningAuthor(
+                name=name,
+                bio="AI-generated word meanings" if name == "HSP AI" else None,
+            )
+            for name in sorted(required_word_meaning_author_names)
+            if name not in word_meaning_author_cache
+        ]
+        if missing_word_authors:
+            db.add_all(missing_word_authors)
+            db.flush()
+            for author in missing_word_authors:
+                word_meaning_author_cache[str(author.name)] = author
+
+    required_commentary_work_keys = {
+        (author.id, f"{author_name} Commentary")
+        for author_name, author in commentary_author_cache.items()
+    }
+    if required_commentary_work_keys:
+        author_ids = sorted({author_id for author_id, _ in required_commentary_work_keys})
+        titles = sorted({title for _, title in required_commentary_work_keys})
+        existing_commentary_works = (
+            db.query(CommentaryWork)
+            .filter(CommentaryWork.author_id.in_(author_ids), CommentaryWork.title.in_(titles))
+            .all()
+        )
+        for work in existing_commentary_works:
+            commentary_work_cache[(int(work.author_id), str(work.title))] = work
+
+        missing_commentary_works = [
+            CommentaryWork(title=title, author_id=author_id, created_by=current_user.id)
+            for author_id, title in sorted(required_commentary_work_keys)
+            if (author_id, title) not in commentary_work_cache
+        ]
+        if missing_commentary_works:
+            db.add_all(missing_commentary_works)
+            db.flush()
+            for work in missing_commentary_works:
+                commentary_work_cache[(int(work.author_id), str(work.title))] = work
+
+    required_translation_work_keys = {
+        (author.id, f"{author_name} Translation")
+        for author_name, author in translation_author_cache.items()
+    }
+    if required_translation_work_keys:
+        author_ids = sorted({author_id for author_id, _ in required_translation_work_keys})
+        titles = sorted({title for _, title in required_translation_work_keys})
+        existing_translation_works = (
+            db.query(TranslationWork)
+            .filter(TranslationWork.author_id.in_(author_ids), TranslationWork.title.in_(titles))
+            .all()
+        )
+        for work in existing_translation_works:
+            translation_work_cache[(int(work.author_id), str(work.title))] = work
+
+        missing_translation_works = [
+            TranslationWork(title=title, author_id=author_id)
+            for author_id, title in sorted(required_translation_work_keys)
+            if (author_id, title) not in translation_work_cache
+        ]
+        if missing_translation_works:
+            db.add_all(missing_translation_works)
+            db.flush()
+            for work in missing_translation_works:
+                translation_work_cache[(int(work.author_id), str(work.title))] = work
+
+    required_word_work_keys: set[tuple[int, str, str]] = set()
+    for author_name, language_code in required_word_meaning_author_language_pairs:
+        author = word_meaning_author_cache.get(author_name)
+        if author is None:
+            continue
+        language_name = language_name_by_code.get(language_code, language_code.upper())
+        if author.name == "HSP AI":
+            work_title = f"HSP AI Word Meanings - {language_name}"
+        else:
+            work_title = f"{author.name} Word Meanings - {language_name}"
+        required_word_work_keys.add((int(author.id), work_title, language_code))
+
+    if required_word_work_keys:
+        author_ids = sorted({author_id for author_id, _, _ in required_word_work_keys})
+        titles = sorted({title for _, title, _ in required_word_work_keys})
+        existing_word_works = (
+            db.query(WordMeaningWork)
+            .filter(WordMeaningWork.author_id.in_(author_ids), WordMeaningWork.title.in_(titles))
+            .all()
+        )
+        for work in existing_word_works:
+            word_meaning_work_cache[(int(work.author_id), str(work.title))] = work
+
+        missing_word_works = [
+            WordMeaningWork(
+                author_id=author_id,
+                title=title,
+                description=f"Word meanings in {language_name_by_code.get(language_code, language_code.upper())}",
+                metadata_json={
+                    "type": "word_meanings",
+                    "language_code": language_code,
+                    "language_name": language_name_by_code.get(language_code, language_code.upper()).lower(),
+                },
+            )
+            for author_id, title, language_code in sorted(required_word_work_keys)
+            if (author_id, title) not in word_meaning_work_cache
+        ]
+        if missing_word_works:
+            db.add_all(missing_word_works)
+            db.flush()
+            for work in missing_word_works:
+                word_meaning_work_cache[(int(work.author_id), str(work.title))] = work
 
     def _migrate_commentary_variants_to_entries(
         content_node: ContentNode,
@@ -3556,54 +3981,29 @@ def _import_canonical_json_v1(
                 continue
 
             author_slug = str(raw_variant.get("author_slug") or "").strip()
-            author_name = ""
-            if author_slug:
-                mapped_name = variant_authors_lookup.get(author_slug)
-                if isinstance(mapped_name, str) and mapped_name.strip():
-                    author_name = mapped_name.strip()
-                else:
-                    author_name = author_slug
-
-            if not author_name:
-                fallback_author = str(raw_variant.get("author") or "").strip()
-                author_name = fallback_author or "unknown_author"
+            author_name = _resolve_commentary_author_name(raw_variant)
 
             author = commentary_author_cache.get(author_name)
             if author is None:
-                author = (
-                    db.query(CommentaryAuthor)
-                    .filter(CommentaryAuthor.name == author_name)
-                    .first()
+                author = CommentaryAuthor(
+                    name=author_name,
+                    created_by=current_user.id,
                 )
-                if author is None:
-                    author = CommentaryAuthor(
-                        name=author_name,
-                        created_by=current_user.id,
-                    )
-                    db.add(author)
-                    db.flush()
+                db.add(author)
+                db.flush()
                 commentary_author_cache[author_name] = author
 
             work_title = f"{author_name} Commentary"
             work_cache_key = (author.id, work_title)
             work = commentary_work_cache.get(work_cache_key)
             if work is None:
-                work = (
-                    db.query(CommentaryWork)
-                    .filter(
-                        CommentaryWork.author_id == author.id,
-                        CommentaryWork.title == work_title,
-                    )
-                    .first()
+                work = CommentaryWork(
+                    title=work_title,
+                    author_id=author.id,
+                    created_by=current_user.id,
                 )
-                if work is None:
-                    work = CommentaryWork(
-                        title=work_title,
-                        author_id=author.id,
-                        created_by=current_user.id,
-                    )
-                    db.add(work)
-                    db.flush()
+                db.add(work)
+                db.flush()
                 commentary_work_cache[work_cache_key] = work
 
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
@@ -3639,50 +4039,25 @@ def _import_canonical_json_v1(
                 continue
 
             author_slug = str(raw_variant.get("author_slug") or "").strip()
-            author_name = ""
-            if author_slug:
-                mapped_name = variant_authors_lookup.get(author_slug)
-                if isinstance(mapped_name, str) and mapped_name.strip():
-                    author_name = mapped_name.strip()
-                else:
-                    author_name = author_slug
-
-            if not author_name:
-                fallback_author = str(raw_variant.get("author_name") or raw_variant.get("author") or "").strip()
-                author_name = fallback_author or "unknown_author"
+            author_name = _resolve_translation_author_name(raw_variant)
 
             author = translation_author_cache.get(author_name)
             if author is None:
-                author = (
-                    db.query(TranslationAuthor)
-                    .filter(TranslationAuthor.name == author_name)
-                    .first()
-                )
-                if author is None:
-                    author = TranslationAuthor(name=author_name)
-                    db.add(author)
-                    db.flush()
+                author = TranslationAuthor(name=author_name)
+                db.add(author)
+                db.flush()
                 translation_author_cache[author_name] = author
 
             work_title = f"{author_name} Translation"
             work_cache_key = (author.id, work_title)
             work = translation_work_cache.get(work_cache_key)
             if work is None:
-                work = (
-                    db.query(TranslationWork)
-                    .filter(
-                        TranslationWork.author_id == author.id,
-                        TranslationWork.title == work_title,
-                    )
-                    .first()
+                work = TranslationWork(
+                    title=work_title,
+                    author_id=author.id,
                 )
-                if work is None:
-                    work = TranslationWork(
-                        title=work_title,
-                        author_id=author.id,
-                    )
-                    db.add(work)
-                    db.flush()
+                db.add(work)
+                db.flush()
                 translation_work_cache[work_cache_key] = work
 
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
@@ -3703,6 +4078,109 @@ def _import_canonical_json_v1(
                 },
             )
             db.add(entry)
+
+    def _resolve_or_create_word_meaning_author(author_name: str) -> WordMeaningAuthor:
+        cached = word_meaning_author_cache.get(author_name)
+        if cached is not None:
+            return cached
+
+        author = WordMeaningAuthor(
+            name=author_name,
+            bio="AI-generated word meanings" if author_name == "HSP AI" else None,
+        )
+        db.add(author)
+        db.flush()
+
+        word_meaning_author_cache[author_name] = author
+        return author
+
+    def _resolve_or_create_word_meaning_work(author: WordMeaningAuthor, language_code: str) -> WordMeaningWork:
+        language_key = str(language_code or "en").strip().lower() or "en"
+        language_name = language_name_by_code.get(language_key, language_key.upper())
+        if author.name == "HSP AI":
+            work_title = f"HSP AI Word Meanings - {language_name}"
+        else:
+            work_title = f"{author.name} Word Meanings - {language_name}"
+
+        cache_key = (author.id, work_title)
+        cached = word_meaning_work_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        work = WordMeaningWork(
+            author_id=author.id,
+            title=work_title,
+            description=f"Word meanings in {language_name}",
+            metadata_json={
+                "type": "word_meanings",
+                "language_code": language_key,
+                "language_name": language_name.lower(),
+            },
+        )
+        db.add(work)
+        db.flush()
+
+        word_meaning_work_cache[cache_key] = work
+        return work
+
+    def _migrate_word_meanings_to_entries(
+        content_node: ContentNode,
+        raw_word_meanings_rows: list,
+    ) -> None:
+        for idx, raw_row in enumerate(raw_word_meanings_rows):
+            if not isinstance(raw_row, dict):
+                continue
+
+            source = raw_row.get("source") if isinstance(raw_row.get("source"), dict) else {}
+            source_word = str(source.get("script_text") or "").strip()
+            if not source_word:
+                continue
+
+            transliteration = ""
+            transliteration_obj = source.get("transliteration") if isinstance(source.get("transliteration"), dict) else {}
+            if isinstance(transliteration_obj, dict):
+                transliteration = str(transliteration_obj.get("iast") or "").strip()
+            word_order = int(raw_row.get("order") or 0)
+            if word_order <= 0:
+                word_order = idx + 1
+
+            meanings = raw_row.get("meanings") if isinstance(raw_row.get("meanings"), dict) else {}
+            for language_key, meaning_payload in meanings.items():
+                language_code = str(language_key or "").strip().lower()
+                if not language_code:
+                    continue
+
+                meaning_text = ""
+                if isinstance(meaning_payload, dict):
+                    meaning_text = str(meaning_payload.get("text") or "").strip()
+                elif isinstance(meaning_payload, str):
+                    meaning_text = meaning_payload.strip()
+                if not meaning_text:
+                    continue
+
+                author_name, author_slug = _resolve_word_meaning_author_name(raw_row, meaning_payload)
+
+                author = _resolve_or_create_word_meaning_author(author_name)
+                work = _resolve_or_create_word_meaning_work(author, language_code)
+
+                entry = WordMeaningEntry(
+                    node_id=content_node.id,
+                    author_id=author.id,
+                    work_id=work.id,
+                    source_word=source_word,
+                    transliteration=transliteration or source_word,
+                    word_order=word_order,
+                    language_code=language_code,
+                    meaning_text=meaning_text,
+                    display_order=word_order - 1,
+                    metadata_json={
+                        "author_slug": author_slug,
+                        "migrated_from": "word_meanings.rows",
+                    },
+                )
+                db.add(entry)
+
+    _t_node_loop_start = time.perf_counter()
 
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
@@ -3765,9 +4243,25 @@ def _import_canonical_json_v1(
                 if isinstance(raw_node_content_data.get("translation_variants"), list)
                 else []
             )
+            word_meanings_obj = (
+                raw_node_content_data.get("word_meanings")
+                if isinstance(raw_node_content_data.get("word_meanings"), dict)
+                else {}
+            )
+            word_meanings_rows = (
+                word_meanings_obj.get("rows")
+                if isinstance(word_meanings_obj.get("rows"), list)
+                else (
+                    raw_node_content_data.get("word_meanings_rows")
+                    if isinstance(raw_node_content_data.get("word_meanings_rows"), list)
+                    else []
+                )
+            )
             content_data_without_commentary_variants = dict(raw_node_content_data)
             content_data_without_commentary_variants.pop("commentary_variants", None)
             content_data_without_commentary_variants.pop("translation_variants", None)
+            content_data_without_commentary_variants.pop("word_meanings", None)
+            content_data_without_commentary_variants.pop("word_meanings_rows", None)
             node_content_data = _autofill_content_data_pair(
                 content_data_without_commentary_variants
             )
@@ -3802,6 +4296,8 @@ def _import_canonical_json_v1(
                 _migrate_commentary_variants_to_entries(content_node, commentary_variants)
             if translation_variants:
                 _migrate_translation_variants_to_entries(content_node, translation_variants)
+            if isinstance(word_meanings_rows, list) and word_meanings_rows:
+                _migrate_word_meanings_to_entries(content_node, word_meanings_rows)
 
             old_to_new_node_ids[node.node_id] = content_node.id
             nodes_created += 1
@@ -3856,7 +4352,16 @@ def _import_canonical_json_v1(
             error=f"Failed to import canonical JSON: {str(exc)}",
         )
 
+    _t_end = time.perf_counter()
+    _t_total = _t_end - _t_start
+    _t_prescan = _t_preload_start - _t_prescan_start
+    _t_preload = _t_node_loop_start - _t_preload_start
+    _t_nodes = _t_end - _t_node_loop_start
     warnings.append(f"Created {nodes_created} nodes from canonical JSON")
+    warnings.append(
+        f"[perf] total={_t_total:.2f}s  prescan={_t_prescan:.2f}s  "
+        f"preload={_t_preload:.2f}s  node_loop={_t_nodes:.2f}s"
+    )
     return ImportResponse(
         success=True,
         book_id=book.id,
@@ -5195,6 +5700,159 @@ def repair_node_level(
     db.refresh(node)
 
     payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
+
+
+@router.patch("/nodes/{node_id}/word-meanings", response_model=ContentNodePublic)
+def update_node_word_meanings_tokens(
+    node_id: int,
+    payload: ContentNodeWordMeaningsTokenPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentNodePublic:
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+
+    target_node = source_node if source_node is not None else node
+    language_code = payload.language_code.strip().lower()
+    parsed_tokens = _parse_word_meaning_tokens(payload.tokens)
+
+    existing_entries = (
+        db.query(WordMeaningEntry)
+        .filter(WordMeaningEntry.node_id == target_node.id)
+        .order_by(
+            WordMeaningEntry.word_order.asc(),
+            WordMeaningEntry.display_order.asc(),
+            WordMeaningEntry.id.asc(),
+        )
+        .all()
+    )
+
+    existing_language_entry = next(
+        (entry for entry in existing_entries if str(entry.language_code or "").strip().lower() == language_code),
+        None,
+    )
+    fallback_entry = existing_language_entry or (existing_entries[0] if existing_entries else None)
+    author_id = fallback_entry.author_id if fallback_entry is not None else None
+    work_id = fallback_entry.work_id if fallback_entry is not None else None
+
+    existing_by_order: dict[int, WordMeaningEntry] = {}
+    for entry in existing_entries:
+        row_key = int(entry.word_order or 0)
+        if row_key <= 0:
+            row_key = int(entry.display_order or 0) + 1
+        if row_key <= 0 or row_key in existing_by_order:
+            continue
+        existing_by_order[row_key] = entry
+
+    version_target = target_node
+    version_history = version_target.version_history or []
+    version_history.append(
+        {
+            "edited_by": current_user.id,
+            "edited_at": datetime.utcnow().isoformat(),
+            "reason": payload.edit_reason or f"Word meanings token edit ({language_code})",
+            "changes": {
+                "word_meanings": {
+                    "language_code": language_code,
+                    "token_count": len(parsed_tokens),
+                }
+            },
+        }
+    )
+    version_target.version_history = version_history
+
+    db.query(WordMeaningEntry).filter(
+        WordMeaningEntry.node_id == target_node.id,
+        func.lower(WordMeaningEntry.language_code) == language_code,
+    ).delete(synchronize_session=False)
+
+    for index, (source_word, meaning_text) in enumerate(parsed_tokens, start=1):
+        existing_row = existing_by_order.get(index)
+        transliteration = str(existing_row.transliteration or source_word).strip() if existing_row else source_word
+
+        db.query(WordMeaningEntry).filter(
+            WordMeaningEntry.node_id == target_node.id,
+            WordMeaningEntry.word_order == index,
+        ).update(
+            {
+                WordMeaningEntry.source_word: source_word,
+                WordMeaningEntry.transliteration: transliteration,
+            },
+            synchronize_session=False,
+        )
+
+        db.add(
+            WordMeaningEntry(
+                node_id=target_node.id,
+                author_id=author_id,
+                work_id=work_id,
+                source_word=source_word,
+                transliteration=transliteration,
+                word_order=index,
+                language_code=language_code,
+                meaning_text=meaning_text,
+                display_order=index - 1,
+                metadata_json={
+                    "edited_via": "token_patch",
+                    "edited_by": current_user.id,
+                },
+            )
+        )
+
+    node.last_modified_by = current_user.id
+    if source_node is not None:
+        source_node.last_modified_by = current_user.id
+
+    db.commit()
+
+    try:
+        from api.draft_books import invalidate_preview_render_cache
+
+        invalidate_preview_render_cache(node.book_id)
+    except Exception:
+        pass
+
+    db.refresh(node)
+    if source_node is not None:
+        db.refresh(source_node)
+        response_payload = ContentNodePublic.model_validate(node).model_dump()
+        response_payload.update(
+            {
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        response_payload["level_name"] = _display_level_name_for_book(node_book, response_payload.get("level_name"))
+        return ContentNodePublic.model_validate(response_payload)
+
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
     return ContentNodePublic.model_validate(payload_out)

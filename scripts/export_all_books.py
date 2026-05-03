@@ -32,6 +32,7 @@ from models.scripture_schema import ScriptureSchema
 from models.translation_author import TranslationAuthor
 from models.translation_entry import TranslationEntry
 from models.translation_work import TranslationWork
+from models.word_meaning_entry import WordMeaningEntry
 
 BATCH_SIZE_DEFAULT = 500
 SCHEMA_VERSION = "hsp-book-json-v1"
@@ -232,16 +233,83 @@ def _build_translation_variants_by_node(
     return dict(by_node)
 
 
+def _build_word_meanings_by_node(
+    db: Session,
+    node_ids: list[int],
+) -> dict[int, dict]:
+    if not node_ids:
+        return {}
+
+    rows = (
+        db.query(WordMeaningEntry)
+        .filter(WordMeaningEntry.node_id.in_(node_ids))
+        .order_by(
+            WordMeaningEntry.node_id.asc(),
+            WordMeaningEntry.word_order.asc(),
+            WordMeaningEntry.display_order.asc(),
+            WordMeaningEntry.id.asc(),
+        )
+        .all()
+    )
+
+    by_node: dict[int, dict[int, dict]] = defaultdict(dict)
+    for entry in rows:
+        language = (entry.language_code or "").strip().lower()
+        source_word = (entry.source_word or "").strip()
+        meaning_text = (entry.meaning_text or "").strip()
+        if not language or not source_word or not meaning_text:
+            continue
+
+        row_key = int(entry.word_order or 0)
+        if row_key <= 0:
+            row_key = int(entry.display_order or 0) + 1
+
+        node_rows = by_node[entry.node_id]
+        row = node_rows.get(row_key)
+        if row is None:
+            row = {
+                "id": f"wm_{entry.node_id}_{row_key}",
+                "order": row_key,
+                "source": {
+                    "language": "sa",
+                    "script_text": source_word,
+                    "transliteration": {
+                        "iast": (entry.transliteration or source_word).strip(),
+                    },
+                },
+                "meanings": {},
+            }
+            node_rows[row_key] = row
+
+        meanings = row["meanings"] if isinstance(row.get("meanings"), dict) else {}
+        if language not in meanings:
+            meanings[language] = {"text": meaning_text}
+        row["meanings"] = meanings
+
+    result: dict[int, dict] = {}
+    for node_id, grouped in by_node.items():
+        ordered_rows = [grouped[key] for key in sorted(grouped.keys())]
+        for idx, row in enumerate(ordered_rows, start=1):
+            row["order"] = idx
+        if ordered_rows:
+            result[node_id] = {"rows": ordered_rows, "version": "1.0"}
+
+    return result
+
+
 def _node_to_hsp_dict(
     node: ContentNode,
     commentary_variants: list[dict[str, str]] | None = None,
     translation_variants: list[dict[str, str]] | None = None,
+    word_meanings: dict | None = None,
 ) -> dict:
     content_data = dict(node.content_data) if isinstance(node.content_data, dict) else {}
     if commentary_variants:
         content_data["commentary_variants"] = commentary_variants
     if translation_variants:
         content_data["translation_variants"] = translation_variants
+    if word_meanings:
+        content_data["word_meanings"] = word_meanings
 
     return {
         "node_id": node.id,
@@ -335,12 +403,17 @@ def _export_single_book(
             node_ids=batch_node_ids,
             variant_authors=book.variant_authors if isinstance(book.variant_authors, dict) else {},
         )
+        word_meanings_by_node = _build_word_meanings_by_node(
+            db=db,
+            node_ids=batch_node_ids,
+        )
 
         payload["nodes"].extend(
             _node_to_hsp_dict(
                 node,
                 commentary_variants_by_node.get(node.id),
                 translation_variants_by_node.get(node.id),
+                word_meanings_by_node.get(node.id),
             )
             for node in batch
         )

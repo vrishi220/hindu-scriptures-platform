@@ -20,6 +20,9 @@ from sqlalchemy.engine.url import make_url
 
 
 DELETE_ORDER = [
+    "word_meaning_entries",
+    "word_meaning_works",
+    "word_meaning_authors",
     "commentary_entries",
     "commentary_works",
     "commentary_authors",
@@ -135,6 +138,9 @@ def _print_plan(stats: list[TableStats] | None = None) -> None:
 def _execute_delete(connection) -> None:
     connection.execute(text("""
         TRUNCATE TABLE
+            word_meaning_entries,
+            word_meaning_works,
+            word_meaning_authors,
             commentary_entries,
             commentary_works,
             commentary_authors,

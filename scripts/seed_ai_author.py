@@ -20,6 +20,8 @@ from models.commentary_work import CommentaryWork
 from models.database import DATABASE_URL
 from models.translation_author import TranslationAuthor
 from models.translation_work import TranslationWork
+from models.word_meaning_author import WordMeaningAuthor
+from models.word_meaning_work import WordMeaningWork
 from models.user import User
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -122,6 +124,49 @@ AI_TRANSLATION_WORKS = [
     },
 ]
 
+AI_WORD_MEANING_WORKS = [
+    {
+        "title": "HSP AI Word Meanings - English",
+        "description": "AI-generated English word meanings for supported scripture nodes.",
+        "metadata": {
+            "type": "ai_word_meanings",
+            "language_code": "en",
+            "language_name": "english",
+            "model": "claude-sonnet-4",
+        },
+    },
+    {
+        "title": "HSP AI Word Meanings - Telugu",
+        "description": "AI-generated Telugu word meanings for supported scripture nodes.",
+        "metadata": {
+            "type": "ai_word_meanings",
+            "language_code": "te",
+            "language_name": "telugu",
+            "model": "claude-sonnet-4",
+        },
+    },
+    {
+        "title": "HSP AI Word Meanings - Hindi",
+        "description": "AI-generated Hindi word meanings for supported scripture nodes.",
+        "metadata": {
+            "type": "ai_word_meanings",
+            "language_code": "hi",
+            "language_name": "hindi",
+            "model": "claude-sonnet-4",
+        },
+    },
+    {
+        "title": "HSP AI Word Meanings - Tamil",
+        "description": "AI-generated Tamil word meanings for supported scripture nodes.",
+        "metadata": {
+            "type": "ai_word_meanings",
+            "language_code": "ta",
+            "language_name": "tamil",
+            "model": "claude-sonnet-4",
+        },
+    },
+]
+
 
 def _resolve_creator_id(db, explicit_creator_id: int | None) -> int | None:
     if explicit_creator_id is not None:
@@ -171,6 +216,11 @@ def main() -> int:
             .filter(TranslationAuthor.name == AI_AUTHOR_NAME)
             .first()
         )
+        word_meaning_author = (
+            db.query(WordMeaningAuthor)
+            .filter(WordMeaningAuthor.name == AI_AUTHOR_NAME)
+            .first()
+        )
 
         created_authors = 0
         updated_authors = 0
@@ -215,6 +265,24 @@ def main() -> int:
             updated_authors += 1
             if args.verbose:
                 print(f"UPDATE translation_author name={AI_AUTHOR_NAME} author_id={translation_author.id}")
+
+        if word_meaning_author is None:
+            word_meaning_author = WordMeaningAuthor(
+                name=AI_AUTHOR_NAME,
+                bio=AI_AUTHOR_BIO,
+                metadata_json=AI_AUTHOR_METADATA,
+            )
+            db.add(word_meaning_author)
+            db.flush()
+            created_authors += 1
+            if args.verbose:
+                print(f"CREATE word_meaning_author name={AI_AUTHOR_NAME} author_id={word_meaning_author.id}")
+        else:
+            word_meaning_author.bio = AI_AUTHOR_BIO
+            word_meaning_author.metadata_json = _merge_metadata(word_meaning_author.metadata_json, AI_AUTHOR_METADATA)
+            updated_authors += 1
+            if args.verbose:
+                print(f"UPDATE word_meaning_author name={AI_AUTHOR_NAME} author_id={word_meaning_author.id}")
 
         for work_seed in AI_WORKS:
             work = (
@@ -276,6 +344,35 @@ def main() -> int:
             updated_works += 1
             if args.verbose:
                 print(f"UPDATE translation_work title={work_seed['title']}")
+
+        for work_seed in AI_WORD_MEANING_WORKS:
+            work = (
+                db.query(WordMeaningWork)
+                .filter(
+                    WordMeaningWork.author_id == word_meaning_author.id,
+                    WordMeaningWork.title == work_seed["title"],
+                )
+                .first()
+            )
+
+            if work is None:
+                work = WordMeaningWork(
+                    title=work_seed["title"],
+                    author_id=word_meaning_author.id,
+                    description=work_seed["description"],
+                    metadata_json=work_seed["metadata"],
+                )
+                db.add(work)
+                created_works += 1
+                if args.verbose:
+                    print(f"CREATE word_meaning_work title={work_seed['title']}")
+                continue
+
+            work.description = work_seed["description"]
+            work.metadata_json = _merge_metadata(work.metadata_json, work_seed["metadata"])
+            updated_works += 1
+            if args.verbose:
+                print(f"UPDATE word_meaning_work title={work_seed['title']}")
 
         if args.apply:
             db.commit()

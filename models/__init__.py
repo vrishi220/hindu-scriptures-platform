@@ -11,6 +11,9 @@ from models.commentary_entry import CommentaryEntry
 from models.translation_author import TranslationAuthor
 from models.translation_work import TranslationWork
 from models.translation_entry import TranslationEntry
+from models.word_meaning_author import WordMeaningAuthor
+from models.word_meaning_work import WordMeaningWork
+from models.word_meaning_entry import WordMeaningEntry
 from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
@@ -46,6 +49,9 @@ __all__ = [
 	"TranslationAuthor",
 	"TranslationWork",
 	"TranslationEntry",
+	"WordMeaningAuthor",
+	"WordMeaningWork",
+	"WordMeaningEntry",
 	"ContentRendition",
 	"EmailVerificationToken",
 	"NodeComment",

@@ -671,6 +671,22 @@ class ContentNodeFieldPatch(BaseModel):
         raise ValueError("Unsupported field_path for single-field patch")
 
 
+class ContentNodeWordMeaningsTokenPatch(BaseModel):
+    language_code: str
+    tokens: str = ""
+    edit_reason: str | None = None
+
+    @field_validator("language_code")
+    @classmethod
+    def validate_language_code(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("language_code is required")
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("language_code must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+
 class ContentNodePublic(ContentNodeBase):
     model_config = ConfigDict(from_attributes=True)
 

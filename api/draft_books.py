@@ -49,6 +49,7 @@ from models.template_library import RenderTemplate, RenderTemplateAssignment, Re
 from models.translation_author import TranslationAuthor
 from models.translation_entry import TranslationEntry
 from models.translation_work import TranslationWork
+from models.word_meaning_entry import WordMeaningEntry
 from models.schemas import (
     AdminDraftBookCreate,
     BookPreviewRenderArtifactPublic,
@@ -1987,6 +1988,76 @@ def _resolve_word_meanings_rows(
     return resolved_rows
 
 
+def _resolve_relational_word_meanings_rows(
+    db: Session,
+    source_node: ContentNode,
+    resolved_metadata: dict | None = None,
+    cache: dict[int, list[dict[str, object]]] | None = None,
+) -> list[dict[str, object]]:
+    node_id = int(source_node.id)
+    if cache is not None and node_id in cache:
+        return list(cache[node_id])
+
+    entries = (
+        db.query(WordMeaningEntry)
+        .filter(WordMeaningEntry.node_id == node_id)
+        .order_by(
+            WordMeaningEntry.word_order.asc(),
+            WordMeaningEntry.display_order.asc(),
+            WordMeaningEntry.id.asc(),
+        )
+        .all()
+    )
+    if not entries:
+        if cache is not None:
+            cache[node_id] = []
+        return []
+
+    grouped: dict[int, dict[str, object]] = {}
+    for entry in entries:
+        source_word = _as_clean_string(entry.source_word)
+        meaning_text = _as_clean_string(entry.meaning_text)
+        language_code = _as_clean_string(entry.language_code).lower()
+        if not source_word or not meaning_text or not language_code:
+            continue
+
+        row_key = int(entry.word_order or 0)
+        if row_key <= 0:
+            row_key = int(entry.display_order or 0) + 1
+
+        row = grouped.get(row_key)
+        if row is None:
+            transliteration = _as_clean_string(entry.transliteration) or source_word
+            row = {
+                "id": f"wm_{node_id}_{row_key}",
+                "order": row_key,
+                "source": {
+                    "language": "sa",
+                    "script_text": source_word,
+                    "transliteration": {"iast": transliteration},
+                },
+                "meanings": {},
+            }
+            grouped[row_key] = row
+
+        meanings = row.get("meanings") if isinstance(row.get("meanings"), dict) else {}
+        if language_code not in meanings:
+            meanings[language_code] = {"text": meaning_text}
+        row["meanings"] = meanings
+
+    relational_rows = [grouped[key] for key in sorted(grouped.keys())]
+    for idx, row in enumerate(relational_rows, start=1):
+        row["order"] = idx
+
+    resolved = _resolve_word_meanings_rows(
+        {"word_meanings": {"rows": relational_rows, "version": "1.0"}},
+        resolved_metadata,
+    )
+    if cache is not None:
+        cache[node_id] = list(resolved)
+    return resolved
+
+
 def _resolve_referenced_source_node(
     db: Session,
     node: ContentNode | None,
@@ -2354,9 +2425,11 @@ def _bulk_table_backed_translation_variants_for_nodes(
 
 
 def _build_template_context(
+    db: Session,
     source_node: ContentNode | None,
     item: dict,
     resolved_metadata: dict | None = None,
+    word_meanings_cache: dict[int, list[dict[str, object]]] | None = None,
 ) -> dict:
     if source_node is None:
         base_context = {
@@ -2383,6 +2456,14 @@ def _build_template_context(
         summary_translations = (
             summary_data.get("translations") if isinstance(summary_data.get("translations"), dict) else {}
         )
+        resolved_word_meanings_rows = _resolve_word_meanings_rows(content_data, resolved_metadata)
+        if not resolved_word_meanings_rows:
+            resolved_word_meanings_rows = _resolve_relational_word_meanings_rows(
+                db,
+                source_node,
+                resolved_metadata,
+                cache=word_meanings_cache,
+            )
         merged_translations = {
             **_normalize_translation_map(summary_translations),
             **_normalize_translation_map(translations_data),
@@ -2469,7 +2550,7 @@ def _build_template_context(
                 if isinstance(item.get("commentary_variants"), list)
                 else content_data.get("commentary_variants")
             ),
-            "word_meanings_rows": _resolve_word_meanings_rows(content_data, resolved_metadata),
+            "word_meanings_rows": resolved_word_meanings_rows,
         }
 
     metadata_context: dict = {}
@@ -2633,6 +2714,7 @@ def _render_liquid_lines(
 
 
 def _render_block_content_with_template(
+    db: Session,
     section_name: str,
     template_key: str,
     source_node: ContentNode | None,
@@ -2641,8 +2723,15 @@ def _render_block_content_with_template(
     custom_template_sources: dict[str, str] | None = None,
     system_template_sources: dict[str, str] | None = None,
     slug_remapping: dict[str, str] | None = None,
+    word_meanings_cache: dict[int, list[dict[str, object]]] | None = None,
 ) -> tuple[dict, str]:
-    context = _build_template_context(source_node, item, resolved_metadata)
+    context = _build_template_context(
+        db,
+        source_node,
+        item,
+        resolved_metadata,
+        word_meanings_cache=word_meanings_cache,
+    )
     resolved_labels = _resolve_default_template_labels(resolved_metadata)
     label_to_field = {
         _as_clean_string(label).lower(): field_name
@@ -3268,6 +3357,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         referenced_node_cache: dict[int, ContentNode | None] = {}
         translation_cache: dict[int, list[dict[str, str]]] = {}
         commentary_cache: dict[int, list[dict[str, str]]] = {}
+        word_meanings_cache: dict[int, list[dict[str, object]]] = {}
         variant_authors_by_book: dict[int, dict[str, str]] = {}
 
         # Prefetch translation/commentary variants for all resolved source nodes in bulk
@@ -3330,6 +3420,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 resolved_metadata=resolved_metadata,
             )
             block_content, resolved_template_source = _render_block_content_with_template(
+                db=db,
                 section_name=section_name,
                 template_key=template_key,
                 source_node=source_node,
@@ -3338,6 +3429,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 custom_template_sources=custom_template_sources,
                 system_template_sources=system_template_sources,
                 slug_remapping=slug_remapping_by_book.get(item["source_book_id"]) if item.get("source_book_id") else None,
+                word_meanings_cache=word_meanings_cache,
             )
             materialized_blocks.append(
                 SnapshotRenderBlock(
