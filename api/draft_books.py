@@ -2186,6 +2186,173 @@ def _table_backed_translation_variants_for_node(
     return variants
 
 
+def _prime_variant_author_registry_for_nodes(
+    db: Session,
+    source_nodes: list[ContentNode],
+    variant_authors_by_book: dict[int, dict[str, str]],
+) -> None:
+    missing_book_ids = {
+        int(node.book_id)
+        for node in source_nodes
+        if node.book_id is not None and int(node.book_id) not in variant_authors_by_book
+    }
+    if not missing_book_ids:
+        return
+
+    books = db.query(Book.id, Book.variant_authors).filter(Book.id.in_(missing_book_ids)).all()
+    for book_id, variant_authors in books:
+        registry = variant_authors if isinstance(variant_authors, dict) else {}
+        variant_authors_by_book[int(book_id)] = {
+            str(slug).strip(): str(name).strip()
+            for slug, name in registry.items()
+            if str(slug).strip() and str(name).strip()
+        }
+
+
+def _bulk_table_backed_commentary_variants_for_nodes(
+    db: Session,
+    source_nodes: list[ContentNode],
+    commentary_cache: dict[int, list[dict[str, str]]],
+    variant_authors_by_book: dict[int, dict[str, str]],
+) -> None:
+    if not source_nodes:
+        return
+
+    _prime_variant_author_registry_for_nodes(db, source_nodes, variant_authors_by_book)
+
+    node_ids = sorted({int(node.id) for node in source_nodes})
+    for node_id in node_ids:
+        commentary_cache.setdefault(node_id, [])
+
+    rows = (
+        db.query(CommentaryEntry, CommentaryWork, CommentaryAuthor)
+        .outerjoin(CommentaryWork, CommentaryEntry.work_id == CommentaryWork.id)
+        .outerjoin(CommentaryAuthor, CommentaryEntry.author_id == CommentaryAuthor.id)
+        .filter(CommentaryEntry.node_id.in_(node_ids))
+        .order_by(CommentaryEntry.node_id.asc(), CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+        .all()
+    )
+
+    source_nodes_by_id = {int(node.id): node for node in source_nodes}
+    for entry, work, author in rows:
+        source_node = source_nodes_by_id.get(int(entry.node_id))
+        if source_node is None:
+            continue
+
+        text_value = _as_clean_string(entry.content_text)
+        if not text_value:
+            continue
+
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        author_name = ""
+        if author and _as_clean_string(author.name):
+            author_name = _as_clean_string(author.name)
+        elif _as_clean_string(metadata.get("author")):
+            author_name = _as_clean_string(metadata.get("author"))
+        elif work and _as_clean_string(work.title):
+            author_name = _as_clean_string(work.title)
+
+        author_slug_by_name: dict[str, str] = {}
+        if source_node.book_id is not None:
+            author_slug_by_name = {
+                name.lower(): slug
+                for slug, name in variant_authors_by_book.get(int(source_node.book_id), {}).items()
+            }
+
+        author_slug = _as_clean_string(metadata.get("author_slug")).lower()
+        if not author_slug and author_name:
+            author_slug = author_slug_by_name.get(author_name.lower(), "")
+        if not author_slug and author_name:
+            author_slug = _normalize_variant_author_slug(author_name)
+
+        field_value = _as_clean_string(metadata.get("field")).lower() or "ec"
+        language_value = _as_clean_string(entry.language_code).lower() or _as_clean_string(metadata.get("language")).lower() or "en"
+
+        commentary_cache[int(entry.node_id)].append(
+            {
+                "author_slug": author_slug,
+                "author_name": author_name,
+                "author": author_name,
+                "language": language_value,
+                "field": field_value,
+                "text": text_value,
+            }
+        )
+
+
+def _bulk_table_backed_translation_variants_for_nodes(
+    db: Session,
+    source_nodes: list[ContentNode],
+    translation_cache: dict[int, list[dict[str, str]]],
+    variant_authors_by_book: dict[int, dict[str, str]],
+) -> None:
+    if not source_nodes:
+        return
+
+    _prime_variant_author_registry_for_nodes(db, source_nodes, variant_authors_by_book)
+
+    node_ids = sorted({int(node.id) for node in source_nodes})
+    for node_id in node_ids:
+        translation_cache.setdefault(node_id, [])
+
+    rows = (
+        db.query(TranslationEntry, TranslationWork, TranslationAuthor)
+        .outerjoin(TranslationWork, TranslationEntry.work_id == TranslationWork.id)
+        .outerjoin(TranslationAuthor, TranslationEntry.author_id == TranslationAuthor.id)
+        .filter(TranslationEntry.node_id.in_(node_ids))
+        .order_by(TranslationEntry.node_id.asc(), TranslationEntry.display_order.asc(), TranslationEntry.id.asc())
+        .all()
+    )
+
+    source_nodes_by_id = {int(node.id): node for node in source_nodes}
+    for entry, work, author in rows:
+        source_node = source_nodes_by_id.get(int(entry.node_id))
+        if source_node is None:
+            continue
+
+        text_value = _as_clean_string(entry.content_text)
+        if not text_value:
+            continue
+
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        author_name = ""
+        if author and _as_clean_string(author.name):
+            author_name = _as_clean_string(author.name)
+        elif _as_clean_string(metadata.get("author_name")):
+            author_name = _as_clean_string(metadata.get("author_name"))
+        elif _as_clean_string(metadata.get("author")):
+            author_name = _as_clean_string(metadata.get("author"))
+        elif work and _as_clean_string(work.title):
+            author_name = _as_clean_string(work.title)
+
+        author_slug_by_name: dict[str, str] = {}
+        if source_node.book_id is not None:
+            author_slug_by_name = {
+                name.lower(): slug
+                for slug, name in variant_authors_by_book.get(int(source_node.book_id), {}).items()
+            }
+
+        author_slug = _as_clean_string(metadata.get("author_slug")).lower()
+        if not author_slug and author_name:
+            author_slug = author_slug_by_name.get(author_name.lower(), "")
+        if not author_slug and author_name:
+            author_slug = _normalize_variant_author_slug(author_name)
+
+        field_value = _as_clean_string(metadata.get("field")).lower() or "translation"
+        language_value = _as_clean_string(entry.language_code).lower() or _as_clean_string(metadata.get("language")).lower() or "en"
+
+        translation_cache[int(entry.node_id)].append(
+            {
+                "author_slug": author_slug,
+                "author_name": author_name,
+                "author": author_name,
+                "language": language_value,
+                "field": field_value,
+                "text": text_value,
+            }
+        )
+
+
 def _build_template_context(
     source_node: ContentNode | None,
     item: dict,
@@ -3102,6 +3269,29 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         translation_cache: dict[int, list[dict[str, str]]] = {}
         commentary_cache: dict[int, list[dict[str, str]]] = {}
         variant_authors_by_book: dict[int, dict[str, str]] = {}
+
+        # Prefetch translation/commentary variants for all resolved source nodes in bulk
+        # to avoid per-node entry queries during block materialization.
+        resolved_source_nodes: dict[int, ContentNode] = {}
+        for _, item in candidates:
+            source_node = source_nodes_by_id.get(item["source_node_id"]) if item["source_node_id"] else None
+            source_node = _resolve_referenced_source_node(db, source_node, resolved_cache=referenced_node_cache)
+            if source_node is not None:
+                resolved_source_nodes[int(source_node.id)] = source_node
+
+        if resolved_source_nodes:
+            _bulk_table_backed_translation_variants_for_nodes(
+                db,
+                list(resolved_source_nodes.values()),
+                translation_cache,
+                variant_authors_by_book,
+            )
+            _bulk_table_backed_commentary_variants_for_nodes(
+                db,
+                list(resolved_source_nodes.values()),
+                commentary_cache,
+                variant_authors_by_book,
+            )
 
         candidates.sort(key=lambda item: item[0])
 
