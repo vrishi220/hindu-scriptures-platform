@@ -253,6 +253,11 @@ def _merge_node_commentary_variants(
     content_data: object,
 ) -> dict:
     sanitized = _sanitize_content_data_for_response(content_data)
+    existing_variants = (
+        list(sanitized.get("commentary_variants"))
+        if isinstance(sanitized.get("commentary_variants"), list)
+        else []
+    )
 
     rows = (
         db.query(CommentaryEntry, CommentaryWork, CommentaryAuthor)
@@ -309,7 +314,9 @@ def _merge_node_commentary_variants(
             }
         )
 
-    sanitized["commentary_variants"] = merged_variants
+    # Prefer relational rows when available; otherwise preserve inline variants
+    # so single-field PATCH responses remain stable for draft/preview flows.
+    sanitized["commentary_variants"] = merged_variants if merged_variants else existing_variants
     return sanitized
 
 
@@ -319,6 +326,11 @@ def _merge_node_translation_variants(
     content_data: object,
 ) -> dict:
     sanitized = _sanitize_content_data_for_response(content_data)
+    existing_variants = (
+        list(sanitized.get("translation_variants"))
+        if isinstance(sanitized.get("translation_variants"), list)
+        else []
+    )
 
     rows = (
         db.query(TranslationEntry, TranslationWork, TranslationAuthor)
@@ -377,7 +389,9 @@ def _merge_node_translation_variants(
             }
         )
 
-    sanitized["translation_variants"] = merged_variants
+    # Prefer relational rows when available; otherwise preserve inline variants
+    # so single-field PATCH responses remain stable for draft/preview flows.
+    sanitized["translation_variants"] = merged_variants if merged_variants else existing_variants
     return sanitized
 
 
