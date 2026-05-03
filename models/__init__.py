@@ -8,10 +8,14 @@ from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
 from models.commentary_entry import CommentaryEntry
+from models.translation_author import TranslationAuthor
+from models.translation_work import TranslationWork
+from models.translation_entry import TranslationEntry
 from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
 from models.media_asset import MediaAsset
+from models.ai_job import AIJob
 from models.import_job import ImportJob
 from models.provenance_record import ProvenanceRecord
 from models.search_query import SearchQuery
@@ -39,6 +43,9 @@ __all__ = [
 	"CommentaryAuthor",
 	"CommentaryWork",
 	"CommentaryEntry",
+	"TranslationAuthor",
+	"TranslationWork",
+	"TranslationEntry",
 	"ContentRendition",
 	"EmailVerificationToken",
 	"NodeComment",

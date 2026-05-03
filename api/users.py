@@ -190,7 +190,7 @@ def create_user_admin(
     role_permissions_map = {
         "viewer": {
             "can_view": True,
-            "can_contribute": True,
+            "can_contribute": False,
             "can_import": False,
             "can_edit": False,
             "can_moderate": False,

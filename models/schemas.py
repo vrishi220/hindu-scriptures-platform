@@ -663,7 +663,7 @@ class ContentNodeFieldPatch(BaseModel):
             raise ValueError("field_path is required")
 
         if re.fullmatch(
-            r"(title_english|title_sanskrit|title_transliteration|sequence_number|content_data\.basic\.(sanskrit|transliteration|translation)|content_data\.translations\.[A-Za-z0-9_-]+|content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text|content_data\.word_meanings_rows\.\d+\.(delete|move_up|move_down)|content_data\.word_meanings_rows\.add|content_data\.word_meanings_rows\.replace_all|content_data\.(translation_variants|commentary_variants)\.\d+\.(text|author|language))",
+            r"(title_english|title_sanskrit|title_transliteration|sequence_number|content_data\.basic\.(sanskrit|transliteration|translation)|content_data\.translations\.[A-Za-z0-9_-]+|content_data\.word_meanings_rows\.\d+\.resolved_(meaning|source)\.text|content_data\.word_meanings_rows\.\d+\.(delete|move_up|move_down)|content_data\.word_meanings_rows\.add|content_data\.word_meanings_rows\.replace_all|content_data\.(translation_variants|commentary_variants)\.\d+\.(text|author|language)|content_data\.(translation_variants|commentary_variants)\.add|content_data\.(translation_variants|commentary_variants)\.\d+\.delete|content_data\.(translation_variants|commentary_variants)\.replace_all)",
             normalized,
         ):
             return normalized
@@ -1443,3 +1443,71 @@ class CartCreateDraftRequest(BaseModel):
     title: str
     description: str | None = None
     clear_cart_after_create: bool = False
+
+
+# ---------------------------------------------------------------------------
+# AI Jobs
+# ---------------------------------------------------------------------------
+
+AI_JOB_STATUSES = {"pending", "running", "completed", "failed", "cancelled"}
+AI_JOB_TYPES = {"commentary_generation"}
+
+
+class AIJobCreate(BaseModel):
+    job_type: str
+    book_id: int
+    language_code: str
+    model: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("job_type")
+    @classmethod
+    def validate_job_type(cls, v: str) -> str:
+        if v not in AI_JOB_TYPES:
+            raise ValueError(f"job_type must be one of: {', '.join(sorted(AI_JOB_TYPES))}")
+        return v
+
+    @field_validator("language_code")
+    @classmethod
+    def validate_language_code(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("language_code must not be empty")
+        return v
+
+
+class AIJobStatusUpdate(BaseModel):
+    status: str
+    processed_nodes: int | None = None
+    failed_nodes: int | None = None
+    actual_cost_usd: float | None = None
+    error_log: list[dict[str, Any]] | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in AI_JOB_STATUSES:
+            raise ValueError(f"status must be one of: {', '.join(sorted(AI_JOB_STATUSES))}")
+        return v
+
+
+class AIJobPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_type: str
+    book_id: int | None
+    language_code: str | None
+    model: str | None
+    status: str
+    total_nodes: int
+    processed_nodes: int
+    failed_nodes: int
+    estimated_cost_usd: float | None
+    actual_cost_usd: float | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_log: list[dict[str, Any]] | None
+    metadata: dict[str, Any] | None = Field(None, validation_alias=AliasChoices("metadata", "metadata_json"))
+    created_by: int | None
+    created_at: datetime

@@ -12276,15 +12276,6 @@ function ScripturesContent() {
       }
 
       await loadBooksRefresh();
-      const importedBookId =
-        typeof finalResult.book_id === "number" && Number.isFinite(finalResult.book_id)
-          ? finalResult.book_id
-          : null;
-      if (importedBookId !== null) {
-        browsingHook.setBookId(String(importedBookId));
-        router.push(`/scriptures?book=${importedBookId}`, { scroll: false });
-        loadTree(String(importedBookId));
-      }
 
       clearPersistedImportJobState();
       activeImportJobIdRef.current = null;
@@ -12298,7 +12289,7 @@ function ScripturesContent() {
         `Import completed${typeof finalResult.nodes_created === "number" ? ` (${finalResult.nodes_created} nodes)` : ""}`
       );
     },
-    [loadBooksRefresh, loadTree, router]
+    [loadBooksRefresh]
   );
 
   useEffect(() => {
