@@ -30,6 +30,9 @@ from models.content_node import ContentNode
 from models.commentary_author import CommentaryAuthor
 from models.commentary_work import CommentaryWork
 from models.commentary_entry import CommentaryEntry
+from models.translation_author import TranslationAuthor
+from models.translation_work import TranslationWork
+from models.translation_entry import TranslationEntry
 from models.content_rendition import ContentRendition
 from models.node_comment import NodeComment
 from models.media_file import MediaFile
@@ -213,6 +216,178 @@ def _sanitize_content_data_for_response(content_data: object) -> dict:
             return normalized if isinstance(normalized, dict) else sanitized
         except Exception:
             return {}
+
+
+def _resolved_variant_authors_for_book(book: Book) -> dict[str, str]:
+    registry = dict(book.variant_authors) if isinstance(book.variant_authors, dict) else {}
+    # Ensure HSP AI is resolvable in Avadhuta Gita scripture browser displays.
+    if (book.book_code or "").strip().lower() == "avadhuta-gita":
+        registry.setdefault("hsp_ai", "HSP AI")
+    return registry
+
+
+def _resolve_effective_source_node(db: Session, node: ContentNode) -> ContentNode:
+    source_node = node
+    visited_ids: set[int] = set()
+
+    while source_node.referenced_node_id:
+        if source_node.id in visited_ids:
+            break
+        visited_ids.add(source_node.id)
+
+        next_source = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == source_node.referenced_node_id)
+            .first()
+        )
+        if not next_source:
+            break
+        source_node = next_source
+
+    return source_node
+
+
+def _merge_node_commentary_variants(
+    db: Session,
+    node: ContentNode,
+    content_data: object,
+) -> dict:
+    sanitized = _sanitize_content_data_for_response(content_data)
+
+    rows = (
+        db.query(CommentaryEntry, CommentaryWork, CommentaryAuthor)
+        .outerjoin(CommentaryWork, CommentaryEntry.work_id == CommentaryWork.id)
+        .outerjoin(CommentaryAuthor, CommentaryEntry.author_id == CommentaryAuthor.id)
+        .filter(CommentaryEntry.node_id == node.id)
+        .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+        .all()
+    )
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    variant_author_registry = _resolved_variant_authors_for_book(node_book) if node_book else {}
+    author_slug_by_name = {
+        str(name).strip().lower(): str(slug).strip()
+        for slug, name in variant_author_registry.items()
+        if str(slug).strip() and str(name).strip()
+    }
+
+    merged_variants: list[dict] = []
+    for entry, work, author in rows:
+        text_value = (entry.content_text or "").strip()
+        if not text_value:
+            continue
+
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        language = (entry.language_code or str(metadata.get("language") or "en")).strip().lower() or "en"
+
+        author_name = ""
+        if author and isinstance(author.name, str) and author.name.strip():
+            author_name = author.name.strip()
+        elif isinstance(metadata.get("author"), str) and str(metadata.get("author")).strip():
+            author_name = str(metadata.get("author")).strip()
+        elif work and isinstance(work.title, str) and work.title.strip():
+            author_name = work.title.strip()
+
+        author_slug = ""
+        if isinstance(metadata.get("author_slug"), str):
+            author_slug = str(metadata.get("author_slug")).strip().lower()
+        if not author_slug and author_name:
+            author_slug = author_slug_by_name.get(author_name.lower(), "")
+        if not author_slug and author_name:
+            author_slug = _normalize_variant_author_slug(author_name)
+
+        field_value = str(metadata.get("field") or "ec").strip() or "ec"
+
+        merged_variants.append(
+            {
+                "author_slug": author_slug,
+                "author_name": author_name,
+                "author": author_name,
+                "language": language,
+                "field": field_value,
+                "text": text_value,
+            }
+        )
+
+    sanitized["commentary_variants"] = merged_variants
+    return sanitized
+
+
+def _merge_node_translation_variants(
+    db: Session,
+    node: ContentNode,
+    content_data: object,
+) -> dict:
+    sanitized = _sanitize_content_data_for_response(content_data)
+
+    rows = (
+        db.query(TranslationEntry, TranslationWork, TranslationAuthor)
+        .outerjoin(TranslationWork, TranslationEntry.work_id == TranslationWork.id)
+        .outerjoin(TranslationAuthor, TranslationEntry.author_id == TranslationAuthor.id)
+        .filter(TranslationEntry.node_id == node.id)
+        .order_by(TranslationEntry.display_order.asc(), TranslationEntry.id.asc())
+        .all()
+    )
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    variant_author_registry = _resolved_variant_authors_for_book(node_book) if node_book else {}
+    author_slug_by_name = {
+        str(name).strip().lower(): str(slug).strip()
+        for slug, name in variant_author_registry.items()
+        if str(slug).strip() and str(name).strip()
+    }
+
+    merged_variants: list[dict] = []
+    for entry, work, author in rows:
+        text_value = (entry.content_text or "").strip()
+        if not text_value:
+            continue
+
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        language = (entry.language_code or str(metadata.get("language") or "en")).strip().lower() or "en"
+
+        author_name = ""
+        if author and isinstance(author.name, str) and author.name.strip():
+            author_name = author.name.strip()
+        elif isinstance(metadata.get("author_name"), str) and str(metadata.get("author_name")).strip():
+            author_name = str(metadata.get("author_name")).strip()
+        elif isinstance(metadata.get("author"), str) and str(metadata.get("author")).strip():
+            author_name = str(metadata.get("author")).strip()
+        elif work and isinstance(work.title, str) and work.title.strip():
+            author_name = work.title.strip()
+
+        author_slug = ""
+        if isinstance(metadata.get("author_slug"), str):
+            author_slug = str(metadata.get("author_slug")).strip().lower()
+        if not author_slug and author_name:
+            author_slug = author_slug_by_name.get(author_name.lower(), "")
+        if not author_slug and author_name:
+            author_slug = _normalize_variant_author_slug(author_name)
+
+        field_value = str(metadata.get("field") or "translation").strip() or "translation"
+
+        merged_variants.append(
+            {
+                "author_slug": author_slug,
+                "author_name": author_name,
+                "author": author_name,
+                "language": language,
+                "field": field_value,
+                "text": text_value,
+            }
+        )
+
+    sanitized["translation_variants"] = merged_variants
+    return sanitized
+
+
+def _merge_node_relational_variants(
+    db: Session,
+    node: ContentNode,
+    content_data: object,
+) -> dict:
+    with_translation = _merge_node_translation_variants(db, node, content_data)
+    return _merge_node_commentary_variants(db, node, with_translation)
 
 
 def _node_response_payload(node: ContentNode) -> dict:
@@ -698,7 +873,7 @@ def _book_public_model(book: Book) -> BookPublic:
         "language_primary": book.language_primary,
         "metadata_json": metadata_out,
         "level_name_overrides": _book_level_name_overrides(book),
-        "variant_authors": book.variant_authors if isinstance(book.variant_authors, dict) else {},
+        "variant_authors": _resolved_variant_authors_for_book(book),
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
         "schema": book.schema,
@@ -3348,6 +3523,172 @@ def _import_canonical_json_v1(
     pending_nodes = list(canonical.nodes)
     nodes_created = 0
     total_nodes = len(pending_nodes)
+    variant_authors_lookup = book.variant_authors if isinstance(book.variant_authors, dict) else {}
+    commentary_author_cache: dict[str, CommentaryAuthor] = {}
+    commentary_work_cache: dict[tuple[int, str], CommentaryWork] = {}
+    translation_author_cache: dict[str, TranslationAuthor] = {}
+    translation_work_cache: dict[tuple[int, str], TranslationWork] = {}
+
+    def _migrate_commentary_variants_to_entries(
+        content_node: ContentNode,
+        commentary_variants: list,
+    ) -> None:
+        for idx, raw_variant in enumerate(commentary_variants):
+            if not isinstance(raw_variant, dict):
+                continue
+
+            text_value = str(raw_variant.get("text") or "").strip()
+            if not text_value:
+                continue
+
+            author_slug = str(raw_variant.get("author_slug") or "").strip()
+            author_name = ""
+            if author_slug:
+                mapped_name = variant_authors_lookup.get(author_slug)
+                if isinstance(mapped_name, str) and mapped_name.strip():
+                    author_name = mapped_name.strip()
+                else:
+                    author_name = author_slug
+
+            if not author_name:
+                fallback_author = str(raw_variant.get("author") or "").strip()
+                author_name = fallback_author or "unknown_author"
+
+            author = commentary_author_cache.get(author_name)
+            if author is None:
+                author = (
+                    db.query(CommentaryAuthor)
+                    .filter(CommentaryAuthor.name == author_name)
+                    .first()
+                )
+                if author is None:
+                    author = CommentaryAuthor(
+                        name=author_name,
+                        created_by=current_user.id,
+                    )
+                    db.add(author)
+                    db.flush()
+                commentary_author_cache[author_name] = author
+
+            work_title = f"{author_name} Commentary"
+            work_cache_key = (author.id, work_title)
+            work = commentary_work_cache.get(work_cache_key)
+            if work is None:
+                work = (
+                    db.query(CommentaryWork)
+                    .filter(
+                        CommentaryWork.author_id == author.id,
+                        CommentaryWork.title == work_title,
+                    )
+                    .first()
+                )
+                if work is None:
+                    work = CommentaryWork(
+                        title=work_title,
+                        author_id=author.id,
+                        created_by=current_user.id,
+                    )
+                    db.add(work)
+                    db.flush()
+                commentary_work_cache[work_cache_key] = work
+
+            language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
+            field_value = raw_variant.get("field")
+
+            entry = CommentaryEntry(
+                node_id=content_node.id,
+                author_id=author.id,
+                work_id=work.id,
+                content_text=text_value,
+                language_code=language_code,
+                display_order=idx,
+                metadata_json={
+                    "field": field_value,
+                    "author_slug": author_slug,
+                    "migrated_from": "commentary_variants",
+                },
+                created_by=current_user.id,
+                last_modified_by=current_user.id,
+            )
+            db.add(entry)
+
+    def _migrate_translation_variants_to_entries(
+        content_node: ContentNode,
+        translation_variants: list,
+    ) -> None:
+        for idx, raw_variant in enumerate(translation_variants):
+            if not isinstance(raw_variant, dict):
+                continue
+
+            text_value = str(raw_variant.get("text") or "").strip()
+            if not text_value:
+                continue
+
+            author_slug = str(raw_variant.get("author_slug") or "").strip()
+            author_name = ""
+            if author_slug:
+                mapped_name = variant_authors_lookup.get(author_slug)
+                if isinstance(mapped_name, str) and mapped_name.strip():
+                    author_name = mapped_name.strip()
+                else:
+                    author_name = author_slug
+
+            if not author_name:
+                fallback_author = str(raw_variant.get("author_name") or raw_variant.get("author") or "").strip()
+                author_name = fallback_author or "unknown_author"
+
+            author = translation_author_cache.get(author_name)
+            if author is None:
+                author = (
+                    db.query(TranslationAuthor)
+                    .filter(TranslationAuthor.name == author_name)
+                    .first()
+                )
+                if author is None:
+                    author = TranslationAuthor(name=author_name)
+                    db.add(author)
+                    db.flush()
+                translation_author_cache[author_name] = author
+
+            work_title = f"{author_name} Translation"
+            work_cache_key = (author.id, work_title)
+            work = translation_work_cache.get(work_cache_key)
+            if work is None:
+                work = (
+                    db.query(TranslationWork)
+                    .filter(
+                        TranslationWork.author_id == author.id,
+                        TranslationWork.title == work_title,
+                    )
+                    .first()
+                )
+                if work is None:
+                    work = TranslationWork(
+                        title=work_title,
+                        author_id=author.id,
+                    )
+                    db.add(work)
+                    db.flush()
+                translation_work_cache[work_cache_key] = work
+
+            language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
+            field_value = raw_variant.get("field")
+
+            entry = TranslationEntry(
+                node_id=content_node.id,
+                author_id=author.id,
+                work_id=work.id,
+                content_text=text_value,
+                language_code=language_code,
+                display_order=idx,
+                metadata_json={
+                    "field": field_value,
+                    "author_slug": author_slug,
+                    "author_name": author_name,
+                    "migrated_from": "translation_variants",
+                },
+            )
+            db.add(entry)
 
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
@@ -3399,8 +3740,22 @@ def _import_canonical_json_v1(
                 node.title_sanskrit,
                 node.title_transliteration,
             )
+            raw_node_content_data = node.content_data if isinstance(node.content_data, dict) else {}
+            commentary_variants = (
+                raw_node_content_data.get("commentary_variants")
+                if isinstance(raw_node_content_data.get("commentary_variants"), list)
+                else []
+            )
+            translation_variants = (
+                raw_node_content_data.get("translation_variants")
+                if isinstance(raw_node_content_data.get("translation_variants"), list)
+                else []
+            )
+            content_data_without_commentary_variants = dict(raw_node_content_data)
+            content_data_without_commentary_variants.pop("commentary_variants", None)
+            content_data_without_commentary_variants.pop("translation_variants", None)
             node_content_data = _autofill_content_data_pair(
-                node.content_data if isinstance(node.content_data, dict) else {}
+                content_data_without_commentary_variants
             )
 
             content_node = ContentNode(
@@ -3428,6 +3783,11 @@ def _import_canonical_json_v1(
             )
             db.add(content_node)
             db.flush()
+
+            if commentary_variants:
+                _migrate_commentary_variants_to_entries(content_node, commentary_variants)
+            if translation_variants:
+                _migrate_translation_variants_to_entries(content_node, translation_variants)
 
             old_to_new_node_ids[node.node_id] = content_node.id
             nodes_created += 1
@@ -4428,39 +4788,23 @@ def get_node(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _ensure_book_view_access(db, node_book, current_user)
 
-    if node.referenced_node_id:
-        source_node = node
-        visited_ids: set[int] = set()
-
-        while source_node.referenced_node_id:
-            if source_node.id in visited_ids:
-                break
-            visited_ids.add(source_node.id)
-
-            next_source = (
-                db.query(ContentNode)
-                .filter(ContentNode.id == source_node.referenced_node_id)
-                .first()
-            )
-            if not next_source:
-                break
-            source_node = next_source
-
-        if source_node and source_node.id != node.id:
-            payload = _node_response_payload(node)
-            payload.update(
-                {
-                    "content_data": _sanitize_content_data_for_response(source_node.content_data),
-                    "summary_data": source_node.summary_data,
-                    "has_content": source_node.has_content,
-                    "source_attribution": source_node.source_attribution,
-                    "license_type": source_node.license_type,
-                    "original_source_url": source_node.original_source_url,
-                }
-            )
-            payload["level_name"] = _display_level_name_for_book(node_book, payload.get("level_name"))
-            return ContentNodePublic.model_validate(payload)
+    source_node = _resolve_effective_source_node(db, node)
+    if source_node and source_node.id != node.id:
+        payload = _node_response_payload(node)
+        payload.update(
+            {
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        payload["level_name"] = _display_level_name_for_book(node_book, payload.get("level_name"))
+        return ContentNodePublic.model_validate(payload)
     payload_out = _node_response_payload(node)
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
 
@@ -4665,7 +5009,7 @@ def update_node(
         response_payload = ContentNodePublic.model_validate(node).model_dump()
         response_payload.update(
             {
-                "content_data": source_node.content_data,
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
                 "summary_data": source_node.summary_data,
                 "has_content": source_node.has_content,
                 "source_attribution": source_node.source_attribution,
@@ -4677,6 +5021,7 @@ def update_node(
         return ContentNodePublic.model_validate(response_payload)
 
     payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
 
@@ -5940,10 +6285,18 @@ def list_node_commentary(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _ensure_book_view_access(db, node_book, current_user)
 
-    query = db.query(CommentaryEntry).filter(CommentaryEntry.node_id == node_id)
-    if language_code and language_code.strip():
-        query = query.filter(CommentaryEntry.language_code == language_code.strip().lower())
+    effective_source_node = _resolve_effective_source_node(db, node)
+    effective_node_id = effective_source_node.id if effective_source_node else node_id
+    requested_language = language_code.strip().lower() if language_code and language_code.strip() else None
 
+    query = (
+        db.query(CommentaryEntry, CommentaryWork, CommentaryAuthor)
+        .outerjoin(CommentaryWork, CommentaryEntry.work_id == CommentaryWork.id)
+        .outerjoin(CommentaryAuthor, CommentaryEntry.author_id == CommentaryAuthor.id)
+        .filter(CommentaryEntry.node_id == effective_node_id)
+    )
+    if requested_language:
+        query = query.filter(CommentaryEntry.language_code == requested_language)
     rows = (
         query
         .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
@@ -5951,7 +6304,35 @@ def list_node_commentary(
         .limit(limit)
         .all()
     )
-    return [CommentaryEntryPublic.model_validate(item) for item in rows]
+
+    result: list[CommentaryEntryPublic] = []
+    for entry, work, author in rows:
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        if author and isinstance(author.name, str) and author.name.strip():
+            metadata.setdefault("author", author.name.strip())
+        if work and isinstance(work.title, str) and work.title.strip():
+            metadata.setdefault("work_title", work.title.strip())
+
+        result.append(
+            CommentaryEntryPublic.model_validate(
+                {
+                    "id": entry.id,
+                    "node_id": node_id,
+                    "author_id": entry.author_id,
+                    "work_id": entry.work_id,
+                    "content_text": entry.content_text,
+                    "language_code": entry.language_code,
+                    "display_order": entry.display_order,
+                    "metadata": metadata,
+                    "created_by": entry.created_by,
+                    "last_modified_by": entry.last_modified_by,
+                    "created_at": entry.created_at,
+                    "updated_at": entry.updated_at,
+                }
+            )
+        )
+
+    return result
 
 
 @router.post(
