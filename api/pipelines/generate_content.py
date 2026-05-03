@@ -1,27 +1,19 @@
-print("SCRIPT STARTED")
-
 import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-print("STEP 1: stdlib imports done")
-
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
-print("STEP 2: dotenv loaded")
 
 import anthropic
 
-print("STEP 3: anthropic imported")
-
 from sqlalchemy.orm import Session
-
-print("STEP 4: sqlalchemy imported")
 
 from models.ai_job import AIJob
 from models.book import Book
@@ -35,11 +27,15 @@ from models.translation_author import TranslationAuthor
 from models.translation_entry import TranslationEntry
 from models.translation_work import TranslationWork
 
-print("STEP 5: models imported")
-
 
 DEFAULT_MODEL = os.getenv("AI_MODEL", "claude-sonnet-4-5")
 JOB_TYPE = "commentary_generation"
+
+# Default token pricing (USD per 1M tokens). Override via env vars if needed.
+AI_INPUT_COST_PER_MTOK = float(os.getenv("AI_INPUT_COST_PER_MTOK", "3.0"))
+AI_OUTPUT_COST_PER_MTOK = float(os.getenv("AI_OUTPUT_COST_PER_MTOK", "15.0"))
+BATCH_POLL_INTERVAL_SECONDS = int(os.getenv("ANTHROPIC_BATCH_POLL_INTERVAL_SECONDS", "30"))
+BATCH_MAX_WAIT_SECONDS = int(os.getenv("ANTHROPIC_BATCH_MAX_WAIT_SECONDS", str(24 * 60 * 60)))
 
 _LANG_CODE_TO_KEY: dict[str, str] = {
 	"en": "en",
@@ -192,22 +188,23 @@ def _fetch_nodes_missing_translation(
 	book: Book,
 	language_code: str,
 	translation_work_id: int,
-	limit: int,
+	limit: int | None,
 ) -> list[ContentNode]:
-	nodes = (
+	query = (
 		db.query(ContentNode)
 		.filter(
 			ContentNode.book_id == book.id,
 			ContentNode.has_content == True,
 		)
 		.order_by(ContentNode.level_order, ContentNode.id)
-		.limit(limit * 10)
-		.all()
 	)
+	if limit is not None:
+		query = query.limit(limit * 10)
+	nodes = query.all()
 
 	missing: list[ContentNode] = []
 	for node in nodes:
-		if len(missing) >= limit:
+		if limit is not None and len(missing) >= limit:
 			break
 		existing_translation = (
 			db.query(TranslationEntry.id)
@@ -252,14 +249,11 @@ def _build_source_text(node: ContentNode) -> str:
 	return "\n".join(parts) if parts else "(source text unavailable)"
 
 
-def _call_claude(
-	client: anthropic.Anthropic,
-	model: str,
+def _build_generation_prompts(
 	book_name: str,
 	node: ContentNode,
 	language_name: str,
-	language_code: str,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str]:
 	source_text = _build_source_text(node)
 	seq = node.sequence_number or f"node-{node.id}"
 
@@ -276,6 +270,189 @@ def _call_claude(
 		f"of the {book_name}.\n\n{source_text}"
 	)
 
+	return system_prompt, user_message, source_text
+
+
+def _extract_tool_result_from_content(content_blocks) -> tuple[str, str] | None:
+	for block in content_blocks or []:
+		if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "save_shloka_content":
+			inp = getattr(block, "input", {}) or {}
+			translation = (inp.get("translation") or "").strip()
+			commentary = (inp.get("commentary") or "").strip()
+			if translation:
+				return translation, commentary
+
+		if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "save_shloka_content":
+			inp = block.get("input") or {}
+			translation = (inp.get("translation") or "").strip()
+			commentary = (inp.get("commentary") or "").strip()
+			if translation:
+				return translation, commentary
+
+	return None
+
+
+def _obj_get(value, key: str, default=None):
+	if isinstance(value, dict):
+		return value.get(key, default)
+	return getattr(value, key, default)
+
+
+def _estimate_cost(nodes: list[ContentNode]) -> tuple[float, float]:
+	# Rough estimation: ~4 chars/token and fixed output cap per request.
+	total_input_tokens = 0
+	total_output_tokens = len(nodes) * 1024
+
+	for node in nodes:
+		source_text = _build_source_text(node)
+		total_input_tokens += max(200, int(len(source_text) / 4) + 300)
+
+	realtime_cost = (
+		(total_input_tokens / 1_000_000.0) * AI_INPUT_COST_PER_MTOK
+		+ (total_output_tokens / 1_000_000.0) * AI_OUTPUT_COST_PER_MTOK
+	)
+	batch_cost = realtime_cost * 0.5
+	return realtime_cost, batch_cost
+
+
+def _submit_batch(
+	client: anthropic.Anthropic,
+	model: str,
+	book_name: str,
+	nodes: list[ContentNode],
+	language_name: str,
+) -> str:
+	batch_requests = []
+	for node in nodes:
+		system_prompt, user_message, _ = _build_generation_prompts(book_name, node, language_name)
+		batch_requests.append(
+			{
+				"custom_id": str(node.id),
+				"params": {
+					"model": model,
+					"max_tokens": 1024,
+					"tools": [SAVE_SHLOKA_CONTENT_TOOL],
+					"tool_choice": {"type": "tool", "name": "save_shloka_content"},
+					"system": system_prompt,
+					"messages": [{"role": "user", "content": user_message}],
+				},
+			}
+		)
+
+	batch = client.beta.messages.batches.create(requests=batch_requests)
+	batch_id = _obj_get(batch, "id")
+	if not batch_id:
+		raise RuntimeError("Anthropic batch create did not return a batch id")
+	return str(batch_id)
+
+
+def _fmt_elapsed(seconds: float) -> str:
+	m, s = divmod(int(seconds), 60)
+	return f"{m}m {s:02d}s"
+
+
+def _poll_batch_until_complete(client: anthropic.Anthropic, batch_id: str) -> None:
+	started = datetime.now(tz=timezone.utc)
+	prev_completed = 0
+	rate_started: float | None = None  # seconds elapsed when first progress was seen
+
+	while True:
+		status_obj = client.beta.messages.batches.retrieve(batch_id)
+		status = _obj_get(status_obj, "processing_status") or _obj_get(status_obj, "status")
+		status_text = str(status or "unknown")
+
+		elapsed = (datetime.now(tz=timezone.utc) - started).total_seconds()
+		elapsed_str = _fmt_elapsed(elapsed)
+
+		# Parse request_counts from batch object
+		counts = _obj_get(status_obj, "request_counts")
+		total: int | None = None
+		completed: int | None = None
+		if counts is not None:
+			succeeded = _obj_get(counts, "succeeded") or 0
+			errored = _obj_get(counts, "errored") or 0
+			processing = _obj_get(counts, "processing") or 0
+			canceled = _obj_get(counts, "canceled") or 0
+			expired = _obj_get(counts, "expired") or 0
+			completed = int(succeeded) + int(errored) + int(canceled) + int(expired)
+			total = completed + int(processing)
+
+		# Build status suffix
+		if total is not None and total > 0:
+			if completed and completed > prev_completed and rate_started is None:
+				rate_started = elapsed
+			if rate_started is not None and completed and completed > 0 and elapsed > rate_started:
+				rate = completed / (elapsed - rate_started)  # requests per second
+				remaining = (total - completed) / rate if rate > 0 else None
+				est_str = _fmt_elapsed(remaining) if remaining is not None else "unknown"
+			else:
+				est_str = "unknown"
+			prev_completed = completed or 0
+			suffix = f"requests completed={completed}/{total}, est. remaining={est_str}"
+		else:
+			suffix = "est. remaining=unknown"
+
+		print(f"Polling... status={status_text}, elapsed={elapsed_str}, {suffix}")
+
+		if status_text.lower() == "ended":
+			return
+
+		if status_text.lower() in {"canceled", "cancelled", "expired", "failed"}:
+			raise RuntimeError(f"Batch did not complete successfully (status={status_text})")
+
+		if elapsed > BATCH_MAX_WAIT_SECONDS:
+			raise TimeoutError(
+				f"Timed out waiting for batch completion after {int(elapsed)}s "
+				f"(max={BATCH_MAX_WAIT_SECONDS}s)"
+			)
+
+		time.sleep(BATCH_POLL_INTERVAL_SECONDS)
+
+
+def _collect_batch_results(
+	client: anthropic.Anthropic,
+	batch_id: str,
+) -> tuple[dict[int, tuple[str, str]], dict[int, str]]:
+	successes: dict[int, tuple[str, str]] = {}
+	failures: dict[int, str] = {}
+
+	for item in client.beta.messages.batches.results(batch_id):
+		custom_id = _obj_get(item, "custom_id")
+		try:
+			node_id = int(str(custom_id))
+		except Exception:  # noqa: BLE001
+			continue
+
+		result_obj = _obj_get(item, "result")
+		result_type = str(_obj_get(result_obj, "type", "unknown"))
+		if result_type != "succeeded":
+			error_obj = _obj_get(result_obj, "error")
+			error_msg = str(error_obj) if error_obj is not None else f"Result type={result_type}"
+			failures[node_id] = error_msg
+			continue
+
+		message_obj = _obj_get(result_obj, "message")
+		content_blocks = _obj_get(message_obj, "content", [])
+		parsed = _extract_tool_result_from_content(content_blocks)
+		if parsed is None:
+			failures[node_id] = "No save_shloka_content tool result found"
+			continue
+
+		successes[node_id] = parsed
+
+	return successes, failures
+
+
+def _call_claude(
+	client: anthropic.Anthropic,
+	model: str,
+	book_name: str,
+	node: ContentNode,
+	language_name: str,
+	language_code: str,
+) -> tuple[str, str] | None:
+	system_prompt, user_message, _ = _build_generation_prompts(book_name, node, language_name)
+
 	response = client.messages.create(
 		model=model,
 		max_tokens=1024,
@@ -285,15 +462,7 @@ def _call_claude(
 		messages=[{"role": "user", "content": user_message}],
 	)
 
-	for block in response.content:
-		if block.type == "tool_use" and block.name == "save_shloka_content":
-			inp = block.input
-			translation = (inp.get("translation") or "").strip()
-			commentary = (inp.get("commentary") or "").strip()
-			if translation:
-				return translation, commentary
-
-	return None
+	return _extract_tool_result_from_content(response.content)
 
 
 def _write_results(
@@ -448,6 +617,11 @@ def _parse_args() -> argparse.Namespace:
 		default=5,
 		help="Max nodes to process (default: 5 for testing)",
 	)
+	parser.add_argument(
+		"--batch",
+		action="store_true",
+		help="Use Anthropic Batch API mode (submit all selected nodes as one batch job).",
+	)
 	return parser.parse_args()
 
 
@@ -500,6 +674,10 @@ def main() -> None:
 		)
 		print(f"NODES TO PROCESS: {len(nodes)}")
 
+		realtime_cost, batch_cost = _estimate_cost(nodes)
+		print(f"Real-time cost estimate: ${realtime_cost:.2f}")
+		print(f"Batch cost estimate: ${batch_cost:.2f} (50% savings)")
+
 		if not nodes:
 			print(
 				f"[INFO] No nodes missing '{args.language_code}' translation "
@@ -514,56 +692,122 @@ def main() -> None:
 		failed = 0
 		error_log: list[dict] = []
 
-		for i, node in enumerate(nodes, 1):
-			seq = node.sequence_number or f"node-{node.id}"
-			print(f"PROCESS START [{i}/{len(nodes)}]: node={node.id} seq={seq}")
+		if args.batch:
+			print("MODE: batch (Anthropic Batch API)")
 			try:
-				result = _call_claude(
+				batch_id = _submit_batch(
 					client=client,
 					model=model,
 					book_name=book.book_name,
-					node=node,
+					nodes=nodes,
 					language_name=args.language_name,
-					language_code=args.language_code,
 				)
-				print("CLAUDE CALL DONE")
-				if result is None:
-					raise ValueError("Claude did not return a tool_use block")
+				print(f"Batch submitted. ID: {batch_id}")
+				print("Polling for completion (batch jobs can take up to 24 hours)...")
+				_poll_batch_until_complete(client, batch_id)
+				print("Batch complete! Processing results...")
 
-				translation, commentary = result
-				print(f"TRANSLATION RECEIVED: {translation[:80]}{'...' if len(translation) > 80 else ''}")
+				batch_successes, batch_failures = _collect_batch_results(client, batch_id)
 
-				_write_results(
-					db=db,
-					node=node,
-					translation=translation,
-					commentary=commentary,
-					language_code=args.language_code,
-					translation_work=translation_work,
-					translation_author=translation_author,
-					work=work,
-					author=author,
-					ai_job_id=job.id,
-					model=model,
-				)
-				db.commit()
-				processed += 1
-				print("NODE SAVE DONE")
+				for i, node in enumerate(nodes, 1):
+					seq = node.sequence_number or f"node-{node.id}"
+					print(f"PROCESS RESULT [{i}/{len(nodes)}]: node={node.id} seq={seq}")
+					try:
+						if node.id in batch_successes:
+							translation, commentary = batch_successes[node.id]
+							_write_results(
+								db=db,
+								node=node,
+								translation=translation,
+								commentary=commentary,
+								language_code=args.language_code,
+								translation_work=translation_work,
+								translation_author=translation_author,
+								work=work,
+								author=author,
+								ai_job_id=job.id,
+								model=model,
+							)
+							db.commit()
+							processed += 1
+							print("NODE SAVE DONE")
+						else:
+							raise ValueError(batch_failures.get(node.id, "No result returned for node"))
+
+					except Exception as exc:  # noqa: BLE001
+						db.rollback()
+						failed += 1
+						err_detail = {
+							"node_id": node.id,
+							"sequence_number": seq,
+							"error": str(exc),
+						}
+						error_log.append(err_detail)
+						print(f"NODE FAILED: {exc}")
+
+					_update_job_progress(db, job, processed, failed)
+					print(f"JOB PROGRESS UPDATED: processed={processed}, failed={failed}")
 
 			except Exception as exc:  # noqa: BLE001
 				db.rollback()
-				failed += 1
-				err_detail = {
-					"node_id": node.id,
-					"sequence_number": seq,
-					"error": str(exc),
-				}
-				error_log.append(err_detail)
-				print(f"NODE FAILED: {exc}")
+				failed = len(nodes)
+				error_log.append({"node_id": None, "sequence_number": None, "error": str(exc)})
+				print(f"BATCH MODE FAILED: {exc}")
 				traceback.print_exc()
+				_update_job_progress(db, job, processed, failed)
 
-			_update_job_progress(db, job, processed, failed)
-			print(f"JOB PROGRESS UPDATED: processed={processed}, failed={failed}")
+		else:
+			print("MODE: real-time")
+			for i, node in enumerate(nodes, 1):
+				seq = node.sequence_number or f"node-{node.id}"
+				print(f"PROCESS START [{i}/{len(nodes)}]: node={node.id} seq={seq}")
+				try:
+					result = _call_claude(
+						client=client,
+						model=model,
+						book_name=book.book_name,
+						node=node,
+						language_name=args.language_name,
+						language_code=args.language_code,
+					)
+					print("CLAUDE CALL DONE")
+					if result is None:
+						raise ValueError("Claude did not return a tool_use block")
+
+					translation, commentary = result
+					print(f"TRANSLATION RECEIVED: {translation[:80]}{'...' if len(translation) > 80 else ''}")
+
+					_write_results(
+						db=db,
+						node=node,
+						translation=translation,
+						commentary=commentary,
+						language_code=args.language_code,
+						translation_work=translation_work,
+						translation_author=translation_author,
+						work=work,
+						author=author,
+						ai_job_id=job.id,
+						model=model,
+					)
+					db.commit()
+					processed += 1
+					print("NODE SAVE DONE")
+
+				except Exception as exc:  # noqa: BLE001
+					db.rollback()
+					failed += 1
+					err_detail = {
+						"node_id": node.id,
+						"sequence_number": seq,
+						"error": str(exc),
+					}
+					error_log.append(err_detail)
+					print(f"NODE FAILED: {exc}")
+					traceback.print_exc()
+
+				_update_job_progress(db, job, processed, failed)
+				print(f"JOB PROGRESS UPDATED: processed={processed}, failed={failed}")
 
 		_finish_job(db, job, processed, failed, error_log)
 		print(f"JOB FINISHED: id={job.id}, processed={processed}, failed={failed}")

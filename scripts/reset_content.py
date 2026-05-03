@@ -73,6 +73,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Count rows before truncate (optional; disabled by default for instant dry-run).",
     )
+    parser.add_argument(
+        "--force-production",
+        action="store_true",
+        help="Bypass local-only check. Requires interactive confirmation. Use with extreme caution.",
+    )
     return parser.parse_args()
 
 
@@ -157,14 +162,32 @@ def _print_summary(stats_before: list[TableStats] | None = None) -> None:
             print(f"  - {item.table}: {item.count}")
 
 
+def _confirm_production_reset(database_url: str) -> None:
+    """Prompt user to confirm a non-local database reset. Exits if not confirmed."""
+    url = make_url(database_url)
+    host = url.host or "(unknown host)"
+    print("\n" + "=" * 60, file=sys.stderr)
+    print("WARNING: You are about to reset a NON-LOCAL database.", file=sys.stderr)
+    print("All content will be permanently deleted.", file=sys.stderr)
+    print(f"Target host: {host}", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    response = input("\nType 'YES I AM SURE' to continue: ").strip()
+    if response != "YES I AM SURE":
+        print("Aborted. Confirmation phrase did not match.", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     load_dotenv()
     args = _parse_args()
 
     try:
         database_url = _resolve_database_url(args.database_url)
-        _assert_local_only(database_url)
-    except Exception as exc:
+        if args.force_production:
+            _confirm_production_reset(database_url)
+        else:
+            _assert_local_only(database_url)
+    except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)
 
