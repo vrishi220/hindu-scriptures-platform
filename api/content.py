@@ -133,6 +133,7 @@ IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS",
 IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB", "200"))
 IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
 IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(1024 * 1024)))
+IMPORT_CANONICAL_TMP_TTL_SECONDS = int(os.getenv("IMPORT_CANONICAL_TMP_TTL_SECONDS", str(24 * 60 * 60)))
 MEDIA_FILENAME_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 BOOK_NODE_METADATA_KEY = "book_node"
 
@@ -2726,6 +2727,42 @@ def _canonical_upload_absolute_path(relative_path: Path) -> Path:
     return (MEDIA_STORAGE.root_dir / relative_path).resolve()
 
 
+def _cleanup_stale_canonical_upload_tmp_files(now: datetime | None = None) -> tuple[int, int]:
+    if IMPORT_CANONICAL_TMP_TTL_SECONDS <= 0:
+        return 0, 0
+
+    current_time = now or datetime.now(timezone.utc)
+    canonical_tmp_dir = _canonical_upload_absolute_path(Path("imports") / "canonical-tmp")
+    if not canonical_tmp_dir.exists() or not canonical_tmp_dir.is_dir():
+        return 0, 0
+
+    deleted_count = 0
+    deleted_bytes = 0
+    for candidate in canonical_tmp_dir.iterdir():
+        if not candidate.is_file():
+            continue
+        if candidate.suffix not in {".part", ".json"}:
+            continue
+        try:
+            stat_info = candidate.stat()
+            modified_at = datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc)
+            if current_time - modified_at <= timedelta(seconds=IMPORT_CANONICAL_TMP_TTL_SECONDS):
+                continue
+            deleted_bytes += int(stat_info.st_size)
+            candidate.unlink(missing_ok=True)
+            deleted_count += 1
+        except OSError as exc:
+            logger.warning("Failed cleaning stale canonical temp file %s: %s", candidate, exc)
+
+    if deleted_count:
+        logger.info(
+            "Cleaned %s stale canonical temp files (%s bytes)",
+            deleted_count,
+            deleted_bytes,
+        )
+    return deleted_count, deleted_bytes
+
+
 def _read_canonical_upload_state(upload_id: str) -> dict | None:
     meta_relative, _ = _canonical_upload_relative_paths(upload_id)
     meta_path = _canonical_upload_absolute_path(meta_relative)
@@ -3094,6 +3131,7 @@ def init_canonical_upload(
 ) -> CanonicalUploadInitResponse:
     _ = db
     _ = payload
+    _cleanup_stale_canonical_upload_tmp_files()
 
     upload_id = uuid4().hex
     _, part_relative = _canonical_upload_relative_paths(upload_id)
