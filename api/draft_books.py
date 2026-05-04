@@ -1993,21 +1993,26 @@ def _resolve_relational_word_meanings_rows(
     source_node: ContentNode,
     resolved_metadata: dict | None = None,
     cache: dict[int, list[dict[str, object]]] | None = None,
+    prefetched_entries_by_node_id: dict[int, list[WordMeaningEntry]] | None = None,
 ) -> list[dict[str, object]]:
     node_id = int(source_node.id)
     if cache is not None and node_id in cache:
         return list(cache[node_id])
 
-    entries = (
-        db.query(WordMeaningEntry)
-        .filter(WordMeaningEntry.node_id == node_id)
-        .order_by(
-            WordMeaningEntry.word_order.asc(),
-            WordMeaningEntry.display_order.asc(),
-            WordMeaningEntry.id.asc(),
+    if prefetched_entries_by_node_id is not None:
+        entries = prefetched_entries_by_node_id.get(node_id, [])
+    else:
+        entries = (
+            db.query(WordMeaningEntry)
+            .filter(WordMeaningEntry.node_id == node_id)
+            .order_by(
+                WordMeaningEntry.word_order.asc(),
+                WordMeaningEntry.display_order.asc(),
+                WordMeaningEntry.id.asc(),
+            )
+            .all()
         )
-        .all()
-    )
+
     if not entries:
         if cache is not None:
             cache[node_id] = []
@@ -2424,12 +2429,41 @@ def _bulk_table_backed_translation_variants_for_nodes(
         )
 
 
+def _bulk_table_backed_word_meaning_entries_for_nodes(
+    db: Session,
+    source_nodes: list[ContentNode],
+) -> dict[int, list[WordMeaningEntry]]:
+    if not source_nodes:
+        return {}
+
+    node_ids = sorted({int(node.id) for node in source_nodes})
+    entries_by_node_id: dict[int, list[WordMeaningEntry]] = {node_id: [] for node_id in node_ids}
+
+    rows = (
+        db.query(WordMeaningEntry)
+        .filter(WordMeaningEntry.node_id.in_(node_ids))
+        .order_by(
+            WordMeaningEntry.node_id.asc(),
+            WordMeaningEntry.word_order.asc(),
+            WordMeaningEntry.display_order.asc(),
+            WordMeaningEntry.id.asc(),
+        )
+        .all()
+    )
+
+    for row in rows:
+        entries_by_node_id.setdefault(int(row.node_id), []).append(row)
+
+    return entries_by_node_id
+
+
 def _build_template_context(
     db: Session,
     source_node: ContentNode | None,
     item: dict,
     resolved_metadata: dict | None = None,
     word_meanings_cache: dict[int, list[dict[str, object]]] | None = None,
+    word_meaning_entries_by_node_id: dict[int, list[WordMeaningEntry]] | None = None,
 ) -> dict:
     if source_node is None:
         base_context = {
@@ -2463,6 +2497,7 @@ def _build_template_context(
                 source_node,
                 resolved_metadata,
                 cache=word_meanings_cache,
+                prefetched_entries_by_node_id=word_meaning_entries_by_node_id,
             )
         merged_translations = {
             **_normalize_translation_map(summary_translations),
@@ -2724,6 +2759,7 @@ def _render_block_content_with_template(
     system_template_sources: dict[str, str] | None = None,
     slug_remapping: dict[str, str] | None = None,
     word_meanings_cache: dict[int, list[dict[str, object]]] | None = None,
+    word_meaning_entries_by_node_id: dict[int, list[WordMeaningEntry]] | None = None,
 ) -> tuple[dict, str]:
     context = _build_template_context(
         db,
@@ -2731,6 +2767,7 @@ def _render_block_content_with_template(
         item,
         resolved_metadata,
         word_meanings_cache=word_meanings_cache,
+        word_meaning_entries_by_node_id=word_meaning_entries_by_node_id,
     )
     resolved_labels = _resolve_default_template_labels(resolved_metadata)
     label_to_field = {
@@ -3358,6 +3395,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
         translation_cache: dict[int, list[dict[str, str]]] = {}
         commentary_cache: dict[int, list[dict[str, str]]] = {}
         word_meanings_cache: dict[int, list[dict[str, object]]] = {}
+        word_meaning_entries_by_node_id: dict[int, list[WordMeaningEntry]] = {}
         variant_authors_by_book: dict[int, dict[str, str]] = {}
 
         # Prefetch translation/commentary variants for all resolved source nodes in bulk
@@ -3381,6 +3419,10 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 list(resolved_source_nodes.values()),
                 commentary_cache,
                 variant_authors_by_book,
+            )
+            word_meaning_entries_by_node_id = _bulk_table_backed_word_meaning_entries_for_nodes(
+                db,
+                list(resolved_source_nodes.values()),
             )
 
         candidates.sort(key=lambda item: item[0])
@@ -3430,6 +3472,7 @@ def _materialize_snapshot_render_sections(snapshot_data: dict | None, db: Sessio
                 system_template_sources=system_template_sources,
                 slug_remapping=slug_remapping_by_book.get(item["source_book_id"]) if item.get("source_book_id") else None,
                 word_meanings_cache=word_meanings_cache,
+                word_meaning_entries_by_node_id=word_meaning_entries_by_node_id,
             )
             materialized_blocks.append(
                 SnapshotRenderBlock(
