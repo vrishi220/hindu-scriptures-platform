@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import requests
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import Integer, cast, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
@@ -129,7 +130,7 @@ MEDIA_STORAGE = get_media_storage_from_env()
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
-IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "7200"))
+IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "300"))
 IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB", "200"))
 IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
 IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(4 * 1024 * 1024)))
@@ -2898,6 +2899,36 @@ def _canonical_import_identity(payload: dict) -> tuple[str | None, str | None]:
     return normalized_url, normalized_book_code
 
 
+def _compact_import_job_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+
+    compact_payload: dict[str, object] = {}
+    for key in ("import_type", "schema_version", "canonical_json_url"):
+        value = payload.get(key)
+        if value is not None:
+            compact_payload[key] = value
+
+    for key in ("force_reimport", "allow_existing_content"):
+        if payload.get(key) is True:
+            compact_payload[key] = True
+
+    book_payload = payload.get("book")
+    if isinstance(book_payload, dict):
+        compact_book: dict[str, object] = {}
+        for key in ("book_name", "book_code", "language_primary"):
+            value = book_payload.get(key)
+            if value is not None:
+                compact_book[key] = value
+        if compact_book:
+            compact_payload["book"] = compact_book
+
+    if not compact_payload:
+        compact_payload["import_type"] = str(payload.get("import_type") or "json")
+
+    return compact_payload
+
+
 def _is_import_job_stale(job: ImportJob, now: datetime | None = None) -> bool:
     if job.status not in {"queued", "running"}:
         return False
@@ -3058,6 +3089,7 @@ def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
 
 @router.post("/import/admin-cleanup-volume", response_model=dict)
 def admin_cleanup_volume(
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_import_permission),
 ) -> dict:
     """Admin endpoint — cleans up stale canonical upload temp files and completed import sources from volume."""
@@ -3067,11 +3099,29 @@ def admin_cleanup_volume(
     deleted_files = []
     errors = []
 
+    # Collect absolute paths locked by active jobs so we never delete them.
+    active_jobs = (
+        db.query(ImportJob)
+        .filter(ImportJob.status.in_(["queued", "running"]))
+        .with_entities(ImportJob.canonical_json_url)
+        .all()
+    )
+    locked_absolute_paths: set[Path] = set()
+    for (url,) in active_jobs:
+        rel = _relative_media_path_from_url(url)
+        if rel is not None:
+            locked_absolute_paths.add(_canonical_upload_absolute_path(rel))
+
+    preserved_count = 0
+
     for target_dir, suffixes in [(tmp_dir, {".part", ".meta.json", ".json"}), (canonical_dir, {".json"})]:
         if not target_dir.exists():
             continue
         for f in target_dir.iterdir():
             if f.is_file() and f.suffix in suffixes:
+                if f.resolve() in {p.resolve() for p in locked_absolute_paths}:
+                    preserved_count += 1
+                    continue
                 try:
                     size = f.stat().st_size
                     f.unlink(missing_ok=True)
@@ -3084,6 +3134,7 @@ def admin_cleanup_volume(
         "deleted_count": len(deleted_files),
         "deleted_bytes": total_bytes,
         "deleted_mb": round(total_bytes / 1024 / 1024, 2),
+        "preserved_count": preserved_count,
         "errors": errors,
         "media_dir": str(MEDIA_STORAGE.root_dir),
     }
@@ -3137,7 +3188,7 @@ def start_import_job(
         requested_by=current_user.id,
         canonical_json_url=canonical_json_url,
         canonical_book_code=canonical_book_code,
-        payload_json=payload,
+        payload_json=_compact_import_job_payload(payload),
         progress_message="Queued",
         progress_current=0,
         progress_total=None,
@@ -3886,235 +3937,104 @@ def _import_canonical_json_v1(
             author_name = "HSP AI"
         return author_name, author_slug
 
-    # Pre-scan canonical nodes and preload author/work records to avoid per-row queries
-    # during variant and word-meanings migration.
-    _t_prescan_start = time.perf_counter()
-    if progress_callback:
-        progress_callback("Scanning import metadata", 0, total_nodes)
-    required_commentary_author_names: set[str] = set()
-    required_translation_author_names: set[str] = set()
-    required_word_meaning_author_names: set[str] = set()
-    required_word_meaning_author_language_pairs: set[tuple[str, str]] = set()
+    def _resolve_or_create_commentary_author(author_name: str) -> CommentaryAuthor:
+        cached = commentary_author_cache.get(author_name)
+        if cached is not None:
+            return cached
 
-    for raw_node in canonical.nodes:
-        raw_content_data = raw_node.content_data if isinstance(raw_node.content_data, dict) else {}
-        raw_commentary_variants = (
-            raw_content_data.get("commentary_variants")
-            if isinstance(raw_content_data.get("commentary_variants"), list)
-            else []
+        db.execute(
+            pg_insert(CommentaryAuthor)
+            .values(name=author_name, created_by=current_user.id)
+            .on_conflict_do_nothing(index_elements=[CommentaryAuthor.name])
         )
-        for raw_variant in raw_commentary_variants:
-            if not isinstance(raw_variant, dict):
-                continue
-            text_value = str(raw_variant.get("text") or "").strip()
-            if not text_value:
-                continue
-            required_commentary_author_names.add(_resolve_commentary_author_name(raw_variant))
-
-        raw_translation_variants = (
-            raw_content_data.get("translation_variants")
-            if isinstance(raw_content_data.get("translation_variants"), list)
-            else []
-        )
-        for raw_variant in raw_translation_variants:
-            if not isinstance(raw_variant, dict):
-                continue
-            text_value = str(raw_variant.get("text") or "").strip()
-            if not text_value:
-                continue
-            required_translation_author_names.add(_resolve_translation_author_name(raw_variant))
-
-        word_meanings_obj = (
-            raw_content_data.get("word_meanings")
-            if isinstance(raw_content_data.get("word_meanings"), dict)
-            else {}
-        )
-        word_rows = (
-            word_meanings_obj.get("rows")
-            if isinstance(word_meanings_obj.get("rows"), list)
-            else (
-                raw_content_data.get("word_meanings_rows")
-                if isinstance(raw_content_data.get("word_meanings_rows"), list)
-                else []
-            )
-        )
-        for raw_row in word_rows:
-            if not isinstance(raw_row, dict):
-                continue
-            meanings = raw_row.get("meanings") if isinstance(raw_row.get("meanings"), dict) else {}
-            for language_key, meaning_payload in meanings.items():
-                language_code = str(language_key or "").strip().lower()
-                if not language_code:
-                    continue
-                meaning_text = ""
-                if isinstance(meaning_payload, dict):
-                    meaning_text = str(meaning_payload.get("text") or "").strip()
-                elif isinstance(meaning_payload, str):
-                    meaning_text = meaning_payload.strip()
-                if not meaning_text:
-                    continue
-                author_name, _ = _resolve_word_meaning_author_name(raw_row, meaning_payload)
-                required_word_meaning_author_names.add(author_name)
-                required_word_meaning_author_language_pairs.add((author_name, language_code))
-
-    _t_preload_start = time.perf_counter()
-    if progress_callback:
-        progress_callback("Preparing author caches", 0, total_nodes)
-
-    if required_commentary_author_names:
-        existing_commentary_authors = (
-            db.query(CommentaryAuthor)
-            .filter(CommentaryAuthor.name.in_(sorted(required_commentary_author_names)))
-            .all()
-        )
-        commentary_author_cache.update({str(author.name): author for author in existing_commentary_authors})
-
-        missing_commentary_authors = [
-            CommentaryAuthor(name=name, created_by=current_user.id)
-            for name in sorted(required_commentary_author_names)
-            if name not in commentary_author_cache
-        ]
-        if missing_commentary_authors:
-            db.add_all(missing_commentary_authors)
-            db.flush()
-            for author in missing_commentary_authors:
-                commentary_author_cache[str(author.name)] = author
-
-    if required_translation_author_names:
-        existing_translation_authors = (
-            db.query(TranslationAuthor)
-            .filter(TranslationAuthor.name.in_(sorted(required_translation_author_names)))
-            .all()
-        )
-        translation_author_cache.update({str(author.name): author for author in existing_translation_authors})
-
-        missing_translation_authors = [
-            TranslationAuthor(name=name)
-            for name in sorted(required_translation_author_names)
-            if name not in translation_author_cache
-        ]
-        if missing_translation_authors:
-            db.add_all(missing_translation_authors)
-            db.flush()
-            for author in missing_translation_authors:
-                translation_author_cache[str(author.name)] = author
-
-    if required_word_meaning_author_names:
-        existing_word_authors = (
-            db.query(WordMeaningAuthor)
-            .filter(WordMeaningAuthor.name.in_(sorted(required_word_meaning_author_names)))
-            .all()
-        )
-        word_meaning_author_cache.update({str(author.name): author for author in existing_word_authors})
-
-        missing_word_authors = [
-            WordMeaningAuthor(
-                name=name,
-                bio="AI-generated word meanings" if name == "HSP AI" else None,
-            )
-            for name in sorted(required_word_meaning_author_names)
-            if name not in word_meaning_author_cache
-        ]
-        if missing_word_authors:
-            db.add_all(missing_word_authors)
-            db.flush()
-            for author in missing_word_authors:
-                word_meaning_author_cache[str(author.name)] = author
-
-    required_commentary_work_keys = {
-        (author.id, f"{author_name} Commentary")
-        for author_name, author in commentary_author_cache.items()
-    }
-    if required_commentary_work_keys:
-        author_ids = sorted({author_id for author_id, _ in required_commentary_work_keys})
-        titles = sorted({title for _, title in required_commentary_work_keys})
-        existing_commentary_works = (
-            db.query(CommentaryWork)
-            .filter(CommentaryWork.author_id.in_(author_ids), CommentaryWork.title.in_(titles))
-            .all()
-        )
-        for work in existing_commentary_works:
-            commentary_work_cache[(int(work.author_id), str(work.title))] = work
-
-        missing_commentary_works = [
-            CommentaryWork(title=title, author_id=author_id, created_by=current_user.id)
-            for author_id, title in sorted(required_commentary_work_keys)
-            if (author_id, title) not in commentary_work_cache
-        ]
-        if missing_commentary_works:
-            db.add_all(missing_commentary_works)
-            db.flush()
-            for work in missing_commentary_works:
-                commentary_work_cache[(int(work.author_id), str(work.title))] = work
-
-    required_translation_work_keys = {
-        (author.id, f"{author_name} Translation")
-        for author_name, author in translation_author_cache.items()
-    }
-    if required_translation_work_keys:
-        author_ids = sorted({author_id for author_id, _ in required_translation_work_keys})
-        titles = sorted({title for _, title in required_translation_work_keys})
-        existing_translation_works = (
-            db.query(TranslationWork)
-            .filter(TranslationWork.author_id.in_(author_ids), TranslationWork.title.in_(titles))
-            .all()
-        )
-        for work in existing_translation_works:
-            translation_work_cache[(int(work.author_id), str(work.title))] = work
-
-        missing_translation_works = [
-            TranslationWork(title=title, author_id=author_id)
-            for author_id, title in sorted(required_translation_work_keys)
-            if (author_id, title) not in translation_work_cache
-        ]
-        if missing_translation_works:
-            db.add_all(missing_translation_works)
-            db.flush()
-            for work in missing_translation_works:
-                translation_work_cache[(int(work.author_id), str(work.title))] = work
-
-    required_word_work_keys: set[tuple[int, str, str]] = set()
-    for author_name, language_code in required_word_meaning_author_language_pairs:
-        author = word_meaning_author_cache.get(author_name)
+        author = db.query(CommentaryAuthor).filter(CommentaryAuthor.name == author_name).first()
         if author is None:
-            continue
-        language_name = language_name_by_code.get(language_code, language_code.upper())
-        if author.name == "HSP AI":
-            work_title = f"HSP AI Word Meanings - {language_name}"
-        else:
-            work_title = f"{author.name} Word Meanings - {language_name}"
-        required_word_work_keys.add((int(author.id), work_title, language_code))
+            raise RuntimeError(f"Failed to resolve commentary author: {author_name}")
+        commentary_author_cache[author_name] = author
+        return author
 
-    if required_word_work_keys:
-        author_ids = sorted({author_id for author_id, _, _ in required_word_work_keys})
-        titles = sorted({title for _, title, _ in required_word_work_keys})
-        existing_word_works = (
-            db.query(WordMeaningWork)
-            .filter(WordMeaningWork.author_id.in_(author_ids), WordMeaningWork.title.in_(titles))
-            .all()
+    def _resolve_or_create_commentary_work(author: CommentaryAuthor, author_name: str) -> CommentaryWork:
+        work_title = f"{author_name} Commentary"
+        cache_key = (author.id, work_title)
+        cached = commentary_work_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        existing = (
+            db.query(CommentaryWork)
+            .filter(CommentaryWork.author_id == author.id, CommentaryWork.title == work_title)
+            .first()
         )
-        for work in existing_word_works:
-            word_meaning_work_cache[(int(work.author_id), str(work.title))] = work
+        if existing is not None:
+            commentary_work_cache[cache_key] = existing
+            return existing
 
-        missing_word_works = [
-            WordMeaningWork(
-                author_id=author_id,
-                title=title,
-                description=f"Word meanings in {language_name_by_code.get(language_code, language_code.upper())}",
-                metadata_json={
-                    "type": "word_meanings",
-                    "language_code": language_code,
-                    "language_name": language_name_by_code.get(language_code, language_code.upper()).lower(),
-                },
+        work = CommentaryWork(title=work_title, author_id=author.id, created_by=current_user.id)
+        db.add(work)
+        db.flush()
+        commentary_work_cache[cache_key] = work
+        return work
+
+    def _resolve_or_create_translation_author(author_name: str) -> TranslationAuthor:
+        cached = translation_author_cache.get(author_name)
+        if cached is not None:
+            return cached
+
+        existing = db.query(TranslationAuthor).filter(TranslationAuthor.name == author_name).first()
+        if existing is not None:
+            translation_author_cache[author_name] = existing
+            return existing
+
+        author = TranslationAuthor(name=author_name)
+        try:
+            with db.begin_nested():
+                db.add(author)
+                db.flush()
+        except IntegrityError:
+            existing = db.query(TranslationAuthor).filter(TranslationAuthor.name == author_name).first()
+            if existing is None:
+                raise
+            translation_author_cache[author_name] = existing
+            return existing
+        translation_author_cache[author_name] = author
+        return author
+
+    def _resolve_or_create_translation_work(author: TranslationAuthor, author_name: str) -> TranslationWork:
+        work_title = f"{author_name} Translation"
+        cache_key = (author.id, work_title)
+        cached = translation_work_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        existing = (
+            db.query(TranslationWork)
+            .filter(TranslationWork.author_id == author.id, TranslationWork.title == work_title)
+            .first()
+        )
+        if existing is not None:
+            translation_work_cache[cache_key] = existing
+            return existing
+
+        work = TranslationWork(
+            title=work_title,
+            author_id=author.id,
+        )
+        try:
+            with db.begin_nested():
+                db.add(work)
+                db.flush()
+        except IntegrityError:
+            existing = (
+                db.query(TranslationWork)
+                .filter(TranslationWork.author_id == author.id, TranslationWork.title == work_title)
+                .first()
             )
-            for author_id, title, language_code in sorted(required_word_work_keys)
-            if (author_id, title) not in word_meaning_work_cache
-        ]
-        if missing_word_works:
-            db.add_all(missing_word_works)
-            db.flush()
-            for work in missing_word_works:
-                word_meaning_work_cache[(int(work.author_id), str(work.title))] = work
+            if existing is None:
+                raise
+            translation_work_cache[cache_key] = existing
+            return existing
+        translation_work_cache[cache_key] = work
+        return work
 
     def _migrate_commentary_variants_to_entries(
         content_node: ContentNode,
@@ -4131,28 +4051,8 @@ def _import_canonical_json_v1(
             author_slug = str(raw_variant.get("author_slug") or "").strip()
             author_name = _resolve_commentary_author_name(raw_variant)
 
-            author = commentary_author_cache.get(author_name)
-            if author is None:
-                author = CommentaryAuthor(
-                    name=author_name,
-                    created_by=current_user.id,
-                )
-                db.add(author)
-                db.flush()
-                commentary_author_cache[author_name] = author
-
-            work_title = f"{author_name} Commentary"
-            work_cache_key = (author.id, work_title)
-            work = commentary_work_cache.get(work_cache_key)
-            if work is None:
-                work = CommentaryWork(
-                    title=work_title,
-                    author_id=author.id,
-                    created_by=current_user.id,
-                )
-                db.add(work)
-                db.flush()
-                commentary_work_cache[work_cache_key] = work
+            author = _resolve_or_create_commentary_author(author_name)
+            work = _resolve_or_create_commentary_work(author, author_name)
 
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
             field_value = raw_variant.get("field")
@@ -4189,24 +4089,8 @@ def _import_canonical_json_v1(
             author_slug = str(raw_variant.get("author_slug") or "").strip()
             author_name = _resolve_translation_author_name(raw_variant)
 
-            author = translation_author_cache.get(author_name)
-            if author is None:
-                author = TranslationAuthor(name=author_name)
-                db.add(author)
-                db.flush()
-                translation_author_cache[author_name] = author
-
-            work_title = f"{author_name} Translation"
-            work_cache_key = (author.id, work_title)
-            work = translation_work_cache.get(work_cache_key)
-            if work is None:
-                work = TranslationWork(
-                    title=work_title,
-                    author_id=author.id,
-                )
-                db.add(work)
-                db.flush()
-                translation_work_cache[work_cache_key] = work
+            author = _resolve_or_create_translation_author(author_name)
+            work = _resolve_or_create_translation_work(author, author_name)
 
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
             field_value = raw_variant.get("field")
@@ -4232,12 +4116,25 @@ def _import_canonical_json_v1(
         if cached is not None:
             return cached
 
+        existing = db.query(WordMeaningAuthor).filter(WordMeaningAuthor.name == author_name).first()
+        if existing is not None:
+            word_meaning_author_cache[author_name] = existing
+            return existing
+
         author = WordMeaningAuthor(
             name=author_name,
             bio="AI-generated word meanings" if author_name == "HSP AI" else None,
         )
-        db.add(author)
-        db.flush()
+        try:
+            with db.begin_nested():
+                db.add(author)
+                db.flush()
+        except IntegrityError:
+            existing = db.query(WordMeaningAuthor).filter(WordMeaningAuthor.name == author_name).first()
+            if existing is None:
+                raise
+            word_meaning_author_cache[author_name] = existing
+            return existing
 
         word_meaning_author_cache[author_name] = author
         return author
@@ -4255,6 +4152,15 @@ def _import_canonical_json_v1(
         if cached is not None:
             return cached
 
+        existing = (
+            db.query(WordMeaningWork)
+            .filter(WordMeaningWork.author_id == author.id, WordMeaningWork.title == work_title)
+            .first()
+        )
+        if existing is not None:
+            word_meaning_work_cache[cache_key] = existing
+            return existing
+
         work = WordMeaningWork(
             author_id=author.id,
             title=work_title,
@@ -4265,8 +4171,20 @@ def _import_canonical_json_v1(
                 "language_name": language_name.lower(),
             },
         )
-        db.add(work)
-        db.flush()
+        try:
+            with db.begin_nested():
+                db.add(work)
+                db.flush()
+        except IntegrityError:
+            existing = (
+                db.query(WordMeaningWork)
+                .filter(WordMeaningWork.author_id == author.id, WordMeaningWork.title == work_title)
+                .first()
+            )
+            if existing is None:
+                raise
+            word_meaning_work_cache[cache_key] = existing
+            return existing
 
         word_meaning_work_cache[cache_key] = work
         return work
@@ -4327,8 +4245,6 @@ def _import_canonical_json_v1(
                     },
                 )
                 db.add(entry)
-
-    _t_node_loop_start = time.perf_counter()
 
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
@@ -4527,16 +4443,7 @@ def _import_canonical_json_v1(
             error=f"Failed to import canonical JSON: {str(exc)}",
         )
 
-    _t_end = time.perf_counter()
-    _t_total = _t_end - _t_start
-    _t_prescan = _t_preload_start - _t_prescan_start
-    _t_preload = _t_node_loop_start - _t_preload_start
-    _t_nodes = _t_end - _t_node_loop_start
     warnings.append(f"Created {nodes_created} nodes from canonical JSON")
-    warnings.append(
-        f"[perf] total={_t_total:.2f}s  prescan={_t_prescan:.2f}s  "
-        f"preload={_t_preload:.2f}s  node_loop={_t_nodes:.2f}s"
-    )
     return ImportResponse(
         success=True,
         book_id=book.id,

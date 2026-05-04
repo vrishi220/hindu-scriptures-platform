@@ -256,6 +256,7 @@ type ImportResult = {
   success?: boolean;
   book_id?: number;
   nodes_created?: number;
+  warnings?: string[];
   detail?: string;
   error?: string;
 };
@@ -2836,6 +2837,7 @@ function ScripturesContent() {
   const [showImportUrlInput, setShowImportUrlInput] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [appendImportToExisting, setAppendImportToExisting] = useState(false);
+  const [importSuccessResult, setImportSuccessResult] = useState<{ nodesCreated: number | null; warnings: string[] } | null>(null);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [pendingImportBookName, setPendingImportBookName] = useState<string | null>(null);
   const [pendingImportBookCode, setPendingImportBookCode] = useState<string | null>(null);
@@ -12431,9 +12433,10 @@ function ScripturesContent() {
       setImportProgressTotal(null);
       setShowImportUrlInput(false);
       setImportUrl("");
-      alert(
-        `Import completed${typeof finalResult.nodes_created === "number" ? ` (${finalResult.nodes_created} nodes)` : ""}`
-      );
+      setImportSuccessResult({
+        nodesCreated: typeof finalResult.nodes_created === "number" ? finalResult.nodes_created : null,
+        warnings: Array.isArray(finalResult.warnings) ? (finalResult.warnings as string[]) : [],
+      });
     },
     [loadBooksRefresh]
   );
@@ -12491,173 +12494,43 @@ function ScripturesContent() {
     if (!file || !canImport) return;
 
     setImportSubmitting(true);
-    setImportProgressMessage("Preparing canonical upload...");
+    setImportProgressMessage("Preparing import...");
     setImportProgressCurrent(null);
     setImportProgressTotal(null);
-    // Write upload-phase sentinel immediately so navigating away shows an informative message on return
-    writePersistedImportJobState({ jobId: "", status: "uploading", progressMessage: `Uploading ${file.name}...` });
+    clearPersistedImportJobState();
     try {
-      const initResponse = await fetch("/api/content/import/canonical-uploads/init", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.name,
-          size_bytes: file.size,
-        }),
-      });
-
-      const initRawText = await initResponse.text();
-      let initResult: CanonicalUploadInit | null = null;
-      if (initRawText) {
-        try {
-          initResult = JSON.parse(initRawText) as CanonicalUploadInit;
-        } catch {
-          initResult = null;
-        }
-      }
-
-      if (!initResponse.ok) {
-        const fallbackDetail =
-          initRawText.trim() || `Canonical upload init failed (${initResponse.status} ${initResponse.statusText})`;
-        alert(initResult?.detail || initResult?.error || fallbackDetail);
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        alert("Invalid JSON payload");
         return;
       }
 
-      const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
-      if (!uploadId) {
-        alert("Canonical upload did not return a valid upload ID");
-        return;
-      }
-
-      const maxSizeBytes =
-        typeof initResult?.max_size_bytes === "number" && initResult.max_size_bytes > 0
-          ? initResult.max_size_bytes
-          : null;
-      if (typeof maxSizeBytes === "number" && file.size > maxSizeBytes) {
-        alert(
-          `This file is too large (${Math.ceil(file.size / (1024 * 1024))} MB). Max supported size is ${Math.floor(maxSizeBytes / (1024 * 1024))} MB.`
-        );
-        return;
-      }
-
-      const chunkSizeBytes =
-        typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
-          ? initResult.chunk_size_bytes
-          : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
-
-      const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
-      setImportProgressMessage("Uploading canonical JSON...");
-      setImportProgressCurrent(0);
-      setImportProgressTotal(totalChunks);
-
-      for (let index = 0; index < totalChunks; index += 1) {
-        const start = index * chunkSizeBytes;
-        const end = Math.min(start + chunkSizeBytes, file.size);
-        const chunkBlob = file.slice(start, end);
-        const formData = new FormData();
-        formData.append("index", String(index));
-        formData.append(
-          "chunk",
-          new File([chunkBlob], `${file.name || "canonical"}.part`, {
-            type: "application/octet-stream",
-          })
-        );
-
-        const chunkResponse = await fetch(
-          `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
-          {
-            method: "POST",
-            credentials: "include",
-            body: formData,
-          }
-        );
-
-        const chunkRawText = await chunkResponse.text();
-        let chunkResult: CanonicalUploadChunk | null = null;
-        if (chunkRawText) {
-          try {
-            chunkResult = JSON.parse(chunkRawText) as CanonicalUploadChunk;
-          } catch {
-            chunkResult = null;
-          }
-        }
-
-        if (!chunkResponse.ok) {
-          const fallbackDetail =
-            chunkRawText.trim() || `Chunk upload failed (${chunkResponse.status} ${chunkResponse.statusText})`;
-          alert(chunkResult?.detail || chunkResult?.error || fallbackDetail);
-          return;
-        }
-
-        setImportProgressMessage(`Uploading canonical JSON... (${index + 1}/${totalChunks})`);
-        setImportProgressCurrent(index + 1);
-      }
-
-      setImportProgressMessage("Finalizing canonical upload...");
-      const completeResponse = await fetch(
-        `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
-        {
-          method: "POST",
-          credentials: "include",
-        }
-      );
-
-      const completeRawText = await completeResponse.text();
-      let completeResult: CanonicalUploadComplete | null = null;
-      if (completeRawText) {
-        try {
-          completeResult = JSON.parse(completeRawText) as CanonicalUploadComplete;
-        } catch {
-          completeResult = null;
-        }
-      }
-
-      if (!completeResponse.ok) {
-        const fallbackDetail =
-          completeRawText.trim() ||
-          `Canonical upload completion failed (${completeResponse.status} ${completeResponse.statusText})`;
-        alert(completeResult?.detail || completeResult?.error || fallbackDetail);
-        return;
-      }
-
-      const canonicalJsonUrl =
-        typeof completeResult?.canonical_json_url === "string" ? completeResult.canonical_json_url.trim() : "";
-      if (!canonicalJsonUrl) {
-        alert("Canonical upload did not return a valid URL");
-        return;
-      }
+      const importPayload = {
+        ...(parsed as Record<string, unknown>),
+        import_type: "json",
+        ...(allowExistingContent ? { allow_existing_content: true } : {}),
+      };
 
       setImportProgressMessage("Starting import...");
       const response = await fetch("/api/content/import/jobs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          import_type: "json",
-          schema_version: "hsp-book-json-v1",
-          canonical_json_url: canonicalJsonUrl,
-          ...(allowExistingContent ? { allow_existing_content: true } : {}),
-        }),
+        body: JSON.stringify(importPayload),
       });
 
-      const rawText = await response.text();
-
-      let startResult: ImportJobStart | null = null;
-      if (rawText) {
-        try {
-          const parsedStart = JSON.parse(rawText) as unknown;
-          if (parsedStart && typeof parsedStart === "object") {
-            startResult = parsedStart as ImportJobStart;
+      const startResult = (await response.json().catch(() => null)) as
+        | {
+            job_id?: string;
+            status?: ImportJobLifecycleStatus;
+            error?: string;
+            detail?: string;
           }
-        } catch {
-          startResult = null;
-        }
-      }
+        | null;
 
       if (!response.ok) {
-        const fallbackDetail = rawText.trim() || `Import start failed (${response.status} ${response.statusText})`;
-        alert(startResult?.detail || startResult?.error || fallbackDetail);
+        alert(startResult?.detail || startResult?.error || "Failed to start import book job");
         return;
       }
 
@@ -12669,7 +12542,7 @@ function ScripturesContent() {
 
       const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
       setImportProgressMessage(queuedMessage);
-      setImportProgressCurrent(null);
+      setImportProgressCurrent(0);
       setImportProgressTotal(null);
       writePersistedImportJobState({
         jobId,
@@ -12677,14 +12550,13 @@ function ScripturesContent() {
         progressMessage: queuedMessage,
         progressCurrent: 0,
         progressTotal: null,
-        canonicalJsonUrl,
+        canonicalJsonUrl: null,
         fromUrlInput: false,
       });
 
-      await pollImportJob(jobId, { canonicalJsonUrl });
+      await pollImportJob(jobId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON file";
-      clearPersistedImportJobState();
       alert(message);
     } finally {
       if (activeImportJobIdRef.current === null) {
@@ -18753,7 +18625,6 @@ function ScripturesContent() {
                     ref={importBookInputRef}
                     type="file"
                     accept="application/json,.json"
-                    multiple
                     onChange={(event) => {
                       void handleImportBookFile(event);
                     }}
@@ -18846,18 +18717,16 @@ function ScripturesContent() {
                       </span>
                     )}
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
-                    {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 ? (
+                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
                       <div
                         className="h-full rounded-full bg-blue-600 transition-all"
                         style={{
                           width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
                         }}
                       />
-                    ) : (
-                      <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -18873,18 +18742,16 @@ function ScripturesContent() {
                     </span>
                   )}
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
-                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 ? (
+                {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
                     <div
                       className="h-full rounded-full bg-blue-600 transition-all"
                       style={{
                         width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
                       }}
                     />
-                  ) : (
-                    <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -18985,9 +18852,7 @@ function ScripturesContent() {
                               className="h-full rounded-full bg-blue-400/70 transition-all duration-300"
                               style={{ width: "0%" }}
                             />
-                          ) : (
-                            <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
-                          )}
+                          ) : null}
                         </div>
                       )}
                     </li>
@@ -25434,6 +25299,43 @@ function ScripturesContent() {
           }}
         />
       ) : null}
+
+      {importSuccessResult && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 shadow-xl">
+            <button
+              type="button"
+              onClick={() => setImportSuccessResult(null)}
+              aria-label="Close"
+              className="absolute right-3 top-3 text-lg leading-none text-zinc-400 transition hover:text-zinc-600"
+            >
+              ✕
+            </button>
+            <p className="text-2xl">✅</p>
+            <p className="mt-2 text-sm font-semibold text-zinc-800">Import complete</p>
+            {importSuccessResult.nodesCreated !== null && (
+              <p className="mt-1 text-xs text-zinc-500">{importSuccessResult.nodesCreated.toLocaleString()} nodes imported</p>
+            )}
+            {importSuccessResult.warnings.length > 0 && (
+              <div className="mt-3 max-h-32 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-2">
+                <p className="mb-1 text-xs font-medium text-amber-700">Warnings</p>
+                <ul className="space-y-0.5">
+                  {importSuccessResult.warnings.map((w, i) => (
+                    <li key={i} className="text-xs text-amber-600">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setImportSuccessResult(null)}
+              className="mt-5 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -341,6 +341,15 @@ export default function AdminImportPage() {
           </p>
         </div>
 
+        <div className="mb-6 flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
+          <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>
+          <a href="/admin/schemas" className="rounded-full border border-black/10 bg-white px-3 py-1">Schemas</a>
+          <a href="/admin/import" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Import</a>
+          <a href="/admin/metadata/properties" className="rounded-full border border-black/10 bg-white px-3 py-1">Properties</a>
+          <a href="/admin/metadata/categories" className="rounded-full border border-black/10 bg-white px-3 py-1">Categories</a>
+          <a href="/admin/media-bank" className="rounded-full border border-black/10 bg-white px-3 py-1">Multimedia Repo</a>
+        </div>
+
         {/* Messages */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">

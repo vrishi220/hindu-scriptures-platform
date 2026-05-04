@@ -111,6 +111,22 @@ api:
 		exit 1; \
 	fi
 
+api-no-reload:
+	set -a; \
+	[ -f .env ] && . ./.env || true; \
+	[ -f .env.local ] && . ./.env.local || true; \
+	set +a; \
+	if [ -x ./.venv/bin/python ]; then \
+		./.venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000; \
+	elif [ -x ./venv/bin/python ]; then \
+		./venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000; \
+	elif command -v uvicorn >/dev/null 2>&1; then \
+		uvicorn main:app --host 0.0.0.0 --port 8000; \
+	else \
+		echo "Error: could not find uvicorn or a project virtualenv (expected ./.venv)."; \
+		exit 1; \
+	fi
+
 ui:
 	npm --prefix web run dev
 
