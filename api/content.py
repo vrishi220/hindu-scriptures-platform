@@ -2853,8 +2853,18 @@ def _set_import_job(job_id: str, **updates) -> None:
 
 def _make_import_job_progress_callback(
     job_id: str,
+    min_interval_seconds: float = 1.0,
 ) -> Callable[[str, int | None, int | None], None]:
+    """Returns a progress callback that rate-limits DB writes to at most once per second.
+    The final call always writes regardless of interval so the UI shows 100%."""
+    last_write: list[float] = [0.0]  # mutable container for closure
+
     def _callback(message: str, current: int | None = None, total: int | None = None) -> None:
+        now = time.monotonic()
+        is_final = (current is not None and total is not None and current >= total)
+        if not is_final and (now - last_write[0]) < min_interval_seconds:
+            return
+        last_write[0] = now
         _set_import_job(
             job_id,
             progress_message=message,
@@ -4468,8 +4478,7 @@ def _import_canonical_json_v1(
             nodes_created += 1
             progress_made = True
 
-            progress_interval = 1 if total_nodes <= 100 else 25 if total_nodes <= 500 else 100
-            if progress_callback and (nodes_created % progress_interval == 0 or nodes_created == total_nodes):
+            if progress_callback:
                 progress_callback("Importing nodes", nodes_created, total_nodes)
 
             media_items = node.media_items if isinstance(node.media_items, list) else []
@@ -4556,7 +4565,8 @@ def _insert_content_nodes(
             try:
                 level_name = node_data.get("level_name", "")
                 level_order = level_lookup.get(level_name, 1)
-                
+                children = node_data.get("children") or []
+
                 content_node = ContentNode(
                     book_id=book.id,
                     parent_node_id=parent_id,
@@ -4577,12 +4587,14 @@ def _insert_content_nodes(
                     last_modified_by=current_user.id,
                 )
                 db.add(content_node)
-                db.flush()
                 nodes_created += 1
-                
-                # Recursively insert children
-                if node_data.get("children"):
-                    insert_nodes(node_data["children"], content_node.id)
+
+                # Only flush when we need the generated ID to set parent_node_id on children.
+                # Leaf nodes are batched and flushed together at the end, saving one DB
+                # round-trip per leaf node (the vast majority of nodes in large books).
+                if children:
+                    db.flush()
+                    insert_nodes(children, content_node.id)
             except Exception as e:
                 raise Exception(f"Error inserting {level_name}: {str(e)}")
 
