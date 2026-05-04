@@ -12693,6 +12693,17 @@ function ScripturesContent() {
       files.map((f) => ({ name: f.name, status: "pending", message: "" }))
     );
 
+    type BulkJobStatus = {
+      status?: string;
+      progress_message?: string;
+      progress_current?: number;
+      progress_total?: number;
+      error?: string;
+      detail?: string;
+      result?: { success?: boolean; error?: string; nodes_created?: number };
+    };
+    const startedJobs: Array<{ index: number; jobId: string; startedAt: number }> = [];
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
@@ -12871,74 +12882,13 @@ function ScripturesContent() {
           continue;
         }
 
-        // ── Phase 5: poll import job ─────────────────────────────────────────
-        type BulkJobStatus = { status?: string; progress_message?: string; progress_current?: number; progress_total?: number; error?: string; result?: { success?: boolean; error?: string; nodes_created?: number } };
-        const maxAttempts = 900;
-        let finalJobResult: BulkJobStatus["result"] | null = null;
-        let pollFailed = false;
-
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
-            method: "GET",
-            credentials: "include",
-            headers: { Accept: "application/json" },
-          });
-          const pollRaw = await pollResponse.text();
-          let pollStatus: BulkJobStatus | null = null;
-          try { pollStatus = JSON.parse(pollRaw) as BulkJobStatus; } catch { /* */ }
-
-          if (!pollResponse.ok) {
-            const msg = pollStatus?.error || `Status poll failed (${pollResponse.status})`;
-            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-            pollFailed = true;
-            break;
-          }
-
-          const jobStatus = pollStatus?.status || "running";
-          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
-          const jobCurrent = typeof pollStatus?.progress_current === "number" ? pollStatus.progress_current : null;
-          const jobTotal = typeof pollStatus?.progress_total === "number" ? pollStatus.progress_total : null;
-          updateBulkRow(i, { progressMessage: jobMsg, progressCurrent: jobCurrent, progressTotal: jobTotal });
-
-          if (jobStatus === "queued" || jobStatus === "running") continue;
-
-          if (jobStatus === "failed") {
-            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
-            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-            pollFailed = true;
-            break;
-          }
-
-          finalJobResult = pollStatus?.result ?? null;
-          break;
-        }
-
-        if (pollFailed) continue;
-        if (!finalJobResult) {
-          updateBulkRow(i, { status: "error", message: "Import timed out", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        if (finalJobResult.success === false) {
-          const errorMsg = finalJobResult.error ?? "Import failed";
-          if (errorMsg.toLowerCase().includes("already")) {
-            updateBulkRow(i, { status: "skipped", message: "Already exists — skipped", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          } else {
-            updateBulkRow(i, { status: "error", message: errorMsg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          }
-          continue;
-        }
-
-        const nodes = finalJobResult.nodes_created ?? 0;
+        startedJobs.push({ index: i, jobId, startedAt: t0 });
         updateBulkRow(i, {
-          status: "success",
-          message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
-          progressMessage: null,
-          progressCurrent: null,
+          status: "uploading",
+          message: "Queued on server",
+          progressMessage: "Queued",
+          progressCurrent: 0,
           progressTotal: null,
-          elapsedMs: Math.round(performance.now() - t0),
         });
       } catch (err) {
         updateBulkRow(i, {
@@ -12949,6 +12899,138 @@ function ScripturesContent() {
           progressTotal: null,
           elapsedMs: Math.round(performance.now() - t0),
         });
+      }
+    }
+
+    // Poll all queued jobs asynchronously. No fixed attempt cap — jobs can run as
+    // long as needed on the server, and UI keeps tracking status until terminal state.
+    const pendingJobs = new Map(startedJobs.map((entry) => [entry.jobId, entry]));
+    while (pendingJobs.size > 0) {
+      const pollBatch = Array.from(pendingJobs.values());
+      for (const entry of pollBatch) {
+        const { index, jobId, startedAt } = entry;
+        try {
+          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
+            method: "GET",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          const pollRaw = await pollResponse.text();
+          let pollStatus: BulkJobStatus | null = null;
+          try {
+            pollStatus = JSON.parse(pollRaw) as BulkJobStatus;
+          } catch {
+            pollStatus = null;
+          }
+
+          if (!pollResponse.ok) {
+            // Keep retrying transient proxy/backend failures while the job continues server-side.
+            if ([429, 500, 502, 503, 504].includes(pollResponse.status)) {
+              updateBulkRow(index, {
+                status: "uploading",
+                progressMessage: "Waiting for status…",
+                message: "Polling import status",
+              });
+              continue;
+            }
+            const msg =
+              pollStatus?.error ||
+              pollStatus?.detail ||
+              `Status poll failed (${pollResponse.status})`;
+            updateBulkRow(index, {
+              status: "error",
+              message: msg,
+              progressMessage: null,
+              progressCurrent: null,
+              progressTotal: null,
+              elapsedMs: Math.round(performance.now() - startedAt),
+            });
+            pendingJobs.delete(jobId);
+            continue;
+          }
+
+          const jobStatus = (pollStatus?.status || "running").toLowerCase();
+          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
+          const jobCurrent =
+            typeof pollStatus?.progress_current === "number"
+              ? pollStatus.progress_current
+              : null;
+          const jobTotal =
+            typeof pollStatus?.progress_total === "number"
+              ? pollStatus.progress_total
+              : null;
+          updateBulkRow(index, {
+            status: "uploading",
+            progressMessage: jobMsg,
+            progressCurrent: jobCurrent,
+            progressTotal: jobTotal,
+          });
+
+          if (jobStatus === "queued" || jobStatus === "running") {
+            continue;
+          }
+
+          if (jobStatus === "failed") {
+            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
+            updateBulkRow(index, {
+              status: "error",
+              message: msg,
+              progressMessage: null,
+              progressCurrent: null,
+              progressTotal: null,
+              elapsedMs: Math.round(performance.now() - startedAt),
+            });
+            pendingJobs.delete(jobId);
+            continue;
+          }
+
+          const finalJobResult = pollStatus?.result ?? null;
+          if (finalJobResult?.success === false) {
+            const errorMsg = finalJobResult.error ?? "Import failed";
+            if (errorMsg.toLowerCase().includes("already")) {
+              updateBulkRow(index, {
+                status: "skipped",
+                message: "Already exists — skipped",
+                progressMessage: null,
+                progressCurrent: null,
+                progressTotal: null,
+                elapsedMs: Math.round(performance.now() - startedAt),
+              });
+            } else {
+              updateBulkRow(index, {
+                status: "error",
+                message: errorMsg,
+                progressMessage: null,
+                progressCurrent: null,
+                progressTotal: null,
+                elapsedMs: Math.round(performance.now() - startedAt),
+              });
+            }
+            pendingJobs.delete(jobId);
+            continue;
+          }
+
+          const nodes = finalJobResult?.nodes_created ?? 0;
+          updateBulkRow(index, {
+            status: "success",
+            message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
+            progressMessage: null,
+            progressCurrent: null,
+            progressTotal: null,
+            elapsedMs: Math.round(performance.now() - startedAt),
+          });
+          pendingJobs.delete(jobId);
+        } catch {
+          updateBulkRow(index, {
+            status: "uploading",
+            progressMessage: "Waiting for status…",
+            message: "Polling import status",
+          });
+        }
+      }
+
+      if (pendingJobs.size > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
