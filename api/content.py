@@ -3567,6 +3567,18 @@ def _sync_content_nodes_id_sequence(db: Session) -> None:
     )
 
 
+def _is_content_nodes_pk_violation(exc: IntegrityError) -> bool:
+    message = str(getattr(exc, "orig", exc) or "").lower()
+    return (
+        "content_nodes_pkey" in message
+        or (
+            "duplicate key value violates unique constraint" in message
+            and "content_nodes" in message
+            and "key (id)=" in message
+        )
+    )
+
+
 def _import_canonical_json_v1(
     payload: dict,
     db: Session,
@@ -4185,20 +4197,6 @@ def _import_canonical_json_v1(
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
 
-    try:
-        if progress_callback:
-            progress_callback("Synchronizing database sequence", 0, total_nodes)
-        _sync_content_nodes_id_sequence(db)
-    except Exception as exc:
-        db.rollback()
-        return ImportResponse(
-            success=False,
-            book_id=book.id if book and book.id else None,
-            nodes_created=0,
-            warnings=warnings,
-            error=f"Failed to synchronize content node sequence: {str(exc)}",
-        )
-
     while pending_nodes:
         progress_made = False
         still_pending: list = []
@@ -4266,31 +4264,72 @@ def _import_canonical_json_v1(
                 content_data_without_commentary_variants
             )
 
-            content_node = ContentNode(
-                book_id=book.id,
-                parent_node_id=old_to_new_node_ids.get(parent_id) if isinstance(parent_id, int) else None,
-                referenced_node_id=resolved_reference_id,
-                level_name=node.level_name,
-                level_order=resolved_level_order,
-                sequence_number=node.sequence_number,
-                title_sanskrit=node_title_sanskrit,
-                title_transliteration=node_title_transliteration,
-                title_english=node.title_english,
-                title_hindi=node.title_hindi,
-                title_tamil=node.title_tamil,
-                has_content=bool(node.has_content),
-                content_data=node_content_data if isinstance(node_content_data, dict) else {},
-                summary_data=node.summary_data if isinstance(node.summary_data, dict) else {},
-                metadata_json=node.metadata_json if isinstance(node.metadata_json, dict) else {},
-                source_attribution=node.source_attribution or source_attribution,
-                license_type=node.license_type,
-                original_source_url=node.original_source_url or original_source_url,
-                tags=node.tags if isinstance(node.tags, list) else [],
-                created_by=current_user.id,
-                last_modified_by=current_user.id,
-            )
-            db.add(content_node)
-            db.flush()
+            node_insert_payload = {
+                "book_id": book.id,
+                "parent_node_id": old_to_new_node_ids.get(parent_id) if isinstance(parent_id, int) else None,
+                "referenced_node_id": resolved_reference_id,
+                "level_name": node.level_name,
+                "level_order": resolved_level_order,
+                "sequence_number": node.sequence_number,
+                "title_sanskrit": node_title_sanskrit,
+                "title_transliteration": node_title_transliteration,
+                "title_english": node.title_english,
+                "title_hindi": node.title_hindi,
+                "title_tamil": node.title_tamil,
+                "has_content": bool(node.has_content),
+                "content_data": node_content_data if isinstance(node_content_data, dict) else {},
+                "summary_data": node.summary_data if isinstance(node.summary_data, dict) else {},
+                "metadata_json": node.metadata_json if isinstance(node.metadata_json, dict) else {},
+                "source_attribution": node.source_attribution or source_attribution,
+                "license_type": node.license_type,
+                "original_source_url": node.original_source_url or original_source_url,
+                "tags": node.tags if isinstance(node.tags, list) else [],
+                "created_by": current_user.id,
+                "last_modified_by": current_user.id,
+            }
+
+            content_node: ContentNode | None = None
+            for attempt in range(2):
+                try:
+                    with db.begin_nested():
+                        candidate = ContentNode(**node_insert_payload)
+                        db.add(candidate)
+                        db.flush()
+                    content_node = candidate
+                    break
+                except IntegrityError as exc:
+                    if attempt == 0 and _is_content_nodes_pk_violation(exc):
+                        try:
+                            _sync_content_nodes_id_sequence(db)
+                        except Exception as sync_exc:
+                            db.rollback()
+                            return ImportResponse(
+                                success=False,
+                                book_id=book.id if book and book.id else None,
+                                nodes_created=0,
+                                warnings=warnings,
+                                error=f"Failed to recover content node sequence: {str(sync_exc)}",
+                            )
+                        continue
+
+                    db.rollback()
+                    return ImportResponse(
+                        success=False,
+                        book_id=book.id if book and book.id else None,
+                        nodes_created=0,
+                        warnings=warnings,
+                        error=f"Failed to import canonical JSON: {str(exc)}",
+                    )
+
+            if content_node is None:
+                db.rollback()
+                return ImportResponse(
+                    success=False,
+                    book_id=book.id if book and book.id else None,
+                    nodes_created=0,
+                    warnings=warnings,
+                    error="Failed to insert content node",
+                )
 
             if commentary_variants:
                 _migrate_commentary_variants_to_entries(content_node, commentary_variants)

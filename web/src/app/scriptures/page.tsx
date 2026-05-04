@@ -12702,7 +12702,127 @@ function ScripturesContent() {
       detail?: string;
       result?: { success?: boolean; error?: string; nodes_created?: number };
     };
-    const startedJobs: Array<{ index: number; jobId: string; startedAt: number }> = [];
+
+    const pollBulkImportJobUntilDone = async (index: number, jobId: string, startedAt: number) => {
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        try {
+          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
+            method: "GET",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          });
+          const pollRaw = await pollResponse.text();
+          let pollStatus: BulkJobStatus | null = null;
+          try {
+            pollStatus = JSON.parse(pollRaw) as BulkJobStatus;
+          } catch {
+            pollStatus = null;
+          }
+
+          if (!pollResponse.ok) {
+            // Keep retrying transient backend/proxy failures for long-running jobs.
+            if ([429, 500, 502, 503, 504].includes(pollResponse.status)) {
+              updateBulkRow(index, {
+                status: "uploading",
+                progressMessage: "Waiting for status…",
+                message: "Polling import status",
+              });
+              continue;
+            }
+            const msg =
+              pollStatus?.error ||
+              pollStatus?.detail ||
+              `Status poll failed (${pollResponse.status})`;
+            updateBulkRow(index, {
+              status: "error",
+              message: msg,
+              progressMessage: null,
+              progressCurrent: null,
+              progressTotal: null,
+              elapsedMs: Math.round(performance.now() - startedAt),
+            });
+            return;
+          }
+
+          const jobStatus = (pollStatus?.status || "running").toLowerCase();
+          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
+          const jobCurrent =
+            typeof pollStatus?.progress_current === "number"
+              ? pollStatus.progress_current
+              : null;
+          const jobTotal =
+            typeof pollStatus?.progress_total === "number"
+              ? pollStatus.progress_total
+              : null;
+          updateBulkRow(index, {
+            status: "uploading",
+            progressMessage: jobMsg,
+            progressCurrent: jobCurrent,
+            progressTotal: jobTotal,
+          });
+
+          if (jobStatus === "queued" || jobStatus === "running") {
+            continue;
+          }
+
+          if (jobStatus === "failed") {
+            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
+            updateBulkRow(index, {
+              status: "error",
+              message: msg,
+              progressMessage: null,
+              progressCurrent: null,
+              progressTotal: null,
+              elapsedMs: Math.round(performance.now() - startedAt),
+            });
+            return;
+          }
+
+          const finalJobResult = pollStatus?.result ?? null;
+          if (finalJobResult?.success === false) {
+            const errorMsg = finalJobResult.error ?? "Import failed";
+            if (errorMsg.toLowerCase().includes("already")) {
+              updateBulkRow(index, {
+                status: "skipped",
+                message: "Already exists — skipped",
+                progressMessage: null,
+                progressCurrent: null,
+                progressTotal: null,
+                elapsedMs: Math.round(performance.now() - startedAt),
+              });
+            } else {
+              updateBulkRow(index, {
+                status: "error",
+                message: errorMsg,
+                progressMessage: null,
+                progressCurrent: null,
+                progressTotal: null,
+                elapsedMs: Math.round(performance.now() - startedAt),
+              });
+            }
+            return;
+          }
+
+          const nodes = finalJobResult?.nodes_created ?? 0;
+          updateBulkRow(index, {
+            status: "success",
+            message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
+            progressMessage: null,
+            progressCurrent: null,
+            progressTotal: null,
+            elapsedMs: Math.round(performance.now() - startedAt),
+          });
+          return;
+        } catch {
+          updateBulkRow(index, {
+            status: "uploading",
+            progressMessage: "Waiting for status…",
+            message: "Polling import status",
+          });
+        }
+      }
+    };
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -12882,7 +13002,6 @@ function ScripturesContent() {
           continue;
         }
 
-        startedJobs.push({ index: i, jobId, startedAt: t0 });
         updateBulkRow(i, {
           status: "uploading",
           message: "Queued on server",
@@ -12890,6 +13009,7 @@ function ScripturesContent() {
           progressCurrent: 0,
           progressTotal: null,
         });
+        await pollBulkImportJobUntilDone(i, jobId, t0);
       } catch (err) {
         updateBulkRow(i, {
           status: "error",
@@ -12899,138 +13019,6 @@ function ScripturesContent() {
           progressTotal: null,
           elapsedMs: Math.round(performance.now() - t0),
         });
-      }
-    }
-
-    // Poll all queued jobs asynchronously. No fixed attempt cap — jobs can run as
-    // long as needed on the server, and UI keeps tracking status until terminal state.
-    const pendingJobs = new Map(startedJobs.map((entry) => [entry.jobId, entry]));
-    while (pendingJobs.size > 0) {
-      const pollBatch = Array.from(pendingJobs.values());
-      for (const entry of pollBatch) {
-        const { index, jobId, startedAt } = entry;
-        try {
-          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
-            method: "GET",
-            credentials: "include",
-            headers: { Accept: "application/json" },
-          });
-          const pollRaw = await pollResponse.text();
-          let pollStatus: BulkJobStatus | null = null;
-          try {
-            pollStatus = JSON.parse(pollRaw) as BulkJobStatus;
-          } catch {
-            pollStatus = null;
-          }
-
-          if (!pollResponse.ok) {
-            // Keep retrying transient proxy/backend failures while the job continues server-side.
-            if ([429, 500, 502, 503, 504].includes(pollResponse.status)) {
-              updateBulkRow(index, {
-                status: "uploading",
-                progressMessage: "Waiting for status…",
-                message: "Polling import status",
-              });
-              continue;
-            }
-            const msg =
-              pollStatus?.error ||
-              pollStatus?.detail ||
-              `Status poll failed (${pollResponse.status})`;
-            updateBulkRow(index, {
-              status: "error",
-              message: msg,
-              progressMessage: null,
-              progressCurrent: null,
-              progressTotal: null,
-              elapsedMs: Math.round(performance.now() - startedAt),
-            });
-            pendingJobs.delete(jobId);
-            continue;
-          }
-
-          const jobStatus = (pollStatus?.status || "running").toLowerCase();
-          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
-          const jobCurrent =
-            typeof pollStatus?.progress_current === "number"
-              ? pollStatus.progress_current
-              : null;
-          const jobTotal =
-            typeof pollStatus?.progress_total === "number"
-              ? pollStatus.progress_total
-              : null;
-          updateBulkRow(index, {
-            status: "uploading",
-            progressMessage: jobMsg,
-            progressCurrent: jobCurrent,
-            progressTotal: jobTotal,
-          });
-
-          if (jobStatus === "queued" || jobStatus === "running") {
-            continue;
-          }
-
-          if (jobStatus === "failed") {
-            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
-            updateBulkRow(index, {
-              status: "error",
-              message: msg,
-              progressMessage: null,
-              progressCurrent: null,
-              progressTotal: null,
-              elapsedMs: Math.round(performance.now() - startedAt),
-            });
-            pendingJobs.delete(jobId);
-            continue;
-          }
-
-          const finalJobResult = pollStatus?.result ?? null;
-          if (finalJobResult?.success === false) {
-            const errorMsg = finalJobResult.error ?? "Import failed";
-            if (errorMsg.toLowerCase().includes("already")) {
-              updateBulkRow(index, {
-                status: "skipped",
-                message: "Already exists — skipped",
-                progressMessage: null,
-                progressCurrent: null,
-                progressTotal: null,
-                elapsedMs: Math.round(performance.now() - startedAt),
-              });
-            } else {
-              updateBulkRow(index, {
-                status: "error",
-                message: errorMsg,
-                progressMessage: null,
-                progressCurrent: null,
-                progressTotal: null,
-                elapsedMs: Math.round(performance.now() - startedAt),
-              });
-            }
-            pendingJobs.delete(jobId);
-            continue;
-          }
-
-          const nodes = finalJobResult?.nodes_created ?? 0;
-          updateBulkRow(index, {
-            status: "success",
-            message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
-            progressMessage: null,
-            progressCurrent: null,
-            progressTotal: null,
-            elapsedMs: Math.round(performance.now() - startedAt),
-          });
-          pendingJobs.delete(jobId);
-        } catch {
-          updateBulkRow(index, {
-            status: "uploading",
-            progressMessage: "Waiting for status…",
-            message: "Polling import status",
-          });
-        }
-      }
-
-      if (pendingJobs.size > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
@@ -18868,6 +18856,9 @@ function ScripturesContent() {
                   const elapsed = r.elapsedMs !== undefined ? (r.elapsedMs >= 1000 ? `${(r.elapsedMs / 1000).toFixed(1)}s` : `${r.elapsedMs}ms`) : null;
                   const isActive = r.status === "uploading" || r.status === "pending";
                   const hasProgress = typeof r.progressCurrent === "number" && typeof r.progressTotal === "number" && r.progressTotal > 0;
+                  const isWaitingAtZero =
+                    !hasProgress &&
+                    (r.status === "pending" || (typeof r.progressCurrent === "number" && r.progressCurrent <= 0));
                   return (
                     <li key={idx} className="px-3 py-2 text-xs">
                       <div className="flex items-center gap-2">
@@ -18893,6 +18884,11 @@ function ScripturesContent() {
                             <div
                               className="h-full rounded-full bg-blue-500 transition-all duration-300"
                               style={{ width: `${Math.max(2, Math.min(100, ((r.progressCurrent ?? 0) / (r.progressTotal ?? 1)) * 100))}%` }}
+                            />
+                          ) : isWaitingAtZero ? (
+                            <div
+                              className="h-full rounded-full bg-blue-400/70 transition-all duration-300"
+                              style={{ width: "0%" }}
                             />
                           ) : (
                             <div className="h-full w-1/3 animate-pulse rounded-full bg-blue-400" />
