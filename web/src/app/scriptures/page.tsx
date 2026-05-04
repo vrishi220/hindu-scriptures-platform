@@ -91,11 +91,12 @@ type ImportJobLifecycleStatus = "queued" | "running" | "succeeded" | "failed";
 
 type PersistedImportJobState = {
   jobId: string;
-  status?: ImportJobLifecycleStatus;
+  status?: ImportJobLifecycleStatus | "uploading";
   progressMessage?: string | null;
   progressCurrent?: number | null;
   progressTotal?: number | null;
   canonicalJsonUrl?: string | null;
+  fromUrlInput?: boolean;
 };
 
 type MediaFile = {
@@ -698,7 +699,7 @@ const readPersistedImportJobState = (): PersistedImportJobState | null => {
       return null;
     }
     const parsed = JSON.parse(raw) as PersistedImportJobState | null;
-    if (!parsed || typeof parsed !== "object" || typeof parsed.jobId !== "string" || !parsed.jobId) {
+    if (!parsed || typeof parsed !== "object" || typeof parsed.jobId !== "string") {
       return null;
     }
     return parsed;
@@ -12445,9 +12446,18 @@ function ScripturesContent() {
 
   useEffect(() => {
     const persistedJob = readPersistedImportJobState();
-    if (!persistedJob?.jobId) {
+    if (!persistedJob) {
       return;
     }
+
+    // Upload-phase sentinel: chunked upload was in progress when page was left — cannot resume
+    if (persistedJob.status === "uploading" || !persistedJob.jobId) {
+      clearPersistedImportJobState();
+      setImportSubmitting(false);
+      setImportProgressMessage("A previous file upload was interrupted. Please re-upload the file.");
+      return;
+    }
+
     if (persistedJob.status === "succeeded" || persistedJob.status === "failed") {
       clearPersistedImportJobState();
       return;
@@ -12456,9 +12466,11 @@ function ScripturesContent() {
       return;
     }
 
+    // Only open the URL input panel if the user was actually using URL import
+    const wasUrlImport = Boolean(persistedJob.fromUrlInput);
     setImportSubmitting(true);
-    setShowImportUrlInput(Boolean(persistedJob.canonicalJsonUrl));
-    if (typeof persistedJob.canonicalJsonUrl === "string" && persistedJob.canonicalJsonUrl) {
+    setShowImportUrlInput(wasUrlImport);
+    if (wasUrlImport && typeof persistedJob.canonicalJsonUrl === "string" && persistedJob.canonicalJsonUrl) {
       setImportUrl(persistedJob.canonicalJsonUrl);
     }
     setImportProgressMessage(persistedJob.progressMessage || "Resuming import status...");
@@ -12482,6 +12494,8 @@ function ScripturesContent() {
     setImportProgressMessage("Preparing canonical upload...");
     setImportProgressCurrent(null);
     setImportProgressTotal(null);
+    // Write upload-phase sentinel immediately so navigating away shows an informative message on return
+    writePersistedImportJobState({ jobId: "", status: "uploading", progressMessage: `Uploading ${file.name}...` });
     try {
       const initResponse = await fetch("/api/content/import/canonical-uploads/init", {
         method: "POST",
@@ -12664,11 +12678,13 @@ function ScripturesContent() {
         progressCurrent: 0,
         progressTotal: null,
         canonicalJsonUrl,
+        fromUrlInput: false,
       });
 
       await pollImportJob(jobId, { canonicalJsonUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON file";
+      clearPersistedImportJobState();
       alert(message);
     } finally {
       if (activeImportJobIdRef.current === null) {
@@ -13188,6 +13204,7 @@ function ScripturesContent() {
         progressCurrent: 0,
         progressTotal: null,
         canonicalJsonUrl,
+        fromUrlInput: true,
       });
 
       await pollImportJob(jobId, { canonicalJsonUrl });
