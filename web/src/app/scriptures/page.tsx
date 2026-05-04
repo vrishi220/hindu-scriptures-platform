@@ -294,6 +294,21 @@ type ImportJobStart = {
   error?: string;
 };
 
+type DeleteBookJobStatus = {
+  job_id?: string;
+  status?: ImportJobLifecycleStatus;
+  progress_message?: string | null;
+  progress_current?: number | null;
+  progress_total?: number | null;
+  detail?: string;
+  error?: string;
+  result?: {
+    success?: boolean;
+    message?: string;
+    deleted_book_id?: number;
+  } | null;
+};
+
 type CommentaryEntry = {
   id: number;
   node_id: number;
@@ -2697,6 +2712,7 @@ function ScripturesContent() {
   const [authResolved, setAuthResolved] = useState(false);
   const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [bookVisibilitySubmitting, setBookVisibilitySubmitting] = useState<number | null>(null);
+  const [bookDeleteSubmitting, setBookDeleteSubmitting] = useState<number | null>(null);
   const [canView, setCanView] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
   const [canContribute, setCanContribute] = useState(false);
@@ -12499,25 +12515,150 @@ function ScripturesContent() {
     setImportProgressTotal(null);
     clearPersistedImportJobState();
     try {
-      const raw = await file.text();
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== "object") {
-        alert("Invalid JSON payload");
+      const retryableStatuses = new Set([429, 500, 502, 503, 504]);
+      const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      let initResponse: Response | null = null;
+      let initRaw = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        initResponse = await fetch("/api/content/import/canonical-uploads/init", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+        });
+        initRaw = await initResponse.text();
+        if (initResponse.ok || !retryableStatuses.has(initResponse.status) || attempt === 2) {
+          break;
+        }
+        setImportProgressMessage(`Preparing upload... retry ${attempt + 2}/3`);
+        await pause(400 * (attempt + 1));
+      }
+
+      let initResult: CanonicalUploadInit | null = null;
+      try {
+        initResult = JSON.parse(initRaw) as CanonicalUploadInit;
+      } catch {
+        initResult = null;
+      }
+
+      if (!initResponse || !initResponse.ok) {
+        const fallback = `Upload init failed (${initResponse?.status ?? 0})`;
+        alert(initResult?.detail || initResult?.error || fallback);
         return;
       }
 
-      const importPayload = {
-        ...(parsed as Record<string, unknown>),
-        import_type: "json",
-        ...(allowExistingContent ? { allow_existing_content: true } : {}),
-      };
+      const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
+      if (!uploadId) {
+        alert("Upload init returned no upload ID");
+        return;
+      }
+
+      const chunkSizeBytes =
+        typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
+          ? initResult.chunk_size_bytes
+          : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
+      const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
+
+      setImportProgressMessage("Uploading chunks...");
+      setImportProgressCurrent(0);
+      setImportProgressTotal(totalChunks);
+      writePersistedImportJobState({
+        jobId: "",
+        status: "uploading",
+        progressMessage: "Uploading chunks...",
+        progressCurrent: 0,
+        progressTotal: totalChunks,
+        canonicalJsonUrl: null,
+        fromUrlInput: false,
+      });
+
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const start = chunkIndex * chunkSizeBytes;
+        const end = Math.min(start + chunkSizeBytes, file.size);
+        const chunkBlob = file.slice(start, end);
+        const chunkForm = new FormData();
+        chunkForm.append("index", String(chunkIndex));
+        chunkForm.append("chunk", new File([chunkBlob], `${file.name}.part`, { type: "application/octet-stream" }));
+
+        let chunkResponse: Response | null = null;
+        let chunkRaw = "";
+        for (let attempt = 0; attempt < 3; attempt++) {
+          chunkResponse = await fetch(
+            `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
+            { method: "POST", credentials: "include", body: chunkForm }
+          );
+          chunkRaw = await chunkResponse.text();
+          if (chunkResponse.ok || !retryableStatuses.has(chunkResponse.status) || attempt === 2) {
+            break;
+          }
+          setImportProgressMessage(`Uploading chunks... retry ${attempt + 2}/3`);
+          setImportProgressCurrent(chunkIndex);
+          setImportProgressTotal(totalChunks);
+          await pause(300 * (attempt + 1));
+        }
+
+        let chunkResult: CanonicalUploadChunk | null = null;
+        try {
+          chunkResult = JSON.parse(chunkRaw) as CanonicalUploadChunk;
+        } catch {
+          chunkResult = null;
+        }
+
+        if (!chunkResponse || !chunkResponse.ok) {
+          const fallback = `Chunk upload failed (${chunkResponse?.status ?? 0})`;
+          alert(chunkResult?.detail || chunkResult?.error || fallback);
+          return;
+        }
+
+        setImportProgressMessage("Uploading chunks...");
+        setImportProgressCurrent(chunkIndex + 1);
+        setImportProgressTotal(totalChunks);
+      }
+
+      setImportProgressMessage("Finalizing upload...");
+      setImportProgressCurrent(null);
+      setImportProgressTotal(null);
+
+      const completeResponse = await fetch(
+        `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
+        { method: "POST", credentials: "include" }
+      );
+      const completeRaw = await completeResponse.text();
+
+      let completeResult: CanonicalUploadComplete | null = null;
+      try {
+        completeResult = JSON.parse(completeRaw) as CanonicalUploadComplete;
+      } catch {
+        completeResult = null;
+      }
+
+      if (!completeResponse.ok) {
+        const fallback = `Upload completion failed (${completeResponse.status})`;
+        alert(completeResult?.detail || completeResult?.error || fallback);
+        return;
+      }
+
+      const canonicalJsonUrl =
+        typeof completeResult?.canonical_json_url === "string"
+          ? completeResult.canonical_json_url.trim()
+          : "";
+      if (!canonicalJsonUrl) {
+        alert("Upload did not return a canonical URL");
+        return;
+      }
 
       setImportProgressMessage("Starting import...");
       const response = await fetch("/api/content/import/jobs", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(importPayload),
+        body: JSON.stringify({
+          import_type: "json",
+          schema_version: "hsp-book-json-v1",
+          canonical_json_url: canonicalJsonUrl,
+          ...(allowExistingContent ? { allow_existing_content: true } : {}),
+        }),
       });
 
       const startResult = (await response.json().catch(() => null)) as
@@ -12550,11 +12691,11 @@ function ScripturesContent() {
         progressMessage: queuedMessage,
         progressCurrent: 0,
         progressTotal: null,
-        canonicalJsonUrl: null,
+        canonicalJsonUrl,
         fromUrlInput: false,
       });
 
-      await pollImportJob(jobId);
+      await pollImportJob(jobId, { canonicalJsonUrl });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON file";
       alert(message);
@@ -18052,14 +18193,69 @@ function ScripturesContent() {
       return;
     }
 
+    setBookDeleteSubmitting(book.id);
     try {
-      const response = await fetch(`/api/books/${book.id}`, {
-        method: "DELETE",
+      const startResponse = await fetch(`/api/content/books/${book.id}/delete-jobs`, {
+        method: "POST",
         credentials: "include",
       });
-      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        alert(result?.detail ?? "Failed to delete book");
+
+      const startResult = (await startResponse.json().catch(() => null)) as
+        | { detail?: string; error?: string; job_id?: string }
+        | null;
+      if (!startResponse.ok) {
+        alert(startResult?.detail ?? startResult?.error ?? "Failed to start delete book job");
+        return;
+      }
+
+      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
+      if (!jobId) {
+        alert("Delete book job did not return a valid job ID");
+        return;
+      }
+
+      setInlineMessage(`Deleting book: ${book.book_name}...`);
+      const pollIntervalMs = 2000;
+      const maxPollAttempts = 900;
+      let deleteSucceeded = false;
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+        const statusResponse = await fetch(
+          `/api/content/books/delete-jobs/${encodeURIComponent(jobId)}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+          }
+        );
+
+        const statusPayload = (await statusResponse.json().catch(() => null)) as DeleteBookJobStatus | null;
+        if (!statusResponse.ok) {
+          alert(statusPayload?.detail || statusPayload?.error || "Failed to fetch delete status");
+          return;
+        }
+
+        const statusValue = (statusPayload?.status || "running").toLowerCase();
+        if (statusValue === "queued" || statusValue === "running") {
+          const progressText = statusPayload?.progress_message || "Deleting...";
+          setInlineMessage(`Deleting book: ${book.book_name} (${progressText})`);
+          continue;
+        }
+
+        if (statusValue === "failed") {
+          alert(statusPayload?.error || statusPayload?.detail || "Book deletion failed");
+          return;
+        }
+
+        deleteSucceeded = true;
+        break;
+      }
+
+      if (!deleteSucceeded) {
+        alert("Book deletion is still running. Please refresh in a moment.");
         return;
       }
 
@@ -18081,6 +18277,8 @@ function ScripturesContent() {
       await loadBooksRefresh();
     } catch {
       alert("Failed to delete book");
+    } finally {
+      setBookDeleteSubmitting(null);
     }
   };
 
@@ -18399,7 +18597,8 @@ function ScripturesContent() {
               setOpenBookRowShareSubmenuId(null);
               void handleDeleteBook(book);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+            disabled={bookDeleteSubmitting === book.id}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50 disabled:opacity-50"
           >
             <Trash2 size={14} />
             Delete book
@@ -19947,7 +20146,8 @@ function ScripturesContent() {
                                     setShowBookRootActionsMenu(false);
                                     void handleDeleteBook(selectedBookOption);
                                   }}
-                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50"
+                                  disabled={bookDeleteSubmitting === selectedBookOption.id}
+                                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-700 transition hover:bg-red-50 disabled:opacity-50"
                                 >
                                   <Trash2 size={14} />
                                   Delete book

@@ -613,6 +613,29 @@ class ImportJobStatusResponse(BaseModel):
     result: ImportResponse | None = None
 
 
+class DeleteBookJobResult(BaseModel):
+    success: bool
+    message: str | None = None
+    deleted_book_id: int | None = None
+
+
+class DeleteBookJobAcceptedResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running"]
+
+
+class DeleteBookJobStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    created_at: str
+    updated_at: str
+    progress_message: str | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    error: str | None = None
+    result: DeleteBookJobResult | None = None
+
+
 class CanonicalUploadInitResponse(BaseModel):
     upload_id: str
     chunk_size_bytes: int
@@ -2173,21 +2196,103 @@ def delete_book(
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    ensure_book_owner_or_edit_any(
-        current_user,
-        book,
-        detail="Only the book owner can delete this book",
-    )
+    _ensure_book_delete_access(current_user, book)
 
-    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC and not _user_can_edit_any(current_user):
+    try:
+        message = _delete_book_rows(db, book_id)
+        db.commit()
+        return {"message": message}
+    except Exception as exc:
+        db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Public books cannot be deleted. Unpublish the book first.",
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Book delete failed: {str(exc)}",
+        ) from exc
 
-    db.delete(book)
+
+@router.post(
+    "/books/{book_id}/delete-jobs",
+    response_model=DeleteBookJobAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_delete_book_job(
+    book_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DeleteBookJobAcceptedResponse:
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_book_delete_access(current_user, book)
+
+    duplicate_job = _find_inflight_delete_book_job(db, book_id)
+    if duplicate_job:
+        duplicate_status = "running" if duplicate_job.status == "running" else "queued"
+        return DeleteBookJobAcceptedResponse(job_id=duplicate_job.job_id, status=duplicate_status)
+
+    job_id = str(uuid4())
+    job = ImportJob(
+        job_id=job_id,
+        status="queued",
+        requested_by=current_user.id,
+        canonical_json_url=None,
+        canonical_book_code=book.book_code,
+        payload_json={
+            "job_type": "delete_book",
+            "book_id": book_id,
+            "book_name": book.book_name,
+        },
+        progress_message="Queued",
+        progress_current=0,
+        progress_total=3,
+        error=None,
+        result_json=None,
+    )
+    db.add(job)
     db.commit()
-    return {"message": "Deleted"}
+
+    threading.Thread(
+        target=_run_delete_book_job,
+        args=(job_id, current_user.id, book_id),
+        daemon=True,
+        name=f"delete-book-job-{job_id}",
+    ).start()
+
+    return DeleteBookJobAcceptedResponse(job_id=job_id, status="queued")
+
+
+@router.get("/books/delete-jobs/{job_id}", response_model=DeleteBookJobStatusResponse)
+def get_delete_book_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DeleteBookJobStatusResponse:
+    job = db.query(ImportJob).filter(ImportJob.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delete job not found")
+
+    job_payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    if job_payload.get("job_type") != "delete_book":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delete job not found")
+
+    if job.requested_by != current_user.id and not (
+        current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    job_status = job.status if job.status in {"queued", "running", "succeeded", "failed"} else "failed"
+    return DeleteBookJobStatusResponse(
+        job_id=job.job_id,
+        status=job_status,
+        created_at=_to_iso(job.created_at),
+        updated_at=_to_iso(job.updated_at),
+        progress_message=job.progress_message,
+        progress_current=job.progress_current,
+        progress_total=job.progress_total,
+        error=job.error,
+        result=_job_result_to_delete_book_response(job),
+    )
 
 
 @router.get("/books/{book_id}/shares", response_model=list[BookSharePublic])
@@ -3085,6 +3190,160 @@ def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
         return ImportResponse.model_validate(job.result_json)
     except Exception:
         return None
+
+
+def _job_result_to_delete_book_response(job: ImportJob) -> DeleteBookJobResult | None:
+    if not isinstance(job.result_json, dict):
+        return None
+    try:
+        return DeleteBookJobResult.model_validate(job.result_json)
+    except Exception:
+        return None
+
+
+def _ensure_book_delete_access(current_user: User, book: Book) -> None:
+    ensure_book_owner_or_edit_any(
+        current_user,
+        book,
+        detail="Only the book owner can delete this book",
+    )
+
+    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC and not _user_can_edit_any(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public books cannot be deleted. Unpublish the book first.",
+        )
+
+
+def _delete_book_rows(db: Session, book_id: int) -> str:
+    # Large books can have hundreds of thousands of relational rows hanging off
+    # node_id. Deleting these first keeps the final book delete from stalling on
+    # deep cascade work.
+    db.execute(
+        text(
+            """
+            DELETE FROM word_meaning_entries
+            USING content_nodes
+            WHERE word_meaning_entries.node_id = content_nodes.id
+              AND content_nodes.book_id = :book_id
+            """
+        ),
+        {"book_id": book_id},
+    )
+    db.execute(
+        text(
+            """
+            DELETE FROM translation_entries
+            USING content_nodes
+            WHERE translation_entries.node_id = content_nodes.id
+              AND content_nodes.book_id = :book_id
+            """
+        ),
+        {"book_id": book_id},
+    )
+    db.execute(
+        text(
+            """
+            DELETE FROM commentary_entries
+            USING content_nodes
+            WHERE commentary_entries.node_id = content_nodes.id
+              AND content_nodes.book_id = :book_id
+            """
+        ),
+        {"book_id": book_id},
+    )
+    db.query(ContentNode).filter(ContentNode.book_id == book_id).delete(synchronize_session=False)
+    deleted_books = db.query(Book).filter(Book.id == book_id).delete(synchronize_session=False)
+    return "Already deleted" if deleted_books == 0 else "Deleted"
+
+
+def _find_inflight_delete_book_job(db: Session, book_id: int) -> ImportJob | None:
+    return (
+        db.query(ImportJob)
+        .filter(
+            ImportJob.status.in_(["queued", "running"]),
+            ImportJob.payload_json["job_type"].astext == "delete_book",
+            cast(ImportJob.payload_json["book_id"].astext, Integer) == book_id,
+        )
+        .order_by(ImportJob.created_at.asc())
+        .first()
+    )
+
+
+def _run_delete_book_job(job_id: str, user_id: int, book_id: int) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            _set_import_job(job_id, status="failed", error="User not found", result=None)
+            return
+
+        _set_import_job(
+            job_id,
+            status="running",
+            error=None,
+            progress_message="Deleting book rows",
+            progress_current=1,
+            progress_total=3,
+        )
+
+        try:
+            book = db.query(Book).filter(Book.id == book_id).first()
+            if not book:
+                _set_import_job(
+                    job_id,
+                    status="succeeded",
+                    error=None,
+                    progress_message="Book already deleted",
+                    progress_current=3,
+                    progress_total=3,
+                    result=DeleteBookJobResult(
+                        success=True,
+                        message="Already deleted",
+                        deleted_book_id=book_id,
+                    ),
+                )
+                return
+
+            _ensure_book_delete_access(user, book)
+            delete_message = _delete_book_rows(db, book_id)
+            db.commit()
+            _set_import_job(
+                job_id,
+                status="succeeded",
+                error=None,
+                progress_message="Book delete completed",
+                progress_current=3,
+                progress_total=3,
+                result=DeleteBookJobResult(
+                    success=True,
+                    message=delete_message,
+                    deleted_book_id=book_id,
+                ),
+            )
+        except HTTPException as exc:
+            db.rollback()
+            _set_import_job(
+                job_id,
+                status="failed",
+                error=str(exc.detail),
+                progress_message=str(exc.detail),
+                progress_current=3,
+                progress_total=3,
+            )
+        except Exception as exc:
+            db.rollback()
+            message = f"Book delete failed: {str(exc)}"
+            _set_import_job(
+                job_id,
+                status="failed",
+                error=message,
+                progress_message=message,
+                progress_current=3,
+                progress_total=3,
+            )
+    finally:
+        db.close()
 
 
 @router.post("/import/admin-cleanup-volume", response_model=dict)
