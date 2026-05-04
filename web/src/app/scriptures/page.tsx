@@ -18246,6 +18246,17 @@ function ScripturesContent() {
         }
 
         if (statusValue === "failed") {
+          // If the job stalled (e.g. server restart) but the book is actually
+          // gone, treat it as success rather than alarming the user.
+          const checkRes = await fetch(`/api/books/${book.id}`, {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (checkRes.status === 404) {
+            deleteSucceeded = true;
+            break;
+          }
           alert(statusPayload?.error || statusPayload?.detail || "Book deletion failed");
           return;
         }

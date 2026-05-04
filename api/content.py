@@ -2281,6 +2281,8 @@ def get_delete_book_job_status(
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+    _mark_import_job_stale_if_needed(job, db)
+
     job_status = job.status if job.status in {"queued", "running", "succeeded", "failed"} else "failed"
     return DeleteBookJobStatusResponse(
         job_id=job.job_id,
