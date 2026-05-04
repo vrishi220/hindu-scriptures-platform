@@ -126,6 +126,31 @@ export default function AdminImportPage() {
   const [success, setSuccess] = useState<ImportResponse | null>(null);
   const [importType, setImportType] = useState<"pdf" | "html">("pdf");
 
+  // Storage cleanup state
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<{ deleted_count: number; deleted_mb: number; errors: string[] } | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+
+  const handleCleanupVolume = async () => {
+    if (!confirm("Delete all stale import temp files and completed canonical upload sources? This is safe as long as no import is currently running.")) return;
+    setCleanupRunning(true);
+    setCleanupResult(null);
+    setCleanupError(null);
+    try {
+      const res = await fetch("/api/content/import/admin-cleanup-volume", { method: "POST", credentials: "include" });
+      const data = await res.json() as { deleted_count?: number; deleted_mb?: number; errors?: string[]; detail?: string };
+      if (!res.ok) {
+        setCleanupError(data.detail ?? `Cleanup failed (${res.status})`);
+      } else {
+        setCleanupResult({ deleted_count: data.deleted_count ?? 0, deleted_mb: data.deleted_mb ?? 0, errors: data.errors ?? [] });
+      }
+    } catch (err) {
+      setCleanupError(err instanceof Error ? err.message : "Cleanup failed");
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
+
   // PDF form state
   const [pdfConfig, setPdfConfig] = useState<PDFImportConfig>({
     book_name: "Bhagavad Gita",
@@ -356,6 +381,28 @@ export default function AdminImportPage() {
             )}
           </div>
         )}
+
+        {/* Storage Maintenance */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 mb-8 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-800 mb-1">Storage Maintenance</h2>
+          <p className="text-sm text-slate-500 mb-4">Remove stale temp upload files and completed canonical import sources from the volume. Safe to run at any time when no import is in progress.</p>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleCleanupVolume}
+              disabled={cleanupRunning}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              {cleanupRunning ? "Cleaning…" : "🗑 Clean Temp Files"}
+            </button>
+            {cleanupResult && (
+              <span className="text-sm text-green-700">
+                ✓ Deleted {cleanupResult.deleted_count} file{cleanupResult.deleted_count !== 1 ? "s" : ""} ({cleanupResult.deleted_mb} MB freed)
+                {cleanupResult.errors.length > 0 && ` — ${cleanupResult.errors.length} error(s)`}
+              </span>
+            )}
+            {cleanupError && <span className="text-sm text-red-600">✗ {cleanupError}</span>}
+          </div>
+        </div>
 
         {/* Import Type Tabs */}
         <div className="mb-6 border-b border-slate-200">

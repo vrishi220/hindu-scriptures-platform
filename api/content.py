@@ -3050,7 +3050,7 @@ def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
 def admin_cleanup_volume(
     current_user: User = Depends(require_import_permission),
 ) -> dict:
-    """TEMPORARY one-time endpoint — cleans up stale canonical upload files from volume."""
+    """Admin endpoint — cleans up stale canonical upload temp files and completed import sources from volume."""
     tmp_dir = _canonical_upload_absolute_path(Path("imports") / "canonical-tmp")
     canonical_dir = _canonical_upload_absolute_path(Path("imports") / "canonical")
 
