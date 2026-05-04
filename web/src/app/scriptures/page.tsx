@@ -2672,6 +2672,8 @@ function ScripturesContent() {
     4: 4,
     5: 3,
   };
+  const renderStartTimeMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const renderCountRef = useRef(0);
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteEmailFromQuery = useMemo(() => {
@@ -10061,7 +10063,7 @@ function ScripturesContent() {
     }
   };
 
-  const resolvePreviewQuickEditFieldPath = (fieldName: string, label?: string): string | null => {
+  const resolvePreviewQuickEditFieldPath = useCallback((fieldName: string, label?: string): string | null => {
     const normalizedField = (fieldName || "").trim().toLowerCase();
     const normalizedLabel = (label || "").trim().toLowerCase();
     const combinedFieldContext = `${normalizedField} ${normalizedLabel}`.trim();
@@ -10159,9 +10161,9 @@ function ScripturesContent() {
     }
 
     return null;
-  };
+  }, []);
 
-  const resolvePreviewQuickEditNodeId = (block: BookPreviewBlock): number | null => {
+  const resolvePreviewQuickEditNodeId = useCallback((block: BookPreviewBlock): number | null => {
     if (typeof block.source_node_id === "number") {
       return block.source_node_id;
     }
@@ -10183,9 +10185,9 @@ function ScripturesContent() {
     }
 
     return null;
-  };
+  }, [bookPreviewArtifact?.book_id, bookPreviewArtifact?.preview_scope]);
 
-  const resolvePreviewQuickEditTargetType = (block: BookPreviewBlock): "node" | "book" => {
+  const resolvePreviewQuickEditTargetType = useCallback((block: BookPreviewBlock): "node" | "book" => {
     if (typeof block.source_node_id === "number") {
       return "node";
     }
@@ -10204,7 +10206,7 @@ function ScripturesContent() {
     }
 
     return "node";
-  };
+  }, [bookPreviewArtifact?.preview_scope]);
 
   const applyPreviewFieldValueToArtifact = (
     artifact: BookPreviewArtifact,
@@ -10628,10 +10630,10 @@ function ScripturesContent() {
     }
   };
 
-  const applySavedNodeToPreviewArtifact = (
+  function applySavedNodeToPreviewArtifact(
     artifact: BookPreviewArtifact,
     savedNode: NodeContent
-  ): BookPreviewArtifact => {
+  ): BookPreviewArtifact {
     const basic =
       savedNode.content_data?.basic && typeof savedNode.content_data.basic === "object"
         ? savedNode.content_data.basic
@@ -10732,7 +10734,7 @@ function ScripturesContent() {
         body: nextBody,
       },
     };
-  };
+  }
 
   const focusPreviewQuickEditFieldStart = (
     event: React.FocusEvent<HTMLTextAreaElement | HTMLInputElement>
@@ -15962,6 +15964,10 @@ function ScripturesContent() {
   };
 
   const previewBodyBlockElements = useMemo(() => {
+    const profilePreviewRender = process.env.NODE_ENV !== "production";
+    const previewMemoStartTimeMs = profilePreviewRender
+      ? (typeof performance !== "undefined" ? performance.now() : Date.now())
+      : 0;
     if (!bookPreviewArtifact) {
       return [] as ReactElement[];
     }
@@ -17804,6 +17810,16 @@ function ScripturesContent() {
       );
     });
 
+    if (profilePreviewRender) {
+      const previewMemoEndTimeMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsedMs = previewMemoEndTimeMs - previewMemoStartTimeMs;
+      if (elapsedMs >= 16) {
+        console.debug(
+          `[perf][scriptures] previewBodyBlockElements recomputed in ${elapsedMs.toFixed(1)}ms for ${visibleBlocks.length} block(s)`
+        );
+      }
+    }
+
     return elements;
   }, [
     bookPreviewArtifact,
@@ -17837,6 +17853,20 @@ function ScripturesContent() {
     addPreviewBlockToBasket,
     removePreviewNodeFromBasket,
   ]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+    renderCountRef.current += 1;
+    const renderEndTimeMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsedMs = renderEndTimeMs - renderStartTimeMs;
+    if (elapsedMs >= 16) {
+      console.debug(
+        `[perf][scriptures] render #${renderCountRef.current} committed in ${elapsedMs.toFixed(1)}ms`
+      );
+    }
+  });
 
   const previewQuickEditTarget = useMemo(() => {
     if (!bookPreviewArtifact) {

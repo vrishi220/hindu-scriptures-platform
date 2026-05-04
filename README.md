@@ -151,6 +151,23 @@ MEDIA_DIR=/data/media
 
 Without a persistent volume, files written to local service disk can be lost on deploy/restart.
 
+## Local Development Performance Note
+
+`scriptures/page.tsx` is a 17,500 line component that causes
+~2800ms UI lag in dev mode (`next dev`).
+
+For UI development work use:
+```bash
+cd web && npm run dev:fast
+```
+This gives production-like performance (112ms vs 2800ms).
+
+Use `npm run dev` only when you need hot-reload while
+actively editing component code.
+
+The permanent fix is the `scriptures/page.tsx` refactor
+documented in `REFACTOR_ROADMAP.md` — planned for Phase 2.
+
 ## Development Tips
 
 - The frontend uses SessionStorage to preserve scroll position and SearchParams for state persistence

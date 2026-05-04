@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import requests
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import Integer, cast, or_, text
+from sqlalchemy import Integer, cast, insert as sa_insert, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy.orm.attributes import flag_modified
@@ -4298,9 +4298,10 @@ def _import_canonical_json_v1(
         return work
 
     def _migrate_commentary_variants_to_entries(
-        content_node: ContentNode,
+        content_node_id: int,
         commentary_variants: list,
-    ) -> None:
+    ) -> list[dict]:
+        entries: list[dict] = []
         for idx, raw_variant in enumerate(commentary_variants):
             if not isinstance(raw_variant, dict):
                 continue
@@ -4318,27 +4319,28 @@ def _import_canonical_json_v1(
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
             field_value = raw_variant.get("field")
 
-            entry = CommentaryEntry(
-                node_id=content_node.id,
-                author_id=author.id,
-                work_id=work.id,
-                content_text=text_value,
-                language_code=language_code,
-                display_order=idx,
-                metadata_json={
+            entries.append({
+                "node_id": content_node_id,
+                "author_id": author.id,
+                "work_id": work.id,
+                "content_text": text_value,
+                "language_code": language_code,
+                "display_order": idx,
+                "metadata_json": {
                     "field": field_value,
                     "author_slug": author_slug,
                     "migrated_from": "commentary_variants",
                 },
-                created_by=current_user.id,
-                last_modified_by=current_user.id,
-            )
-            db.add(entry)
+                "created_by": current_user.id,
+                "last_modified_by": current_user.id,
+            })
+        return entries
 
     def _migrate_translation_variants_to_entries(
-        content_node: ContentNode,
+        content_node_id: int,
         translation_variants: list,
-    ) -> None:
+    ) -> list[dict]:
+        entries: list[dict] = []
         for idx, raw_variant in enumerate(translation_variants):
             if not isinstance(raw_variant, dict):
                 continue
@@ -4356,21 +4358,21 @@ def _import_canonical_json_v1(
             language_code = str(raw_variant.get("language") or "en").strip().lower() or "en"
             field_value = raw_variant.get("field")
 
-            entry = TranslationEntry(
-                node_id=content_node.id,
-                author_id=author.id,
-                work_id=work.id,
-                content_text=text_value,
-                language_code=language_code,
-                display_order=idx,
-                metadata_json={
+            entries.append({
+                "node_id": content_node_id,
+                "author_id": author.id,
+                "work_id": work.id,
+                "content_text": text_value,
+                "language_code": language_code,
+                "display_order": idx,
+                "metadata_json": {
                     "field": field_value,
                     "author_slug": author_slug,
                     "author_name": author_name,
                     "migrated_from": "translation_variants",
                 },
-            )
-            db.add(entry)
+            })
+        return entries
 
     def _resolve_or_create_word_meaning_author(author_name: str) -> WordMeaningAuthor:
         cached = word_meaning_author_cache.get(author_name)
@@ -4451,9 +4453,10 @@ def _import_canonical_json_v1(
         return work
 
     def _migrate_word_meanings_to_entries(
-        content_node: ContentNode,
+        content_node_id: int,
         raw_word_meanings_rows: list,
-    ) -> None:
+    ) -> list[dict]:
+        entries: list[dict] = []
         for idx, raw_row in enumerate(raw_word_meanings_rows):
             if not isinstance(raw_row, dict):
                 continue
@@ -4490,25 +4493,29 @@ def _import_canonical_json_v1(
                 author = _resolve_or_create_word_meaning_author(author_name)
                 work = _resolve_or_create_word_meaning_work(author, language_code)
 
-                entry = WordMeaningEntry(
-                    node_id=content_node.id,
-                    author_id=author.id,
-                    work_id=work.id,
-                    source_word=source_word,
-                    transliteration=transliteration or source_word,
-                    word_order=word_order,
-                    language_code=language_code,
-                    meaning_text=meaning_text,
-                    display_order=word_order - 1,
-                    metadata_json={
+                entries.append({
+                    "node_id": content_node_id,
+                    "author_id": author.id,
+                    "work_id": work.id,
+                    "source_word": source_word,
+                    "transliteration": transliteration or source_word,
+                    "word_order": word_order,
+                    "language_code": language_code,
+                    "meaning_text": meaning_text,
+                    "display_order": word_order - 1,
+                    "metadata_json": {
                         "author_slug": author_slug,
                         "migrated_from": "word_meanings.rows",
                     },
-                )
-                db.add(entry)
+                })
+        return entries
 
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
+
+    pending_commentary: list[dict] = []
+    pending_translation: list[dict] = []
+    pending_word_meanings: list[dict] = []
 
     while pending_nodes:
         progress_made = False
@@ -4645,11 +4652,17 @@ def _import_canonical_json_v1(
                 )
 
             if commentary_variants:
-                _migrate_commentary_variants_to_entries(content_node, commentary_variants)
+                pending_commentary.extend(
+                    _migrate_commentary_variants_to_entries(content_node.id, commentary_variants)
+                )
             if translation_variants:
-                _migrate_translation_variants_to_entries(content_node, translation_variants)
+                pending_translation.extend(
+                    _migrate_translation_variants_to_entries(content_node.id, translation_variants)
+                )
             if isinstance(word_meanings_rows, list) and word_meanings_rows:
-                _migrate_word_meanings_to_entries(content_node, word_meanings_rows)
+                pending_word_meanings.extend(
+                    _migrate_word_meanings_to_entries(content_node.id, word_meanings_rows)
+                )
 
             old_to_new_node_ids[node.node_id] = content_node.id
             nodes_created += 1
@@ -4689,6 +4702,24 @@ def _import_canonical_json_v1(
             )
 
         pending_nodes = still_pending
+
+    _t_nodes_done = time.perf_counter()
+    logger.info("[import] content_nodes: %d nodes in %.2fs", nodes_created, _t_nodes_done - _t_start)
+
+    if pending_commentary:
+        _t0 = time.perf_counter()
+        db.execute(sa_insert(CommentaryEntry), pending_commentary)
+        logger.info("[import] commentary_entries: %d rows in %.2fs", len(pending_commentary), time.perf_counter() - _t0)
+
+    if pending_translation:
+        _t0 = time.perf_counter()
+        db.execute(sa_insert(TranslationEntry), pending_translation)
+        logger.info("[import] translation_entries: %d rows in %.2fs", len(pending_translation), time.perf_counter() - _t0)
+
+    if pending_word_meanings:
+        _t0 = time.perf_counter()
+        db.execute(sa_insert(WordMeaningEntry), pending_word_meanings)
+        logger.info("[import] word_meaning_entries: %d rows in %.2fs", len(pending_word_meanings), time.perf_counter() - _t0)
 
     try:
         if progress_callback:
