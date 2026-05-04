@@ -3046,6 +3046,39 @@ def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
         return None
 
 
+@router.post("/import/admin-cleanup-volume", response_model=dict)
+def admin_cleanup_volume(
+    current_user: User = Depends(require_import_permission),
+) -> dict:
+    """TEMPORARY one-time endpoint — cleans up stale canonical upload files from volume."""
+    tmp_dir = _canonical_upload_absolute_path(Path("imports") / "canonical-tmp")
+    canonical_dir = _canonical_upload_absolute_path(Path("imports") / "canonical")
+
+    deleted_files = []
+    errors = []
+
+    for target_dir, suffixes in [(tmp_dir, {".part", ".meta.json", ".json"}), (canonical_dir, {".json"})]:
+        if not target_dir.exists():
+            continue
+        for f in target_dir.iterdir():
+            if f.is_file() and f.suffix in suffixes:
+                try:
+                    size = f.stat().st_size
+                    f.unlink(missing_ok=True)
+                    deleted_files.append({"path": str(f), "bytes": size})
+                except OSError as exc:
+                    errors.append(str(exc))
+
+    total_bytes = sum(d["bytes"] for d in deleted_files)
+    return {
+        "deleted_count": len(deleted_files),
+        "deleted_bytes": total_bytes,
+        "deleted_mb": round(total_bytes / 1024 / 1024, 2),
+        "errors": errors,
+        "media_dir": str(MEDIA_STORAGE.root_dir),
+    }
+
+
 @router.post("/import", response_model=ImportResponse, status_code=status.HTTP_202_ACCEPTED)
 def import_document(
     payload: dict,
