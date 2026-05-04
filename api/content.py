@@ -2962,6 +2962,29 @@ def _force_reimport(payload: dict) -> bool:
     return bool(isinstance(payload, dict) and payload.get("force_reimport") is True)
 
 
+def _cleanup_import_source_canonical_json(payload: dict) -> None:
+    canonical_json_url = payload.get("canonical_json_url") if isinstance(payload, dict) else None
+    if not isinstance(canonical_json_url, str) or not canonical_json_url.strip():
+        return
+
+    relative_path = _relative_media_path_from_url(canonical_json_url)
+    if relative_path is None:
+        return
+
+    parts = relative_path.parts
+    if len(parts) < 2 or parts[0] != "imports" or parts[1] != "canonical":
+        return
+
+    try:
+        MEDIA_STORAGE.delete_relative_path(relative_path)
+    except OSError as exc:
+        logger.warning(
+            "Failed deleting canonical source file after import %s: %s",
+            relative_path,
+            exc,
+        )
+
+
 def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
     db = SessionLocal()
     try:
@@ -2993,6 +3016,7 @@ def _run_import_job(job_id: str, payload: dict, user_id: int) -> None:
                 error=None,
                 progress_message="Import completed",
             )
+            _cleanup_import_source_canonical_json(payload)
         else:
             _set_import_job(
                 job_id,
