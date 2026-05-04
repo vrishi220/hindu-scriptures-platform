@@ -3098,9 +3098,20 @@ def init_canonical_upload(
     upload_id = uuid4().hex
     _, part_relative = _canonical_upload_relative_paths(upload_id)
     part_path = _canonical_upload_absolute_path(part_relative)
-    part_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(part_path, "wb") as part_file:
-        part_file.write(b"")
+    try:
+        part_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(part_path, "wb") as part_file:
+            part_file.write(b"")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"Cannot create upload staging area at {part_path.parent}: "
+                f"{type(exc).__name__}: {exc}. "
+                f"MEDIA_DIR={os.getenv('MEDIA_DIR', 'media')!r} "
+                f"resolved root={MEDIA_STORAGE.root_dir}"
+            ),
+        ) from exc
 
     state = {
         "upload_id": upload_id,
@@ -3109,7 +3120,16 @@ def init_canonical_upload(
         "next_index": 0,
         "received_bytes": 0,
     }
-    _write_canonical_upload_state(upload_id, state)
+    try:
+        _write_canonical_upload_state(upload_id, state)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"Cannot write upload state file: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        ) from exc
 
     return CanonicalUploadInitResponse(
         upload_id=upload_id,
