@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
 const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const refreshAccessToken = async (refreshToken: string) => {
   let response: Response;
@@ -46,6 +48,7 @@ export async function GET(
   const doStatusGet = (token?: string) =>
     fetch(target.toString(), {
       method: "GET",
+      cache: "no-store",
       headers: {
         Accept: "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -79,7 +82,10 @@ export async function GET(
           }
         }
 
-        const res = NextResponse.json(payload || {}, { status: response.status });
+        const res = NextResponse.json(payload || {}, {
+          status: response.status,
+          headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+        });
         res.cookies.set(ACCESS_TOKEN_COOKIE, refreshed.access_token, {
           httpOnly: true,
           sameSite: "lax",
@@ -101,15 +107,24 @@ export async function GET(
           : payload && typeof payload === "object" && "error" in payload
             ? (payload as { error?: string }).error
             : `Import job status failed (${response.status} ${response.statusText})`;
-      return NextResponse.json(payload || { detail }, { status: response.status });
+      return NextResponse.json(payload || { detail }, {
+        status: response.status,
+        headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+      });
     }
 
-    return NextResponse.json(payload, { status: response.status });
+    return NextResponse.json(payload, {
+      status: response.status,
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Upstream request failed";
     return NextResponse.json(
       { detail: `Import job status request could not reach backend: ${message}` },
-      { status: 502 }
+      {
+        status: 502,
+        headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
+      }
     );
   }
 }

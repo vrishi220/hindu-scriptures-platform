@@ -3,6 +3,7 @@ import random
 import re
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Callable, Literal
 from urllib.parse import parse_qsl, urlencode, urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import requests
@@ -3011,7 +3012,6 @@ def import_document(
 )
 def start_import_job(
     payload: dict,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_import_permission),
 ) -> ImportJobAcceptedResponse:
@@ -3043,7 +3043,12 @@ def start_import_job(
     db.add(job)
     db.commit()
 
-    background_tasks.add_task(_run_import_job, job_id, payload, current_user.id)
+    threading.Thread(
+        target=_run_import_job,
+        args=(job_id, payload, current_user.id),
+        daemon=True,
+        name=f"import-job-{job_id}",
+    ).start()
     return ImportJobAcceptedResponse(job_id=job_id, status="queued")
 
 
@@ -3688,6 +3693,8 @@ def _import_canonical_json_v1(
     pending_nodes = list(canonical.nodes)
     nodes_created = 0
     total_nodes = len(pending_nodes)
+    if progress_callback:
+        progress_callback("Preparing import", 0, total_nodes)
     variant_authors_lookup = book.variant_authors if isinstance(book.variant_authors, dict) else {}
     commentary_author_cache: dict[str, CommentaryAuthor] = {}
     commentary_work_cache: dict[tuple[int, str], CommentaryWork] = {}
@@ -3757,6 +3764,8 @@ def _import_canonical_json_v1(
     # Pre-scan canonical nodes and preload author/work records to avoid per-row queries
     # during variant and word-meanings migration.
     _t_prescan_start = time.perf_counter()
+    if progress_callback:
+        progress_callback("Scanning import metadata", 0, total_nodes)
     required_commentary_author_names: set[str] = set()
     required_translation_author_names: set[str] = set()
     required_word_meaning_author_names: set[str] = set()
@@ -3824,6 +3833,8 @@ def _import_canonical_json_v1(
                 required_word_meaning_author_language_pairs.add((author_name, language_code))
 
     _t_preload_start = time.perf_counter()
+    if progress_callback:
+        progress_callback("Preparing author caches", 0, total_nodes)
 
     if required_commentary_author_names:
         existing_commentary_authors = (
@@ -4342,7 +4353,8 @@ def _import_canonical_json_v1(
             nodes_created += 1
             progress_made = True
 
-            if progress_callback and (nodes_created % 100 == 0 or nodes_created == total_nodes):
+            progress_interval = 1 if total_nodes <= 100 else 25 if total_nodes <= 500 else 100
+            if progress_callback and (nodes_created % progress_interval == 0 or nodes_created == total_nodes):
                 progress_callback("Importing nodes", nodes_created, total_nodes)
 
             media_items = node.media_items if isinstance(node.media_items, list) else []

@@ -12339,6 +12339,7 @@ function ScripturesContent() {
 
         const statusResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
           method: "GET",
+          cache: "no-store",
           credentials: "include",
           headers: { Accept: "application/json" },
         });
@@ -12654,6 +12655,8 @@ function ScripturesContent() {
 
       const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
       setImportProgressMessage(queuedMessage);
+      setImportProgressCurrent(null);
+      setImportProgressTotal(null);
       writePersistedImportJobState({
         jobId,
         status: startResult?.status || "queued",
@@ -12690,7 +12693,11 @@ function ScripturesContent() {
     if (files.length === 0 || !canImport) return;
     setBulkRunning(true);
     setBulkFileResults(
-      files.map((f) => ({ name: f.name, status: "pending", message: "" }))
+      files.map((f) => ({
+        name: f.name,
+        status: "pending",
+        message: "Waiting for previous files…",
+      }))
     );
 
     type BulkJobStatus = {
@@ -12702,13 +12709,20 @@ function ScripturesContent() {
       detail?: string;
       result?: { success?: boolean; error?: string; nodes_created?: number };
     };
+    const retryableStatuses = new Set([429, 500, 502, 503, 504]);
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
     const pollBulkImportJobUntilDone = async (index: number, jobId: string, startedAt: number) => {
+      let hasPolledOnce = false;
       while (true) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (hasPolledOnce) {
+          await pause(750);
+        }
+        hasPolledOnce = true;
         try {
           const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
             method: "GET",
+            cache: "no-store",
             credentials: "include",
             headers: { Accept: "application/json" },
           });
@@ -12757,6 +12771,7 @@ function ScripturesContent() {
               : null;
           updateBulkRow(index, {
             status: "uploading",
+            message: jobStatus === "queued" ? "Queued on server" : jobMsg,
             progressMessage: jobMsg,
             progressCurrent: jobCurrent,
             progressTotal: jobTotal,
@@ -12827,25 +12842,18 @@ function ScripturesContent() {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      // Parse the full JSON locally (CPU only, no network) to reliably extract
-      // book_name / book_code before touching the upload API.
-      let payload: Record<string, unknown> | null = null;
-      try {
-        payload = JSON.parse(await file.text()) as Record<string, unknown>;
-      } catch {
-        updateBulkRow(i, { status: "error", message: "Invalid JSON — not an HSP file" });
-        continue;
-      }
-
-      // Validate it's actually an HSP book JSON export.
-      if (payload?.schema_version !== "hsp-book-json-v1") {
+      // Read only the first 16 KB to extract metadata — schema_version, book_name, book_code
+      // always appear near the top of an HSP JSON file. Avoids loading multi-MB files into memory.
+      const headerText = await file.slice(0, 16384).text();
+      const schemaMatch = /"schema_version"\s*:\s*"([^"]+)"/.exec(headerText);
+      if (!schemaMatch || schemaMatch[1] !== "hsp-book-json-v1") {
         updateBulkRow(i, { status: "error", message: "Not an HSP book JSON (missing schema_version)" });
         continue;
       }
-
-      const bookObj = payload?.book as Record<string, unknown> | undefined;
-      const bookName = typeof bookObj?.book_name === "string" ? bookObj.book_name : file.name;
-      const bookCode = typeof bookObj?.book_code === "string" ? bookObj.book_code : null;
+      const bookNameMatch = /"book_name"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(headerText);
+      const bookCodeMatch = /"book_code"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(headerText);
+      const bookName = bookNameMatch ? bookNameMatch[1] : file.name;
+      const bookCode = bookCodeMatch ? bookCodeMatch[1] : null;
 
       // Ask the API whether a book with this name/code already exists.
       // Uses exact-match params — no fuzzy scoring, no false negatives.
@@ -12891,19 +12899,33 @@ function ScripturesContent() {
           progressTotal: null,
         });
 
-        const initResponse = await fetch("/api/content/import/canonical-uploads/init", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
-        });
-        const initRaw = await initResponse.text();
+        let initResponse: Response | null = null;
+        let initRaw = "";
+        for (let attempt = 0; attempt < 3; attempt++) {
+          initResponse = await fetch("/api/content/import/canonical-uploads/init", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+          });
+          initRaw = await initResponse.text();
+          if (initResponse.ok || !retryableStatuses.has(initResponse.status) || attempt === 2) {
+            break;
+          }
+          updateBulkRow(i, {
+            progressMessage: `Preparing upload… retry ${attempt + 2}/3`,
+            progressCurrent: null,
+            progressTotal: null,
+          });
+          await pause(400 * (attempt + 1));
+        }
         type BulkUploadInit = { upload_id?: string; chunk_size_bytes?: number; max_size_bytes?: number; detail?: string; error?: string };
         let initResult: BulkUploadInit | null = null;
         try { initResult = JSON.parse(initRaw) as BulkUploadInit; } catch { /* */ }
 
-        if (!initResponse.ok) {
-          const msg = initResult?.detail || initResult?.error || `Upload init failed (${initResponse.status})`;
+        if (!initResponse || !initResponse.ok) {
+          const statusCode = initResponse?.status ?? 0;
+          const msg = initResult?.detail || initResult?.error || `Upload init failed (${statusCode})`;
           updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
           continue;
         }
@@ -12932,17 +12954,31 @@ function ScripturesContent() {
           chunkForm.append("index", String(chunkIndex));
           chunkForm.append("chunk", new File([chunkBlob], `${file.name}.part`, { type: "application/octet-stream" }));
 
-          const chunkResponse = await fetch(
-            `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
-            { method: "POST", credentials: "include", body: chunkForm }
-          );
-          const chunkRaw = await chunkResponse.text();
+          let chunkResponse: Response | null = null;
+          let chunkRaw = "";
+          for (let attempt = 0; attempt < 3; attempt++) {
+            chunkResponse = await fetch(
+              `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
+              { method: "POST", credentials: "include", body: chunkForm }
+            );
+            chunkRaw = await chunkResponse.text();
+            if (chunkResponse.ok || !retryableStatuses.has(chunkResponse.status) || attempt === 2) {
+              break;
+            }
+            updateBulkRow(i, {
+              progressMessage: `Uploading chunks… retry ${attempt + 2}/3`,
+              progressCurrent: chunkIndex,
+              progressTotal: totalChunks,
+            });
+            await pause(300 * (attempt + 1));
+          }
           type BulkUploadChunk = { detail?: string; error?: string };
           let chunkResult: BulkUploadChunk | null = null;
           try { chunkResult = JSON.parse(chunkRaw) as BulkUploadChunk; } catch { /* */ }
 
-          if (!chunkResponse.ok) {
-            const msg = chunkResult?.detail || chunkResult?.error || `Chunk upload failed (${chunkResponse.status})`;
+          if (!chunkResponse || !chunkResponse.ok) {
+            const statusCode = chunkResponse?.status ?? 0;
+            const msg = chunkResult?.detail || chunkResult?.error || `Chunk upload failed (${statusCode})`;
             updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
             chunkFailed = true;
             break;
@@ -13143,6 +13179,8 @@ function ScripturesContent() {
 
       const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
       setImportProgressMessage(queuedMessage);
+      setImportProgressCurrent(null);
+      setImportProgressTotal(null);
       writePersistedImportJobState({
         jobId,
         status: startResult?.status || "queued",
@@ -18835,6 +18873,46 @@ function ScripturesContent() {
           )}
           {canImport && bulkFileResults.length > 0 && (
             <div className="mt-2 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+              <div className="border-b border-zinc-100 bg-zinc-50 px-3 py-2">
+                {(() => {
+                  const totalCount = bulkFileResults.length;
+                  const completedCount = bulkFileResults.filter(
+                    (r) => r.status === "success" || r.status === "skipped" || r.status === "error"
+                  ).length;
+                  const activeIndex = bulkFileResults.findIndex((r) => r.status === "uploading");
+                  const activeRow = activeIndex >= 0 ? bulkFileResults[activeIndex] : null;
+                  const summaryMessage = bulkRunning
+                    ? activeRow
+                      ? `Book ${activeIndex + 1} of ${totalCount}: ${activeRow.name}`
+                      : "Preparing bulk import..."
+                    : `${completedCount} of ${totalCount} books finished`;
+                  const summaryDetail = activeRow?.progressMessage || activeRow?.message || null;
+                  const summaryWidth = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-zinc-700">
+                        <span>{summaryMessage}</span>
+                        <span className="text-zinc-500">{completedCount} / {totalCount}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+                        <div
+                          className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                          style={{
+                            width: `${Math.max(
+                              bulkRunning && totalCount > 0 && completedCount === 0 ? 2 : 0,
+                              Math.min(100, summaryWidth)
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      {summaryDetail ? (
+                        <div className="mt-2 text-[11px] text-zinc-500">{summaryDetail}</div>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </div>
               {!bulkRunning && (
                 <div className="flex gap-4 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-xs font-medium">
                   <span className="text-emerald-600">✓ {bulkFileResults.filter((r) => r.status === "success").length} imported</span>
@@ -18854,7 +18932,7 @@ function ScripturesContent() {
                 {bulkFileResults.map((r, idx) => {
                   const icon = r.status === "success" ? "✅" : r.status === "skipped" ? "⏭" : r.status === "error" ? "❌" : "⏳";
                   const elapsed = r.elapsedMs !== undefined ? (r.elapsedMs >= 1000 ? `${(r.elapsedMs / 1000).toFixed(1)}s` : `${r.elapsedMs}ms`) : null;
-                  const isActive = r.status === "uploading" || r.status === "pending";
+                  const isActive = r.status === "uploading";
                   const hasProgress = typeof r.progressCurrent === "number" && typeof r.progressTotal === "number" && r.progressTotal > 0;
                   const isWaitingAtZero =
                     !hasProgress &&
@@ -18864,7 +18942,7 @@ function ScripturesContent() {
                       <div className="flex items-center gap-2">
                         <span className="shrink-0">{icon}</span>
                         <span className="min-w-0 flex-1 truncate font-medium text-zinc-800">{r.name}</span>
-                        {isActive && r.progressMessage ? (
+                        {r.progressMessage ? (
                           <span className="shrink-0 text-zinc-500">{r.progressMessage}</span>
                         ) : (
                           <span className="shrink-0 text-zinc-500">{r.message}</span>
