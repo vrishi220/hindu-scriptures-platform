@@ -180,6 +180,10 @@ test.describe('preview Edit node button visibility', () => {
   test('Edit node button is visible in preview blocks for an editor', async ({ page }) => {
     await mockBaseRoutes(page, 'editor');
 
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem('scriptures.preview.editMode', '1');
+    });
+
     await page.goto(`/scriptures?book=${BOOK_ID}&preview=book`);
     await page.waitForURL(/preview=book/, { timeout: 10000 });
 

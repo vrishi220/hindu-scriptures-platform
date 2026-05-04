@@ -12801,7 +12801,7 @@ function ScripturesContent() {
         const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
 
         // ── Phase 2: upload chunks ───────────────────────────────────────────
-        updateBulkRow(i, { progressMessage: `Uploading… (0 / ${totalChunks} chunks)`, progressCurrent: 0, progressTotal: totalChunks });
+        updateBulkRow(i, { progressMessage: "Uploading chunks…", progressCurrent: 0, progressTotal: totalChunks });
 
         let chunkFailed = false;
         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
@@ -12828,7 +12828,7 @@ function ScripturesContent() {
             break;
           }
 
-          updateBulkRow(i, { progressMessage: `Uploading… (${chunkIndex + 1} / ${totalChunks} chunks)`, progressCurrent: chunkIndex + 1 });
+          updateBulkRow(i, { progressMessage: "Uploading chunks…", progressCurrent: chunkIndex + 1 });
         }
         if (chunkFailed) continue;
 
