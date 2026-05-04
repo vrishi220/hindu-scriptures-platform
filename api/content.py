@@ -130,7 +130,7 @@ MEDIA_STORAGE = get_media_storage_from_env()
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "50"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_MEDIA_TYPES = {"audio", "video", "image", "link"}
-IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "300"))
+IMPORT_JOB_STALE_AFTER_SECONDS = int(os.getenv("IMPORT_JOB_STALE_AFTER_SECONDS", "1800"))
 IMPORT_CANONICAL_UPLOAD_MAX_MB = int(os.getenv("IMPORT_CANONICAL_UPLOAD_MAX_MB", "200"))
 IMPORT_CANONICAL_UPLOAD_MAX_BYTES = IMPORT_CANONICAL_UPLOAD_MAX_MB * 1024 * 1024
 IMPORT_CANONICAL_CHUNK_MAX_BYTES = int(os.getenv("IMPORT_CANONICAL_CHUNK_MAX_BYTES", str(4 * 1024 * 1024)))
@@ -611,29 +611,6 @@ class ImportJobStatusResponse(BaseModel):
     progress_total: int | None = None
     error: str | None = None
     result: ImportResponse | None = None
-
-
-class DeleteBookJobResult(BaseModel):
-    success: bool
-    message: str | None = None
-    deleted_book_id: int | None = None
-
-
-class DeleteBookJobAcceptedResponse(BaseModel):
-    job_id: str
-    status: Literal["queued", "running"]
-
-
-class DeleteBookJobStatusResponse(BaseModel):
-    job_id: str
-    status: Literal["queued", "running", "succeeded", "failed"]
-    created_at: str
-    updated_at: str
-    progress_message: str | None = None
-    progress_current: int | None = None
-    progress_total: int | None = None
-    error: str | None = None
-    result: DeleteBookJobResult | None = None
 
 
 class CanonicalUploadInitResponse(BaseModel):
@@ -2200,7 +2177,6 @@ def delete_book(
 
     try:
         message = _delete_book_rows(db, book_id)
-        db.commit()
         return {"message": message}
     except Exception as exc:
         db.rollback()
@@ -2208,93 +2184,6 @@ def delete_book(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Book delete failed: {str(exc)}",
         ) from exc
-
-
-@router.post(
-    "/books/{book_id}/delete-jobs",
-    response_model=DeleteBookJobAcceptedResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-def start_delete_book_job(
-    book_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> DeleteBookJobAcceptedResponse:
-    book = db.query(Book).filter(Book.id == book_id).first()
-    if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-
-    _ensure_book_delete_access(current_user, book)
-
-    duplicate_job = _find_inflight_delete_book_job(db, book_id)
-    if duplicate_job:
-        duplicate_status = "running" if duplicate_job.status == "running" else "queued"
-        return DeleteBookJobAcceptedResponse(job_id=duplicate_job.job_id, status=duplicate_status)
-
-    job_id = str(uuid4())
-    job = ImportJob(
-        job_id=job_id,
-        status="queued",
-        requested_by=current_user.id,
-        canonical_json_url=None,
-        canonical_book_code=book.book_code,
-        payload_json={
-            "job_type": "delete_book",
-            "book_id": book_id,
-            "book_name": book.book_name,
-        },
-        progress_message="Queued",
-        progress_current=0,
-        progress_total=3,
-        error=None,
-        result_json=None,
-    )
-    db.add(job)
-    db.commit()
-
-    threading.Thread(
-        target=_run_delete_book_job,
-        args=(job_id, current_user.id, book_id),
-        daemon=True,
-        name=f"delete-book-job-{job_id}",
-    ).start()
-
-    return DeleteBookJobAcceptedResponse(job_id=job_id, status="queued")
-
-
-@router.get("/books/delete-jobs/{job_id}", response_model=DeleteBookJobStatusResponse)
-def get_delete_book_job_status(
-    job_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> DeleteBookJobStatusResponse:
-    job = db.query(ImportJob).filter(ImportJob.job_id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delete job not found")
-
-    job_payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    if job_payload.get("job_type") != "delete_book":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delete job not found")
-
-    if job.requested_by != current_user.id and not (
-        current_user.role == "admin" or (current_user.permissions or {}).get("can_admin")
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-    _mark_import_job_stale_if_needed(job, db)
-
-    job_status = job.status if job.status in {"queued", "running", "succeeded", "failed"} else "failed"
-    return DeleteBookJobStatusResponse(
-        job_id=job.job_id,
-        status=job_status,
-        created_at=_to_iso(job.created_at),
-        updated_at=_to_iso(job.updated_at),
-        progress_message=job.progress_message,
-        progress_current=job.progress_current,
-        progress_total=job.progress_total,
-        error=job.error,
-        result=_job_result_to_delete_book_response(job),
-    )
 
 
 @router.get("/books/{book_id}/shares", response_model=list[BookSharePublic])
@@ -3194,15 +3083,6 @@ def _job_result_to_import_response(job: ImportJob) -> ImportResponse | None:
         return None
 
 
-def _job_result_to_delete_book_response(job: ImportJob) -> DeleteBookJobResult | None:
-    if not isinstance(job.result_json, dict):
-        return None
-    try:
-        return DeleteBookJobResult.model_validate(job.result_json)
-    except Exception:
-        return None
-
-
 def _ensure_book_delete_access(current_user: User, book: Book) -> None:
     ensure_book_owner_or_edit_any(
         current_user,
@@ -3210,142 +3090,54 @@ def _ensure_book_delete_access(current_user: User, book: Book) -> None:
         detail="Only the book owner can delete this book",
     )
 
-    if _book_visibility(book) == BOOK_VISIBILITY_PUBLIC and not _user_can_edit_any(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Public books cannot be deleted. Unpublish the book first.",
-        )
-
 
 def _delete_book_rows(db: Session, book_id: int) -> str:
-    # Large books can have hundreds of thousands of relational rows hanging off
-    # node_id. Deleting these first keeps the final book delete from stalling on
-    # deep cascade work.
     db.execute(
         text(
-            """
-            DELETE FROM word_meaning_entries
-            USING content_nodes
-            WHERE word_meaning_entries.node_id = content_nodes.id
-              AND content_nodes.book_id = :book_id
-            """
+            "DELETE FROM word_meaning_entries "
+            "WHERE node_id IN (SELECT id FROM content_nodes WHERE book_id = :bid)"
         ),
-        {"book_id": book_id},
+        {"bid": book_id},
     )
     db.execute(
         text(
-            """
-            DELETE FROM translation_entries
-            USING content_nodes
-            WHERE translation_entries.node_id = content_nodes.id
-              AND content_nodes.book_id = :book_id
-            """
+            "DELETE FROM commentary_entries "
+            "WHERE node_id IN (SELECT id FROM content_nodes WHERE book_id = :bid)"
         ),
-        {"book_id": book_id},
+        {"bid": book_id},
     )
     db.execute(
         text(
-            """
-            DELETE FROM commentary_entries
-            USING content_nodes
-            WHERE commentary_entries.node_id = content_nodes.id
-              AND content_nodes.book_id = :book_id
-            """
+            "DELETE FROM translation_entries "
+            "WHERE node_id IN (SELECT id FROM content_nodes WHERE book_id = :bid)"
         ),
-        {"book_id": book_id},
+        {"bid": book_id},
     )
-    db.query(ContentNode).filter(ContentNode.book_id == book_id).delete(synchronize_session=False)
-    deleted_books = db.query(Book).filter(Book.id == book_id).delete(synchronize_session=False)
-    return "Already deleted" if deleted_books == 0 else "Deleted"
-
-
-def _find_inflight_delete_book_job(db: Session, book_id: int) -> ImportJob | None:
-    return (
-        db.query(ImportJob)
-        .filter(
-            ImportJob.status.in_(["queued", "running"]),
-            ImportJob.payload_json["job_type"].astext == "delete_book",
-            cast(ImportJob.payload_json["book_id"].astext, Integer) == book_id,
-        )
-        .order_by(ImportJob.created_at.asc())
-        .first()
+    db.execute(
+        text(
+            "DELETE FROM media_files "
+            "WHERE node_id IN (SELECT id FROM content_nodes WHERE book_id = :bid)"
+        ),
+        {"bid": book_id},
     )
-
-
-def _run_delete_book_job(job_id: str, user_id: int, book_id: int) -> None:
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            _set_import_job(job_id, status="failed", error="User not found", result=None)
-            return
-
-        _set_import_job(
-            job_id,
-            status="running",
-            error=None,
-            progress_message="Deleting book rows",
-            progress_current=1,
-            progress_total=3,
-        )
-
-        try:
-            book = db.query(Book).filter(Book.id == book_id).first()
-            if not book:
-                _set_import_job(
-                    job_id,
-                    status="succeeded",
-                    error=None,
-                    progress_message="Book already deleted",
-                    progress_current=3,
-                    progress_total=3,
-                    result=DeleteBookJobResult(
-                        success=True,
-                        message="Already deleted",
-                        deleted_book_id=book_id,
-                    ),
-                )
-                return
-
-            _ensure_book_delete_access(user, book)
-            delete_message = _delete_book_rows(db, book_id)
-            db.commit()
-            _set_import_job(
-                job_id,
-                status="succeeded",
-                error=None,
-                progress_message="Book delete completed",
-                progress_current=3,
-                progress_total=3,
-                result=DeleteBookJobResult(
-                    success=True,
-                    message=delete_message,
-                    deleted_book_id=book_id,
-                ),
-            )
-        except HTTPException as exc:
-            db.rollback()
-            _set_import_job(
-                job_id,
-                status="failed",
-                error=str(exc.detail),
-                progress_message=str(exc.detail),
-                progress_current=3,
-                progress_total=3,
-            )
-        except Exception as exc:
-            db.rollback()
-            message = f"Book delete failed: {str(exc)}"
-            _set_import_job(
-                job_id,
-                status="failed",
-                error=message,
-                progress_message=message,
-                progress_current=3,
-                progress_total=3,
-            )
-    finally:
-        db.close()
+    db.execute(
+        text(
+            "DELETE FROM provenance_records "
+            "WHERE target_node_id IN (SELECT id FROM content_nodes WHERE book_id = :bid)"
+        ),
+        {"bid": book_id},
+    )
+    db.execute(
+        text("DELETE FROM content_nodes WHERE book_id = :bid"),
+        {"bid": book_id},
+    )
+    result = db.execute(
+        text("DELETE FROM books WHERE id = :bid"),
+        {"bid": book_id},
+    )
+    db.commit()
+    deleted_count = int(result.rowcount or 0)
+    return "Already deleted" if deleted_count == 0 else "Deleted"
 
 
 @router.post("/import/admin-cleanup-volume", response_model=dict)
@@ -4513,23 +4305,35 @@ def _import_canonical_json_v1(
     if progress_callback:
         progress_callback("Validated canonical payload", 0, total_nodes)
 
+    node_insert_chunk_size = 1000
     pending_commentary: list[dict] = []
     pending_translation: list[dict] = []
     pending_word_meanings: list[dict] = []
+    pending_media_files: list[dict] = []
 
-    while pending_nodes:
-        progress_made = False
-        still_pending: list = []
+    # Group nodes by level_order so parents are fully inserted (and mapped) before
+    # any child level is processed.  This guarantees old_to_new_node_ids contains
+    # every parent mapping before the next level resolves its parent_node_id.
+    nodes_by_level: dict[int, list] = {}
+    for node in pending_nodes:
+        lo = level_lookup.get(node.level_name, node.level_order)
+        if not isinstance(lo, int) or lo <= 0:
+            lo = 1
+        nodes_by_level.setdefault(lo, []).append(node)
+
+    for _level_key in sorted(nodes_by_level.keys()):
+        level_nodes = nodes_by_level[_level_key]
 
         if progress_callback:
             progress_callback("Importing nodes", nodes_created, total_nodes)
 
-        for node in pending_nodes:
-            parent_id = node.parent_node_id
-            if isinstance(parent_id, int) and parent_id not in old_to_new_node_ids:
-                still_pending.append(node)
-                continue
+        level_insert_payloads: list[dict] = []
+        level_old_node_ids: list[int] = []
+        level_node_assets: list[tuple[int, list, list, list, list]] = []
+        prepared_count = 0
 
+        for node in level_nodes:
+            parent_id = node.parent_node_id
             referenced_id = node.referenced_node_id
             resolved_reference_id = (
                 old_to_new_node_ids.get(referenced_id)
@@ -4608,14 +4412,36 @@ def _import_canonical_json_v1(
                 "last_modified_by": current_user.id,
             }
 
-            content_node: ContentNode | None = None
+            level_insert_payloads.append(node_insert_payload)
+            level_old_node_ids.append(node.node_id)
+            media_items = node.media_items if isinstance(node.media_items, list) else []
+            level_node_assets.append(
+                (node.node_id, commentary_variants, translation_variants, word_meanings_rows, media_items)
+            )
+            prepared_count += 1
+
+            if progress_callback and prepared_count % 250 == 0:
+                progress_callback(
+                    "Preparing node batch",
+                    nodes_created + prepared_count,
+                    total_nodes,
+                )
+
+        inserted_count = 0
+        for chunk_start in range(0, len(level_insert_payloads), node_insert_chunk_size):
+            chunk = level_insert_payloads[chunk_start:chunk_start + node_insert_chunk_size]
+            chunk_old_ids = level_old_node_ids[chunk_start:chunk_start + node_insert_chunk_size]
+            inserted_chunk_ids: list[int] = []
             for attempt in range(2):
                 try:
-                    with db.begin_nested():
-                        candidate = ContentNode(**node_insert_payload)
-                        db.add(candidate)
-                        db.flush()
-                    content_node = candidate
+                    stmt = sa_insert(ContentNode).values(chunk).returning(ContentNode.id)
+                    result = db.execute(stmt)
+                    inserted_chunk_ids = [row[0] for row in result.fetchall()]
+                    if len(inserted_chunk_ids) != len(chunk):
+                        raise RuntimeError(
+                            "Bulk insert mismatch for content nodes "
+                            f"(expected {len(chunk)}, got {len(inserted_chunk_ids)})"
+                        )
                     break
                 except IntegrityError as exc:
                     if attempt == 0 and _is_content_nodes_pk_violation(exc):
@@ -4641,37 +4467,36 @@ def _import_canonical_json_v1(
                         error=f"Failed to import canonical JSON: {str(exc)}",
                     )
 
-            if content_node is None:
-                db.rollback()
-                return ImportResponse(
-                    success=False,
-                    book_id=book.id if book and book.id else None,
-                    nodes_created=0,
-                    warnings=warnings,
-                    error="Failed to insert content node",
+            # Update the mapping immediately after each chunk so that nodes in later
+            # chunks of the same level can resolve referenced_node_id cross-chunk.
+            for old_node_id, new_node_id in zip(chunk_old_ids, inserted_chunk_ids):
+                old_to_new_node_ids[old_node_id] = new_node_id
+
+            inserted_count += len(inserted_chunk_ids)
+
+            if progress_callback:
+                progress_callback(
+                    "Inserting node batch",
+                    nodes_created + inserted_count,
+                    total_nodes,
                 )
+
+        for old_node_id, commentary_variants, translation_variants, word_meanings_rows, media_items in level_node_assets:
+            new_node_id = old_to_new_node_ids[old_node_id]
 
             if commentary_variants:
                 pending_commentary.extend(
-                    _migrate_commentary_variants_to_entries(content_node.id, commentary_variants)
+                    _migrate_commentary_variants_to_entries(new_node_id, commentary_variants)
                 )
             if translation_variants:
                 pending_translation.extend(
-                    _migrate_translation_variants_to_entries(content_node.id, translation_variants)
+                    _migrate_translation_variants_to_entries(new_node_id, translation_variants)
                 )
             if isinstance(word_meanings_rows, list) and word_meanings_rows:
                 pending_word_meanings.extend(
-                    _migrate_word_meanings_to_entries(content_node.id, word_meanings_rows)
+                    _migrate_word_meanings_to_entries(new_node_id, word_meanings_rows)
                 )
 
-            old_to_new_node_ids[node.node_id] = content_node.id
-            nodes_created += 1
-            progress_made = True
-
-            if progress_callback:
-                progress_callback("Importing nodes", nodes_created, total_nodes)
-
-            media_items = node.media_items if isinstance(node.media_items, list) else []
             for media in media_items:
                 media_type = (media.media_type or "").strip().lower()
                 media_url = (media.url or "").strip()
@@ -4679,29 +4504,19 @@ def _import_canonical_json_v1(
                     continue
                 if media_type not in ALLOWED_MEDIA_TYPES:
                     continue
-                media_file = MediaFile(
-                    node_id=content_node.id,
-                    media_type=media_type,
-                    url=media_url,
-                    metadata_json=media.metadata if isinstance(media.metadata, dict) else {},
+                pending_media_files.append(
+                    {
+                        "node_id": new_node_id,
+                        "media_type": media_type,
+                        "url": media_url,
+                        "metadata_json": media.metadata if isinstance(media.metadata, dict) else {},
+                    }
                 )
-                db.add(media_file)
 
-        if not progress_made:
-            unresolved_ids = [str(node.node_id) for node in still_pending]
-            db.rollback()
-            return ImportResponse(
-                success=False,
-                book_id=book.id if book and book.id else None,
-                nodes_created=0,
-                warnings=warnings,
-                error=(
-                    "Invalid node hierarchy in canonical JSON. "
-                    f"Could not resolve parent linkage for node_ids: {', '.join(unresolved_ids)}"
-                ),
-            )
+        nodes_created += len(level_nodes)
 
-        pending_nodes = still_pending
+        if progress_callback:
+            progress_callback("Importing nodes", nodes_created, total_nodes)
 
     _t_nodes_done = time.perf_counter()
     logger.info("[import] content_nodes: %d nodes in %.2fs", nodes_created, _t_nodes_done - _t_start)
@@ -4720,6 +4535,11 @@ def _import_canonical_json_v1(
         _t0 = time.perf_counter()
         db.execute(sa_insert(WordMeaningEntry), pending_word_meanings)
         logger.info("[import] word_meaning_entries: %d rows in %.2fs", len(pending_word_meanings), time.perf_counter() - _t0)
+
+    if pending_media_files:
+        _t0 = time.perf_counter()
+        db.execute(sa_insert(MediaFile), pending_media_files)
+        logger.info("[import] media_files: %d rows in %.2fs", len(pending_media_files), time.perf_counter() - _t0)
 
     try:
         if progress_callback:

@@ -294,19 +294,11 @@ type ImportJobStart = {
   error?: string;
 };
 
-type DeleteBookJobStatus = {
-  job_id?: string;
-  status?: ImportJobLifecycleStatus;
-  progress_message?: string | null;
-  progress_current?: number | null;
-  progress_total?: number | null;
-  detail?: string;
-  error?: string;
-  result?: {
-    success?: boolean;
-    message?: string;
-    deleted_book_id?: number;
-  } | null;
+type ImportResultDialogState = {
+  bookName: string;
+  status: "completed" | "error";
+  nodesCreated: number | null;
+  reason: string;
 };
 
 type CommentaryEntry = {
@@ -2855,7 +2847,7 @@ function ScripturesContent() {
   const [showImportUrlInput, setShowImportUrlInput] = useState(false);
   const [importUrl, setImportUrl] = useState("");
   const [appendImportToExisting, setAppendImportToExisting] = useState(false);
-  const [importSuccessResult, setImportSuccessResult] = useState<{ nodesCreated: number | null; warnings: string[] } | null>(null);
+  const [importResultDialog, setImportResultDialog] = useState<ImportResultDialogState | null>(null);
   const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
   const [pendingImportBookName, setPendingImportBookName] = useState<string | null>(null);
   const [pendingImportBookCode, setPendingImportBookCode] = useState<string | null>(null);
@@ -12304,6 +12296,7 @@ function ScripturesContent() {
       options?: {
         canonicalJsonUrl?: string | null;
         showResumeMessage?: boolean;
+        bookName?: string | null;
       }
     ) => {
       if (!jobId) {
@@ -12346,6 +12339,10 @@ function ScripturesContent() {
       const pollIntervalMs = 2000;
       const maxPollAttempts = 900;
       let finalResult: ImportResult | null = null;
+      const resolvedBookName =
+        typeof options?.bookName === "string" && options.bookName.trim()
+          ? options.bookName.trim()
+          : "Book";
 
       for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
         if (importPollingRunIdRef.current !== runId) {
@@ -12387,7 +12384,12 @@ function ScripturesContent() {
           setImportProgressTotal(null);
           const fallbackDetail =
             statusRawText.trim() || `Import status failed (${statusResponse.status} ${statusResponse.statusText})`;
-          alert(statusPayload?.detail || statusPayload?.error || fallbackDetail);
+          setImportResultDialog({
+            bookName: resolvedBookName,
+            status: "error",
+            nodesCreated: null,
+            reason: statusPayload?.detail || statusPayload?.error || fallbackDetail,
+          });
           return;
         }
 
@@ -12413,7 +12415,12 @@ function ScripturesContent() {
           setImportProgressMessage(null);
           setImportProgressCurrent(null);
           setImportProgressTotal(null);
-          alert(statusPayload?.error || statusPayload?.result?.error || "Import job failed");
+          setImportResultDialog({
+            bookName: resolvedBookName,
+            status: "error",
+            nodesCreated: null,
+            reason: statusPayload?.error || statusPayload?.result?.error || "Import job failed",
+          });
           return;
         }
 
@@ -12426,7 +12433,12 @@ function ScripturesContent() {
       }
 
       if (!finalResult) {
-        alert("Import is still running. Please wait and try again in a minute.");
+        setImportResultDialog({
+          bookName: resolvedBookName,
+          status: "error",
+          nodesCreated: null,
+          reason: "Import is still running. Please wait and try again in a minute.",
+        });
         return;
       }
 
@@ -12437,7 +12449,12 @@ function ScripturesContent() {
         setImportProgressMessage(null);
         setImportProgressCurrent(null);
         setImportProgressTotal(null);
-        alert(finalResult.detail || finalResult.error || "Import failed");
+        setImportResultDialog({
+          bookName: resolvedBookName,
+          status: "error",
+          nodesCreated: null,
+          reason: finalResult.detail || finalResult.error || "Import failed",
+        });
         return;
       }
 
@@ -12451,9 +12468,11 @@ function ScripturesContent() {
       setImportProgressTotal(null);
       setShowImportUrlInput(false);
       setImportUrl("");
-      setImportSuccessResult({
+      setImportResultDialog({
+        bookName: resolvedBookName,
+        status: "completed",
         nodesCreated: typeof finalResult.nodes_created === "number" ? finalResult.nodes_created : null,
-        warnings: Array.isArray(finalResult.warnings) ? (finalResult.warnings as string[]) : [],
+        reason: "",
       });
     },
     [loadBooksRefresh]
@@ -12505,10 +12524,26 @@ function ScripturesContent() {
     void pollImportJob(persistedJob.jobId, {
       canonicalJsonUrl: persistedJob.canonicalJsonUrl ?? null,
       showResumeMessage: true,
+      bookName:
+        persistedJob.canonicalJsonUrl
+          ?.split("?")[0]
+          .split("#")[0]
+          .split("/")
+          .filter(Boolean)
+          .pop()
+          ?.replace(/\.json$/i, "")
+          .replace(/[-_]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Book",
     });
   }, [pollImportJob]);
 
-  const startImportBookFile = async (file: File, allowExistingContent: boolean) => {
+  const startImportBookFile = async (
+    file: File,
+    allowExistingContent: boolean,
+    bookName: string
+  ) => {
     if (!file || !canImport) return;
 
     setImportSubmitting(true);
@@ -12546,13 +12581,23 @@ function ScripturesContent() {
 
       if (!initResponse || !initResponse.ok) {
         const fallback = `Upload init failed (${initResponse?.status ?? 0})`;
-        alert(initResult?.detail || initResult?.error || fallback);
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: initResult?.detail || initResult?.error || fallback,
+        });
         return;
       }
 
       const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
       if (!uploadId) {
-        alert("Upload init returned no upload ID");
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: "Upload init returned no upload ID",
+        });
         return;
       }
 
@@ -12609,7 +12654,12 @@ function ScripturesContent() {
 
         if (!chunkResponse || !chunkResponse.ok) {
           const fallback = `Chunk upload failed (${chunkResponse?.status ?? 0})`;
-          alert(chunkResult?.detail || chunkResult?.error || fallback);
+          setImportResultDialog({
+            bookName,
+            status: "error",
+            nodesCreated: null,
+            reason: chunkResult?.detail || chunkResult?.error || fallback,
+          });
           return;
         }
 
@@ -12637,7 +12687,12 @@ function ScripturesContent() {
 
       if (!completeResponse.ok) {
         const fallback = `Upload completion failed (${completeResponse.status})`;
-        alert(completeResult?.detail || completeResult?.error || fallback);
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: completeResult?.detail || completeResult?.error || fallback,
+        });
         return;
       }
 
@@ -12646,7 +12701,12 @@ function ScripturesContent() {
           ? completeResult.canonical_json_url.trim()
           : "";
       if (!canonicalJsonUrl) {
-        alert("Upload did not return a canonical URL");
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: "Upload did not return a canonical URL",
+        });
         return;
       }
 
@@ -12673,13 +12733,23 @@ function ScripturesContent() {
         | null;
 
       if (!response.ok) {
-        alert(startResult?.detail || startResult?.error || "Failed to start import book job");
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: startResult?.detail || startResult?.error || "Failed to start import book job",
+        });
         return;
       }
 
       const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
       if (!jobId) {
-        alert("Import job did not return a valid job ID");
+        setImportResultDialog({
+          bookName,
+          status: "error",
+          nodesCreated: null,
+          reason: "Import job did not return a valid job ID",
+        });
         return;
       }
 
@@ -12697,10 +12767,15 @@ function ScripturesContent() {
         fromUrlInput: false,
       });
 
-      await pollImportJob(jobId, { canonicalJsonUrl });
+      await pollImportJob(jobId, { canonicalJsonUrl, bookName });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON file";
-      alert(message);
+      setImportResultDialog({
+        bookName,
+        status: "error",
+        nodesCreated: null,
+        reason: message,
+      });
     } finally {
       if (activeImportJobIdRef.current === null) {
         setImportSubmitting(false);
@@ -13137,8 +13212,26 @@ function ScripturesContent() {
     if (!canImport) return;
 
     const trimmedUrl = importUrl.trim();
+    const inferredBookName =
+      trimmedUrl
+        .split("?")[0]
+        .split("#")[0]
+        .split("/")
+        .filter(Boolean)
+        .pop()
+        ?.replace(/\.json$/i, "")
+        .replace(/[-_]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Book";
+
     if (!trimmedUrl) {
-      alert("Enter a public raw JSON URL");
+      setImportResultDialog({
+        bookName: inferredBookName,
+        status: "error",
+        nodesCreated: null,
+        reason: "Enter a public raw JSON URL",
+      });
       return;
     }
 
@@ -13198,13 +13291,23 @@ function ScripturesContent() {
 
       if (!response.ok) {
         const fallbackDetail = rawText.trim() || `Import start failed (${response.status} ${response.statusText})`;
-        alert(startResult?.detail || startResult?.error || fallbackDetail);
+        setImportResultDialog({
+          bookName: inferredBookName,
+          status: "error",
+          nodesCreated: null,
+          reason: startResult?.detail || startResult?.error || fallbackDetail,
+        });
         return;
       }
 
       const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
       if (!jobId) {
-        alert("Import job did not return a valid job ID");
+        setImportResultDialog({
+          bookName: inferredBookName,
+          status: "error",
+          nodesCreated: null,
+          reason: "Import job did not return a valid job ID",
+        });
         return;
       }
 
@@ -13222,10 +13325,15 @@ function ScripturesContent() {
         fromUrlInput: true,
       });
 
-      await pollImportJob(jobId, { canonicalJsonUrl });
+      await pollImportJob(jobId, { canonicalJsonUrl, bookName: inferredBookName });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to import JSON from URL";
-      alert(message);
+      setImportResultDialog({
+        bookName: inferredBookName,
+        status: "error",
+        nodesCreated: null,
+        reason: message,
+      });
     } finally {
       if (activeImportJobIdRef.current === null) {
         setImportSubmitting(false);
@@ -18225,78 +18333,16 @@ function ScripturesContent() {
 
     setBookDeleteSubmitting(book.id);
     try {
-      const startResponse = await fetch(`/api/content/books/${book.id}/delete-jobs`, {
-        method: "POST",
+      setInlineMessage(`Deleting book: ${book.book_name}...`);
+      const deleteResponse = await fetch(`/api/books/${book.id}`, {
+        method: "DELETE",
         credentials: "include",
       });
-
-      const startResult = (await startResponse.json().catch(() => null)) as
-        | { detail?: string; error?: string; job_id?: string }
+      const deleteResult = (await deleteResponse.json().catch(() => null)) as
+        | { detail?: string; error?: string; message?: string }
         | null;
-      if (!startResponse.ok) {
-        alert(startResult?.detail ?? startResult?.error ?? "Failed to start delete book job");
-        return;
-      }
-
-      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
-      if (!jobId) {
-        alert("Delete book job did not return a valid job ID");
-        return;
-      }
-
-      setInlineMessage(`Deleting book: ${book.book_name}...`);
-      const pollIntervalMs = 2000;
-      const maxPollAttempts = 900;
-      let deleteSucceeded = false;
-
-      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-        const statusResponse = await fetch(
-          `/api/content/books/delete-jobs/${encodeURIComponent(jobId)}`,
-          {
-            method: "GET",
-            cache: "no-store",
-            credentials: "include",
-            headers: { Accept: "application/json" },
-          }
-        );
-
-        const statusPayload = (await statusResponse.json().catch(() => null)) as DeleteBookJobStatus | null;
-        if (!statusResponse.ok) {
-          alert(statusPayload?.detail || statusPayload?.error || "Failed to fetch delete status");
-          return;
-        }
-
-        const statusValue = (statusPayload?.status || "running").toLowerCase();
-        if (statusValue === "queued" || statusValue === "running") {
-          const progressText = statusPayload?.progress_message || "Deleting...";
-          setInlineMessage(`Deleting book: ${book.book_name} (${progressText})`);
-          continue;
-        }
-
-        if (statusValue === "failed") {
-          // If the job stalled (e.g. server restart) but the book is actually
-          // gone, treat it as success rather than alarming the user.
-          const checkRes = await fetch(`/api/books/${book.id}`, {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-          });
-          if (checkRes.status === 404) {
-            deleteSucceeded = true;
-            break;
-          }
-          alert(statusPayload?.error || statusPayload?.detail || "Book deletion failed");
-          return;
-        }
-
-        deleteSucceeded = true;
-        break;
-      }
-
-      if (!deleteSucceeded) {
-        alert("Book deletion is still running. Please refresh in a moment.");
+      if (!deleteResponse.ok) {
+        alert(deleteResult?.detail ?? deleteResult?.error ?? "Failed to delete book");
         return;
       }
 
@@ -19149,6 +19195,10 @@ function ScripturesContent() {
                     type="button"
                     onClick={() => {
                       const selectedFile = pendingImportFile;
+                      const selectedBookName =
+                        (pendingImportBookName && pendingImportBookName.trim()) ||
+                        selectedFile?.name.replace(/\.json$/i, "") ||
+                        "Book";
                       const shouldAppend = appendImportToExisting;
                       setShowImportUploadConfirm(false);
                       setPendingImportFile(null);
@@ -19156,7 +19206,7 @@ function ScripturesContent() {
                       setPendingImportBookCode(null);
                       setAppendImportToExisting(false);
                       if (selectedFile) {
-                        void startImportBookFile(selectedFile, shouldAppend);
+                        void startImportBookFile(selectedFile, shouldAppend, selectedBookName);
                       }
                     }}
                     className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-zinc-900 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
@@ -25541,35 +25591,50 @@ function ScripturesContent() {
         />
       ) : null}
 
-      {importSuccessResult && (
+      {importResultDialog && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <div className="relative w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 shadow-xl">
             <button
               type="button"
-              onClick={() => setImportSuccessResult(null)}
+              onClick={() => setImportResultDialog(null)}
               aria-label="Close"
               className="absolute right-3 top-3 text-lg leading-none text-zinc-400 transition hover:text-zinc-600"
             >
               ✕
             </button>
-            <p className="text-2xl">✅</p>
-            <p className="mt-2 text-sm font-semibold text-zinc-800">Import complete</p>
-            {importSuccessResult.nodesCreated !== null && (
-              <p className="mt-1 text-xs text-zinc-500">{importSuccessResult.nodesCreated.toLocaleString()} nodes imported</p>
-            )}
-            {importSuccessResult.warnings.length > 0 && (
-              <div className="mt-3 max-h-32 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-2">
-                <p className="mb-1 text-xs font-medium text-amber-700">Warnings</p>
-                <ul className="space-y-0.5">
-                  {importSuccessResult.warnings.map((w, i) => (
-                    <li key={i} className="text-xs text-amber-600">{w}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            <p className="mt-2 text-sm font-semibold text-zinc-800">
+              <em className="italic">{importResultDialog.bookName}</em> upload
+            </p>
+            <div className="mt-3 rounded-lg border border-black/10 bg-white/70 p-3 text-sm text-zinc-700">
+              <p>
+                Status:{" "}
+                <span
+                  className={
+                    importResultDialog.status === "completed"
+                      ? "font-semibold text-emerald-700"
+                      : "font-semibold text-red-700"
+                  }
+                >
+                  {importResultDialog.status === "completed" ? "Completed" : "Error"}
+                </span>
+              </p>
+              <p className="mt-1">
+                Node count:{" "}
+                <span className="font-medium text-zinc-900">
+                  {importResultDialog.nodesCreated === null
+                    ? ""
+                    : importResultDialog.nodesCreated.toLocaleString()}
+                </span>
+              </p>
+              {importResultDialog.status !== "completed" && importResultDialog.reason.trim() ? (
+                <p className="mt-1">
+                  Reason: <span className="font-medium text-zinc-900">{importResultDialog.reason}</span>
+                </p>
+              ) : null}
+            </div>
             <button
               type="button"
-              onClick={() => setImportSuccessResult(null)}
+              onClick={() => setImportResultDialog(null)}
               className="mt-5 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
             >
               Done

@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS provenance_records (
 CREATE INDEX IF NOT EXISTS idx_provenance_target_book_id ON provenance_records(target_book_id);
 CREATE INDEX IF NOT EXISTS idx_provenance_target_node_id ON provenance_records(target_node_id);
 CREATE INDEX IF NOT EXISTS idx_provenance_source_book_id ON provenance_records(source_book_id);
+CREATE INDEX IF NOT EXISTS idx_provenance_source_node_id ON provenance_records(source_node_id);
 
 -- Scripture schema templates
 CREATE TABLE IF NOT EXISTS scripture_schemas (
@@ -291,7 +292,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS content_nodes (
   id SERIAL PRIMARY KEY,
   book_id INTEGER REFERENCES books(id) ON DELETE CASCADE,
-  parent_node_id INTEGER REFERENCES content_nodes(id) ON DELETE CASCADE,
+  parent_node_id INTEGER REFERENCES content_nodes(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
   referenced_node_id INTEGER REFERENCES content_nodes(id) ON DELETE SET NULL,
   level_name VARCHAR(100) NOT NULL, -- e.g., "Adhyaya"
   level_order INTEGER NOT NULL, -- depth
@@ -323,6 +324,7 @@ CREATE TABLE IF NOT EXISTS content_nodes (
 
 CREATE INDEX IF NOT EXISTS idx_content_nodes_book ON content_nodes(book_id);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_parent ON content_nodes(parent_node_id);
+CREATE INDEX IF NOT EXISTS idx_content_nodes_referenced_node_id ON content_nodes(referenced_node_id);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_status ON content_nodes(status);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_visibility ON content_nodes(visibility);
 CREATE INDEX IF NOT EXISTS idx_content_nodes_language ON content_nodes(language_code);
@@ -370,6 +372,8 @@ CREATE TABLE IF NOT EXISTS contributions (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_contributions_node_id ON contributions(node_id);
+
 -- User collections
 CREATE TABLE IF NOT EXISTS user_collections (
   id SERIAL PRIMARY KEY,
@@ -386,6 +390,8 @@ CREATE TABLE IF NOT EXISTS collection_items (
   position INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_collection_items_node_id ON collection_items(node_id);
 
 -- Search analytics
 CREATE TABLE IF NOT EXISTS search_queries (

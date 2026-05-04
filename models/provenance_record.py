@@ -11,7 +11,7 @@ class ProvenanceRecord(Base):
     target_book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
     target_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="CASCADE"), nullable=False, index=True)
     source_book_id = Column(Integer, ForeignKey("books.id", ondelete="SET NULL"), nullable=True, index=True)
-    source_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="SET NULL"), nullable=True)
+    source_node_id = Column(Integer, ForeignKey("content_nodes.id", ondelete="SET NULL"), nullable=True, index=True)
     source_type = Column(String(50), nullable=False, default="library_reference")
     source_author = Column(Text, nullable=True)
     license_type = Column(String(100), nullable=False, default="CC-BY-SA-4.0")
