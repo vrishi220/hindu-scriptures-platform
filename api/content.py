@@ -289,8 +289,6 @@ def _merge_node_commentary_variants(
     merged_variants: list[dict] = []
     for entry, work, author in rows:
         text_value = (entry.content_text or "").strip()
-        if not text_value:
-            continue
 
         metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
         language = (entry.language_code or str(metadata.get("language") or "en")).strip().lower() or "en"
@@ -362,8 +360,6 @@ def _merge_node_translation_variants(
     merged_variants: list[dict] = []
     for entry, work, author in rows:
         text_value = (entry.content_text or "").strip()
-        if not text_value:
-            continue
 
         metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
         language = (entry.language_code or str(metadata.get("language") or "en")).strip().lower() or "en"
@@ -4238,6 +4234,60 @@ def _import_canonical_json_v1(
             })
         return entries
 
+    def _build_translations_from_variants(
+        translation_variants: list,
+        existing_translations: object,
+    ) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        if isinstance(existing_translations, dict):
+            for key, value in existing_translations.items():
+                if not isinstance(key, str):
+                    continue
+                cleaned_key = key.strip().lower()
+                cleaned_value = value.strip() if isinstance(value, str) else ""
+                if cleaned_key and cleaned_value:
+                    merged[cleaned_key] = cleaned_value
+
+        if not isinstance(translation_variants, list):
+            return merged
+
+        # Prefer HSP AI entries when available, then fall back to first non-empty variant text.
+        preferred: dict[str, str] = {}
+        fallback: dict[str, str] = {}
+        for raw_variant in translation_variants:
+            if not isinstance(raw_variant, dict):
+                continue
+
+            text_value = str(raw_variant.get("text") or "").strip()
+            language_code = str(raw_variant.get("language") or "").strip().lower()
+            if not text_value or not language_code:
+                continue
+
+            field_value = str(raw_variant.get("field") or "translation").strip().lower()
+            if field_value not in {"translation", "text", "english"}:
+                continue
+
+            author_slug = str(raw_variant.get("author_slug") or "").strip().lower()
+            author_name = str(raw_variant.get("author_name") or raw_variant.get("author") or "").strip().lower()
+            is_hsp_ai = (
+                author_slug in {"hsp_ai", "hsp-ai", "ai"}
+                or author_name == "hsp ai"
+            )
+
+            if is_hsp_ai and language_code not in preferred:
+                preferred[language_code] = text_value
+            elif language_code not in fallback:
+                fallback[language_code] = text_value
+
+        for language_code, text_value in preferred.items():
+            if language_code not in merged:
+                merged[language_code] = text_value
+        for language_code, text_value in fallback.items():
+            if language_code not in merged:
+                merged[language_code] = text_value
+
+        return merged
+
     def _resolve_or_create_word_meaning_author(author_name: str) -> WordMeaningAuthor:
         cached = word_meaning_author_cache.get(author_name)
         if cached is not None:
@@ -4459,6 +4509,12 @@ def _import_canonical_json_v1(
             node_content_data = _autofill_content_data_pair(
                 content_data_without_commentary_variants
             )
+            merged_translations = _build_translations_from_variants(
+                translation_variants,
+                node_content_data.get("translations") if isinstance(node_content_data, dict) else None,
+            )
+            if isinstance(node_content_data, dict) and merged_translations:
+                node_content_data["translations"] = merged_translations
 
             node_insert_payload = {
                 "book_id": book.id,
@@ -5026,6 +5082,11 @@ def export_book_json(
     for node in nodes:
         # Inline content from the ultimate source node so the export is portable.
         source = _resolve_source(node) if node.referenced_node_id is not None else node
+        merged_content_data = _merge_node_relational_variants(
+            db,
+            source,
+            source.content_data if isinstance(source.content_data, dict) else {},
+        )
         exported_nodes.append(
             {
                 "node_id": node.id,
@@ -5042,7 +5103,7 @@ def export_book_json(
                 "title_hindi": node.title_hindi,
                 "title_tamil": node.title_tamil,
                 "has_content": bool(source.has_content),
-                "content_data": source.content_data if isinstance(source.content_data, dict) else {},
+                "content_data": merged_content_data,
                 "summary_data": source.summary_data if isinstance(source.summary_data, dict) else {},
                 "metadata_json": node.metadata_json if isinstance(node.metadata_json, dict) else {},
                 "source_attribution": source.source_attribution,
@@ -5814,6 +5875,193 @@ def update_node(
     return ContentNodePublic.model_validate(payload_out)
 
 
+def _build_node_public_response(db: Session, node: ContentNode) -> "ContentNodePublic":
+    """Return a ContentNodePublic with relational variants merged into content_data."""
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if source_node is not None:
+        response_payload = ContentNodePublic.model_validate(node).model_dump()
+        response_payload.update(
+            {
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        response_payload["level_name"] = _display_level_name_for_book(node_book, response_payload.get("level_name"))
+        return ContentNodePublic.model_validate(response_payload)
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
+
+
+_VARIANT_ADD_RE = re.compile(r"content_data\.(translation_variants|commentary_variants)\.add")
+_VARIANT_DELETE_RE = re.compile(r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.delete")
+_VARIANT_FIELD_RE = re.compile(
+    r"content_data\.(translation_variants|commentary_variants)\.(\d+)\.(text|author|language)"
+)
+
+
+def _handle_relational_variant_operation(
+    db: Session,
+    node: ContentNode,
+    field_path: str,
+    value: object,
+) -> bool:
+    """Try to handle variant operations against relational tables.
+
+    Returns True if the operation was handled (caller should skip content_data patch).
+    Returns False if no relational rows exist (caller should fall through to content_data patch).
+    """
+    add_m = _VARIANT_ADD_RE.fullmatch(field_path)
+    delete_m = _VARIANT_DELETE_RE.fullmatch(field_path)
+    field_m = _VARIANT_FIELD_RE.fullmatch(field_path)
+    if not add_m and not delete_m and not field_m:
+        return False
+
+    content_target = node
+    if node.referenced_node_id:
+        src = db.query(ContentNode).filter(ContentNode.id == node.referenced_node_id).first()
+        if src:
+            content_target = src
+
+    if add_m:
+        variants_key = add_m.group(1)
+        is_translation = variants_key == "translation_variants"
+        payload_dict = value if isinstance(value, dict) else {}
+        language_value = str(payload_dict.get("language") or "en").strip().lower() or "en"
+        text_value = str(payload_dict.get("text") or "").strip()
+        metadata_value = {
+            "author": str(payload_dict.get("author") or "").strip(),
+            "author_slug": str(payload_dict.get("author_slug") or "").strip().lower(),
+            "field": str(payload_dict.get("field") or "").strip(),
+        }
+        # Check whether relational rows exist for this node
+        if is_translation:
+            has_relational = db.query(TranslationEntry).filter(
+                TranslationEntry.node_id == content_target.id
+            ).first() is not None
+        else:
+            has_relational = db.query(CommentaryEntry).filter(
+                CommentaryEntry.node_id == content_target.id
+            ).first() is not None
+        if not has_relational:
+            return False  # fall through to content_data path
+
+        # Determine next display_order
+        if is_translation:
+            max_order_row = (
+                db.query(TranslationEntry)
+                .filter(TranslationEntry.node_id == content_target.id)
+                .order_by(TranslationEntry.display_order.desc())
+                .first()
+            )
+            next_order = (max_order_row.display_order + 1) if max_order_row else 0
+            new_entry = TranslationEntry(
+                node_id=content_target.id,
+                content_text=text_value,
+                language_code=language_value,
+                display_order=next_order,
+                metadata_json=metadata_value,
+            )
+        else:
+            max_order_row = (
+                db.query(CommentaryEntry)
+                .filter(CommentaryEntry.node_id == content_target.id)
+                .order_by(CommentaryEntry.display_order.desc())
+                .first()
+            )
+            next_order = (max_order_row.display_order + 1) if max_order_row else 0
+            new_entry = CommentaryEntry(
+                node_id=content_target.id,
+                content_text=text_value,
+                language_code=language_value,
+                display_order=next_order,
+                metadata_json=metadata_value,
+            )
+        db.add(new_entry)
+        db.commit()
+        return True
+
+    if field_m:
+        variants_key = field_m.group(1)
+        variant_index = int(field_m.group(2))
+        variant_field = field_m.group(3)
+        is_translation = variants_key == "translation_variants"
+        if is_translation:
+            rows = (
+                db.query(TranslationEntry)
+                .filter(TranslationEntry.node_id == content_target.id)
+                .order_by(TranslationEntry.display_order.asc(), TranslationEntry.id.asc())
+                .all()
+            )
+        else:
+            rows = (
+                db.query(CommentaryEntry)
+                .filter(CommentaryEntry.node_id == content_target.id)
+                .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+                .all()
+            )
+        if not rows:
+            return False  # no relational rows — fall through to content_data patch
+        if variant_index < 0 or variant_index >= len(rows):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{variants_key} index out of bounds",
+            )
+
+        entry = rows[variant_index]
+        if variant_field == "text":
+            entry.content_text = str(value or "")
+        elif variant_field == "language":
+            entry.language_code = str(value or "").strip().lower()
+        else:  # author
+            metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+            metadata["author"] = str(value or "").strip()
+            entry.metadata_json = metadata
+        db.commit()
+        return True
+
+    # delete_m branch
+    variants_key = delete_m.group(1)
+    variant_index = int(delete_m.group(2))
+    is_translation = variants_key == "translation_variants"
+    if is_translation:
+        rows = (
+            db.query(TranslationEntry)
+            .filter(TranslationEntry.node_id == content_target.id)
+            .order_by(TranslationEntry.display_order.asc(), TranslationEntry.id.asc())
+            .all()
+        )
+    else:
+        rows = (
+            db.query(CommentaryEntry)
+            .filter(CommentaryEntry.node_id == content_target.id)
+            .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+            .all()
+        )
+    if not rows:
+        return False  # no relational rows — fall through to content_data patch
+    if variant_index < 0 or variant_index >= len(rows):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{variants_key} index out of bounds",
+        )
+    db.delete(rows[variant_index])
+    db.commit()
+    return True
+
+
 @router.patch("/nodes/{node_id}/field", response_model=ContentNodePublic)
 def update_node_single_field(
     node_id: int,
@@ -5841,6 +6089,25 @@ def update_node_single_field(
             )
 
     field_path = payload.field_path.strip()
+
+    # Handle variant operations against relational tables when applicable.
+    if (
+        _VARIANT_ADD_RE.fullmatch(field_path)
+        or _VARIANT_DELETE_RE.fullmatch(field_path)
+        or _VARIANT_FIELD_RE.fullmatch(field_path)
+    ):
+        handled = _handle_relational_variant_operation(
+            db, node, field_path, _normalize_content_field_patch_value(payload.value)
+        )
+        if handled:
+            try:
+                from api.draft_books import invalidate_preview_render_cache
+                invalidate_preview_render_cache(node.book_id)
+            except Exception:
+                pass
+            db.refresh(node)
+            return _build_node_public_response(db, node)
+        # fall through to content_data patch below
 
     patch_updates: dict[str, object] = {}
 

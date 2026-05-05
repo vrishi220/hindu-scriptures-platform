@@ -142,6 +142,10 @@ def _build_commentary_variants_by_node(
         author_name = ""
         if author and isinstance(author.name, str) and author.name.strip():
             author_name = author.name.strip()
+        elif isinstance(metadata.get("author_name"), str) and str(metadata.get("author_name")).strip():
+            author_name = str(metadata.get("author_name")).strip()
+        elif isinstance(metadata.get("author_display_name"), str) and str(metadata.get("author_display_name")).strip():
+            author_name = str(metadata.get("author_display_name")).strip()
         elif isinstance(metadata.get("author"), str) and str(metadata.get("author")).strip():
             author_name = str(metadata.get("author")).strip()
         elif work and isinstance(work.title, str) and work.title.strip():
@@ -205,6 +209,8 @@ def _build_translation_variants_by_node(
             author_name = author.name.strip()
         elif isinstance(metadata.get("author_name"), str) and str(metadata.get("author_name")).strip():
             author_name = str(metadata.get("author_name")).strip()
+        elif isinstance(metadata.get("author_display_name"), str) and str(metadata.get("author_display_name")).strip():
+            author_name = str(metadata.get("author_display_name")).strip()
         elif isinstance(metadata.get("author"), str) and str(metadata.get("author")).strip():
             author_name = str(metadata.get("author")).strip()
         elif work and isinstance(work.title, str) and work.title.strip():

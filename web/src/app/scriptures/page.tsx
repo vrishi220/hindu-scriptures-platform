@@ -3090,6 +3090,7 @@ function ScripturesContent() {
     useState<string>(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
   const [propertiesWordMeaningsDefaultMeaningLanguage, setPropertiesWordMeaningsDefaultMeaningLanguage] =
     useState<string>(WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE);
+  const [propertiesWordMeaningsTouched, setPropertiesWordMeaningsTouched] = useState(false);
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -3109,6 +3110,7 @@ function ScripturesContent() {
   const [showNodeActionsMenu, setShowNodeActionsMenu] = useState(false);
   const [showBookRootActionsMenu, setShowBookRootActionsMenu] = useState(false);
   const [showPreviewShareMenu, setShowPreviewShareMenu] = useState(false);
+  const latestSavedBookSnapshotRef = useRef<BookDetails | null>(null);
   const [browseDetailsTab, setBrowseDetailsTab] = useState<"overview" | "content" | "properties">("overview");
   const previousBrowseSelectedIdRef = useRef<number | null>(null);
   const previousBrowseBookIdRef = useRef<string | null>(null);
@@ -4350,9 +4352,11 @@ function ScripturesContent() {
     scope: PropertiesScope,
     nodeId: number | null = null,
     bookIdOverride: string | null = null,
-    bookNameOverride: string | null = null
+    bookNameOverride: string | null = null,
+    bookSnapshotOverride: BookDetails | null = null
   ) => {
     const activeBookId = bookIdOverride || resolvedCurrentBookId;
+    const effectiveBook = bookSnapshotOverride || currentBook;
     if (!activeBookId) return;
     if (scope === "node" && !nodeId) return;
 
@@ -4361,14 +4365,14 @@ function ScripturesContent() {
     setPropertiesNodeId(nodeId);
     setPropertiesName(
       scope === "book"
-        ? bookNameOverride || currentBook?.book_name || ""
+        ? bookNameOverride || effectiveBook?.book_name || ""
         : nodeContent?.title_english || ""
     );
     setPropertiesDescription("");
     setPropertiesInitialDescription("");
     if (scope === "book") {
-      const metadata = getBookMetadataObject(currentBook) || {};
-      const bookContentData = toRecord(currentBook?.content_data);
+      const metadata = getBookMetadataObject(effectiveBook) || {};
+      const bookContentData = toRecord(effectiveBook?.content_data);
       const bookBasic = toRecord(bookContentData.basic);
       const bookTranslations = toTranslationRecord(bookContentData.translations);
       setPropertiesNodeTitleSanskrit("");
@@ -4396,9 +4400,9 @@ function ScripturesContent() {
           ? bookBasic.translation
           : pickPreferredTranslationText(bookTranslations, sourceLanguage, "")
       );
-      const enabledLevels = getWordMeaningsEnabledLevelsFromBook(currentBook);
-      const schemaLevels = Array.isArray(currentBook?.schema?.levels)
-        ? currentBook.schema.levels.filter(
+      const enabledLevels = getWordMeaningsEnabledLevelsFromBook(effectiveBook);
+      const schemaLevels = Array.isArray(effectiveBook?.schema?.levels)
+        ? effectiveBook.schema.levels.filter(
             (level): level is string => typeof level === "string" && level.trim().length > 0
           )
         : [];
@@ -4408,8 +4412,8 @@ function ScripturesContent() {
             .map((level) =>
               resolveCanonicalLevelName(
                 level,
-                currentBook?.level_name_overrides && typeof currentBook.level_name_overrides === "object"
-                  ? (currentBook.level_name_overrides as Record<string, unknown>)
+                effectiveBook?.level_name_overrides && typeof effectiveBook.level_name_overrides === "object"
+                  ? (effectiveBook.level_name_overrides as Record<string, unknown>)
                   : null
               )
             )
@@ -4420,12 +4424,13 @@ function ScripturesContent() {
         canonicalSchemaLevels.filter((level) => enabledLevels.has(level.trim().toLowerCase()))
       );
       setPropertiesWordMeaningsDefaultSourceLanguage(
-        getWordMeaningsDefaultSourceLanguageFromBook(currentBook) || wordMeaningsGlobalSourceLanguage
+        getWordMeaningsDefaultSourceLanguageFromBook(effectiveBook) || wordMeaningsGlobalSourceLanguage
       );
       setPropertiesWordMeaningsDefaultMeaningLanguage(
-        getWordMeaningsDefaultMeaningLanguageFromBook(currentBook) || wordMeaningsGlobalMeaningLanguage
+        getWordMeaningsDefaultMeaningLanguageFromBook(effectiveBook) || wordMeaningsGlobalMeaningLanguage
       );
-      const existingRegistry = currentBook?.variant_authors ?? {};
+      setPropertiesWordMeaningsTouched(false);
+      const existingRegistry = effectiveBook?.variant_authors ?? {};
       const existingRegistryRows = Object.entries(existingRegistry).map(([slug, name]) => ({
         slug,
         name: name as string,
@@ -4462,6 +4467,7 @@ function ScripturesContent() {
       setPropertiesWordMeaningsEnabledLevels([]);
       setPropertiesWordMeaningsDefaultSourceLanguage(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
       setPropertiesWordMeaningsDefaultMeaningLanguage(WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE);
+      setPropertiesWordMeaningsTouched(false);
       setVariantAuthorsRegistry([]);
       setOwnedBooksForTransfer([]);
       setSelectedOwnedBookIds([]);
@@ -4485,7 +4491,7 @@ function ScripturesContent() {
       const scopedMetadataSnapshot =
         scope === "node" && nodeId
           ? await loadNodeMetadataSnapshot(nodeId)
-          : toRecord(currentBook?.metadata_json || currentBook?.metadata);
+          : toRecord(effectiveBook?.metadata_json || effectiveBook?.metadata);
       const scopedDescription =
         typeof scopedMetadataSnapshot.description === "string"
           ? scopedMetadataSnapshot.description
@@ -4946,6 +4952,7 @@ function ScripturesContent() {
         throw new Error((payload as { detail?: string } | null)?.detail || "Failed to save author registry");
       }
       const updatedBook = payload as BookDetails;
+      latestSavedBookSnapshotRef.current = updatedBook;
       setCurrentBook(updatedBook);
       setBooks((prev) =>
         prev.map((b) => (b.id === updatedBook.id ? { ...b, variant_authors: updatedBook.variant_authors } : b))
@@ -5067,6 +5074,7 @@ function ScripturesContent() {
     const shouldSaveWordMeanings =
       propertiesScope === "book" &&
       (
+        propertiesWordMeaningsTouched ||
         JSON.stringify([...currentWordMeaningsEnabledLevels].sort()) !==
           JSON.stringify(nextWordMeaningsEnabledLevels) ||
         currentWordMeaningsDefaultSourceLanguage !== nextWordMeaningsDefaultSourceLanguage ||
@@ -5383,7 +5391,45 @@ function ScripturesContent() {
                             ? "Name saved"
                             : "Properties saved"
       );
-      await openPropertiesModal(propertiesScope, propertiesNodeId);
+
+      if (propertiesScope === "book" && resolvedCurrentBookId) {
+        try {
+          const refreshedResponse = await fetch(`/api/books/${resolvedCurrentBookId}`, {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (refreshedResponse.ok) {
+            const refreshedBook = (await refreshedResponse.json()) as BookDetails;
+            latestSavedBookSnapshotRef.current = refreshedBook;
+            setCurrentBook(refreshedBook);
+            setBooks((prev) =>
+              prev.map((book) =>
+                book.id === refreshedBook.id
+                  ? {
+                      ...book,
+                      book_name: refreshedBook.book_name,
+                      content_data: refreshedBook.content_data,
+                      has_content: refreshedBook.has_content,
+                      level_name_overrides: refreshedBook.level_name_overrides,
+                      metadata_json: refreshedBook.metadata_json,
+                      metadata: refreshedBook.metadata,
+                    }
+                  : book
+              )
+            );
+          }
+        } catch {
+          // Keep save success UX even if immediate refresh fails.
+        }
+      }
+
+      await openPropertiesModal(
+        propertiesScope,
+        propertiesNodeId,
+        null,
+        null,
+        latestSavedBookSnapshotRef.current
+      );
     } catch (err) {
       setPropertiesError(err instanceof Error ? err.message : "Failed to save properties");
     } finally {
@@ -10549,6 +10595,13 @@ function ScripturesContent() {
       return;
     }
 
+    if (operation === "delete") {
+      const kindLabel = kind === "translation" ? "translation" : "commentary";
+      if (!window.confirm(`Remove this ${kindLabel} variant? This cannot be undone.`)) {
+        return;
+      }
+    }
+
     const defaultLanguage =
       appliedPreviewTranslationLanguages[0] ||
       (normalizeTranslationLanguage(preferences?.source_language) as EditableTranslationLanguage);
@@ -10594,6 +10647,33 @@ function ScripturesContent() {
         setBookPreviewArtifact((prev) =>
           prev ? applySavedNodeToPreviewArtifact(prev, payload) : prev
         );
+
+        if (operation === "add") {
+          const variants =
+            kind === "translation"
+              ? Array.isArray(payload.content_data?.translation_variants)
+                ? payload.content_data.translation_variants
+                : []
+              : Array.isArray(payload.content_data?.commentary_variants)
+                ? payload.content_data.commentary_variants
+                : [];
+          const newVariantIndex = variants.length - 1;
+          const newVariant = newVariantIndex >= 0 ? variants[newVariantIndex] : null;
+          if (newVariantIndex >= 0) {
+            setPreviewQuickEditDraft({
+              nodeId,
+              targetType,
+              fieldPath: `content_data.${fieldPrefix}.${newVariantIndex}.text`,
+              lineKey: `${kind}-variant-${newVariantIndex}`,
+              value:
+                newVariant && typeof newVariant === "object" && typeof newVariant.text === "string"
+                  ? newVariant.text
+                  : "",
+              saving: false,
+              error: null,
+            });
+          }
+        }
       }
 
       if (targetType === "book") {
@@ -16330,7 +16410,7 @@ function ScripturesContent() {
               language: ((entry?.language || "").trim().toLowerCase() || deriveVariantLanguageFromField(entry?.field)),
               text: (entry?.text || "").trim(),
             }))
-            .filter((entry) => entry.text.length > 0)
+            .filter((entry) => previewEditModeEnabled || entry.text.length > 0)
         : [];
       const commentaryVariants = Array.isArray(block.content.commentary_variants)
         ? block.content.commentary_variants
@@ -16341,7 +16421,7 @@ function ScripturesContent() {
               language: ((entry?.language || "").trim().toLowerCase() || deriveVariantLanguageFromField(entry?.field)),
               text: (entry?.text || "").trim(),
             }))
-            .filter((entry) => entry.text.length > 0)
+            .filter((entry) => previewEditModeEnabled || entry.text.length > 0)
         : [];
       const selectedTranslationLanguages = new Set(
         appliedPreviewTranslationLanguages.map((language) => normalizeTranslationLanguage(language))
@@ -17481,31 +17561,11 @@ function ScripturesContent() {
               })}
             </div>
           )}
-          {(visibleTranslationVariants.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
+          {(visibleTranslationVariants.length > 0 || (previewEditModeEnabled && canEditCurrentBook && typeof quickEditNodeId === "number")) && (
             <details className="mt-1 border-t border-black/10 pt-1">
               <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
                 Translations By Authors ({visibleTranslationVariants.length})
               </summary>
-              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
-                <div className="mt-1 flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handlePreviewVariantOperation(
-                        quickEditNodeId,
-                        quickEditTargetType,
-                        "translation",
-                        "add"
-                      );
-                    }}
-                    className="rounded-md border border-black/10 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20"
-                    title="Add translation variant"
-                    aria-label="Add translation variant"
-                  >
-                    Add
-                  </button>
-                </div>
-              )}
               <div className="mt-1 flex flex-col gap-1">
                 {visibleTranslationVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.translation_variants.${entry.originalIndex}.text`;
@@ -17745,14 +17805,7 @@ function ScripturesContent() {
                   );
                 })}
               </div>
-            </details>
-          )}
-          {(visibleCommentaryVariants.length > 0 || (canEditCurrentBook && typeof quickEditNodeId === "number")) && (
-            <details className="mt-1 border-t border-black/10 pt-1">
-              <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
-                Commentaries By Authors ({visibleCommentaryVariants.length})
-              </summary>
-              {canEditCurrentBook && typeof quickEditNodeId === "number" && (
+              {canPreviewQuickEditBlock && (
                 <div className="mt-1 flex items-center justify-end">
                   <button
                     type="button"
@@ -17760,18 +17813,25 @@ function ScripturesContent() {
                       void handlePreviewVariantOperation(
                         quickEditNodeId,
                         quickEditTargetType,
-                        "commentary",
+                        "translation",
                         "add"
                       );
                     }}
-                    className="rounded-md border border-black/10 bg-white px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-zinc-700 transition hover:border-black/20"
-                    title="Add commentary variant"
-                    aria-label="Add commentary variant"
+                    className={`rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                    title="Add translation variant"
+                    aria-label="Add translation variant"
                   >
-                    Add
+                    <Plus className="h-3.5 w-3.5" />
                   </button>
                 </div>
               )}
+            </details>
+          )}
+          {(visibleCommentaryVariants.length > 0 || (previewEditModeEnabled && canEditCurrentBook && typeof quickEditNodeId === "number")) && (
+            <details className="mt-1 border-t border-black/10 pt-1">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-[0.18em] text-zinc-500">
+                Commentaries By Authors ({visibleCommentaryVariants.length})
+              </summary>
               <div className="mt-1 flex flex-col gap-1">
                 {visibleCommentaryVariants.map((entry, idx) => {
                   const textFieldPath = `content_data.commentary_variants.${entry.originalIndex}.text`;
@@ -18011,6 +18071,26 @@ function ScripturesContent() {
                   );
                 })}
               </div>
+              {canPreviewQuickEditBlock && (
+                <div className="mt-1 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handlePreviewVariantOperation(
+                        quickEditNodeId,
+                        quickEditTargetType,
+                        "commentary",
+                        "add"
+                      );
+                    }}
+                    className={`rounded-md border border-black/10 bg-white/90 p-1 text-zinc-500 transition hover:border-black/20 hover:text-zinc-700 ${previewQuickEditAffordanceClass(showQuickEditAffordances)}`}
+                    title="Add commentary variant"
+                    aria-label="Add commentary variant"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
             </details>
           )}
           {appliedShowPreviewMedia && Array.isArray(block.content.media_items) && block.content.media_items.length > 0 && (
@@ -22574,6 +22654,7 @@ function ScripturesContent() {
                         value={propertiesWordMeaningsDefaultSourceLanguage}
                         onChange={(event) => {
                           setPropertiesWordMeaningsDefaultSourceLanguage(event.target.value);
+                          setPropertiesWordMeaningsTouched(true);
                           setPropertiesDirty(true);
                           setPropertiesMessage(null);
                           setPropertiesError(null);
@@ -22593,6 +22674,7 @@ function ScripturesContent() {
                         value={propertiesWordMeaningsDefaultMeaningLanguage}
                         onChange={(event) => {
                           setPropertiesWordMeaningsDefaultMeaningLanguage(event.target.value);
+                          setPropertiesWordMeaningsTouched(true);
                           setPropertiesDirty(true);
                           setPropertiesMessage(null);
                           setPropertiesError(null);
@@ -22627,6 +22709,7 @@ function ScripturesContent() {
                                   }
                                   return prev.filter((entry) => entry !== level);
                                 });
+                                setPropertiesWordMeaningsTouched(true);
                                 setPropertiesDirty(true);
                                 setPropertiesMessage(null);
                                 setPropertiesError(null);
