@@ -18,6 +18,23 @@ type BookOption = {
   metadata_json?: Record<string, unknown> | null;
 };
 
+type CartItem = {
+  id: number;
+  cart_id: number;
+  item_id: number;
+  item_type: "library_node" | "user_content";
+  source_book_id: number | null;
+  order: number;
+  added_at: string;
+};
+
+type CartPublic = {
+  id: number;
+  owner_id: number;
+  title: string;
+  items: CartItem[];
+};
+
 type GenerationSummaryResponse = {
   total_jobs: number;
   total_verses_generated: number;
@@ -65,6 +82,8 @@ type AIJob = {
   started_at: string | null;
   completed_at: string | null;
   created_at: string | null;
+  source_type: string | null;
+  source_label: string | null;
   error_log: Array<{ error?: string; message?: string } & Record<string, unknown>> | null;
   metadata: Record<string, unknown> | null;
   batch_status_snapshot?: BatchStatusSnapshot | null;
@@ -99,6 +118,8 @@ const dateTimeFormatter = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+
+const MAX_ADDITIONAL_INSTRUCTIONS = 500;
 
 const parsePayload = (raw: string) => {
   if (!raw) return null;
@@ -185,6 +206,16 @@ const getJobMetadata = (job: AIJob) =>
 const getJobMode = (job: AIJob) =>
   getJobMetadata(job).mode === "batch" ? "batch" : "realtime";
 
+const getJobSourceLabel = (job: AIJob, bookNameById: Map<number, string>) => {
+  if (job.source_label) return job.source_label;
+  if (job.source_type === "basket") {
+    const count = getJobMetadata(job).basket_item_count ?? job.total_nodes;
+    return `Basket (${count} verses)`;
+  }
+  if (job.book_id) return bookNameById.get(job.book_id) || `Book #${job.book_id}`;
+  return "Unknown";
+};
+
 const getJobLanguageLabel = (job: AIJob) => {
   const metadata = getJobMetadata(job);
   if (typeof metadata.language_name === "string" && metadata.language_name.trim()) {
@@ -268,6 +299,18 @@ const getStatusClasses = (status: string) => {
   return "border-blue-200 bg-blue-50 text-blue-700";
 };
 
+const getJobAdditionalInstructions = (job: AIJob): string | null => {
+  const value = getJobMetadata(job).additional_instructions;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const truncateWithEllipsis = (value: string, maxLength: number) => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 1)}...`;
+};
+
 export default function AdminAiGenerationPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -275,6 +318,8 @@ export default function AdminAiGenerationPage() {
 
   const [books, setBooks] = useState<BookOption[]>([]);
   const [booksLoading, setBooksLoading] = useState(false);
+  const [basket, setBasket] = useState<CartPublic | null>(null);
+  const [basketLoading, setBasketLoading] = useState(false);
   const [summary, setSummary] = useState<GenerationSummaryResponse | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [allJobs, setAllJobs] = useState<AIJob[]>([]);
@@ -288,11 +333,12 @@ export default function AdminAiGenerationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [cancellingJobId, setCancellingJobId] = useState<number | null>(null);
 
-  const [selectedBookId, setSelectedBookId] = useState("");
+  const [selectedSourceId, setSelectedSourceId] = useState(""); // "basket" | book id string
   const [languageCode, setLanguageCode] = useState<LanguageOption["code"]>("en");
   const [mode, setMode] = useState<"batch" | "realtime">("batch");
   const [limitMode, setLimitMode] = useState<"all" | "custom">("all");
   const [customLimit, setCustomLimit] = useState("");
+  const [additionalInstructions, setAdditionalInstructions] = useState("");
 
   const activeJobsLoaderRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null);
 
@@ -301,9 +347,26 @@ export default function AdminAiGenerationPage() {
     [languageCode]
   );
 
+  const isBasketSelected = selectedSourceId === "basket";
+
   const selectedBook = useMemo(
-    () => books.find((book) => book.id === Number(selectedBookId)) || null,
-    [books, selectedBookId]
+    () => (isBasketSelected ? null : books.find((book) => book.id === Number(selectedSourceId)) || null),
+    [books, selectedSourceId, isBasketSelected]
+  );
+
+  const basketNodeCount = useMemo(
+    () => basket?.items.filter((i) => i.item_type === "library_node").length ?? 0,
+    [basket]
+  );
+
+  const basketBookCount = useMemo(
+    () =>
+      new Set(
+        (basket?.items ?? [])
+          .filter((i) => i.item_type === "library_node" && typeof i.source_book_id === "number")
+          .map((i) => i.source_book_id)
+      ).size,
+    [basket]
   );
 
   const parsedCustomLimit = useMemo(() => {
@@ -332,16 +395,46 @@ export default function AdminAiGenerationPage() {
   );
 
   const duplicateJobRunning = useMemo(() => {
-    const bookId = Number(selectedBookId);
-    if (!bookId) return false;
+    if (!selectedSourceId) return false;
+    if (isBasketSelected) {
+      return activeOrPendingJobs.some(
+        (job) => job.source_type === "basket" && job.language_code === languageCode
+      );
+    }
+    const bookId = Number(selectedSourceId);
     return activeOrPendingJobs.some(
       (job) => job.book_id === bookId && job.language_code === languageCode
     );
-  }, [activeOrPendingJobs, languageCode, selectedBookId]);
+  }, [activeOrPendingJobs, languageCode, selectedSourceId, isBasketSelected]);
 
   const limitError =
     limitMode === "custom" && parsedCustomLimit === null ? "Enter a limit greater than 0." : null;
-  const canStartJob = Boolean(selectedBookId) && !submitting && !duplicateJobRunning && !limitError;
+  const additionalInstructionsTrimmed = additionalInstructions.trim();
+  const additionalInstructionsError =
+    additionalInstructionsTrimmed.length > MAX_ADDITIONAL_INSTRUCTIONS
+      ? `Additional instructions must be ${MAX_ADDITIONAL_INSTRUCTIONS} characters or fewer.`
+      : null;
+
+  const basketMissingTranslationCount = isBasketSelected ? estimate?.total_nodes ?? null : null;
+  const basketValidationPending =
+    isBasketSelected && basketNodeCount > 0 && !estimateLoading && !estimate && !estimateError;
+  const basketIsEmpty = isBasketSelected && basketNodeCount === 0;
+  const basketAllTranslated =
+    isBasketSelected &&
+    basketNodeCount > 0 &&
+    !estimateLoading &&
+    !estimateError &&
+    basketMissingTranslationCount === 0;
+
+  const canStartJob =
+    Boolean(selectedSourceId) &&
+    !submitting &&
+    !duplicateJobRunning &&
+    !limitError &&
+    !additionalInstructionsError &&
+    !basketIsEmpty &&
+    !basketAllTranslated &&
+    !basketValidationPending;
 
   const ensureAdmin = async () => {
     try {
@@ -379,6 +472,28 @@ export default function AdminAiGenerationPage() {
       });
     } finally {
       setBooksLoading(false);
+    }
+  };
+
+  const loadBasket = async () => {
+    setBasketLoading(true);
+    try {
+      const response = await fetch("/api/cart/me", { credentials: "include" });
+      const raw = await response.text();
+      const payload = parsePayload(raw) as CartPublic | null;
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setBasket(null);
+          return;
+        }
+        // Non-fatal — basket just won't show
+        return;
+      }
+      setBasket(payload);
+    } catch {
+      // Non-fatal
+    } finally {
+      setBasketLoading(false);
     }
   };
 
@@ -479,7 +594,7 @@ export default function AdminAiGenerationPage() {
     void (async () => {
       const admin = await ensureAdmin();
       if (admin) {
-        await Promise.all([loadBooks(), loadSummary(), loadAllJobs(), loadActiveJobs()]);
+        await Promise.all([loadBooks(), loadBasket(), loadSummary(), loadAllJobs(), loadActiveJobs()]);
       }
       setAuthChecked(true);
     })();
@@ -504,7 +619,13 @@ export default function AdminAiGenerationPage() {
   }, [activeJobs.length, canAdmin]);
 
   useEffect(() => {
-    if (!canAdmin || !selectedBookId) {
+    if (!canAdmin || !selectedSourceId) {
+      setEstimate(null);
+      setEstimateError(null);
+      return undefined;
+    }
+
+    if (isBasketSelected && basketNodeCount === 0) {
       setEstimate(null);
       setEstimateError(null);
       return undefined;
@@ -522,10 +643,16 @@ export default function AdminAiGenerationPage() {
       setEstimateError(null);
       try {
         const params = new URLSearchParams({
-          book_id: selectedBookId,
           language_code: languageCode,
           language_name: selectedLanguage.label,
         });
+        if (isBasketSelected) {
+          params.set("source_type", "basket");
+          if (basket?.id) params.set("basket_id", String(basket.id));
+        } else {
+          params.set("source_type", "book");
+          params.set("book_id", selectedSourceId);
+        }
         if (parsedCustomLimit !== null) {
           params.set("limit", String(parsedCustomLimit));
         }
@@ -563,27 +690,41 @@ export default function AdminAiGenerationPage() {
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [canAdmin, selectedBookId, languageCode, limitMode, mode, parsedCustomLimit, selectedLanguage.label]);
+  }, [canAdmin, selectedSourceId, isBasketSelected, basket?.id, basketNodeCount, languageCode, limitMode, mode, parsedCustomLimit, selectedLanguage.label]);
 
   const handleStartJob = async () => {
-    if (!canStartJob || !selectedBook) {
+    if (!canStartJob) {
       return;
     }
 
     setSubmitting(true);
     setToast(null);
     try {
+      const body = isBasketSelected
+        ? {
+            source_type: "basket",
+            basket_id: basket?.id ?? null,
+            language_code: languageCode,
+            language_name: selectedLanguage.label,
+            mode,
+            limit: parsedCustomLimit,
+            additional_instructions: additionalInstructionsTrimmed || null,
+          }
+        : {
+            source_type: "book",
+            book_id: selectedBook!.id,
+            language_code: languageCode,
+            language_name: selectedLanguage.label,
+            mode,
+            limit: parsedCustomLimit,
+            additional_instructions: additionalInstructionsTrimmed || null,
+          };
+
       const response = await fetch("/api/ai/generate/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          book_id: selectedBook.id,
-          language_code: languageCode,
-          language_name: selectedLanguage.label,
-          mode,
-          limit: parsedCustomLimit,
-        }),
+        body: JSON.stringify(body),
       });
       const raw = await response.text();
       const payload = parsePayload(raw) as (GenerationEstimateResponse & { job_id?: number }) | null;
@@ -597,15 +738,16 @@ export default function AdminAiGenerationPage() {
 
       if (payload) {
         setEstimate({
-          total_nodes: estimate?.total_nodes || getBookVerseCount(selectedBook) || 0,
+          total_nodes: estimate?.total_nodes || (isBasketSelected ? basketNodeCount : getBookVerseCount(selectedBook!) || 0),
           estimated_cost_realtime: payload.estimated_cost_realtime,
           estimated_cost_batch: payload.estimated_cost_batch,
         });
       }
 
+      const sourceName = isBasketSelected ? "My Basket" : selectedBook!.book_name;
       setToast({
         type: "success",
-        message: `Started ${selectedLanguage.label} generation for ${selectedBook.book_name}.`,
+        message: `Started ${selectedLanguage.label} generation for ${sourceName}.`,
       });
       await Promise.all([loadSummary(), loadAllJobs(), loadActiveJobs()]);
     } catch (error) {
@@ -735,9 +877,9 @@ export default function AdminAiGenerationPage() {
             <h2 className="text-base font-semibold text-zinc-900">Start New Job</h2>
             <p className="text-sm text-zinc-600">Create AI generation jobs for a book and target language.</p>
           </div>
-          {duplicateJobRunning && selectedBook ? (
+        {duplicateJobRunning ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              {selectedBook.book_name} already has an active {selectedLanguage.label} job.
+              {isBasketSelected ? "Basket" : selectedBook?.book_name} already has an active {selectedLanguage.label} job.
             </div>
           ) : null}
         </div>
@@ -745,14 +887,17 @@ export default function AdminAiGenerationPage() {
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-1">
-              <span className="text-sm font-medium text-zinc-800">Book</span>
+              <span className="text-sm font-medium text-zinc-800">Source</span>
               <select
-                value={selectedBookId}
-                onChange={(event) => setSelectedBookId(event.target.value)}
+                value={selectedSourceId}
+                onChange={(event) => setSelectedSourceId(event.target.value)}
                 className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
-                disabled={booksLoading}
+                disabled={booksLoading || basketLoading}
               >
-                <option value="">Select a book</option>
+                <option value="">Select a source</option>
+                <option value="basket">
+                  🧺 My Basket{basketLoading ? " (loading…)" : ` (${basketNodeCount} verses)`}
+                </option>
                 {books.map((book) => {
                   const verseCount = getBookVerseCount(book);
                   return (
@@ -763,6 +908,27 @@ export default function AdminAiGenerationPage() {
                   );
                 })}
               </select>
+              {isBasketSelected && basket && (
+                <p className="text-xs text-zinc-500">
+                  {basketNodeCount} verse{basketNodeCount !== 1 ? "s" : ""} from{" "}
+                  {basketBookCount} different book{basketBookCount === 1 ? "" : "s"}
+                </p>
+              )}
+              {isBasketSelected && basketIsEmpty ? (
+                <p className="text-sm text-amber-700">
+                  Your basket is empty. Browse scriptures and add verses to generate content.
+                </p>
+              ) : null}
+              {isBasketSelected && basketAllTranslated ? (
+                <p className="text-sm text-sky-700">
+                  All {formatInteger(basketNodeCount)} verses in your basket already have {selectedLanguage.label} translation. Nothing to generate.
+                </p>
+              ) : null}
+              {isBasketSelected && basketNodeCount > 0 && (basketMissingTranslationCount ?? 0) > 0 ? (
+                <p className="text-sm text-emerald-700">
+                  {formatInteger(basketMissingTranslationCount)} of {formatInteger(basketNodeCount)} verses need {selectedLanguage.label} translation.
+                </p>
+              ) : null}
             </label>
 
             <label className="space-y-1">
@@ -798,6 +964,30 @@ export default function AdminAiGenerationPage() {
                   Batch (50% cheaper)
                 </button>
               </div>
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-zinc-800">Additional Instructions (optional)</span>
+                <span className="text-xs text-zinc-500">
+                  {additionalInstructions.length} / {MAX_ADDITIONAL_INSTRUCTIONS}
+                </span>
+              </div>
+              <textarea
+                value={additionalInstructions}
+                onChange={(event) => setAdditionalInstructions(event.target.value)}
+                maxLength={MAX_ADDITIONAL_INSTRUCTIONS}
+                rows={3}
+                className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
+                placeholder="Leave blank for standard generation"
+              />
+              {additionalInstructionsError ? (
+                <p className="text-sm text-red-600">{additionalInstructionsError}</p>
+              ) : (
+                <p className="text-xs text-zinc-500">
+                  e.g. "Commentary should be from Advaitic perspective. Keep w2w meanings concise."
+                </p>
+              )}
             </div>
 
             <div className="space-y-2 sm:col-span-2">
@@ -853,13 +1043,17 @@ export default function AdminAiGenerationPage() {
           <aside className="rounded-xl border border-black/10 bg-zinc-50 p-4">
             <h3 className="text-sm font-semibold text-zinc-900">Cost estimate</h3>
             <p className="mt-1 text-sm text-zinc-600">
-              {estimateLoading
+              {isBasketSelected && basketIsEmpty
+                ? "Add verses to your basket to see cost estimate."
+                : estimateLoading
                 ? "Calculating estimate..."
                 : estimate
                   ? `Estimated cost: ${formatCurrency(estimate.estimated_cost_batch)} (batch) / ${formatCurrency(estimate.estimated_cost_realtime)} (real-time)`
-                  : "Select a book to calculate cost."}
+                  : isBasketSelected
+                    ? "Select a language to calculate basket cost."
+                    : "Select a source to calculate cost."}
             </p>
-            {estimate ? (
+            {estimate && !(isBasketSelected && basketIsEmpty) ? (
               <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                 <div className="rounded-lg border border-black/10 bg-white px-3 py-2">
                   <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Mode selected</p>
@@ -875,7 +1069,7 @@ export default function AdminAiGenerationPage() {
                 </div>
               </div>
             ) : null}
-            {estimateError ? <p className="mt-3 text-sm text-red-600">{estimateError}</p> : null}
+            {estimateError && !(isBasketSelected && basketIsEmpty) ? <p className="mt-3 text-sm text-red-600">{estimateError}</p> : null}
           </aside>
         </div>
       </section>
@@ -904,7 +1098,7 @@ export default function AdminAiGenerationPage() {
 
           {activeJobs.map((job) => {
             const progress = getJobProgress(job);
-            const bookName = job.book_id ? bookNameById.get(job.book_id) || `Book #${job.book_id}` : "Unknown book";
+            const sourceLabel = getJobSourceLabel(job, bookNameById);
             const modeLabel = getJobMode(job) === "batch" ? "Batch" : "Real-time";
             const snapshotStatus = job.batch_status_snapshot?.status || job.batch_status_snapshot?.processing_status;
             const remainingMs = getJobRemainingMs(job);
@@ -915,7 +1109,7 @@ export default function AdminAiGenerationPage() {
                   <div className="space-y-3 flex-1">
                     <div>
                       <h3 className="text-sm font-semibold text-zinc-900">
-                        {bookName} • {getJobLanguageLabel(job)} • {modeLabel}
+                        {sourceLabel} • {getJobLanguageLabel(job)} • {modeLabel}
                       </h3>
                       <p className="text-sm text-zinc-600">
                         {formatInteger(progress.processed)} / {formatInteger(progress.total)} processed • {progress.percent}%
@@ -984,6 +1178,7 @@ export default function AdminAiGenerationPage() {
                 <th className="px-3 py-2 font-medium">Book</th>
                 <th className="px-3 py-2 font-medium">Language</th>
                 <th className="px-3 py-2 font-medium">Mode</th>
+                <th className="px-3 py-2 font-medium">Instructions</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Verses generated</th>
                 <th className="px-3 py-2 font-medium">Actual cost</th>
@@ -995,7 +1190,7 @@ export default function AdminAiGenerationPage() {
             <tbody className="divide-y divide-black/5">
               {historyLoading ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600" colSpan={9}>
+                  <td className="px-3 py-4 text-zinc-600" colSpan={10}>
                     Loading history...
                   </td>
                 </tr>
@@ -1003,7 +1198,7 @@ export default function AdminAiGenerationPage() {
 
               {!historyLoading && historyJobs.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-4 text-zinc-600" colSpan={9}>
+                  <td className="px-3 py-4 text-zinc-600" colSpan={10}>
                     No completed or failed jobs yet.
                   </td>
                 </tr>
@@ -1011,16 +1206,18 @@ export default function AdminAiGenerationPage() {
 
               {!historyLoading
                 ? historyJobs.map((job) => {
-                    const bookName = job.book_id
-                      ? bookNameById.get(job.book_id) || `Book #${job.book_id}`
-                      : "Unknown book";
+                    const sourceLabel = getJobSourceLabel(job, bookNameById);
+                    const jobInstructions = getJobAdditionalInstructions(job);
 
                     return (
                       <tr key={job.id} className="align-top">
-                        <td className="px-3 py-3 text-zinc-900">{bookName}</td>
+                        <td className="px-3 py-3 text-zinc-900">{sourceLabel}</td>
                         <td className="px-3 py-3 text-zinc-700">{getJobLanguageLabel(job)}</td>
                         <td className="px-3 py-3 text-zinc-700">
                           {getJobMode(job) === "batch" ? "Batch" : "Real-time"}
+                        </td>
+                        <td className="max-w-72 px-3 py-3 text-zinc-700" title={jobInstructions || undefined}>
+                          {jobInstructions ? truncateWithEllipsis(jobInstructions, 50) : "—"}
                         </td>
                         <td className="px-3 py-3">
                           <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize ${getStatusClasses(job.status)}`}>

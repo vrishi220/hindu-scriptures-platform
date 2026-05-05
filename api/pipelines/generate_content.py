@@ -338,6 +338,61 @@ def _fetch_nodes_missing_translation(
 	return missing
 
 
+def _fetch_nodes_for_node_ids(
+	db: Session,
+	node_ids: list[int],
+	language_code: str,
+	translation_work_id: int,
+	limit: int | None,
+) -> list[ContentNode]:
+	"""Fetch ContentNodes by explicit IDs, resolve references, filter to those missing translation."""
+	if not node_ids:
+		return []
+
+	ref_node = aliased(ContentNode)
+	query = (
+		db.query(ContentNode, ref_node)
+		.outerjoin(ref_node, ContentNode.referenced_node_id == ref_node.id)
+		.filter(ContentNode.id.in_(node_ids))
+		.order_by(ContentNode.level_order, ContentNode.id)
+	)
+	node_pairs = query.all()
+
+	missing: list[ContentNode] = []
+	seen_node_ids: set[int] = set()
+	for owner_node, referenced_node in node_pairs:
+		target_node: ContentNode | None = None
+		if referenced_node is not None:
+			target_node = referenced_node
+		elif owner_node.has_content:
+			target_node = owner_node
+
+		if target_node is None:
+			continue
+		if target_node.id in seen_node_ids:
+			continue
+
+		if limit is not None and len(missing) >= limit:
+			break
+
+		existing_translation = (
+			db.query(TranslationEntry.id)
+			.filter(
+				TranslationEntry.node_id == target_node.id,
+				TranslationEntry.work_id == translation_work_id,
+				TranslationEntry.language_code == language_code,
+			)
+			.first()
+		)
+		if existing_translation:
+			seen_node_ids.add(target_node.id)
+			continue
+		missing.append(target_node)
+		seen_node_ids.add(target_node.id)
+
+	return missing
+
+
 def _build_source_text(node: ContentNode) -> str:
 	cd = node.content_data or {}
 	basic = cd.get("basic") or {}
@@ -369,13 +424,20 @@ def _build_generation_prompts(
 	book_name: str,
 	node: ContentNode,
 	language_name: str,
+	additional_instructions: str | None = None,
 ) -> tuple[str, str, str]:
 	source_text = _build_source_text(node)
 	seq = node.sequence_number or f"node-{node.id}"
+	instructions_block = (
+		f"Additional instructions: {additional_instructions.strip()} "
+		if isinstance(additional_instructions, str) and additional_instructions.strip()
+		else ""
+	)
 
 	system_prompt = (
 		f"You are a learned scholar of Hindu scriptures producing high-quality {language_name} "
 		f"translations and commentary for the {book_name}. "
+		f"{instructions_block}"
 		"Your outputs will be reviewed by human editors before publication. "
 		"Be faithful to the source, clear in expression, and reverent in tone. "
 		"Always respond by calling the save_shloka_content tool."
@@ -467,10 +529,16 @@ def _submit_batch(
 	book_name: str,
 	nodes: list[ContentNode],
 	language_name: str,
+	additional_instructions: str | None = None,
 ) -> str:
 	batch_requests = []
 	for node in nodes:
-		system_prompt, user_message, _ = _build_generation_prompts(book_name, node, language_name)
+		system_prompt, user_message, _ = _build_generation_prompts(
+			book_name,
+			node,
+			language_name,
+			additional_instructions,
+		)
 		batch_requests.append(
 			{
 				"custom_id": str(node.id),
@@ -596,8 +664,14 @@ def _call_claude(
 	node: ContentNode,
 	language_name: str,
 	language_code: str,
+	additional_instructions: str | None = None,
 ) -> tuple[str, str, str] | None:
-	system_prompt, user_message, _ = _build_generation_prompts(book_name, node, language_name)
+	system_prompt, user_message, _ = _build_generation_prompts(
+		book_name,
+		node,
+		language_name,
+		additional_instructions,
+	)
 
 	response = client.messages.create(
 		model=model,
@@ -837,6 +911,12 @@ def _parse_args() -> argparse.Namespace:
 		action="store_true",
 		help="Use Anthropic Batch API mode (submit all selected nodes as one batch job).",
 	)
+	parser.add_argument(
+		"--instructions",
+		type=str,
+		default=None,
+		help="Optional additional instructions to guide generation (max 500 chars).",
+	)
 	return parser.parse_args()
 
 
@@ -856,6 +936,11 @@ def main() -> None:
 
 	client = anthropic.Anthropic(api_key=api_key)
 	print("CLIENT CREATED")
+
+	additional_instructions = (args.instructions or "").strip() or None
+	if additional_instructions is not None and len(additional_instructions) > 500:
+		print("[ERROR] --instructions must be 500 characters or fewer", file=sys.stderr)
+		sys.exit(1)
 
 	db = _get_db()
 	print("DB CONNECTED")
@@ -925,6 +1010,7 @@ def main() -> None:
 					book_name=book.book_name,
 					nodes=nodes,
 					language_name=args.language_name,
+					additional_instructions=additional_instructions,
 				)
 				print(f"Batch submitted. ID: {batch_id}")
 				print("Polling for completion (batch jobs can take up to 24 hours)...")
@@ -996,6 +1082,7 @@ def main() -> None:
 						node=node,
 						language_name=args.language_name,
 						language_code=args.language_code,
+						additional_instructions=additional_instructions,
 					)
 					print("CLAUDE CALL DONE")
 					if result is None:

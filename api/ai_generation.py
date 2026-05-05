@@ -17,6 +17,7 @@ from api.pipelines import generate_content as generation_pipeline
 from api.users import require_permission
 from models.ai_job import AIJob
 from models.book import Book
+from models.collection_cart import CollectionCart, CollectionCartItem
 from models.database import SessionLocal
 from models.user import User
 from services import get_db
@@ -28,12 +29,15 @@ _CANCEL_FLAGS: dict[int, threading.Event] = {}
 
 
 class GenerationStartRequest(BaseModel):
-    book_id: int
+    source_type: Literal["book", "basket"] = "book"
+    book_id: int | None = None
+    basket_id: int | None = None
     language_code: Literal["en", "te", "hi", "ta"]
     language_name: str
     mode: Literal["realtime", "batch"]
     limit: int | None = None
     api_key: str | None = None
+    additional_instructions: str | None = None
 
 
 class GenerationStartResponse(BaseModel):
@@ -64,6 +68,8 @@ class AIJobPublic(BaseModel):
     completed_at: datetime | None
     error_log: list[dict] | None
     metadata: dict | None
+    source_type: str | None
+    source_label: str | None
     created_by: int | None
     created_at: datetime | None
 
@@ -105,6 +111,15 @@ class GenerationSummaryResponse(BaseModel):
 
 
 def _serialize_job(job: AIJob) -> AIJobPublic:
+    _meta = job.metadata_json or {}
+    _source_type: str | None = _meta.get("source_type") or ("book" if job.book_id else None)
+    _source_label: str | None = _meta.get("source_label")
+    if _source_label is None:
+        if _source_type == "basket":
+            _count = _meta.get("basket_item_count") or job.total_nodes
+            _source_label = f"Basket ({_count} verses)"
+        else:
+            _source_label = _meta.get("book_code")
     return AIJobPublic(
         id=job.id,
         job_type=job.job_type,
@@ -118,6 +133,8 @@ def _serialize_job(job: AIJob) -> AIJobPublic:
         estimated_cost_usd=float(job.estimated_cost_usd) if job.estimated_cost_usd is not None else None,
         actual_cost_usd=float(job.actual_cost_usd) if job.actual_cost_usd is not None else None,
         started_at=job.started_at,
+        source_type=_source_type,
+        source_label=_source_label,
         completed_at=job.completed_at,
         error_log=job.error_log,
         metadata=job.metadata_json,
@@ -200,12 +217,14 @@ def _apply_progress(db: Session, job: AIJob, processed: int, failed: int) -> Non
 
 def _run_generation_job_task(
     job_id: int,
-    book_id: int,
+    source_type: Literal["book", "basket"],
+    book_id: int | None,
     language_code: str,
     language_name: str,
     mode: Literal["realtime", "batch"],
     limit: int | None,
     api_key_override: str | None,
+    additional_instructions: str | None,
 ) -> None:
     db = SessionLocal()
     cancel_event = _CANCEL_FLAGS.setdefault(job_id, threading.Event())
@@ -229,13 +248,26 @@ def _run_generation_job_task(
 
         client = anthropic.Anthropic(api_key=api_key)
 
-        book = db.query(Book).filter(Book.id == book_id).first()
-        if not book:
-            job.status = "failed"
-            job.completed_at = datetime.now(tz=timezone.utc)
-            job.error_log = [{"error": f"Book id={book_id} not found"}]
-            db.commit()
-            return
+        # Resolve source: book or basket
+        source_label: str
+        if source_type == "basket":
+            _meta = job.metadata_json or {}
+            source_label = _meta.get("source_label", "My Basket")
+            basket_node_ids: list[int] = _meta.get("basket_node_ids") or []
+            if not basket_node_ids:
+                job.status = "completed"
+                job.completed_at = datetime.now(tz=timezone.utc)
+                db.commit()
+                return
+        else:
+            book = db.query(Book).filter(Book.id == book_id).first()
+            if not book:
+                job.status = "failed"
+                job.completed_at = datetime.now(tz=timezone.utc)
+                job.error_log = [{"error": f"Book id={book_id} not found"}]
+                db.commit()
+                return
+            source_label = book.book_name
 
         job.status = "running"
         if job.started_at is None:
@@ -260,13 +292,22 @@ def _run_generation_job_task(
         )
         db.commit()
 
-        nodes = generation_pipeline._fetch_nodes_missing_translation(
-            db,
-            book,
-            language_code,
-            translation_work.id,
-            limit,
-        )
+        if source_type == "basket":
+            nodes = generation_pipeline._fetch_nodes_for_node_ids(
+                db,
+                basket_node_ids,
+                language_code,
+                translation_work.id,
+                limit,
+            )
+        else:
+            nodes = generation_pipeline._fetch_nodes_missing_translation(
+                db,
+                book,  # type: ignore[possibly-undefined]
+                language_code,
+                translation_work.id,
+                limit,
+            )
         job.total_nodes = len(nodes)
         _apply_progress(db, job, processed=0, failed=0)
 
@@ -280,9 +321,10 @@ def _run_generation_job_task(
             batch_id = generation_pipeline._submit_batch(
                 client=client,
                 model=model,
-                book_name=book.book_name,
+                book_name=source_label,
                 nodes=nodes,
                 language_name=language_name,
+                additional_instructions=additional_instructions,
             )
             metadata = dict(job.metadata_json or {})
             metadata["batch_id"] = batch_id
@@ -372,10 +414,11 @@ def _run_generation_job_task(
                     result = generation_pipeline._call_claude(
                         client=client,
                         model=model,
-                        book_name=book.book_name,
+                        book_name=source_label,
                         node=node,
                         language_name=language_name,
                         language_code=language_code,
+                        additional_instructions=additional_instructions,
                     )
                     if result is None:
                         raise ValueError("Claude did not return a tool_use block")
@@ -431,6 +474,42 @@ def _run_generation_job_task(
         _CANCEL_FLAGS.pop(job_id, None)
 
 
+def _get_user_cart(db: Session, user_id: int, basket_id: int | None) -> CollectionCart | None:
+    if basket_id is not None:
+        return (
+            db.query(CollectionCart)
+            .filter(CollectionCart.id == basket_id, CollectionCart.owner_id == user_id)
+            .first()
+        )
+    return db.query(CollectionCart).filter(CollectionCart.owner_id == user_id).first()
+
+
+def _get_cart_node_ids(db: Session, cart_id: int) -> list[int]:
+    items = (
+        db.query(CollectionCartItem)
+        .filter(
+            CollectionCartItem.cart_id == cart_id,
+            CollectionCartItem.item_type == "library_node",
+        )
+        .all()
+    )
+    return [item.item_id for item in items]
+
+
+def _normalize_additional_instructions(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 500:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="additional_instructions must be 500 characters or fewer",
+        )
+    return cleaned
+
+
 @router.post("/start", response_model=GenerationStartResponse)
 def start_generation(
     payload: GenerationStartRequest,
@@ -438,9 +517,8 @@ def start_generation(
     current_user: User = Depends(require_permission("can_admin")),
     db: Session = Depends(get_db),
 ) -> GenerationStartResponse:
-    book = db.query(Book).filter(Book.id == payload.book_id).first()
-    if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    source_type = payload.source_type or "book"
+    additional_instructions = _normalize_additional_instructions(payload.additional_instructions)
 
     translation_author = generation_pipeline._resolve_hsp_ai_translation_author(db)
     generation_pipeline._seed_hsp_ai_translation_works(db, translation_author)
@@ -452,33 +530,82 @@ def start_generation(
     )
     db.commit()
 
-    nodes = generation_pipeline._fetch_nodes_missing_translation(
-        db,
-        book,
-        payload.language_code,
-        translation_work.id,
-        payload.limit,
-    )
-    est_realtime, est_batch = generation_pipeline._estimate_cost(nodes)
+    if source_type == "basket":
+        cart = _get_user_cart(db, current_user.id, payload.basket_id)
+        if cart is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Basket not found")
+        raw_node_ids = _get_cart_node_ids(db, cart.id)
+        if not raw_node_ids:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Basket is empty. Add verses before starting generation.",
+            )
+        nodes = generation_pipeline._fetch_nodes_for_node_ids(
+            db, raw_node_ids, payload.language_code, translation_work.id, payload.limit
+        )
+        if not nodes:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"All verses in this basket already have {payload.language_name} translation.",
+            )
+        est_realtime, est_batch = generation_pipeline._estimate_cost(nodes)
+        basket_item_count = len(raw_node_ids)
+        source_label = f"My Basket ({basket_item_count} items)"
+        job = AIJob(
+            job_type=generation_pipeline.JOB_TYPE,
+            book_id=None,
+            language_code=payload.language_code,
+            model=generation_pipeline.DEFAULT_MODEL,
+            status="pending",
+            total_nodes=len(nodes),
+            processed_nodes=0,
+            failed_nodes=0,
+            estimated_cost_usd=Decimal(f"{est_realtime:.4f}"),
+            metadata_json={
+                "source_type": "basket",
+                "source_label": source_label,
+                "basket_id": cart.id,
+                "basket_node_ids": [n.id for n in nodes],
+                "basket_item_count": basket_item_count,
+                "language_name": payload.language_name,
+                "mode": payload.mode,
+                "limit": payload.limit,
+                "additional_instructions": additional_instructions,
+            },
+            created_by=current_user.id,
+        )
+    else:
+        if not payload.book_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="book_id is required for source_type='book'")
+        book = db.query(Book).filter(Book.id == payload.book_id).first()
+        if not book:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+        nodes = generation_pipeline._fetch_nodes_missing_translation(
+            db, book, payload.language_code, translation_work.id, payload.limit
+        )
+        est_realtime, est_batch = generation_pipeline._estimate_cost(nodes)
+        job = AIJob(
+            job_type=generation_pipeline.JOB_TYPE,
+            book_id=book.id,
+            language_code=payload.language_code,
+            model=generation_pipeline.DEFAULT_MODEL,
+            status="pending",
+            total_nodes=len(nodes),
+            processed_nodes=0,
+            failed_nodes=0,
+            estimated_cost_usd=Decimal(f"{est_realtime:.4f}"),
+            metadata_json={
+                "source_type": "book",
+                "book_code": book.book_code,
+                "source_label": book.book_name,
+                "language_name": payload.language_name,
+                "mode": payload.mode,
+                "limit": payload.limit,
+                "additional_instructions": additional_instructions,
+            },
+            created_by=current_user.id,
+        )
 
-    job = AIJob(
-        job_type=generation_pipeline.JOB_TYPE,
-        book_id=book.id,
-        language_code=payload.language_code,
-        model=generation_pipeline.DEFAULT_MODEL,
-        status="pending",
-        total_nodes=len(nodes),
-        processed_nodes=0,
-        failed_nodes=0,
-        estimated_cost_usd=Decimal(f"{est_realtime:.4f}"),
-        metadata_json={
-            "book_code": book.book_code,
-            "language_name": payload.language_name,
-            "mode": payload.mode,
-            "limit": payload.limit,
-        },
-        created_by=current_user.id,
-    )
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -486,12 +613,14 @@ def start_generation(
     background_tasks.add_task(
         _run_generation_job_task,
         job.id,
-        payload.book_id,
+        source_type,
+        payload.book_id if source_type == "book" else None,
         payload.language_code,
         payload.language_name,
         payload.mode,
         payload.limit,
         payload.api_key,
+        additional_instructions,
     )
 
     return GenerationStartResponse(
@@ -503,19 +632,15 @@ def start_generation(
 
 @router.get("/estimate", response_model=GenerationEstimateResponse)
 def estimate_generation(
-    book_id: int,
     language_code: Literal["en", "te", "hi", "ta"],
     language_name: str,
+    source_type: Literal["book", "basket"] = "book",
+    book_id: int | None = None,
+    basket_id: int | None = None,
     limit: int | None = None,
     current_user: User = Depends(require_permission("can_admin")),
     db: Session = Depends(get_db),
 ) -> GenerationEstimateResponse:
-    del current_user
-
-    book = db.query(Book).filter(Book.id == book_id).first()
-    if not book:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-
     translation_author = generation_pipeline._resolve_hsp_ai_translation_author(db)
     generation_pipeline._seed_hsp_ai_translation_works(db, translation_author)
     translation_work = generation_pipeline._resolve_or_create_translation_work(
@@ -526,13 +651,24 @@ def estimate_generation(
     )
     db.commit()
 
-    nodes = generation_pipeline._fetch_nodes_missing_translation(
-        db,
-        book,
-        language_code,
-        translation_work.id,
-        limit,
-    )
+    if source_type == "basket":
+        cart = _get_user_cart(db, current_user.id, basket_id)
+        if cart is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Basket not found")
+        raw_node_ids = _get_cart_node_ids(db, cart.id)
+        nodes = generation_pipeline._fetch_nodes_for_node_ids(
+            db, raw_node_ids, language_code, translation_work.id, limit
+        )
+    else:
+        if not book_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="book_id is required for source_type='book'")
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if not book:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+        nodes = generation_pipeline._fetch_nodes_missing_translation(
+            db, book, language_code, translation_work.id, limit
+        )
+
     est_realtime, est_batch = generation_pipeline._estimate_cost(nodes)
 
     return GenerationEstimateResponse(
