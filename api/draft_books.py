@@ -12,9 +12,12 @@ from time import monotonic, perf_counter
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from liquid import Template
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph
 from sqlalchemy import text
 from sqlalchemy.orm import Session, load_only
+from xml.sax.saxutils import escape
 
 from api.metadata import _resolve_binding_metadata, validate_draft_metadata_bindings_on_publish
 from api.pdf_export import (
@@ -2721,6 +2724,13 @@ def _render_liquid_lines(
         should_parse_labeled_line = bool(label_prefix) and label_prefix in resolved_label_to_field
 
         if not should_parse_labeled_line:
+            # This is a continuation line (e.g. verse line 2 after "Sanskrit: <line1>").
+            # If the previous non-blank row is a named field (sanskrit/transliteration/text),
+            # append this line to it rather than emitting a separate field="text" row.
+            prev = next((r for r in reversed(lines) if r.get("field") != "blank"), None)
+            if prev and prev.get("field") in {"sanskrit", "transliteration", "text"}:
+                prev["value"] = prev["value"] + "\n" + line
+                continue
             lines.append(
                 {
                     "field": "text",
@@ -2956,6 +2966,39 @@ def _resolve_pdf_content_lines(
         else None
     )
 
+    def _join_sanskrit_lines_for_pdf(value: str) -> str:
+        normalized = _normalize_pdf_text(value)
+        if not normalized:
+            return ""
+        return " ".join(normalized.replace("\n", " ").split())
+
+    def _is_likely_iast(value: str) -> bool:
+        return bool(re.search(r"[āīūṛṝḷḹṅñṭḍṇśṣḥṃṁĀĪŪṚṜḶḸṄÑṬḌṆŚṢḤṂṀ]", value or ""))
+
+    def _line_sort_key(field_name: str, label: str, value: str) -> int:
+        normalized_label = _as_clean_string(label).lower()
+        script = _detect_indic_script(value)
+
+        if field_name == "sanskrit" or (field_name == "text" and script == "devanagari"):
+            return 0
+        if field_name == "text" and script == "telugu":
+            return 1
+        if field_name == "transliteration" and script == "telugu":
+            return 1
+        if field_name == "transliteration" and script is not None:
+            return 2
+        if "word meaning" in normalized_label:
+            return 4
+        if field_name == "commentary" or "commentar" in normalized_label:
+            return 6
+        if field_name == "english" or "translation" in normalized_label:
+            return 5
+        if field_name == "text" and _is_likely_iast(value):
+            return 3
+        if field_name == "transliteration" and script is None:
+            return 3
+        return 7
+
     def _resolve_word_meaning_pdf_lines() -> list[tuple[str, str]]:
         if word_meanings_display_mode == "hide":
             return []
@@ -2988,17 +3031,20 @@ def _resolve_pdf_content_lines(
         for row in sorted_rows:
             resolved_source = row.get("resolved_source") if isinstance(row.get("resolved_source"), dict) else {}
             resolved_meaning = row.get("resolved_meaning") if isinstance(row.get("resolved_meaning"), dict) else {}
+            raw_source = row.get("source") if isinstance(row.get("source"), dict) else {}
 
             source_text = _as_clean_string(resolved_source.get("text"))
+            # Fall back to raw source script_text (IAST) when resolved_source has no text
+            if not source_text:
+                source_text = _as_clean_string(
+                    raw_source.get("script_text")
+                    or (raw_source.get("transliteration") or {}).get("iast")
+                )
             meaning_text = _as_clean_string(resolved_meaning.get("text"))
             if not source_text and not meaning_text:
                 continue
 
-            source_language = _as_clean_string(
-                (row.get("source") or {}).get("language")
-                if isinstance(row.get("source"), dict)
-                else ""
-            ).lower()
+            source_language = _as_clean_string(raw_source.get("language") or resolved_source.get("language") or "").lower()
             if source_text and source_language == "sa" and resolved_preview_transliteration_script:
                 source_text = transliterate_text(
                     source_text,
@@ -3035,10 +3081,68 @@ def _resolve_pdf_content_lines(
             if not value:
                 continue
 
-            if field_name == "transliteration" and resolved_preview_transliteration_script:
-                value = transliterate_text(value, resolved_preview_transliteration_script)
+            normalized_line_label = (raw_label or "").strip().lower()
+            is_verse_text_label = normalized_line_label in {"", "text", "sanskrit", "transliteration"}
 
-            if field_name in {"sanskrit", "transliteration"}:
+            # Some imported verses arrive as multiple rows for the same verse (e.g. line 1 as
+            # field="sanskrit" and line 2 as field="text").  Merge them into a single entry so
+            # the PDF renders one continuous block.
+            is_devanagari_value = _detect_indic_script(value) == "devanagari"
+            is_iast_value = _is_likely_iast(value)
+
+            # Transliterate IAST "text" continuation lines before merge so they land in the
+            # same script bucket as the preceding transliteration row.
+            if resolved_preview_transliteration_script and (
+                field_name == "transliteration"
+                or (field_name == "text" and is_iast_value and is_verse_text_label)
+            ):
+                value = transliterate_text(value, resolved_preview_transliteration_script)
+                # Re-detect script after transliteration so merge / sort logic is correct
+                is_devanagari_value = _detect_indic_script(value) == "devanagari"
+                is_iast_value = _is_likely_iast(value)
+
+            if (
+                field_name in {"sanskrit", "transliteration"}
+                or (field_name == "text" and is_verse_text_label)
+            ) and (is_devanagari_value or _detect_indic_script(value) is not None or is_iast_value):
+                value = _join_sanskrit_lines_for_pdf(value)
+                prev_script_matches = False
+                if rendered_entries:
+                    prev_fn, prev_lbl, prev_val = rendered_entries[-1]
+                    prev_script = _detect_indic_script(prev_val)
+                    cur_script = _detect_indic_script(value)
+                    prev_label_ok = (prev_lbl or "").strip().lower() in {"", "text", "sanskrit", "transliteration"}
+                    # Same field, or "text" continuation onto a named field of same script
+                    same_field = prev_fn == field_name
+                    continuation = (
+                        field_name == "text"
+                        and is_verse_text_label
+                        and prev_fn in {"sanskrit", "transliteration", "text"}
+                        and prev_label_ok
+                        and (
+                            (prev_script == "devanagari" and cur_script == "devanagari")
+                            or (prev_script == cur_script and cur_script is not None)
+                            or (_is_likely_iast(prev_val) and is_iast_value)
+                        )
+                    )
+                    prev_script_matches = prev_label_ok and (same_field or continuation) and (
+                        _detect_indic_script(prev_val) == "devanagari"
+                        or _is_likely_iast(prev_val)
+                        or _detect_indic_script(prev_val) is not None
+                    )
+                if prev_script_matches:
+                    prev_field_name, prev_label, prev_value = rendered_entries[-1]
+                    rendered_entries[-1] = (
+                        prev_field_name,
+                        prev_label,
+                        _join_sanskrit_lines_for_pdf(f"{prev_value} {value}"),
+                    )
+                    previous_field_name = field_name or None
+                    continue
+
+            if field_name in {"sanskrit", "transliteration", "text"}:
+                if field_name in {"sanskrit", "transliteration"} or (field_name == "text" and is_iast_value):
+                    value = _join_sanskrit_lines_for_pdf(value)
                 value = _expand_verse_separators_for_pdf(value)
 
             if field_name in visible_by_key and not visible_by_key.get(field_name, False):
@@ -3050,6 +3154,10 @@ def _resolve_pdf_content_lines(
                 display_label = label
                 if field_name == "sanskrit":
                     display_label = ""
+                if field_name == "text" and (is_devanagari_value or is_iast_value):
+                    display_label = ""
+                if field_name == "transliteration" and (display_label or "").strip().lower() == "text":
+                    display_label = ""
                 if field_name and field_name == previous_field_name:
                     display_label = ""
                 rendered_entries.append((field_name, display_label, value))
@@ -3057,16 +3165,29 @@ def _resolve_pdf_content_lines(
             previous_field_name = field_name or None
 
         if rendered_entries:
-            non_translation_lines = [
-                (label, value)
-                for field_name, label, value in rendered_entries
-                if field_name != "english"
-            ]
-            translation_lines = [
-                (label, value)
-                for field_name, label, value in rendered_entries
-                if field_name == "english"
-            ]
+            ordered_entries = sorted(
+                rendered_entries,
+                key=lambda item: _line_sort_key(item[0], item[1], item[2]),
+            )
+
+            core_lines: list[tuple[str, str]] = []
+            translation_lines: list[tuple[str, str]] = []
+            word_meaning_lines_from_entries: list[tuple[str, str]] = []
+            commentary_lines: list[tuple[str, str]] = []
+            trailing_lines: list[tuple[str, str]] = []
+            for field_name, label, value in ordered_entries:
+                bucket = _line_sort_key(field_name, label, value)
+                item = (label, value)
+                if bucket in {0, 1, 2, 3}:
+                    core_lines.append(item)
+                elif bucket == 4:
+                    word_meaning_lines_from_entries.append(item)
+                elif bucket == 5:
+                    translation_lines.append(item)
+                elif bucket == 6:
+                    commentary_lines.append(item)
+                else:
+                    trailing_lines.append(item)
 
             primary_selected_translation_language = (
                 resolved_selected_translation_languages[0]
@@ -3087,7 +3208,14 @@ def _resolve_pdf_content_lines(
                 translation_lines.append((f"{_translation_language_label(language)} Translation", value))
                 existing_translation_values.add(value)
 
-            return non_translation_lines + word_meaning_lines + translation_lines
+            combined_word_meaning_lines = word_meaning_lines_from_entries + word_meaning_lines
+            return (
+                core_lines
+                + combined_word_meaning_lines
+                + translation_lines
+                + commentary_lines
+                + trailing_lines
+            )
 
     visible_by_key: dict[str, bool] = {
         "sanskrit": render_settings.show_sanskrit,
@@ -3115,7 +3243,17 @@ def _resolve_pdf_content_lines(
         if not cleaned:
             continue
 
-        fallback_entries.append((key, labels.get(key, key.title()), cleaned))
+        if key in {"sanskrit", "transliteration"} or (
+            key == "text" and (_detect_indic_script(cleaned) == "devanagari" or _is_likely_iast(cleaned))
+        ):
+            cleaned = _join_sanskrit_lines_for_pdf(cleaned)
+
+        if key == "text" and (_detect_indic_script(cleaned) == "devanagari" or _is_likely_iast(cleaned)):
+            resolved_label = ""
+        else:
+            resolved_label = labels.get(key, key.title())
+
+        fallback_entries.append((key, resolved_label, cleaned))
 
     if not fallback_entries:
         fallback = resolved_content.get("text")
@@ -3152,7 +3290,27 @@ def _resolve_pdf_content_lines(
         translation_lines.append((f"{_translation_language_label(language)} Translation", value))
         existing_translation_values.add(value)
 
-    return non_translation_lines + word_meaning_lines + translation_lines
+    ordered_fallback_entries = sorted(
+        fallback_entries,
+        key=lambda item: _line_sort_key(item[0], item[1], item[2]),
+    )
+    core_lines: list[tuple[str, str]] = []
+    translation_lines: list[tuple[str, str]] = []
+    commentary_lines: list[tuple[str, str]] = []
+    trailing_lines: list[tuple[str, str]] = []
+    for field_name, label, value in ordered_fallback_entries:
+        bucket = _line_sort_key(field_name, label, value)
+        item = (label, value)
+        if bucket in {0, 1, 2, 3}:
+            core_lines.append(item)
+        elif bucket == 5:
+            translation_lines.append(item)
+        elif bucket == 6:
+            commentary_lines.append(item)
+        else:
+            trailing_lines.append(item)
+
+    return core_lines + word_meaning_lines + translation_lines + commentary_lines + trailing_lines
 
 
 def _render_book_preview_template(
@@ -3914,6 +4072,23 @@ def _generate_rendered_pdf(
         "malayalam": pdf_malayalam_font_name,
     }
 
+    def _normalize_spaced_header_text(value: str) -> str:
+        normalized = _normalize_pdf_text(value)
+        # Collapse accidental character-by-character spacing for all-caps headers.
+        if re.search(r"\b(?:[A-Z]\s+){2,}[A-Z0-9]\b", normalized):
+            normalized = re.sub(
+                r"\b(?:[A-Z]\s+){2,}[A-Z0-9]\b",
+                lambda match: re.sub(r"\s+", "", match.group(0)),
+                normalized,
+            )
+        return normalized
+
+    def _resolve_header_font_name(text: str) -> str:
+        return "Helvetica-Bold" if _detect_indic_script(text) is None else pdf_font_name
+
+    def _is_likely_iast(value: str) -> bool:
+        return bool(re.search(r"[āīūṛṝḷḹṅñṭḍṇśṣḥṃṁĀĪŪṚṜḶḸṄÑṬḌṆŚṢḤṂṀ]", value or ""))
+
     def write_line(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
         nonlocal y
         if y < bottom_margin:
@@ -3984,6 +4159,59 @@ def _generate_rendered_pdf(
                 use_devanagari=resolved_use_devanagari,
             )
 
+    def write_paragraph_text(text: str, font_name: str | None = None, font_size: int = 10, use_devanagari: bool = False):
+        nonlocal y
+        normalized_text = _normalize_pdf_text(text)
+        detected_script = _detect_indic_script(normalized_text)
+        resolved_use_devanagari = use_devanagari or detected_script is not None
+
+        if font_name:
+            resolved_font = font_name
+        elif use_devanagari:
+            resolved_font = pdf_devanagari_font_name
+        elif detected_script == "telugu":
+            resolved_font = pdf_telugu_font_name
+        elif detected_script == "kannada":
+            resolved_font = pdf_kannada_font_name
+        elif detected_script == "tamil":
+            resolved_font = pdf_tamil_font_name
+        elif detected_script == "malayalam":
+            resolved_font = pdf_malayalam_font_name
+        elif detected_script == "devanagari":
+            resolved_font = pdf_devanagari_font_name
+        else:
+            resolved_font = pdf_font_name
+
+        if pdf_font_name != "Helvetica" and resolved_font.startswith("Helvetica"):
+            resolved_font = pdf_font_name
+
+        if detected_script == "telugu":
+            leading = telugu_line_height
+        elif resolved_use_devanagari:
+            leading = devanagari_line_height
+        else:
+            leading = line_height
+
+        style_name = f"snapshot-paragraph-{resolved_font}-{font_size}-{leading}"
+        paragraph_style = ParagraphStyle(
+            name=style_name,
+            fontName=resolved_font,
+            fontSize=font_size,
+            leading=leading,
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        paragraph = Paragraph(escape(normalized_text), paragraph_style)
+        _, para_height = paragraph.wrap(max_content_width, page_height)
+
+        if y - para_height < bottom_margin:
+            pdf.showPage()
+            y = page_height - top_margin
+            _, para_height = paragraph.wrap(max_content_width, page_height)
+
+        paragraph.drawOn(pdf, left_margin, y - para_height)
+        y -= para_height
+
     normalized_cover_title = _normalize_pdf_text((cover_title or "").strip())
     normalized_cover_author = _normalize_pdf_text((cover_author or "").strip())
     if normalized_cover_title or normalized_cover_author:
@@ -4015,18 +4243,21 @@ def _generate_rendered_pdf(
         y = page_height - top_margin
 
     if show_heading_metadata:
-        write_wrapped_text(f"{document_heading} — {effective_title}", "Helvetica-Bold", 14)
+        heading_text = _normalize_spaced_header_text(f"{document_heading} — {effective_title}")
+        write_wrapped_text(heading_text, _resolve_header_font_name(heading_text), 14)
         for metadata_line in heading_metadata_lines:
             write_wrapped_text(metadata_line, "Helvetica", 10)
         write_line("", "Helvetica", 10)
 
     if show_section_labels:
-        write_wrapped_text("Rendered Content", "Helvetica-Bold", 12)
+        section_heading = _normalize_spaced_header_text("Rendered Content")
+        write_wrapped_text(section_heading, _resolve_header_font_name(section_heading), 12)
     for section_name in ("front", "body", "back"):
         blocks = getattr(sections, section_name, [])
         if show_section_labels:
-            section_label = section_name.title()
-            write_wrapped_text(f"{section_label} ({len(blocks)})", "Helvetica-Bold", 11)
+            section_label = _normalize_spaced_header_text(section_name.title())
+            section_title = _normalize_spaced_header_text(f"{section_label} ({len(blocks)})")
+            write_wrapped_text(section_title, _resolve_header_font_name(section_title), 11)
 
         if not blocks:
             if show_section_labels:
@@ -4036,7 +4267,8 @@ def _generate_rendered_pdf(
 
         for block in blocks:
             if show_block_titles:
-                write_wrapped_text(f"{block.order}. {_normalize_pdf_text(block.title)}", "Helvetica-Bold", 10)
+                block_title = _normalize_spaced_header_text(f"{block.order}. {_normalize_pdf_text(block.title)}")
+                write_wrapped_text(block_title, _resolve_header_font_name(block_title), 10)
 
             block_content = block.content if isinstance(block.content, dict) else {}
             content_lines = _resolve_pdf_content_lines(
@@ -4047,19 +4279,28 @@ def _generate_rendered_pdf(
                 preview_transliteration_script,
             )
             for label, value in content_lines:
-                normalized_label = _normalize_pdf_text(label)
+                normalized_label = _normalize_spaced_header_text(label)
                 normalized_value = _normalize_pdf_text(value)
-                is_sanskrit = label.lower() == "sanskrit"
+                detected_script = _detect_indic_script(normalized_value)
+                is_sanskrit = label.lower() == "sanskrit" or detected_script == "devanagari"
+                is_iast = _is_likely_iast(normalized_value)
+                suppress_label = normalized_label.strip().lower() == "text" and (is_sanskrit or is_iast)
+                resolved_label = "" if suppress_label else normalized_label
                 display_text = (
                     f"   {normalized_value}"
-                    if not show_line_labels or not normalized_label
-                    else f"   {normalized_label}: {normalized_value}"
+                    if not show_line_labels or not resolved_label
+                    else f"   {resolved_label}: {normalized_value}"
                 )
-                write_wrapped_text(
-                    display_text,
-                    font_size=11 if is_sanskrit else 10,
-                    use_devanagari=is_sanskrit,
-                )
+                if is_sanskrit:
+                    write_paragraph_text(display_text, font_size=11, use_devanagari=True)
+                elif is_iast:
+                    write_paragraph_text(display_text, font_size=10, use_devanagari=False)
+                else:
+                    write_wrapped_text(
+                        display_text,
+                        font_size=10,
+                        use_devanagari=False,
+                    )
 
             if render_settings.show_metadata:
                 metadata_parts = [f"template={block.template_key}"]

@@ -232,6 +232,8 @@ def _run_generation_job_task(
     processed = 0
     failed = 0
     error_log: list[dict] = []
+    total_input_tokens = 0
+    total_output_tokens = 0
 
     try:
         job = db.query(AIJob).filter(AIJob.id == job_id).first()
@@ -312,6 +314,7 @@ def _run_generation_job_task(
         _apply_progress(db, job, processed=0, failed=0)
 
         if not nodes:
+            job.actual_cost_usd = Decimal("0.0000")
             job.status = "completed"
             job.completed_at = datetime.now(tz=timezone.utc)
             db.commit()
@@ -362,7 +365,14 @@ def _run_generation_job_task(
                     )
                 time.sleep(generation_pipeline.BATCH_POLL_INTERVAL_SECONDS)
 
-            batch_successes, batch_failures = generation_pipeline._collect_batch_results(client, batch_id)
+            (
+                batch_successes,
+                batch_failures,
+                batch_input_tokens,
+                batch_output_tokens,
+            ) = generation_pipeline._collect_batch_results(client, batch_id)
+            total_input_tokens += batch_input_tokens
+            total_output_tokens += batch_output_tokens
 
             for node in nodes:
                 if _job_cancel_requested(db, job_id, cancel_event):
@@ -423,7 +433,9 @@ def _run_generation_job_task(
                     if result is None:
                         raise ValueError("Claude did not return a tool_use block")
 
-                    translation, commentary, word_meanings_token = result
+                    translation, commentary, word_meanings_token, input_tokens, output_tokens = result
+                    total_input_tokens += input_tokens
+                    total_output_tokens += output_tokens
                     generation_pipeline._write_results(
                         db=db,
                         node=node,
@@ -454,6 +466,8 @@ def _run_generation_job_task(
                     )
                 _apply_progress(db, job, processed, failed)
 
+            actual_cost = generation_pipeline._actual_cost_from_tokens(total_input_tokens, total_output_tokens)
+            job.actual_cost_usd = Decimal(f"{actual_cost:.4f}")
         job.status = "completed"
         job.completed_at = datetime.now(tz=timezone.utc)
         if error_log:

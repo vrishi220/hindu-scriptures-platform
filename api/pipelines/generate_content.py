@@ -523,6 +523,13 @@ def _estimate_cost(nodes: list[ContentNode]) -> tuple[float, float]:
 	return realtime_cost, batch_cost
 
 
+def _actual_cost_from_tokens(total_input_tokens: int, total_output_tokens: int) -> float:
+	return (
+		(total_input_tokens / 1_000_000.0) * AI_INPUT_COST_PER_MTOK
+		+ (total_output_tokens / 1_000_000.0) * AI_OUTPUT_COST_PER_MTOK
+	)
+
+
 def _submit_batch(
 	client: anthropic.Anthropic,
 	model: str,
@@ -626,9 +633,11 @@ def _poll_batch_until_complete(client: anthropic.Anthropic, batch_id: str) -> No
 def _collect_batch_results(
 	client: anthropic.Anthropic,
 	batch_id: str,
-) -> tuple[dict[int, tuple[str, str, str]], dict[int, str]]:
+) -> tuple[dict[int, tuple[str, str, str]], dict[int, str], int, int]:
 	successes: dict[int, tuple[str, str, str]] = {}
 	failures: dict[int, str] = {}
+	total_input_tokens = 0
+	total_output_tokens = 0
 
 	for item in client.beta.messages.batches.results(batch_id):
 		custom_id = _obj_get(item, "custom_id")
@@ -646,6 +655,9 @@ def _collect_batch_results(
 			continue
 
 		message_obj = _obj_get(result_obj, "message")
+		usage_obj = _obj_get(message_obj, "usage")
+		total_input_tokens += int(_obj_get(usage_obj, "input_tokens", 0) or 0)
+		total_output_tokens += int(_obj_get(usage_obj, "output_tokens", 0) or 0)
 		content_blocks = _obj_get(message_obj, "content", [])
 		parsed = _extract_tool_result_from_content(content_blocks)
 		if parsed is None:
@@ -654,7 +666,7 @@ def _collect_batch_results(
 
 		successes[node_id] = parsed
 
-	return successes, failures
+	return successes, failures, total_input_tokens, total_output_tokens
 
 
 def _call_claude(
@@ -665,7 +677,7 @@ def _call_claude(
 	language_name: str,
 	language_code: str,
 	additional_instructions: str | None = None,
-) -> tuple[str, str, str] | None:
+) -> tuple[str, str, str, int, int] | None:
 	system_prompt, user_message, _ = _build_generation_prompts(
 		book_name,
 		node,
@@ -682,7 +694,14 @@ def _call_claude(
 		messages=[{"role": "user", "content": user_message}],
 	)
 
-	return _extract_tool_result_from_content(response.content)
+	parsed = _extract_tool_result_from_content(response.content)
+	if parsed is None:
+		return None
+	usage_obj = _obj_get(response, "usage")
+	input_tokens = int(_obj_get(usage_obj, "input_tokens", 0) or 0)
+	output_tokens = int(_obj_get(usage_obj, "output_tokens", 0) or 0)
+	translation, commentary, word_meanings = parsed
+	return translation, commentary, word_meanings, input_tokens, output_tokens
 
 
 def _write_results(
@@ -883,9 +902,11 @@ def _finish_job(
 	processed: int,
 	failed: int,
 	error_log: list[dict],
+	actual_cost_usd: float,
 ) -> None:
 	job.processed_nodes = processed
 	job.failed_nodes = failed
+	job.actual_cost_usd = actual_cost_usd
 	job.status = "completed"
 	job.completed_at = datetime.now(tz=timezone.utc)
 	if error_log:
@@ -1000,6 +1021,8 @@ def main() -> None:
 		processed = 0
 		failed = 0
 		error_log: list[dict] = []
+		total_input_tokens = 0
+		total_output_tokens = 0
 
 		if args.batch:
 			print("MODE: batch (Anthropic Batch API)")
@@ -1017,7 +1040,12 @@ def main() -> None:
 				_poll_batch_until_complete(client, batch_id)
 				print("Batch complete! Processing results...")
 
-				batch_successes, batch_failures = _collect_batch_results(client, batch_id)
+				batch_successes, batch_failures, batch_input_tokens, batch_output_tokens = _collect_batch_results(
+					client,
+					batch_id,
+				)
+				total_input_tokens += batch_input_tokens
+				total_output_tokens += batch_output_tokens
 
 				for i, node in enumerate(nodes, 1):
 					seq = node.sequence_number or f"node-{node.id}"
@@ -1088,7 +1116,9 @@ def main() -> None:
 					if result is None:
 						raise ValueError("Claude did not return a tool_use block")
 
-					translation, commentary, word_meanings_token = result
+					translation, commentary, word_meanings_token, input_tokens, output_tokens = result
+					total_input_tokens += input_tokens
+					total_output_tokens += output_tokens
 					print(f"TRANSLATION RECEIVED: {translation[:80]}{'...' if len(translation) > 80 else ''}")
 
 					_write_results(
@@ -1126,7 +1156,8 @@ def main() -> None:
 				_update_job_progress(db, job, processed, failed)
 				print(f"JOB PROGRESS UPDATED: processed={processed}, failed={failed}")
 
-		_finish_job(db, job, processed, failed, error_log)
+		actual_cost_usd = _actual_cost_from_tokens(total_input_tokens, total_output_tokens)
+		_finish_job(db, job, processed, failed, error_log, actual_cost_usd)
 		print(f"JOB FINISHED: id={job.id}, processed={processed}, failed={failed}")
 
 		print(

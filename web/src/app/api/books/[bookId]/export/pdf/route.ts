@@ -922,7 +922,8 @@ const buildBookPreviewHtml = (
           if (source && sourceLanguage === "sa") {
             if (hasDevanagariLetters(source)) {
               renderedSource = transliterateFromDevanagari(source, appliedPreviewTransliterationScript);
-            } else if (sourceMode === "transliteration" && (!sourceScheme || sourceScheme === "iast")) {
+            } else {
+              // mode="script" with IAST text, or mode="transliteration" — both need transliterating
               renderedSource = transliterateFromIast(source, appliedPreviewTransliterationScript);
             }
           }
