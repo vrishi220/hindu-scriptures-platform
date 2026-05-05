@@ -341,6 +341,7 @@ export default function AdminAiGenerationPage() {
   const [additionalInstructions, setAdditionalInstructions] = useState("");
 
   const activeJobsLoaderRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null);
+  const allJobsLoaderRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null);
 
   const selectedLanguage = useMemo(
     () => LANGUAGE_OPTIONS.find((option) => option.code === languageCode) || LANGUAGE_OPTIONS[0],
@@ -525,8 +526,10 @@ export default function AdminAiGenerationPage() {
     }
   };
 
-  const loadAllJobs = async () => {
-    setHistoryLoading(true);
+  const loadAllJobs = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setHistoryLoading(true);
+    }
     try {
       const response = await fetch("/api/ai/generate/jobs", {
         credentials: "include",
@@ -544,12 +547,16 @@ export default function AdminAiGenerationPage() {
       }
       setAllJobs(Array.isArray(payload) ? payload : []);
     } catch (error) {
-      setToast({
-        type: "error",
-        message: error instanceof Error ? error.message : "Failed to load jobs",
-      });
+      if (!options?.silent) {
+        setToast({
+          type: "error",
+          message: error instanceof Error ? error.message : "Failed to load jobs",
+        });
+      }
     } finally {
-      setHistoryLoading(false);
+      if (!options?.silent) {
+        setHistoryLoading(false);
+      }
     }
   };
 
@@ -589,6 +596,7 @@ export default function AdminAiGenerationPage() {
   };
 
   activeJobsLoaderRef.current = loadActiveJobs;
+  allJobsLoaderRef.current = loadAllJobs;
 
   useEffect(() => {
     void (async () => {
@@ -607,16 +615,19 @@ export default function AdminAiGenerationPage() {
   }, [toast]);
 
   useEffect(() => {
-    if (!canAdmin || activeJobs.length === 0) {
+    if (!canAdmin || !selectedSourceId) {
       return undefined;
     }
 
     const intervalId = window.setInterval(() => {
-      void activeJobsLoaderRef.current?.({ silent: true });
+      void Promise.all([
+        activeJobsLoaderRef.current?.({ silent: true }),
+        allJobsLoaderRef.current?.({ silent: true }),
+      ]);
     }, 5000);
 
     return () => window.clearInterval(intervalId);
-  }, [activeJobs.length, canAdmin]);
+  }, [canAdmin, selectedSourceId]);
 
   useEffect(() => {
     if (!canAdmin || !selectedSourceId) {
@@ -879,7 +890,7 @@ export default function AdminAiGenerationPage() {
           </div>
         {duplicateJobRunning ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              {isBasketSelected ? "Basket" : selectedBook?.book_name} already has an active {selectedLanguage.label} job.
+              A generation job is already running for this source in {selectedLanguage.label}. Please wait for it to complete or cancel it first.
             </div>
           ) : null}
         </div>
