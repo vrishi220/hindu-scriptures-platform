@@ -441,6 +441,74 @@ class TestContentCoverageNextSliceCOV01:
         finally:
             db.close()
 
+    def test_import_canonical_json_synthesizes_translations_from_variants(self):
+        db = SessionLocal()
+        try:
+            schema = _create_schema(db, "COV01 Canonical Translation Synthesis")
+            user = _create_user(db, "cov01_trans_synth")
+            payload = {
+                "schema_version": "hsp-book-json-v1",
+                "schema": {
+                    "id": schema.id,
+                    "name": schema.name,
+                    "levels": schema.levels,
+                },
+                "book": {
+                    "book_name": "Canonical Translation Synth Book",
+                    "book_code": f"canonical-trans-synth-{uuid4().hex[:6]}",
+                    "language_primary": "sanskrit",
+                },
+                "nodes": [
+                    {
+                        "node_id": 1,
+                        "level_name": "Chapter",
+                        "level_order": 0,
+                        "sequence_number": "1",
+                        "title_english": "Chapter 1",
+                        "has_content": False,
+                    },
+                    {
+                        "node_id": 2,
+                        "parent_node_id": 1,
+                        "level_name": "Verse",
+                        "level_order": 1,
+                        "sequence_number": "1",
+                        "title_english": "Verse 1",
+                        "has_content": True,
+                        "content_data": {
+                            "translation_variants": [
+                                {
+                                    "author_slug": "hsp_ai",
+                                    "author": "HSP AI",
+                                    "language": "en",
+                                    "field": "translation",
+                                    "text": "How is knowledge attained?",
+                                }
+                            ]
+                        },
+                    },
+                ],
+            }
+
+            result = content_api._import_canonical_json_v1(payload, db, user)
+            assert result.success is True
+            assert result.book_id is not None
+
+            imported_verse = (
+                db.query(ContentNode)
+                .filter(
+                    ContentNode.book_id == result.book_id,
+                    ContentNode.level_name == "Verse",
+                    ContentNode.sequence_number == "1",
+                )
+                .first()
+            )
+            assert imported_verse is not None
+            translations = (imported_verse.content_data or {}).get("translations") or {}
+            assert translations.get("en") == "How is knowledge attained?"
+        finally:
+            db.close()
+
     def test_import_endpoint_unknown_type_returns_structured_failure(self, client):
         headers = _register_and_login(client)
         response = client.post(

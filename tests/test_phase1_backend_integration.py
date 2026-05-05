@@ -16,9 +16,12 @@ from models.content_node import ContentNode
 from models.database import SessionLocal
 from models.property_system import MetadataBinding
 from models.provenance_record import ProvenanceRecord
-from models.schemas import ContentNodeCreate, _validate_word_meanings_content_data
+from models.schemas import ContentNodeCreate, ContentNodeFieldPatch, _validate_word_meanings_content_data
 from models.scripture_schema import ScriptureSchema
+from models.commentary_entry import CommentaryEntry
+from models.translation_entry import TranslationEntry
 from models.user import User
+from models.word_meaning_entry import WordMeaningEntry
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -7750,3 +7753,239 @@ class TestBookJsonExport:
         assert metadata.get("summary_sanskrit") == "सप्त ज्ञानभूमिकाः"
         assert metadata.get("summary_transliteration") == "sapta jnanabhumikah"
         assert metadata.get("english") == "Seven stages of knowledge summary"
+
+
+class TestPreviewVariantRelationalFieldPatch:
+    def test_relational_translation_variant_add_edit_delete_via_node_field_patch(self):
+        db = SessionLocal()
+        try:
+            schema = ScriptureSchema(
+                name=f"Variant Patch Schema {uuid4().hex[:6]}",
+                description="variant patch regression",
+                levels=["Verse"],
+            )
+            db.add(schema)
+            db.flush()
+
+            user = User(
+                email=f"variant_patch_{uuid4().hex[:8]}@example.com",
+                username=f"variant_patch_{uuid4().hex[:8]}",
+                password_hash="x",
+                role="editor",
+                permissions={
+                    "can_view": True,
+                    "can_contribute": True,
+                    "can_import": True,
+                    "can_edit": True,
+                    "can_moderate": False,
+                    "can_admin": False,
+                },
+            )
+            db.add(user)
+            db.flush()
+
+            book = Book(
+                schema_id=schema.id,
+                book_name=f"Variant Patch Book {uuid4().hex[:6]}",
+                book_code=f"variant-patch-{uuid4().hex[:8]}",
+                language_primary="sanskrit",
+                metadata_json={},
+            )
+            db.add(book)
+            db.flush()
+
+            node = ContentNode(
+                book_id=book.id,
+                level_name="Verse",
+                level_order=1,
+                sequence_number="1",
+                has_content=True,
+                content_data={"basic": {"translation": "seed"}},
+                created_by=user.id,
+                last_modified_by=user.id,
+            )
+            db.add(node)
+            db.flush()
+
+            db.add(
+                TranslationEntry(
+                    node_id=node.id,
+                    content_text="Seed translation",
+                    language_code="en",
+                    display_order=0,
+                    metadata_json={"author": "Seed Author", "author_slug": "seed_author", "field": "et"},
+                )
+            )
+            db.commit()
+
+            add_result = content_api.update_node_single_field(
+                node_id=node.id,
+                payload=ContentNodeFieldPatch(
+                    field_path="content_data.translation_variants.add",
+                    value={
+                        "author": "HSP AI",
+                        "author_slug": "hsp_ai",
+                        "language": "en",
+                        "field": "et",
+                        "text": "Draft translation",
+                    },
+                    edit_reason="test add",
+                ),
+                db=db,
+                current_user=user,
+            )
+            variants = add_result.content_data.get("translation_variants") or []
+            assert len(variants) == 2
+            added_index = len(variants) - 1
+            assert variants[added_index]["text"] == "Draft translation"
+
+            text_result = content_api.update_node_single_field(
+                node_id=node.id,
+                payload=ContentNodeFieldPatch(
+                    field_path=f"content_data.translation_variants.{added_index}.text",
+                    value="Updated translation",
+                    edit_reason="test edit text",
+                ),
+                db=db,
+                current_user=user,
+            )
+            assert text_result.content_data["translation_variants"][added_index]["text"] == "Updated translation"
+
+            author_result = content_api.update_node_single_field(
+                node_id=node.id,
+                payload=ContentNodeFieldPatch(
+                    field_path=f"content_data.translation_variants.{added_index}.author",
+                    value="Updated Author",
+                    edit_reason="test edit author",
+                ),
+                db=db,
+                current_user=user,
+            )
+            assert author_result.content_data["translation_variants"][added_index]["author"] == "Updated Author"
+
+            language_result = content_api.update_node_single_field(
+                node_id=node.id,
+                payload=ContentNodeFieldPatch(
+                    field_path=f"content_data.translation_variants.{added_index}.language",
+                    value="hi",
+                    edit_reason="test edit language",
+                ),
+                db=db,
+                current_user=user,
+            )
+            assert language_result.content_data["translation_variants"][added_index]["language"] == "hi"
+
+            delete_result = content_api.update_node_single_field(
+                node_id=node.id,
+                payload=ContentNodeFieldPatch(
+                    field_path=f"content_data.translation_variants.{added_index}.delete",
+                    value=None,
+                    edit_reason="test delete",
+                ),
+                db=db,
+                current_user=user,
+            )
+            assert len(delete_result.content_data.get("translation_variants") or []) == 1
+        finally:
+            db.close()
+
+    def test_export_json_includes_relational_variant_and_word_meaning_data(self):
+        db = SessionLocal()
+        try:
+            schema = ScriptureSchema(
+                name=f"Export Rel Merge Schema {uuid4().hex[:6]}",
+                description="export regression",
+                levels=["Verse"],
+            )
+            db.add(schema)
+            db.flush()
+
+            user = User(
+                email=f"export_rel_{uuid4().hex[:8]}@example.com",
+                username=f"export_rel_{uuid4().hex[:8]}",
+                password_hash="x",
+                role="editor",
+                permissions={
+                    "can_view": True,
+                    "can_contribute": True,
+                    "can_import": True,
+                    "can_edit": True,
+                    "can_moderate": False,
+                    "can_admin": False,
+                },
+            )
+            db.add(user)
+            db.flush()
+
+            book = Book(
+                schema_id=schema.id,
+                book_name=f"Export Rel Merge Book {uuid4().hex[:6]}",
+                book_code=f"export-rel-merge-{uuid4().hex[:8]}",
+                language_primary="sanskrit",
+                metadata_json={},
+            )
+            db.add(book)
+            db.flush()
+
+            node = ContentNode(
+                book_id=book.id,
+                level_name="Verse",
+                level_order=1,
+                sequence_number="1",
+                has_content=True,
+                content_data={"basic": {"translation": "seed"}},
+                created_by=user.id,
+                last_modified_by=user.id,
+            )
+            db.add(node)
+            db.flush()
+
+            db.add(
+                TranslationEntry(
+                    node_id=node.id,
+                    content_text="Relational translation",
+                    language_code="en",
+                    display_order=0,
+                    metadata_json={"author": "HSP AI", "author_slug": "hsp_ai", "field": "et"},
+                )
+            )
+            db.add(
+                CommentaryEntry(
+                    node_id=node.id,
+                    content_text="Relational commentary",
+                    language_code="en",
+                    display_order=0,
+                    metadata_json={"author": "HSP AI", "author_slug": "hsp_ai", "field": "ec"},
+                )
+            )
+            db.add(
+                WordMeaningEntry(
+                    node_id=node.id,
+                    source_word="katham",
+                    transliteration="katham",
+                    word_order=1,
+                    language_code="en",
+                    meaning_text="how",
+                    display_order=0,
+                    metadata_json={"author": "HSP AI"},
+                )
+            )
+            db.commit()
+
+            payload = content_api.export_book_json(book.id, db=db, current_user=user)
+            exported_nodes = payload.nodes or []
+            exported_node = next((row for row in exported_nodes if row.node_id == node.id), None)
+            assert exported_node is not None
+
+            content_data = exported_node.content_data or {}
+            translation_variants = content_data.get("translation_variants") or []
+            commentary_variants = content_data.get("commentary_variants") or []
+            assert any(item.get("text") == "Relational translation" for item in translation_variants)
+            assert any(item.get("text") == "Relational commentary" for item in commentary_variants)
+
+            word_meanings_rows = (content_data.get("word_meanings") or {}).get("rows") or []
+            assert word_meanings_rows
+            assert word_meanings_rows[0]["source"]["script_text"] == "katham"
+            assert word_meanings_rows[0]["meanings"]["en"]["text"] == "how"
+        finally:
+            db.close()
