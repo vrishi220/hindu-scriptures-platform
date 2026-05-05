@@ -60,10 +60,12 @@ from models.schemas import (
     BulkTreeImportRequest,
     BulkTreeImportResponse,
     ContentNodeCreate,
+    ContentNodeCommentaryPatch,
     ContentNodeFieldPatch,
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeTreeItem,
+    ContentNodeTranslationPatch,
     ContentNodeWordMeaningsTokenPatch,
     ContentNodeUpdate,
     CommentaryAuthorCreate,
@@ -959,7 +961,7 @@ def _write_book_node_payload_into_metadata(metadata: dict, node_payload: dict) -
     }
 
 
-def _book_public_model(book: Book) -> BookPublic:
+def _book_public_model(book: Book, verse_count: int | None = None) -> BookPublic:
     existing_metadata = book.metadata_json or {}
     if not isinstance(existing_metadata, dict):
         existing_metadata = {}
@@ -981,10 +983,33 @@ def _book_public_model(book: Book) -> BookPublic:
         "variant_authors": _resolved_variant_authors_for_book(book),
         "status": metadata_out["status"],
         "visibility": metadata_out["visibility"],
+        "verse_count": verse_count,
         "schema": book.schema,
         **node_payload,
     }
     return BookPublic.model_validate(payload)
+
+
+def _book_verse_counts(db: Session, book_ids: list[int]) -> dict[int, int]:
+    if not book_ids:
+        return {}
+
+    rows = (
+        db.query(
+            ContentNode.book_id,
+            func.count(ContentNode.id),
+        )
+        .filter(
+            ContentNode.book_id.in_(book_ids),
+            or_(
+                ContentNode.has_content == True,
+                ContentNode.referenced_node_id.isnot(None),
+            ),
+        )
+        .group_by(ContentNode.book_id)
+        .all()
+    )
+    return {int(book_id): int(count or 0) for book_id, count in rows if book_id is not None}
 
 
 def _owned_books_for_user(db: Session, user: User) -> list[Book]:
@@ -1015,6 +1040,49 @@ def _normalize_variant_author_slug(value: object) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
     normalized = re.sub(r"_+", "_", normalized).strip("_")
     return normalized
+
+
+def _variant_author_name_for_slug(book: Book | None, author_slug: str) -> str:
+    slug = _normalize_variant_author_slug(author_slug)
+    if not slug:
+        return ""
+
+    if book is not None:
+        registry = _resolved_variant_authors_for_book(book)
+        resolved_name = str(registry.get(slug) or "").strip()
+        if resolved_name:
+            return resolved_name
+
+    fallback = slug.replace("_", " ").replace("-", " ").strip()
+    return fallback.title() if fallback else slug
+
+
+def _variant_entry_matches_author_slug(
+    author_slug: str,
+    metadata: dict,
+    author_name: str,
+) -> bool:
+    target_slug = _normalize_variant_author_slug(author_slug)
+    if not target_slug:
+        return False
+
+    candidates: set[str] = set()
+    metadata_slug = metadata.get("author_slug")
+    if isinstance(metadata_slug, str):
+        candidates.add(_normalize_variant_author_slug(metadata_slug))
+
+    metadata_author = metadata.get("author")
+    if isinstance(metadata_author, str):
+        candidates.add(_normalize_variant_author_slug(metadata_author))
+
+    metadata_author_name = metadata.get("author_name")
+    if isinstance(metadata_author_name, str):
+        candidates.add(_normalize_variant_author_slug(metadata_author_name))
+
+    if author_name:
+        candidates.add(_normalize_variant_author_slug(author_name))
+
+    return target_slug in candidates
 
 
 def _normalize_content_variant_authors(
@@ -1854,13 +1922,17 @@ def list_books(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ) -> list[BookPublic]:
+    def serialize_books(items: list[Book]) -> list[BookPublic]:
+        verse_counts = _book_verse_counts(db, [book.id for book in items])
+        return [_book_public_model(book, verse_counts.get(book.id, 0)) for book in items]
+
     # Exact-match lookups (used for existence checks before import)
     if book_code is not None:
         books = db.query(Book).filter(Book.book_code == book_code.strip()).all()
-        return [_book_public_model(b) for b in books]
+        return serialize_books(books)
     if book_name is not None:
         books = db.query(Book).filter(Book.book_name == book_name.strip()).all()
-        return [_book_public_model(b) for b in books]
+        return serialize_books(books)
     query_text = (q or "").strip()
     if query_text:
         # Pre-filter at DB level: only load books containing at least one search term,
@@ -1890,7 +1962,7 @@ def list_books(
             )
         )
         page = [pair[0] for pair in ranked_books[offset : offset + limit]]
-        return [_book_public_model(item) for item in page]
+        return serialize_books(page)
 
     books = (
         db.query(Book)
@@ -1899,7 +1971,7 @@ def list_books(
         .limit(limit)
         .all()
     )
-    return [_book_public_model(item) for item in books]
+    return serialize_books(books)
 
 
 @router.post("/books", response_model=BookPublic, status_code=status.HTTP_201_CREATED)
@@ -5908,6 +5980,8 @@ def update_node_word_meanings_tokens(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ContentNodePublic:
+    _ensure_can_contribute(current_user)
+
     node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -6052,6 +6126,395 @@ def update_node_word_meanings_tokens(
     payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
     payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
+    return ContentNodePublic.model_validate(payload_out)
+
+
+@router.patch("/nodes/{node_id}/translation", response_model=ContentNodePublic)
+def update_node_translation_variant(
+    node_id: int,
+    payload: ContentNodeTranslationPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentNodePublic:
+    _ensure_can_contribute(current_user)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+
+    target_node = source_node if source_node is not None else node
+    language_code = payload.language_code.strip().lower()
+    author_slug = _normalize_variant_author_slug(payload.author_slug)
+    author_name = _variant_author_name_for_slug(node_book, author_slug)
+    text_value = str(payload.text or "")
+
+    rows = (
+        db.query(TranslationEntry, TranslationAuthor)
+        .outerjoin(TranslationAuthor, TranslationEntry.author_id == TranslationAuthor.id)
+        .filter(
+            TranslationEntry.node_id == target_node.id,
+            func.lower(TranslationEntry.language_code) == language_code,
+        )
+        .order_by(TranslationEntry.display_order.asc(), TranslationEntry.id.asc())
+        .all()
+    )
+
+    existing_entry: TranslationEntry | None = None
+    for entry, author in rows:
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        resolved_author_name = str(author.name or "").strip() if author is not None else ""
+        if _variant_entry_matches_author_slug(author_slug, metadata, resolved_author_name):
+            existing_entry = entry
+            break
+
+    author = (
+        db.query(TranslationAuthor)
+        .filter(func.lower(TranslationAuthor.name) == author_name.lower())
+        .first()
+        if author_name
+        else None
+    )
+    if author is None:
+        author = TranslationAuthor(
+            name=author_name or author_slug,
+            metadata_json={"author_slug": author_slug},
+        )
+        db.add(author)
+        db.flush()
+
+    work_title = f"{author.name} Translation"
+    work = (
+        db.query(TranslationWork)
+        .filter(
+            TranslationWork.author_id == author.id,
+            func.lower(TranslationWork.title) == work_title.lower(),
+        )
+        .first()
+    )
+    if work is None:
+        work = TranslationWork(
+            author_id=author.id,
+            title=work_title,
+            metadata_json={
+                "author_slug": author_slug,
+                "language_code": language_code,
+                "source": "preview_patch",
+            },
+        )
+        db.add(work)
+        db.flush()
+
+    if existing_entry is not None:
+        metadata = dict(existing_entry.metadata_json) if isinstance(existing_entry.metadata_json, dict) else {}
+        metadata.update(
+            {
+                "author_slug": author_slug,
+                "author": author.name,
+                "author_name": author.name,
+                "field": "translation",
+                "language": language_code,
+                "edited_via": "preview_patch",
+                "edited_by": current_user.id,
+            }
+        )
+        existing_entry.content_text = text_value
+        existing_entry.language_code = language_code
+        existing_entry.author_id = author.id
+        existing_entry.work_id = work.id
+        existing_entry.metadata_json = metadata
+    else:
+        max_order = (
+            db.query(func.max(TranslationEntry.display_order))
+            .filter(TranslationEntry.node_id == target_node.id)
+            .scalar()
+        )
+        next_order = int(max_order or -1) + 1
+        db.add(
+            TranslationEntry(
+                node_id=target_node.id,
+                author_id=author.id,
+                work_id=work.id,
+                content_text=text_value,
+                language_code=language_code,
+                display_order=next_order,
+                metadata_json={
+                    "author_slug": author_slug,
+                    "author": author.name,
+                    "author_name": author.name,
+                    "field": "translation",
+                    "language": language_code,
+                    "edited_via": "preview_patch",
+                    "edited_by": current_user.id,
+                },
+            )
+        )
+
+    version_target = target_node
+    version_history = version_target.version_history or []
+    version_history.append(
+        {
+            "edited_by": current_user.id,
+            "edited_at": datetime.utcnow().isoformat(),
+            "reason": payload.edit_reason or f"Translation variant edit ({language_code}/{author_slug})",
+            "changes": {
+                "translation_variant": {
+                    "language_code": language_code,
+                    "author_slug": author_slug,
+                }
+            },
+        }
+    )
+    version_target.version_history = version_history
+
+    node.last_modified_by = current_user.id
+    if source_node is not None:
+        source_node.last_modified_by = current_user.id
+
+    db.commit()
+
+    try:
+        from api.draft_books import invalidate_preview_render_cache
+
+        invalidate_preview_render_cache(node.book_id)
+    except Exception:
+        pass
+
+    db.refresh(node)
+    if source_node is not None:
+        db.refresh(source_node)
+        response_payload = ContentNodePublic.model_validate(node).model_dump()
+        response_payload.update(
+            {
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        response_payload["level_name"] = _display_level_name_for_book(node_book, response_payload.get("level_name"))
+        return ContentNodePublic.model_validate(response_payload)
+
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
+    return ContentNodePublic.model_validate(payload_out)
+
+
+@router.patch("/nodes/{node_id}/commentary", response_model=ContentNodePublic)
+def update_node_commentary_variant(
+    node_id: int,
+    payload: ContentNodeCommentaryPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ContentNodePublic:
+    _ensure_can_contribute(current_user)
+
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    node_book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not node_book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    _ensure_node_edit_access(db, current_user, node)
+
+    source_node = None
+    if node.referenced_node_id:
+        source_node = (
+            db.query(ContentNode)
+            .filter(ContentNode.id == node.referenced_node_id)
+            .first()
+        )
+        if not source_node:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid referenced node",
+            )
+
+    target_node = source_node if source_node is not None else node
+    language_code = payload.language_code.strip().lower()
+    author_slug = _normalize_variant_author_slug(payload.author_slug)
+    author_name = _variant_author_name_for_slug(node_book, author_slug)
+    text_value = str(payload.text or "")
+
+    rows = (
+        db.query(CommentaryEntry, CommentaryAuthor)
+        .outerjoin(CommentaryAuthor, CommentaryEntry.author_id == CommentaryAuthor.id)
+        .filter(
+            CommentaryEntry.node_id == target_node.id,
+            func.lower(CommentaryEntry.language_code) == language_code,
+        )
+        .order_by(CommentaryEntry.display_order.asc(), CommentaryEntry.id.asc())
+        .all()
+    )
+
+    existing_entry: CommentaryEntry | None = None
+    for entry, author in rows:
+        metadata = dict(entry.metadata_json) if isinstance(entry.metadata_json, dict) else {}
+        resolved_author_name = str(author.name or "").strip() if author is not None else ""
+        if _variant_entry_matches_author_slug(author_slug, metadata, resolved_author_name):
+            existing_entry = entry
+            break
+
+    author = (
+        db.query(CommentaryAuthor)
+        .filter(func.lower(CommentaryAuthor.name) == author_name.lower())
+        .first()
+        if author_name
+        else None
+    )
+    if author is None:
+        author = CommentaryAuthor(
+            name=author_name or author_slug,
+            metadata_json={"author_slug": author_slug},
+            created_by=current_user.id,
+        )
+        db.add(author)
+        db.flush()
+
+    work_title = f"{author.name} Commentary"
+    work = (
+        db.query(CommentaryWork)
+        .filter(
+            CommentaryWork.author_id == author.id,
+            func.lower(CommentaryWork.title) == work_title.lower(),
+        )
+        .first()
+    )
+    if work is None:
+        work = CommentaryWork(
+            author_id=author.id,
+            title=work_title,
+            metadata_json={
+                "author_slug": author_slug,
+                "language_code": language_code,
+                "source": "preview_patch",
+            },
+            created_by=current_user.id,
+        )
+        db.add(work)
+        db.flush()
+
+    if existing_entry is not None:
+        metadata = dict(existing_entry.metadata_json) if isinstance(existing_entry.metadata_json, dict) else {}
+        metadata.update(
+            {
+                "author_slug": author_slug,
+                "author": author.name,
+                "author_name": author.name,
+                "field": "ec",
+                "language": language_code,
+                "edited_via": "preview_patch",
+                "edited_by": current_user.id,
+            }
+        )
+        existing_entry.content_text = text_value
+        existing_entry.language_code = language_code
+        existing_entry.author_id = author.id
+        existing_entry.work_id = work.id
+        existing_entry.metadata_json = metadata
+        existing_entry.last_modified_by = current_user.id
+    else:
+        max_order = (
+            db.query(func.max(CommentaryEntry.display_order))
+            .filter(CommentaryEntry.node_id == target_node.id)
+            .scalar()
+        )
+        next_order = int(max_order or -1) + 1
+        db.add(
+            CommentaryEntry(
+                node_id=target_node.id,
+                author_id=author.id,
+                work_id=work.id,
+                content_text=text_value,
+                language_code=language_code,
+                display_order=next_order,
+                metadata_json={
+                    "author_slug": author_slug,
+                    "author": author.name,
+                    "author_name": author.name,
+                    "field": "ec",
+                    "language": language_code,
+                    "edited_via": "preview_patch",
+                    "edited_by": current_user.id,
+                },
+                created_by=current_user.id,
+                last_modified_by=current_user.id,
+            )
+        )
+
+    version_target = target_node
+    version_history = version_target.version_history or []
+    version_history.append(
+        {
+            "edited_by": current_user.id,
+            "edited_at": datetime.utcnow().isoformat(),
+            "reason": payload.edit_reason or f"Commentary variant edit ({language_code}/{author_slug})",
+            "changes": {
+                "commentary_variant": {
+                    "language_code": language_code,
+                    "author_slug": author_slug,
+                }
+            },
+        }
+    )
+    version_target.version_history = version_history
+
+    node.last_modified_by = current_user.id
+    if source_node is not None:
+        source_node.last_modified_by = current_user.id
+
+    db.commit()
+
+    try:
+        from api.draft_books import invalidate_preview_render_cache
+
+        invalidate_preview_render_cache(node.book_id)
+    except Exception:
+        pass
+
+    db.refresh(node)
+    if source_node is not None:
+        db.refresh(source_node)
+        response_payload = ContentNodePublic.model_validate(node).model_dump()
+        response_payload.update(
+            {
+                "content_data": _merge_node_relational_variants(db, source_node, source_node.content_data),
+                "summary_data": source_node.summary_data,
+                "has_content": source_node.has_content,
+                "source_attribution": source_node.source_attribution,
+                "license_type": source_node.license_type,
+                "original_source_url": source_node.original_source_url,
+            }
+        )
+        response_payload["level_name"] = _display_level_name_for_book(node_book, response_payload.get("level_name"))
+        return ContentNodePublic.model_validate(response_payload)
+
+    payload_out = ContentNodePublic.model_validate(node).model_dump()
+    payload_out["content_data"] = _merge_node_relational_variants(db, node, payload_out.get("content_data"))
+    payload_out["level_name"] = _display_level_name_for_book(node_book, payload_out.get("level_name"))
     return ContentNodePublic.model_validate(payload_out)
 
 

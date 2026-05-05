@@ -581,6 +581,7 @@ class BookPublic(BookBase):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: int
+    verse_count: int | None = None
     schema_: ScriptureSchemaPublic | None = Field(
         default=None,
         validation_alias=AliasChoices("schema", "schema_"),
@@ -684,6 +685,60 @@ class ContentNodeWordMeaningsTokenPatch(BaseModel):
             raise ValueError("language_code is required")
         if not re.fullmatch(r"[a-z0-9_-]+", normalized):
             raise ValueError("language_code must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+
+class ContentNodeTranslationPatch(BaseModel):
+    language_code: str
+    author_slug: str
+    text: str = ""
+    edit_reason: str | None = None
+
+    @field_validator("language_code")
+    @classmethod
+    def validate_language_code(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("language_code is required")
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("language_code must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+    @field_validator("author_slug")
+    @classmethod
+    def validate_author_slug(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("author_slug is required")
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("author_slug must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+
+class ContentNodeCommentaryPatch(BaseModel):
+    language_code: str
+    author_slug: str
+    text: str = ""
+    edit_reason: str | None = None
+
+    @field_validator("language_code")
+    @classmethod
+    def validate_language_code(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("language_code is required")
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("language_code must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+    @field_validator("author_slug")
+    @classmethod
+    def validate_author_slug(cls, value: str) -> str:
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            raise ValueError("author_slug is required")
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("author_slug must contain only letters, numbers, underscores, or hyphens")
         return normalized
 
 

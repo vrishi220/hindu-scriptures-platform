@@ -10490,7 +10490,7 @@ function ScripturesContent() {
       setPreviewWordMeaningsQuickEditDraft((prev) =>
         prev ? { ...prev, saving: true, error: null } : prev
       );
-      const res = await fetch(`/api/content/nodes/${nodeId}/word-meanings`, {
+      const res = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/word-meanings`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -11144,6 +11144,141 @@ function ScripturesContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ book_name: nextBookName }),
       });
+    }
+
+    if (targetType === "node") {
+      const variantMatch = body.field_path.match(
+        /^content_data\.(translation_variants|commentary_variants)\.(\d+)\.text$/
+      );
+      if (variantMatch) {
+        const kind = variantMatch[1] === "translation_variants" ? "translation" : "commentary";
+        const variantIndex = Number(variantMatch[2]);
+
+        const matchingBlock = bookPreviewArtifact?.sections.body.find((block) => {
+          const blockNodeId =
+            typeof block.source_node_id === "number"
+              ? block.source_node_id
+              : typeof (block.content as { node_id?: unknown }).node_id === "number"
+                ? ((block.content as { node_id?: number }).node_id ?? null)
+                : null;
+          return blockNodeId === nodeId;
+        });
+
+        const variants =
+          kind === "translation"
+            ? matchingBlock?.content.translation_variants
+            : matchingBlock?.content.commentary_variants;
+
+        const variant =
+          Array.isArray(variants) && Number.isInteger(variantIndex) && variantIndex >= 0 && variantIndex < variants.length
+            ? (variants[variantIndex] as Record<string, unknown>)
+            : null;
+
+        const languageCode =
+          typeof variant?.language === "string" && variant.language.trim()
+            ? normalizeTranslationLanguage(variant.language)
+            : "en";
+        const authorSlug =
+          typeof variant?.author_slug === "string"
+            ? variant.author_slug.trim().toLowerCase()
+            : "";
+
+        if (authorSlug) {
+          const endpoint = kind === "translation" ? "translation" : "commentary";
+          return fetchContentWithSessionRecovery(`/nodes/${nodeId}/${endpoint}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              language_code: languageCode,
+              author_slug: authorSlug,
+              text: typeof body.value === "string" ? body.value : "",
+              edit_reason: body.edit_reason,
+            }),
+          });
+        }
+      }
+
+      const wordMeaningMatch = body.field_path.match(
+        /^content_data\.word_meanings_rows\.(\d+)\.resolved_(meaning|source)\.text$/
+      );
+      if (wordMeaningMatch) {
+        const rowIndex = Number(wordMeaningMatch[1]);
+        const target = wordMeaningMatch[2];
+
+        const matchingBlock = bookPreviewArtifact?.sections.body.find((block) => {
+          const blockNodeId =
+            typeof block.source_node_id === "number"
+              ? block.source_node_id
+              : typeof (block.content as { node_id?: unknown }).node_id === "number"
+                ? ((block.content as { node_id?: number }).node_id ?? null)
+                : null;
+          return blockNodeId === nodeId;
+        });
+
+        const rows = Array.isArray(matchingBlock?.content.word_meanings_rows)
+          ? matchingBlock.content.word_meanings_rows
+          : [];
+        const tokenRows = rows.map((row, index) => {
+          const source = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+          const resolvedSource =
+            source.resolved_source && typeof source.resolved_source === "object"
+              ? (source.resolved_source as Record<string, unknown>)
+              : {};
+          const resolvedMeaning =
+            source.resolved_meaning && typeof source.resolved_meaning === "object"
+              ? (source.resolved_meaning as Record<string, unknown>)
+              : {};
+
+          const sourceText = String(resolvedSource.text || "");
+          const meaningText = String(resolvedMeaning.text || "");
+
+          if (index === rowIndex) {
+            if (target === "source") {
+              return {
+                sourceRawText: typeof body.value === "string" ? body.value : "",
+                sourceText: typeof body.value === "string" ? body.value : "",
+                meaningText,
+              };
+            }
+            return {
+              sourceRawText: sourceText,
+              sourceText,
+              meaningText: typeof body.value === "string" ? body.value : "",
+            };
+          }
+
+          return {
+            sourceRawText: sourceText,
+            sourceText,
+            meaningText,
+          };
+        });
+
+        const editedRow =
+          Number.isInteger(rowIndex) && rowIndex >= 0 && rowIndex < rows.length
+            ? rows[rowIndex]
+            : null;
+        const editedMeaning =
+          editedRow && typeof editedRow === "object"
+            ? ((editedRow as Record<string, unknown>).resolved_meaning as Record<string, unknown> | undefined)
+            : undefined;
+        const languageCode =
+          editedMeaning && typeof editedMeaning.language === "string" && editedMeaning.language.trim()
+            ? editedMeaning.language.trim().toLowerCase()
+            : "en";
+
+        return fetchContentWithSessionRecovery(`/nodes/${nodeId}/word-meanings`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            language_code: languageCode,
+            tokens: serializePreviewWordMeaningTokens(tokenRows),
+            edit_reason: body.edit_reason,
+          }),
+        });
+      }
     }
 
     const requestInit: RequestInit = {

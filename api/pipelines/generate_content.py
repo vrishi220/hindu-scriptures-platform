@@ -13,6 +13,8 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 import anthropic
 
+from sqlalchemy import or_
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm import Session
 
 from models.ai_job import AIJob
@@ -120,12 +122,20 @@ def _resolve_book(db: Session, book_code: str) -> Book:
 
 def _resolve_hsp_ai_author(db: Session) -> CommentaryAuthor:
 	author = db.query(CommentaryAuthor).filter(CommentaryAuthor.name == "HSP AI").first()
-	if not author:
-		print(
-			"[ERROR] 'HSP AI' commentary author not found. Run the seed script first.",
-			file=sys.stderr,
-		)
-		sys.exit(1)
+	if author:
+		return author
+
+	author = CommentaryAuthor(
+		name="HSP AI",
+		bio="AI-generated commentary on behalf of the Hindu Scriptures Platform.",
+		metadata_json={
+			"type": "ai",
+			"provider": "anthropic",
+			"model": DEFAULT_MODEL,
+		},
+	)
+	db.add(author)
+	db.flush()
 	return author
 
 
@@ -141,9 +151,21 @@ def _resolve_commentary_work(
 		)
 		.first()
 	)
-	if not work:
-		print(f"[ERROR] Commentary work not found: {title!r}", file=sys.stderr)
-		sys.exit(1)
+	if work:
+		return work
+
+	work = CommentaryWork(
+		author_id=author.id,
+		title=title,
+		description=f"AI-generated commentary for supported scripture nodes.",
+		metadata_json={
+			"type": "ai_commentary",
+			"language_name": language_name.lower(),
+			"model": DEFAULT_MODEL,
+		},
+	)
+	db.add(work)
+	db.flush()
 	return work
 
 
@@ -265,34 +287,53 @@ def _fetch_nodes_missing_translation(
 	translation_work_id: int,
 	limit: int | None,
 ) -> list[ContentNode]:
+	ref_node = aliased(ContentNode)
 	query = (
-		db.query(ContentNode)
+		db.query(ContentNode, ref_node)
+		.outerjoin(ref_node, ContentNode.referenced_node_id == ref_node.id)
 		.filter(
 			ContentNode.book_id == book.id,
-			ContentNode.has_content == True,
+			or_(
+				ContentNode.has_content == True,
+				ContentNode.referenced_node_id.isnot(None),
+			),
 		)
 		.order_by(ContentNode.level_order, ContentNode.id)
 	)
 	if limit is not None:
 		query = query.limit(limit * 10)
-	nodes = query.all()
+	node_pairs = query.all()
 
 	missing: list[ContentNode] = []
-	for node in nodes:
+	seen_node_ids: set[int] = set()
+	for owner_node, referenced_node in node_pairs:
+		target_node: ContentNode | None = None
+		if referenced_node is not None:
+			target_node = referenced_node
+		elif owner_node.has_content:
+			target_node = owner_node
+
+		if target_node is None:
+			continue
+		if target_node.id in seen_node_ids:
+			continue
+
 		if limit is not None and len(missing) >= limit:
 			break
 		existing_translation = (
 			db.query(TranslationEntry.id)
 			.filter(
-				TranslationEntry.node_id == node.id,
+				TranslationEntry.node_id == target_node.id,
 				TranslationEntry.work_id == translation_work_id,
 				TranslationEntry.language_code == language_code,
 			)
 			.first()
 		)
 		if existing_translation:
+			seen_node_ids.add(target_node.id)
 			continue
-		missing.append(node)
+		missing.append(target_node)
+		seen_node_ids.add(target_node.id)
 
 	return missing
 

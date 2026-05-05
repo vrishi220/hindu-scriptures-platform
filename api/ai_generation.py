@@ -42,6 +42,12 @@ class GenerationStartResponse(BaseModel):
     estimated_cost_batch: float
 
 
+class GenerationEstimateResponse(BaseModel):
+    total_nodes: int
+    estimated_cost_realtime: float
+    estimated_cost_batch: float
+
+
 class AIJobPublic(BaseModel):
     id: int
     job_type: str
@@ -247,6 +253,11 @@ def _run_generation_job_task(
             language_name,
             language_code,
         )
+
+        word_meaning_author = generation_pipeline._resolve_hsp_ai_word_meaning_author(db)
+        word_meaning_work = generation_pipeline._resolve_or_create_word_meaning_work(
+            db, word_meaning_author, language_name, language_code
+        )
         db.commit()
 
         nodes = generation_pipeline._fetch_nodes_missing_translation(
@@ -320,17 +331,20 @@ def _run_generation_job_task(
                     if node.id not in batch_successes:
                         raise ValueError(batch_failures.get(node.id, "No result returned for node"))
 
-                    translation, commentary = batch_successes[node.id]
+                    translation, commentary, word_meanings_token = batch_successes[node.id]
                     generation_pipeline._write_results(
                         db=db,
                         node=node,
                         translation=translation,
                         commentary=commentary,
+                        word_meanings_token=word_meanings_token,
                         language_code=language_code,
                         translation_work=translation_work,
                         translation_author=translation_author,
                         work=work,
                         author=author,
+                        word_meaning_work=word_meaning_work,
+                        word_meaning_author=word_meaning_author,
                         ai_job_id=job.id,
                         model=model,
                     )
@@ -366,17 +380,20 @@ def _run_generation_job_task(
                     if result is None:
                         raise ValueError("Claude did not return a tool_use block")
 
-                    translation, commentary = result
+                    translation, commentary, word_meanings_token = result
                     generation_pipeline._write_results(
                         db=db,
                         node=node,
                         translation=translation,
                         commentary=commentary,
+                        word_meanings_token=word_meanings_token,
                         language_code=language_code,
                         translation_work=translation_work,
                         translation_author=translation_author,
                         work=work,
                         author=author,
+                        word_meaning_work=word_meaning_work,
+                        word_meaning_author=word_meaning_author,
                         ai_job_id=job.id,
                         model=model,
                     )
@@ -400,7 +417,7 @@ def _run_generation_job_task(
             job.error_log = error_log
         db.commit()
 
-    except Exception as exc:  # noqa: BLE001
+    except BaseException as exc:  # noqa: BLE001
         job = db.query(AIJob).filter(AIJob.id == job_id).first()
         if job:
             job.status = "failed"
@@ -479,6 +496,47 @@ def start_generation(
 
     return GenerationStartResponse(
         job_id=job.id,
+        estimated_cost_realtime=round(est_realtime, 4),
+        estimated_cost_batch=round(est_batch, 4),
+    )
+
+
+@router.get("/estimate", response_model=GenerationEstimateResponse)
+def estimate_generation(
+    book_id: int,
+    language_code: Literal["en", "te", "hi", "ta"],
+    language_name: str,
+    limit: int | None = None,
+    current_user: User = Depends(require_permission("can_admin")),
+    db: Session = Depends(get_db),
+) -> GenerationEstimateResponse:
+    del current_user
+
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+    translation_author = generation_pipeline._resolve_hsp_ai_translation_author(db)
+    generation_pipeline._seed_hsp_ai_translation_works(db, translation_author)
+    translation_work = generation_pipeline._resolve_or_create_translation_work(
+        db,
+        translation_author,
+        language_name,
+        language_code,
+    )
+    db.commit()
+
+    nodes = generation_pipeline._fetch_nodes_missing_translation(
+        db,
+        book,
+        language_code,
+        translation_work.id,
+        limit,
+    )
+    est_realtime, est_batch = generation_pipeline._estimate_cost(nodes)
+
+    return GenerationEstimateResponse(
+        total_nodes=len(nodes),
         estimated_cost_realtime=round(est_realtime, 4),
         estimated_cost_batch=round(est_batch, 4),
     )
