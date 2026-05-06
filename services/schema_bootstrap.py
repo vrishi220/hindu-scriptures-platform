@@ -1,4 +1,12 @@
+import logging
+
 from sqlalchemy import create_engine, text
+
+logger = logging.getLogger(__name__)
+
+# Set to True only when the vector extension is successfully created/confirmed.
+# Checked by api/semantic_search.py to gate requests.
+PGVECTOR_AVAILABLE: bool = False
 
 
 def ensure_phase1_schema(database_url: str) -> None:
@@ -9,10 +17,33 @@ def ensure_phase1_schema(database_url: str) -> None:
     """
     engine = create_engine(database_url, pool_pre_ping=True)
 
-    statements = [
+    # Statements that require the pgvector extension (run only when available).
+    pgvector_statements = [
         """
-        CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE TABLE IF NOT EXISTS node_embeddings (
+            id SERIAL PRIMARY KEY,
+            node_id INTEGER REFERENCES content_nodes(id) ON DELETE CASCADE,
+            language_code VARCHAR(20) NOT NULL,
+            content_type VARCHAR(50) NOT NULL,
+            embedding VECTOR(1536),
+            model VARCHAR(100) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            UNIQUE(node_id, language_code, content_type)
+        );
         """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_node_embeddings_vector
+        ON node_embeddings
+        USING ivfflat (embedding vector_cosine_ops)
+        WITH (lists = 100);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_node_embeddings_node_lang
+        ON node_embeddings(node_id, language_code);
+        """,
+    ]
+
+    statements = [
         """
         DO $$ BEGIN
             CREATE TYPE content_status AS ENUM ('draft', 'published', 'archived');
@@ -469,28 +500,6 @@ def ensure_phase1_schema(database_url: str) -> None:
         CREATE INDEX IF NOT EXISTS idx_word_meaning_entries_node_work ON word_meaning_entries(node_id, work_id);
         """,
         """
-        CREATE TABLE IF NOT EXISTS node_embeddings (
-            id SERIAL PRIMARY KEY,
-            node_id INTEGER REFERENCES content_nodes(id) ON DELETE CASCADE,
-            language_code VARCHAR(20) NOT NULL,
-            content_type VARCHAR(50) NOT NULL,
-            embedding VECTOR(1536),
-            model VARCHAR(100) NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            UNIQUE(node_id, language_code, content_type)
-        );
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_node_embeddings_vector
-        ON node_embeddings
-        USING ivfflat (embedding vector_cosine_ops)
-        WITH (lists = 100);
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_node_embeddings_node_lang
-        ON node_embeddings(node_id, language_code);
-        """,
-        """
         CREATE TABLE IF NOT EXISTS content_renditions (
             id SERIAL PRIMARY KEY,
             node_id INTEGER NOT NULL REFERENCES content_nodes(id) ON DELETE CASCADE,
@@ -851,9 +860,30 @@ def ensure_phase1_schema(database_url: str) -> None:
         "CREATE INDEX IF NOT EXISTS idx_render_template_assignments_is_active ON render_template_assignments(is_active);",
     ]
 
+    global PGVECTOR_AVAILABLE
+
     try:
+        # Step 1: Try to enable pgvector in its own transaction so a failure
+        # does not abort the rest of the bootstrap.
+        with engine.begin() as conn:
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                logger.info("pgvector extension enabled")
+                PGVECTOR_AVAILABLE = True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "pgvector not available: %s. Semantic search will be disabled.", exc
+                )
+
+        # Step 2: Run all non-vector schema statements.
         with engine.begin() as conn:
             for sql in statements:
                 conn.execute(text(sql))
+
+        # Step 3: Run vector-dependent statements only when pgvector is present.
+        if PGVECTOR_AVAILABLE:
+            with engine.begin() as conn:
+                for sql in pgvector_statements:
+                    conn.execute(text(sql))
     finally:
         engine.dispose()

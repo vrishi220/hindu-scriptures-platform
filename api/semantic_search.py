@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import services.schema_bootstrap as _schema_bootstrap
 from services import get_db
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -85,6 +86,12 @@ def semantic_search(
     payload: SemanticSearchRequest,
     db: Session = Depends(get_db),
 ) -> SemanticSearchResponse:
+    if not _schema_bootstrap.PGVECTOR_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Semantic search not available on this instance",
+        )
+
     query_text = payload.query.strip()
     if not query_text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="query is required")

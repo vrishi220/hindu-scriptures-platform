@@ -2,6 +2,11 @@ import logging
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load .env before any os.getenv() calls (no-op in Railway where vars are injected)
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
