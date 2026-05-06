@@ -122,13 +122,13 @@ def semantic_search(
             cn.content_data,
             b.book_name,
             b.book_code,
-            1 - (ne.embedding <=> :query_embedding::vector) AS similarity
+            1 - (ne.embedding <=> CAST(:query_embedding AS vector)) AS similarity
         FROM node_embeddings ne
         JOIN content_nodes cn ON ne.node_id = cn.id
         JOIN books b ON cn.book_id = b.id
         WHERE ne.language_code = :language_code
           AND ne.content_type = :content_type
-          AND 1 - (ne.embedding <=> :query_embedding::vector) > :threshold
+          AND 1 - (ne.embedding <=> CAST(:query_embedding AS vector)) > :threshold
     """
 
     params: dict[str, Any] = {
@@ -144,7 +144,7 @@ def semantic_search(
         sql_base += "\n AND b.book_code = ANY(:book_codes)"
         params["book_codes"] = book_codes
 
-    sql_base += "\n ORDER BY ne.embedding <=> :query_embedding::vector\n LIMIT :limit"
+    sql_base += "\n ORDER BY ne.embedding <=> CAST(:query_embedding AS vector)\n LIMIT :limit"
 
     rows = db.execute(text(sql_base), params).mappings().all()
 
