@@ -27,6 +27,7 @@ class SemanticSearchRequest(BaseModel):
 
 class SemanticSearchResult(BaseModel):
     node_id: int
+    book_id: int
     book_name: str
     book_code: str | None
     sequence_number: str | None
@@ -154,6 +155,7 @@ def semantic_search(
         results.append(
             SemanticSearchResult(
                 node_id=int(row["node_id"]),
+                book_id=int(row["book_id"]),
                 book_name=str(row.get("book_name") or ""),
                 book_code=row.get("book_code"),
                 sequence_number=row.get("sequence_number"),

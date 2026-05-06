@@ -46,6 +46,24 @@ type SearchResponse = {
   results: SearchResult[];
 };
 
+type SemanticSearchResult = {
+  node_id: number;
+  book_id: number;
+  book_name: string;
+  book_code: string | null;
+  sequence_number: string | null;
+  similarity: number;
+  translation: string;
+  sanskrit: string;
+};
+
+type SemanticSearchResponse = {
+  query: string;
+  language_code: string;
+  results: SemanticSearchResult[];
+  total: number;
+};
+
 type BasketListItem = {
   cart_item_id?: number;
   node_id: number;
@@ -101,13 +119,14 @@ function HomeContent() {
   const [bookId, setBookId] = useState("");
   const [levelName, setLevelName] = useState("");
   const [hasContent, setHasContent] = useState(false);
-  const [useFullTextSearch, setUseFullTextSearch] = useState(false);
+  const [searchMode, setSearchMode] = useState<"basic" | "fulltext" | "semantic">("basic");
   const [books, setBooks] = useState<BookOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [hasRunSearch, setHasRunSearch] = useState(false);
   const [total, setTotal] = useState(0);
+  const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [, setAuthMessage] = useState<string | null>(null);
@@ -518,10 +537,12 @@ function HomeContent() {
         if (urlBookId) setBookId(urlBookId);
         if (urlLevelName) setLevelName(urlLevelName);
         if (urlHasContent) setHasContent(urlHasContent === "true");
-        setUseFullTextSearch(urlMode === "fulltext");
+        const resolvedMode: "basic" | "fulltext" | "semantic" =
+          urlMode === "semantic" ? "semantic" : urlMode === "fulltext" ? "fulltext" : "basic";
+        setSearchMode(resolvedMode);
         // Run search after state is set
         setTimeout(() => {
-          runSearch(urlQuery, urlBookId || "", urlLevelName || "", urlHasContent === "true", urlMode === "fulltext");
+          runSearch(urlQuery, urlBookId || "", urlLevelName || "", urlHasContent === "true", resolvedMode);
         }, 50);
       }
     };
@@ -574,43 +595,58 @@ function HomeContent() {
     searchBookId?: string,
     searchLevelName?: string,
     searchHasContent?: boolean,
-    searchUseFullText?: boolean
+    overrideMode?: "basic" | "fulltext" | "semantic"
   ) => {
     setHasRunSearch(true);
     const searchTerm = term || query;
     const finalBookId = searchBookId !== undefined ? searchBookId : bookId;
     const finalLevelName = searchLevelName !== undefined ? searchLevelName : levelName;
     const finalHasContent = searchHasContent !== undefined ? searchHasContent : hasContent;
-    const finalUseFullText =
-      searchUseFullText !== undefined ? searchUseFullText : useFullTextSearch;
-    
+    const finalMode = overrideMode !== undefined ? overrideMode : searchMode;
+
     if (!searchTerm.trim()) {
       setResults([]);
+      setSemanticResults([]);
       setTotal(0);
-      // Clear URL params
       router.push("/", { scroll: false });
       return;
     }
 
     setLoading(true);
     setError(null);
+
+    if (finalMode === "semantic") {
+      try {
+        setResults([]);
+        const response = await fetch("/api/search/semantic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ query: searchTerm, language_code: "en", limit: 10 }),
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+          throw new Error(payload?.detail || "Semantic search failed. Try again.");
+        }
+        const data = (await response.json()) as SemanticSearchResponse;
+        setSemanticResults(data.results || []);
+        setTotal(data.total || 0);
+        router.push(`/?${new URLSearchParams({ q: searchTerm, mode: "semantic" }).toString()}`, { scroll: false });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Semantic search failed");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
-      const params = new URLSearchParams({
-        q: searchTerm,
-        limit: "10",
-      });
-      if (finalBookId.trim()) {
-        params.set("book_id", finalBookId.trim());
-      }
-      if (finalLevelName.trim()) {
-        params.set("level_name", finalLevelName.trim());
-      }
-      if (finalHasContent) {
-        params.set("has_content", "true");
-      }
-      if (finalUseFullText) {
-        params.set("mode", "fulltext");
-      }
+      setSemanticResults([]);
+      const params = new URLSearchParams({ q: searchTerm, limit: "10" });
+      if (finalBookId.trim()) params.set("book_id", finalBookId.trim());
+      if (finalLevelName.trim()) params.set("level_name", finalLevelName.trim());
+      if (finalHasContent) params.set("has_content", "true");
+      if (finalMode === "fulltext") params.set("mode", "fulltext");
 
       const response = await fetch(`/api/search?${params.toString()}`, {
         credentials: "include",
@@ -621,18 +657,16 @@ function HomeContent() {
       const data = (await response.json()) as SearchResponse;
       setResults(data.results || []);
       setTotal(data.total || 0);
-      
-      // Load trees for all books in results for breadcrumb rendering
+
       if (data.results && data.results.length > 0) {
         await loadTreeForBooksInResults(data.results);
       }
-      
-      // Update URL with search params
+
       const urlParams = new URLSearchParams({ q: searchTerm });
       if (finalBookId.trim()) urlParams.set("book_id", finalBookId.trim());
       if (finalLevelName.trim()) urlParams.set("level_name", finalLevelName.trim());
       if (finalHasContent) urlParams.set("has_content", "true");
-      if (finalUseFullText) urlParams.set("mode", "fulltext");
+      if (finalMode === "fulltext") urlParams.set("mode", "fulltext");
       router.push(`/?${urlParams.toString()}`, { scroll: false });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -643,7 +677,7 @@ function HomeContent() {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    runSearch(query, undefined, undefined, undefined, useFullTextSearch);
+    runSearch(query, undefined, undefined, undefined, searchMode);
   };
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1148,15 +1182,16 @@ function HomeContent() {
                     <button
                       type="button"
                       onClick={() => {
-                        setUseFullTextSearch(false);
+                        setSearchMode("basic");
                         setHasRunSearch(false);
                         setResults([]);
+                        setSemanticResults([]);
                         setTotal(0);
                         setError(null);
                       }}
-                      aria-pressed={!useFullTextSearch}
+                      aria-pressed={searchMode === "basic"}
                       className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
-                        !useFullTextSearch
+                        searchMode === "basic"
                           ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
                           : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
                       }`}
@@ -1166,20 +1201,40 @@ function HomeContent() {
                     <button
                       type="button"
                       onClick={() => {
-                        setUseFullTextSearch(true);
+                        setSearchMode("fulltext");
                         setHasRunSearch(false);
                         setResults([]);
+                        setSemanticResults([]);
                         setTotal(0);
                         setError(null);
                       }}
-                      aria-pressed={useFullTextSearch}
+                      aria-pressed={searchMode === "fulltext"}
                       className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
-                        useFullTextSearch
+                        searchMode === "fulltext"
                           ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
                           : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
                       }`}
                     >
                       Full-text
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchMode("semantic");
+                        setHasRunSearch(false);
+                        setResults([]);
+                        setSemanticResults([]);
+                        setTotal(0);
+                        setError(null);
+                      }}
+                      aria-pressed={searchMode === "semantic"}
+                      className={`h-10 rounded-lg border px-3 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                        searchMode === "semantic"
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
+                          : "border-black/10 bg-white text-zinc-600 hover:border-black/20"
+                      }`}
+                    >
+                      Semantic
                     </button>
                   </div>
                   <button
@@ -1202,33 +1257,64 @@ function HomeContent() {
                     </p>
                     <p className="text-xs text-zinc-500" aria-live="polite">{loading ? "Searching..." : `${total} found`}</p>
                   </div>
-                  {!loading && results.length === 0 ? (
+                  {!loading && results.length === 0 && semanticResults.length === 0 ? (
                     <p className="mt-3 text-sm text-zinc-600">No matches found.</p>
                   ) : null}
                   <div className="mt-3 space-y-3">
-                    {results.map((result) => {
-                      const title =
-                        result.node.title_english ||
-                        result.node.title_sanskrit ||
-                        result.node.title_transliteration ||
-                        `${result.node.level_name} ${result.node.sequence_number || ""}`.trim();
-                      const previewHref = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&preview=node&from=home`;
-                      return (
-                        <a
-                          key={result.node.id}
-                          href={previewHref}
-                          className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="font-medium text-[color:var(--deep)]">{title}</p>
-                          </div>
-                          <div className="mt-1">{renderBreadcrumb(result)}</div>
-                          {result.snippet ? (
-                            <p className="mt-2 text-sm text-zinc-700">{renderHighlightedSnippet(result.snippet)}</p>
-                          ) : null}
-                        </a>
-                      );
-                    })}
+                    {searchMode === "semantic" ? (
+                      semanticResults.map((result) => {
+                        const previewHref = `/scriptures?book=${result.book_id}&node=${result.node_id}&preview=node&from=home`;
+                        const pct = Math.round(result.similarity * 100);
+                        return (
+                          <a
+                            key={result.node_id}
+                            href={previewHref}
+                            className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-[color:var(--deep)]">{result.book_name}</p>
+                                {result.sequence_number ? (
+                                  <p className="mt-0.5 text-xs text-zinc-500">{result.sequence_number}</p>
+                                ) : null}
+                              </div>
+                              <span className="shrink-0 rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] font-medium tabular-nums text-zinc-500">
+                                {pct}% match
+                              </span>
+                            </div>
+                            {result.translation ? (
+                              <p className="mt-2 line-clamp-2 text-sm text-zinc-700">{result.translation}</p>
+                            ) : result.sanskrit ? (
+                              <p className="mt-2 line-clamp-2 text-sm text-zinc-700">{result.sanskrit}</p>
+                            ) : null}
+                          </a>
+                        );
+                      })
+                    ) : (
+                      results.map((result) => {
+                        const title =
+                          result.node.title_english ||
+                          result.node.title_sanskrit ||
+                          result.node.title_transliteration ||
+                          `${result.node.level_name} ${result.node.sequence_number || ""}`.trim();
+                        const previewHref = `/scriptures?book=${result.node.book_id}&node=${result.node.id}&preview=node&from=home`;
+                        return (
+                          <a
+                            key={result.node.id}
+                            href={previewHref}
+                            className="block rounded-2xl border border-black/10 bg-white p-3 transition hover:border-[color:var(--accent)] hover:shadow-sm"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="font-medium text-[color:var(--deep)]">{title}</p>
+                            </div>
+                            <div className="mt-1">{renderBreadcrumb(result)}</div>
+                            {result.snippet ? (
+                              <p className="mt-2 text-sm text-zinc-700">{renderHighlightedSnippet(result.snippet)}</p>
+                            ) : null}
+                          </a>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               ) : null}
