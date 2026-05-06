@@ -303,6 +303,17 @@ export default function WordMeaningsEditor({
       .filter(Boolean)
       .join("\n");
 
+  // Initialize token draft from rows on mount when starting in token mode,
+  // or when rows first become non-empty (async load case)
+  useEffect(() => {
+    if (editorMode === "token" && tokenDraft === "" && rows.length > 0) {
+      const draft = serializeRowsForTokenEditor(rows);
+      setTokenDraft(draft);
+      setTokenDraftBaseline(draft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
   const parseTokenDraftToRows = (
     tokenText: string,
     seedRows: WordMeaningRow[]

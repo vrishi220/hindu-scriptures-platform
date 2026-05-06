@@ -6276,6 +6276,43 @@ def update_node_word_meanings_tokens(
     language_code = payload.language_code.strip().lower()
     parsed_tokens = _parse_word_meaning_tokens(payload.tokens)
 
+    submitted_rows: list[tuple[int, str, str]] = []
+    if payload.entries:
+        normalized_entries = sorted(payload.entries, key=lambda entry: entry.word_order)
+        for entry in normalized_entries:
+            entry_language = (entry.language_code or language_code).strip().lower()
+            if entry_language != language_code:
+                continue
+            source_word = str(entry.source_word or "").strip()
+            meaning_text = str(entry.meaning_text or "").strip()
+            if not source_word or not meaning_text:
+                continue
+            submitted_rows.append((entry.word_order, source_word, meaning_text))
+    else:
+        submitted_rows = [
+            (index, source_word, meaning_text)
+            for index, (source_word, meaning_text) in enumerate(parsed_tokens, start=1)
+        ]
+
+    logger.info(
+        "W2W save payload: %s",
+        {
+            "node_id": node_id,
+            "target_node_id": target_node.id,
+            "language_code": language_code,
+            "token_count": len(parsed_tokens),
+            "submitted_row_count": len(submitted_rows),
+            "submitted_rows": [
+                {
+                    "word_order": word_order,
+                    "source_word": source_word,
+                    "meaning_text": meaning_text,
+                }
+                for word_order, source_word, meaning_text in submitted_rows
+            ],
+        },
+    )
+
     existing_entries = (
         db.query(WordMeaningEntry)
         .filter(WordMeaningEntry.node_id == target_node.id)
@@ -6295,15 +6332,6 @@ def update_node_word_meanings_tokens(
     author_id = fallback_entry.author_id if fallback_entry is not None else None
     work_id = fallback_entry.work_id if fallback_entry is not None else None
 
-    existing_by_order: dict[int, WordMeaningEntry] = {}
-    for entry in existing_entries:
-        row_key = int(entry.word_order or 0)
-        if row_key <= 0:
-            row_key = int(entry.display_order or 0) + 1
-        if row_key <= 0 or row_key in existing_by_order:
-            continue
-        existing_by_order[row_key] = entry
-
     version_target = target_node
     version_history = version_target.version_history or []
     version_history.append(
@@ -6314,49 +6342,78 @@ def update_node_word_meanings_tokens(
             "changes": {
                 "word_meanings": {
                     "language_code": language_code,
-                    "token_count": len(parsed_tokens),
+                    "token_count": len(submitted_rows),
                 }
             },
         }
     )
     version_target.version_history = version_history
 
-    db.query(WordMeaningEntry).filter(
-        WordMeaningEntry.node_id == target_node.id,
-        func.lower(WordMeaningEntry.language_code) == language_code,
-    ).delete(synchronize_session=False)
+    submitted_orders = {word_order for word_order, _, _ in submitted_rows}
+    if submitted_orders:
+        db.query(WordMeaningEntry).filter(
+            WordMeaningEntry.node_id == target_node.id,
+            func.lower(WordMeaningEntry.language_code) == language_code,
+            ~WordMeaningEntry.word_order.in_(submitted_orders),
+        ).delete(synchronize_session=False)
+    else:
+        db.query(WordMeaningEntry).filter(
+            WordMeaningEntry.node_id == target_node.id,
+            func.lower(WordMeaningEntry.language_code) == language_code,
+        ).delete(synchronize_session=False)
 
-    for index, (source_word, meaning_text) in enumerate(parsed_tokens, start=1):
-        existing_row = existing_by_order.get(index)
-        transliteration = str(existing_row.transliteration or source_word).strip() if existing_row else source_word
+    for word_order, source_word, meaning_text in submitted_rows:
+        transliteration = source_word
+
+        target_query = db.query(WordMeaningEntry).filter(
+            WordMeaningEntry.node_id == target_node.id,
+            WordMeaningEntry.word_order == word_order,
+            func.lower(WordMeaningEntry.language_code) == language_code,
+        )
+        if author_id is None:
+            target_query = target_query.filter(WordMeaningEntry.author_id.is_(None))
+        else:
+            target_query = target_query.filter(WordMeaningEntry.author_id == author_id)
+
+        existing_target_row = target_query.first()
+        if existing_target_row is not None:
+            existing_target_row.source_word = source_word
+            existing_target_row.transliteration = transliteration
+            existing_target_row.meaning_text = meaning_text
+            existing_target_row.display_order = word_order - 1
+            existing_target_row.work_id = work_id
+            existing_target_row.metadata_json = {
+                "edited_via": "token_patch",
+                "edited_by": current_user.id,
+            }
+        else:
+            db.add(
+                WordMeaningEntry(
+                    node_id=target_node.id,
+                    author_id=author_id,
+                    work_id=work_id,
+                    source_word=source_word,
+                    transliteration=transliteration,
+                    word_order=word_order,
+                    language_code=language_code,
+                    meaning_text=meaning_text,
+                    display_order=word_order - 1,
+                    metadata_json={
+                        "edited_via": "token_patch",
+                        "edited_by": current_user.id,
+                    },
+                )
+            )
 
         db.query(WordMeaningEntry).filter(
             WordMeaningEntry.node_id == target_node.id,
-            WordMeaningEntry.word_order == index,
+            WordMeaningEntry.word_order == word_order,
         ).update(
             {
                 WordMeaningEntry.source_word: source_word,
                 WordMeaningEntry.transliteration: transliteration,
             },
             synchronize_session=False,
-        )
-
-        db.add(
-            WordMeaningEntry(
-                node_id=target_node.id,
-                author_id=author_id,
-                work_id=work_id,
-                source_word=source_word,
-                transliteration=transliteration,
-                word_order=index,
-                language_code=language_code,
-                meaning_text=meaning_text,
-                display_order=index - 1,
-                metadata_json={
-                    "edited_via": "token_patch",
-                    "edited_by": current_user.id,
-                },
-            )
         )
 
     node.last_modified_by = current_user.id

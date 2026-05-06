@@ -3091,6 +3091,9 @@ function ScripturesContent() {
   const [propertiesWordMeaningsDefaultMeaningLanguage, setPropertiesWordMeaningsDefaultMeaningLanguage] =
     useState<string>(WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE);
   const [propertiesWordMeaningsTouched, setPropertiesWordMeaningsTouched] = useState(false);
+  const [propertiesNodeWmRows, setPropertiesNodeWmRows] = useState<WordMeaningRow[]>([]);
+  const [propertiesNodeWmSaving, setPropertiesNodeWmSaving] = useState(false);
+  const [propertiesNodeWmMessage, setPropertiesNodeWmMessage] = useState<string | null>(null);
   const [propertiesCategoryId, setPropertiesCategoryId] = useState<number | null>(null);
   const [propertiesEffectiveFields, setPropertiesEffectiveFields] = useState<EffectivePropertyBinding[]>([]);
   const [propertiesValues, setPropertiesValues] = useState<Record<string, unknown>>({});
@@ -4677,6 +4680,9 @@ function ScripturesContent() {
       setPropertiesValues(values);
 
       if (scope === "node") {
+        setPropertiesNodeWmRows(nodeContent ? mapWordMeaningsRowsFromContent(nodeContent) : []);
+        setPropertiesNodeWmMessage(null);
+
         const selectedTreeNode = nodeId ? findNodeById(treeData, nodeId) : null;
         const normalizedLevelKey = (selectedTreeNode?.level_name || nodeContent?.level_name || "")
           .trim()
@@ -15540,6 +15546,133 @@ function ScripturesContent() {
     }));
   };
 
+  const updatePropertiesNodeWmRows = (rows: WordMeaningRow[]) => {
+    setPropertiesNodeWmRows(rows.map((row, index) => ({ ...row, order: index + 1 })));
+  };
+
+  const handleAddPropertiesNodeWmRow = (sourceLanguage: string, meaningLanguage: string) => {
+    setPropertiesNodeWmRows((prev) => [
+      ...prev,
+      createEmptyWordMeaningRow(prev.length + 1, sourceLanguage, meaningLanguage),
+    ]);
+  };
+
+  const handleRemovePropertiesNodeWmRow = (rowId: string) => {
+    updatePropertiesNodeWmRows(propertiesNodeWmRows.filter((row) => row.id !== rowId));
+  };
+
+  const handleMovePropertiesNodeWmRow = (rowId: string, direction: "up" | "down") => {
+    const index = propertiesNodeWmRows.findIndex((row) => row.id === rowId);
+    if (index < 0) return;
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= propertiesNodeWmRows.length) return;
+    const next = [...propertiesNodeWmRows];
+    const [item] = next.splice(index, 1);
+    next.splice(targetIndex, 0, item);
+    updatePropertiesNodeWmRows(next);
+  };
+
+  const handlePropertiesNodeWmSourceFieldChange = (
+    rowId: string,
+    key: "sourceLanguage" | "sourceScriptText" | "sourceTransliterationIast",
+    value: string
+  ) => {
+    setPropertiesNodeWmRows((prev) =>
+      prev.map((row) => (row.id === rowId ? { ...row, [key]: value } : row))
+    );
+  };
+
+  const handleSelectPropertiesNodeWmMeaningLanguage = (rowId: string, language: string) => {
+    setPropertiesNodeWmRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        return {
+          ...row,
+          activeMeaningLanguage: language,
+          meanings: { ...row.meanings, [language]: row.meanings[language] || "" },
+        };
+      })
+    );
+  };
+
+  const handlePropertiesNodeWmMeaningTextChange = (rowId: string, language: string, value: string) => {
+    setPropertiesNodeWmRows((prev) =>
+      prev.map((row) =>
+        row.id === rowId ? { ...row, meanings: { ...row.meanings, [language]: value } } : row
+      )
+    );
+  };
+
+  const handleSavePropertiesNodeWm = async () => {
+    if (!propertiesNodeId) return;
+    const payloadRows = mapWordMeaningRowsForPayload(propertiesNodeWmRows);
+    const validationErrors = validateWordMeaningPayloadRows(payloadRows);
+    if (validationErrors.length > 0) {
+      setPropertiesNodeWmMessage(`Validation error: ${validationErrors[0]}`);
+      return;
+    }
+    setPropertiesNodeWmSaving(true);
+    setPropertiesNodeWmMessage(null);
+
+    const serializeRowsToTokens = (rows: WordMeaningPayloadRow[]) =>
+      rows
+        .map((row) => {
+          const iast = row.source?.transliteration?.iast || "";
+          const source = (iast || row.source?.script_text || "").trim();
+          const meaning = (row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE]?.text || "").trim();
+          if (!source && !meaning) return "";
+          return meaning ? `${source}=${meaning}` : source;
+        })
+        .filter(Boolean)
+        .join("; ");
+
+    const entries = payloadRows
+      .map((row, index) => {
+        const sourceWord = (row.source?.transliteration?.iast || row.source?.script_text || "").trim();
+        const meaningText = (row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE]?.text || "").trim();
+        return {
+          source_word: sourceWord,
+          meaning_text: meaningText,
+          word_order: index + 1,
+          language_code: WORD_MEANINGS_REQUIRED_LANGUAGE,
+        };
+      })
+      .filter((entry) => entry.source_word && entry.meaning_text);
+
+    const savePayload = {
+      language_code: WORD_MEANINGS_REQUIRED_LANGUAGE,
+      tokens: serializeRowsToTokens(payloadRows),
+      entries,
+      edit_reason: "Properties panel word meanings edit",
+    };
+
+    console.log("Saving w2w payload:", savePayload);
+
+    try {
+      const res = await fetch(`/api/content/nodes/${propertiesNodeId}/word-meanings`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(savePayload),
+      });
+      if (!res.ok) {
+        const p = (await res.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(p?.detail || `Save failed (${res.status})`);
+      }
+      const saved = (await res.json().catch(() => null)) as NodeContent | null;
+      if (saved && isNodeContentPayload(saved)) {
+        syncSavedNodeState(saved);
+        setPropertiesNodeWmRows(mapWordMeaningsRowsFromContent(saved));
+      }
+      setPropertiesNodeWmMessage("Saved.");
+      window.setTimeout(() => setPropertiesNodeWmMessage(null), 2000);
+    } catch (err) {
+      setPropertiesNodeWmMessage(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setPropertiesNodeWmSaving(false);
+    }
+  };
+
   const renderTree = (nodes: TreeNode[], depth = 0) => {
     const canEditTreeOrder = treeEditMode && (canContribute || canEditCurrentBook);
 
@@ -22517,7 +22650,43 @@ function ScripturesContent() {
                   <div className="mb-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
                     Word-to-Word Meanings
                   </div>
-                  {propertiesNodeWordMeaningRows.length === 0 ? (
+                  {(canEditCurrentBook || canContribute) ? (
+                    <>
+                      <WordMeaningsEditor
+                        rows={propertiesNodeWmRows}
+                        validationErrors={validateWordMeaningPayloadRows(mapWordMeaningRowsForPayload(propertiesNodeWmRows))}
+                        missingRequired={validateWordMeaningPayloadRows(mapWordMeaningRowsForPayload(propertiesNodeWmRows)).some((e) =>
+                          e.includes(`meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`)
+                        )}
+                        requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
+                        allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
+                        sourceDisplayScript={transliterationScript}
+                        onAddRow={handleAddPropertiesNodeWmRow}
+                        onReplaceRows={updatePropertiesNodeWmRows}
+                        onMoveRow={handleMovePropertiesNodeWmRow}
+                        onRemoveRow={handleRemovePropertiesNodeWmRow}
+                        onSourceFieldChange={handlePropertiesNodeWmSourceFieldChange}
+                        onSelectMeaningLanguage={handleSelectPropertiesNodeWmMeaningLanguage}
+                        onMeaningTextChange={handlePropertiesNodeWmMeaningTextChange}
+                        blendWithParent
+                      />
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { void handleSavePropertiesNodeWm(); }}
+                          disabled={propertiesNodeWmSaving}
+                          className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-3 py-1.5 text-xs font-medium uppercase tracking-[0.14em] text-white transition disabled:opacity-50"
+                        >
+                          {propertiesNodeWmSaving ? "Saving…" : "Save Word Meanings"}
+                        </button>
+                        {propertiesNodeWmMessage && (
+                          <span className={`text-xs ${propertiesNodeWmMessage === "Saved." ? "text-emerald-700" : "text-red-600"}`}>
+                            {propertiesNodeWmMessage}
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : propertiesNodeWmRows.length === 0 ? (
                     <p className="text-sm text-zinc-500">No word meanings available for this node.</p>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-black/10 bg-white">
@@ -22529,7 +22698,7 @@ function ScripturesContent() {
                           </tr>
                         </thead>
                         <tbody>
-                          {propertiesNodeWordMeaningRows.map((row) => {
+                          {propertiesNodeWmRows.map((row) => {
                             const preferredLanguage = row.activeMeaningLanguage || WORD_MEANINGS_REQUIRED_LANGUAGE;
                             const meaningText =
                               row.meanings[preferredLanguage] || row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE] || "";

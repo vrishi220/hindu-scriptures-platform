@@ -672,9 +672,49 @@ class ContentNodeFieldPatch(BaseModel):
         raise ValueError("Unsupported field_path for single-field patch")
 
 
+class ContentNodeWordMeaningsPatchEntry(BaseModel):
+    source_word: str
+    meaning_text: str
+    word_order: int
+    language_code: str | None = None
+
+    @field_validator("source_word")
+    @classmethod
+    def validate_source_word(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("source_word is required")
+        return normalized
+
+    @field_validator("meaning_text")
+    @classmethod
+    def validate_meaning_text(cls, value: str) -> str:
+        return str(value or "").strip()
+
+    @field_validator("word_order")
+    @classmethod
+    def validate_word_order(cls, value: int) -> int:
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("word_order must be a positive integer")
+        return value
+
+    @field_validator("language_code")
+    @classmethod
+    def validate_optional_language_code(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return None
+        if not re.fullmatch(r"[a-z0-9_-]+", normalized):
+            raise ValueError("language_code must contain only letters, numbers, underscores, or hyphens")
+        return normalized
+
+
 class ContentNodeWordMeaningsTokenPatch(BaseModel):
     language_code: str
     tokens: str = ""
+    entries: list[ContentNodeWordMeaningsPatchEntry] | None = None
     edit_reason: str | None = None
 
     @field_validator("language_code")
