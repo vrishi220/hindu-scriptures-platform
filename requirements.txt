@@ -21,6 +21,8 @@ indic-transliteration==2.3.79
 
 # AI integration
 anthropic>=0.40.0
+openai>=1.0.0
+pgvector>=0.2.4
 python-dotenv>=1.0.0
 
 # Testing

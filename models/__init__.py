@@ -21,6 +21,7 @@ from models.media_asset import MediaAsset
 from models.ai_job import AIJob
 from models.import_job import ImportJob
 from models.provenance_record import ProvenanceRecord
+from models.node_embedding import NodeEmbedding
 from models.search_query import SearchQuery
 from models.session import UserSession
 from models.scripture_schema import ScriptureSchema
@@ -67,6 +68,7 @@ __all__ = [
 	"MetadataBinding",
 	"MediaFile",
 	"MediaAsset",
+	"NodeEmbedding",
 	"ImportJob",
 	"PropertyDefinition",
 	"ProvenanceRecord",
