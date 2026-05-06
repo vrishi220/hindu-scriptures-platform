@@ -22,7 +22,7 @@ class SemanticSearchRequest(BaseModel):
     book_codes: list[str] | None = None
     content_type: str = Field(default="translation")
     limit: int = Field(default=20, ge=1)
-    similarity_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    similarity_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class SemanticSearchResult(BaseModel):
