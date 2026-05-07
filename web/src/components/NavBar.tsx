@@ -432,6 +432,14 @@ export default function NavBar() {
           >
             Explorer
           </a>
+          <a
+            href="/ask"
+            className={`hover:text-[color:var(--accent)] ${
+              isActive("/ask") ? "font-semibold text-[color:var(--deep)]" : ""
+            }`}
+          >
+            Ask
+          </a>
           {canAdmin && (
             <a
               href="/admin"
@@ -577,6 +585,17 @@ export default function NavBar() {
               }`}
             >
               Explorer
+            </a>
+            <a
+              href="/ask"
+              onClick={() => setMobileMenuOpen(false)}
+              className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                isActive("/ask")
+                  ? "font-semibold text-[color:var(--deep)]"
+                  : "text-zinc-600 hover:text-[color:var(--accent)]"
+              }`}
+            >
+              Ask
             </a>
             {canAdmin && (
               <a

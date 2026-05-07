@@ -64,10 +64,13 @@ class AskRequest(BaseModel):
 
 class CitedVerse(BaseModel):
     node_id: int
+    book_id: int
     book_name: str
     book_code: str | None
     sequence_number: str | None
     similarity: float
+    translation: str
+    sanskrit: str
 
 
 class AskResponse(BaseModel):
@@ -195,10 +198,13 @@ def _build_context_and_citations(
         cited.append(
             CitedVerse(
                 node_id=node_id,
+                book_id=int(row.get("book_id") or 0),
                 book_name=book_name,
                 book_code=book_code,
                 sequence_number=seq,
                 similarity=round(similarity, 4),
+                translation=translation,
+                sanskrit=sanskrit,
             )
         )
 
