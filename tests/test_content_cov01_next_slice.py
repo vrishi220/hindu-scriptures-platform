@@ -6,6 +6,8 @@ from uuid import uuid4
 from fastapi import status
 
 import api.content as content_api
+import api.imports as imports_api
+import api.media as media_api
 from models.book import Book
 from models.content_node import ContentNode
 from models.database import SessionLocal
@@ -88,7 +90,9 @@ def _create_user(db, name_prefix: str = "cov01") -> User:
 class TestContentCoverageNextSliceCOV01:
     def test_media_bank_upload_preserves_filename_in_storage_path(self, client, tmp_path, monkeypatch):
         original_storage = content_api.MEDIA_STORAGE
-        monkeypatch.setattr(content_api, "MEDIA_STORAGE", LocalMediaStorage(root_dir=tmp_path))
+        tmp_storage = LocalMediaStorage(root_dir=tmp_path)
+        monkeypatch.setattr(content_api, "MEDIA_STORAGE", tmp_storage)
+        monkeypatch.setattr(media_api, "MEDIA_STORAGE", tmp_storage)
         try:
             headers = _register_and_login(client)
 
@@ -133,6 +137,7 @@ class TestContentCoverageNextSliceCOV01:
             assert (tmp_path / Path("bank/Lotus-Image-01-2.png")).exists()
         finally:
             monkeypatch.setattr(content_api, "MEDIA_STORAGE", original_storage)
+            monkeypatch.setattr(media_api, "MEDIA_STORAGE", original_storage)
 
     def test_find_inflight_duplicate_import_job_ignores_stale_running_job(self):
         db = SessionLocal()
@@ -157,7 +162,7 @@ class TestContentCoverageNextSliceCOV01:
             db.add(stale_job)
             db.commit()
 
-            duplicate = content_api._find_inflight_duplicate_import_job(
+            duplicate = imports_api._find_inflight_duplicate_import_job(
                 {
                     "schema_version": "hsp-book-json-v1",
                     "canonical_json_url": "https://example.com/canonical.json",
@@ -197,7 +202,7 @@ class TestContentCoverageNextSliceCOV01:
             db.add(stale_job)
             db.commit()
 
-            status_response = content_api.get_import_job_status(
+            status_response = imports_api.get_import_job_status(
                 stale_job.job_id,
                 db=db,
                 current_user=user,
@@ -252,7 +257,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            initial_result = content_api._import_canonical_json_v1(initial_payload, db, user)
+            initial_result = imports_api._import_canonical_json_v1(initial_payload, db, user)
             assert initial_result.success is True
             assert initial_result.book_id is not None
 
@@ -281,7 +286,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            replaced_result = content_api._import_canonical_json_v1(replaced_payload, db, user)
+            replaced_result = imports_api._import_canonical_json_v1(replaced_payload, db, user)
             assert replaced_result.success is True
             assert replaced_result.book_id == initial_result.book_id
             assert replaced_result.nodes_created == 1
@@ -329,7 +334,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            initial_result = content_api._import_canonical_json_v1(initial_payload, db, user)
+            initial_result = imports_api._import_canonical_json_v1(initial_payload, db, user)
             assert initial_result.success is True
 
             append_payload = {
@@ -357,7 +362,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            append_result = content_api._import_canonical_json_v1(append_payload, db, user)
+            append_result = imports_api._import_canonical_json_v1(append_payload, db, user)
             assert append_result.success is True
             assert append_result.nodes_created == 1
             assert any("Appending imported nodes" in warning for warning in append_result.warnings)
@@ -428,7 +433,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            result = content_api._import_canonical_json_v1(payload, db, user)
+            result = imports_api._import_canonical_json_v1(payload, db, user)
             assert result.success is True
             assert result.book_id is not None
 
@@ -490,7 +495,7 @@ class TestContentCoverageNextSliceCOV01:
                 ],
             }
 
-            result = content_api._import_canonical_json_v1(payload, db, user)
+            result = imports_api._import_canonical_json_v1(payload, db, user)
             assert result.success is True
             assert result.book_id is not None
 
@@ -524,7 +529,7 @@ class TestContentCoverageNextSliceCOV01:
     def test_import_pdf_invalid_config_returns_validation_error(self):
         db = SessionLocal()
         try:
-            result = content_api._import_pdf(
+            result = imports_api._import_pdf(
                 payload={},
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -545,7 +550,7 @@ class TestContentCoverageNextSliceCOV01:
                 "pdf_file_path": "/tmp/does-not-matter.pdf",
                 "extraction_rules": [],
             }
-            result = content_api._import_pdf(
+            result = imports_api._import_pdf(
                 payload=payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -566,7 +571,7 @@ class TestContentCoverageNextSliceCOV01:
             def extract_chapters_and_verses(self):
                 return []
 
-        monkeypatch.setattr(content_api, "PDFImporter", FakePDFImporter)
+        monkeypatch.setattr(imports_api, "PDFImporter", FakePDFImporter)
 
         db = SessionLocal()
         try:
@@ -578,7 +583,7 @@ class TestContentCoverageNextSliceCOV01:
                 "pdf_file_path": "/tmp/fake.pdf",
                 "extraction_rules": [],
             }
-            result = content_api._import_pdf(
+            result = imports_api._import_pdf(
                 payload=payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -621,8 +626,8 @@ class TestContentCoverageNextSliceCOV01:
                 "extraction_rules": [],
             }
 
-            monkeypatch.setattr(content_api, "PDFImporter", FakePDFImporterNoNodes)
-            no_nodes_result = content_api._import_pdf(
+            monkeypatch.setattr(imports_api, "PDFImporter", FakePDFImporterNoNodes)
+            no_nodes_result = imports_api._import_pdf(
                 payload=payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -630,12 +635,12 @@ class TestContentCoverageNextSliceCOV01:
             assert no_nodes_result.success is False
             assert no_nodes_result.error == "Extraction produced no nodes"
 
-            monkeypatch.setattr(content_api, "PDFImporter", FakePDFImporterWithNodes)
+            monkeypatch.setattr(imports_api, "PDFImporter", FakePDFImporterWithNodes)
 
             def _raise_insert(*args, **kwargs):
                 raise Exception("insert boom")
 
-            monkeypatch.setattr(content_api, "_insert_content_nodes", _raise_insert)
+            monkeypatch.setattr(imports_api, "_insert_content_nodes", _raise_insert)
             insert_fail_payload = {
                 "book_name": "PDF Insert Fail Book",
                 "book_code": f"pdf-insert-fail-{uuid4().hex[:6]}",
@@ -643,7 +648,7 @@ class TestContentCoverageNextSliceCOV01:
                 "pdf_file_path": "/tmp/fake.pdf",
                 "extraction_rules": [],
             }
-            insert_fail_result = content_api._import_pdf(
+            insert_fail_result = imports_api._import_pdf(
                 payload=insert_fail_payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -683,7 +688,7 @@ class TestContentCoverageNextSliceCOV01:
                 "source_attribution": "API",
                 "json_source_url": "https://example.com/data.json",
             }
-            missing_schema = content_api._import_json(
+            missing_schema = imports_api._import_json(
                 payload=missing_schema_payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -700,8 +705,8 @@ class TestContentCoverageNextSliceCOV01:
                 "json_source_url": "https://example.com/data.json",
             }
 
-            monkeypatch.setattr(content_api, "JSONImporter", FakeJSONImporterFailure)
-            fail_result = content_api._import_json(
+            monkeypatch.setattr(imports_api, "JSONImporter", FakeJSONImporterFailure)
+            fail_result = imports_api._import_json(
                 payload=payload,
                 db=db,
                 current_user=SimpleNamespace(id=1),
@@ -709,8 +714,8 @@ class TestContentCoverageNextSliceCOV01:
             assert fail_result.success is False
             assert (fail_result.error or "").startswith("Failed to import JSON content")
 
-            monkeypatch.setattr(content_api, "JSONImporter", FakeJSONImporterNoNodes)
-            no_nodes_result = content_api._import_json(
+            monkeypatch.setattr(imports_api, "JSONImporter", FakeJSONImporterNoNodes)
+            no_nodes_result = imports_api._import_json(
                 payload={
                     "book_name": "JSON No Nodes",
                     "book_code": f"json-no-nodes-{uuid4().hex[:6]}",

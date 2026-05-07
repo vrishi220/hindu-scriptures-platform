@@ -1,11 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { API_BASE_URL, ACCESS_TOKEN_COOKIE, buildAuthHeader } from "@/lib/apiProxy";
 
-const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
-const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
-
-const buildAuthHeader = (token?: string): Record<string, string> =>
-  token ? { Authorization: `Bearer ${token}` } : {};
 
 const forward = async (
   bookId: string,

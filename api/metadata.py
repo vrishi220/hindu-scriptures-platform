@@ -33,12 +33,8 @@ from models.property_system_schemas import (
 from models.user import User
 from services import get_db
 from services.book_permissions import (
-    book_access_rank,
-    book_owner_id,
-    book_visibility,
     ensure_book_edit_access,
     ensure_book_view_access,
-    user_can_edit_any,
 )
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
@@ -60,29 +56,6 @@ def _user_can_edit_draft(current_user: User, draft: DraftBook) -> bool:
     perms = current_user.permissions or {}
     return bool(perms.get("can_edit") or perms.get("can_admin"))
 
-
-def _user_can_edit_any(current_user: User) -> bool:
-    return user_can_edit_any(current_user)
-
-
-def _book_owner_id(book: Book) -> int | None:
-    return book_owner_id(book)
-
-
-def _book_visibility(book: Book) -> str:
-    return book_visibility(book)
-
-
-def _book_access_rank(db: Session, book: Book, current_user: User | None) -> int:
-    return book_access_rank(db, book, current_user)
-
-
-def _ensure_book_view_access(db: Session, book: Book, current_user: User | None) -> None:
-    ensure_book_view_access(db, book, current_user)
-
-
-def _ensure_book_edit_access(db: Session, current_user: User, book: Book) -> None:
-    ensure_book_edit_access(db, current_user, book)
 
 
 def _parse_iso_date(value: str) -> bool:
@@ -1164,7 +1137,7 @@ def upsert_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_edit_access(db, current_user, book)
+    ensure_book_edit_access(db, current_user, book)
 
     if payload.category_id is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="category_id is required")
@@ -1207,7 +1180,7 @@ def get_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_view_access(db, book, current_user)
+    ensure_book_view_access(db, book, current_user)
 
     binding = (
         db.query(MetadataBinding)
@@ -1234,7 +1207,7 @@ def patch_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_edit_access(db, current_user, book)
+    ensure_book_edit_access(db, current_user, book)
 
     binding = (
         db.query(MetadataBinding)
@@ -1289,7 +1262,7 @@ def upsert_node_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_edit_access(db, current_user, book)
+    ensure_book_edit_access(db, current_user, book)
 
     node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
     if not node:
@@ -1337,7 +1310,7 @@ def get_node_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_view_access(db, book, current_user)
+    ensure_book_view_access(db, book, current_user)
 
     node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
     if not node:
@@ -1422,7 +1395,7 @@ def patch_node_book_metadata_binding(
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-    _ensure_book_edit_access(db, current_user, book)
+    ensure_book_edit_access(db, current_user, book)
 
     node = db.query(ContentNode).filter(ContentNode.id == node_id, ContentNode.book_id == book_id).first()
     if not node:

@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api import auth, content, search, semantic_search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email, ai_jobs, ai_generation, ask
+from api import auth, books, commentary, content, imports, media, search, semantic_search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email, ai_jobs, ai_generation, ask
 from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -108,9 +108,13 @@ def health_check() -> dict:
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(books.router, prefix="/api")
+app.include_router(commentary.router, prefix="/api")
+app.include_router(imports.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(semantic_search.router, prefix="/api")
 app.include_router(content.router, prefix="/api")
+app.include_router(media.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(compilations.router, prefix="/api")
 app.include_router(collection_cart.router, prefix="/api")

@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 from types import SimpleNamespace
 
+import api.books as books_api
 import api.content as content_api
 import api.draft_books as draft_books_api
 from api.content import create_node
@@ -1351,7 +1352,7 @@ class TestDailyVerseVisibilityRegression:
         )
         assert public_verse_response.status_code == status.HTTP_201_CREATED
 
-        original_book_visibility = content_api._book_visibility
+        original_book_visibility = content_api.book_visibility
 
         def scoped_book_visibility(book):
             if book.id == public_book_id:
@@ -1360,7 +1361,7 @@ class TestDailyVerseVisibilityRegression:
                 return "private"
             return "private"
 
-        monkeypatch.setattr(content_api, "_book_visibility", scoped_book_visibility)
+        monkeypatch.setattr(content_api, "book_visibility", scoped_book_visibility)
 
         try:
             client.cookies.clear()
@@ -1372,7 +1373,7 @@ class TestDailyVerseVisibilityRegression:
             assert public_marker in anonymous_daily_payload["content"]
             assert private_marker not in anonymous_daily_payload["content"]
         finally:
-            monkeypatch.setattr(content_api, "_book_visibility", original_book_visibility)
+            monkeypatch.setattr(content_api, "book_visibility", original_book_visibility)
 
     def test_random_verse_anonymous_returns_none_when_only_private_books(self, client, monkeypatch):
         headers = _register_and_login(client)
@@ -1436,14 +1437,14 @@ class TestDailyVerseVisibilityRegression:
         )
         assert private_verse_response.status_code == status.HTTP_201_CREATED
 
-        original_book_visibility = content_api._book_visibility
+        original_book_visibility = content_api.book_visibility
 
         def private_only_visibility(book):
             if book.id == private_book_id:
                 return "private"
             return "private"
 
-        monkeypatch.setattr(content_api, "_book_visibility", private_only_visibility)
+        monkeypatch.setattr(content_api, "book_visibility", private_only_visibility)
 
         try:
             client.cookies.clear()
@@ -1451,7 +1452,7 @@ class TestDailyVerseVisibilityRegression:
             assert anonymous_random_response.status_code == status.HTTP_200_OK
             assert anonymous_random_response.json() is None
         finally:
-            monkeypatch.setattr(content_api, "_book_visibility", original_book_visibility)
+            monkeypatch.setattr(content_api, "book_visibility", original_book_visibility)
 
     def test_random_verse_selects_book_before_verse(self, client, monkeypatch):
         headers = _register_and_login(client)
@@ -5996,7 +5997,7 @@ class TestContentCoverageSprintCOV02:
         def fake_send_share_invitation(**kwargs):
             captured.update(kwargs)
 
-        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+        monkeypatch.setattr(books_api, "send_share_invitation", fake_send_share_invitation)
 
         invite_email = f"invite_preview_{uuid4().hex[:8]}@example.com"
         share_response = client.post(
@@ -6044,7 +6045,7 @@ class TestContentCoverageSprintCOV02:
         def fake_send_share_invitation(**kwargs):
             captured.update(kwargs)
 
-        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+        monkeypatch.setattr(books_api, "send_share_invitation", fake_send_share_invitation)
 
         invite_email = f"invite_node_{uuid4().hex[:8]}@example.com"
         share_response = client.post(
@@ -6110,7 +6111,7 @@ class TestContentCoverageSprintCOV02:
         def fake_send_share_invitation(**kwargs):
             captured.update(kwargs)
 
-        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+        monkeypatch.setattr(books_api, "send_share_invitation", fake_send_share_invitation)
 
         share_response = client.post(
             f"/api/content/books/{book_id}/shares",
@@ -6169,7 +6170,7 @@ class TestContentCoverageSprintCOV02:
         def fake_send_share_invitation(**kwargs):
             captured.update(kwargs)
 
-        monkeypatch.setattr(content_api, "send_share_invitation", fake_send_share_invitation)
+        monkeypatch.setattr(books_api, "send_share_invitation", fake_send_share_invitation)
 
         share_response = client.post(
             f"/api/content/books/{book_id}/shares",

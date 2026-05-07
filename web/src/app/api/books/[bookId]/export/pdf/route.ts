@@ -11,14 +11,11 @@ import {
   type TransliterationScriptOption,
 } from "@/lib/indicScript";
 import { canUseSparticuzChromium, getPdfBrowserExecutableCandidates } from "@/lib/pdfBrowserLaunch";
+import { API_BASE_URL, ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE, BACKEND_UNAVAILABLE, buildAuthHeader, refreshAccessToken } from "@/lib/apiProxy";
 
 // Allow up to 5 minutes for large book PDF generation on serverless hosts.
 export const maxDuration = 300;
 
-const API_BASE_URL = process.env.API_BASE_URL || "http://127.0.0.1:8000";
-const ACCESS_TOKEN_COOKIE = process.env.ACCESS_TOKEN_COOKIE || "access_token";
-const REFRESH_TOKEN_COOKIE = process.env.REFRESH_TOKEN_COOKIE || "refresh_token";
-const BACKEND_UNAVAILABLE = "Auth/content service unavailable. Please try again shortly.";
 const ENABLE_BROWSER_RENDERED_PDF =
   (process.env.ENABLE_BROWSER_RENDERED_PDF || "true").trim().toLowerCase() === "true";
 
@@ -465,29 +462,6 @@ const normalizeSelectedTranslationLanguages = (value: unknown): string[] => {
   return Array.from(new Set(normalized));
 };
 
-const buildAuthHeader = (token?: string): Record<string, string> =>
-  token ? { Authorization: `Bearer ${token}` } : {};
-
-const refreshAccessToken = async (refreshToken: string) => {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-  } catch {
-    return null;
-  }
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return (await response.json().catch(() => null)) as
-    | { access_token: string; refresh_token: string }
-    | null;
-};
 
 const tryReadErrorPayload = async (response: Response) => {
   const contentType = response.headers.get("content-type") || "";
