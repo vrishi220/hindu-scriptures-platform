@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api import auth, content, search, semantic_search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email, ai_jobs, ai_generation
+from api import auth, content, search, semantic_search, users, preferences, compilations, collection_cart, draft_books, metadata, templates, email, ai_jobs, ai_generation, ask
 from models.database import DATABASE_URL
 from services.schema_bootstrap import ensure_phase1_schema
 
@@ -120,6 +120,7 @@ app.include_router(templates.router, prefix="/api")
 app.include_router(email.router, prefix="/api")
 app.include_router(ai_jobs.router, prefix="/api")
 app.include_router(ai_generation.router, prefix="/api")
+app.include_router(ask.router, prefix="/api")
 
 if MEDIA_STORAGE_BACKEND in LOCAL_MEDIA_BACKENDS:
     app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
