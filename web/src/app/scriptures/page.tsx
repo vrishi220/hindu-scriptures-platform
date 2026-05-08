@@ -38,6 +38,7 @@ import NodeLevelTemplateSection from "./components/NodeLevelTemplateSection";
 import PropertiesPanel from "./components/PropertiesPanel";
 import WordMeaningsEditor from "../../components/WordMeaningsEditor";
 import { useScripturesBrowse } from "./hooks/useScripturesBrowse";
+import { useImportPipeline, type BulkFileResult } from "./hooks/useImportPipeline";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -79,1669 +80,198 @@ import {
   uploadMediaBankAsset,
 } from "../../lib/mediaBankClient";
 import { resolveMediaUrl, resolveMediaUrlWithMetadataVersion } from "../../lib/mediaUrl";
-type CanonicalUploadComplete = {
-  upload_id?: string;
-  canonical_json_url?: string;
-  size_bytes?: number;
-  detail?: string;
-  error?: string;
-};
+import type {
+  MediaFile,
+  MediaAsset,
+  MediaLinkContext,
+  BookMediaItem,
+  SharePermission,
+  BookMetadata,
+  BookSchema,
+  BookOption,
+  BookDetails,
+  SchemaOption,
+  BookShare,
+  OwnedBookSummary,
+  BookOwnershipTransferResponse,
+  ShareDialogLinkOption,
+  ShareDialogState,
+  CommentaryEntry,
+  CommentaryDisplayItem,
+  AuthorVariantDraft,
+  NodeComment,
+  BookPreviewBlock,
+  BookPreviewRenderSettings,
+  BookPreviewLanguageSettings,
+  BookPreviewArtifact,
+  BasketItem,
+  MetadataCategory,
+  EffectivePropertyBinding,
+  CategoryEffectiveProperties,
+  ResolvedPropertyValue,
+  ResolvedMetadata,
+  PropertiesScope,
+  TreeNode,
+  NodeContent,
+  LevelTemplateOption,
+  LevelTemplateAssignment,
+} from "../../lib/scriptureTypes";
+import {
+  WORD_MEANINGS_VERSION,
+  WORD_MEANINGS_REQUIRED_LANGUAGE,
+  WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES,
+  WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES,
+  WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE,
+  WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE,
+  WORD_MEANINGS_MAX_ROWS,
+  WORD_MEANINGS_MAX_SOURCE_CHARS,
+  WORD_MEANINGS_MAX_MEANING_CHARS,
+  WORD_MEANINGS_HTML_TAG_PATTERN,
+  WORD_MEANING_SEPARATOR_PATTERNS,
+  type WordMeaningPayloadRow,
+  type WordMeaningRow,
+  autoFillSanskritTransliterationPair,
+  validateWordMeaningsPlainText,
+  mapWordMeaningRowsForPayload,
+  validateWordMeaningPayloadRows,
+  createWordMeaningRowId,
+  createEmptyWordMeaningRow,
+  splitLegacyWordMeaningEntries,
+  parseWordMeaningEntry,
+  normalizeWordMeaningSourceForms,
+  mapLegacyWordMeaningsRowsFromContent,
+  mapWordMeaningsRowsFromContent,
+} from "../../lib/wordMeanings";
+
+import {
+  formatValue,
+  normalizeErrorValue,
+  getErrorMessageFromPayload,
+  parseSequenceNumber,
+  getSequenceSortValue,
+  formatSequenceDisplay,
+  LOCAL_SCRIPTURES_PREFERENCES_KEY,
+  ACTIVE_IMPORT_JOB_STORAGE_KEY,
+  SCRIPTURES_BOOK_BROWSER_VIEW_KEY,
+  SCRIPTURES_BOOK_BROWSER_DENSITY_KEY,
+  SCRIPTURES_MEDIA_MANAGER_VIEW_KEY,
+  SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY,
+  SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY,
+  SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY,
+  SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY,
+  ANONYMOUS_BOOK_NOT_FOUND_MESSAGE,
+  BOOK_PREVIEW_PAGE_SIZE,
+  BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX,
+  NODE_CONTENT_CACHE_TTL_MS,
+  NODE_CONTENT_CACHE_MAX_ENTRIES,
+  BOOK_PREVIEW_CACHE_TTL_MS,
+  BOOK_PREVIEW_CACHE_MAX_ENTRIES,
+  DEFAULT_CONTENT_FIELD_LABELS,
+} from "../../lib/scriptureUtils";
+import {
+  getLayoutDeviceBucket,
+  getDeviceScopedStorageKey,
+  resolvePreviewQueryScope,
+  readStoredBrowserView,
+  normalizeBookBrowserDensity,
+  readStoredBookBrowserDensity,
+  mediaManagerDensityStorageKey,
+  readStoredMediaManagerDensity,
+  resolveBookBrowserDensity,
+  normalizeBrowserView,
+} from "../../lib/scriptureStorage";
+import {
+  resolveCanonicalLevelName,
+  getWordMeaningsEnabledLevelsFromBook,
+  getWordMeaningsMetadataConfig,
+  getWordMeaningsDefaultSourceLanguageFromBook,
+  getWordMeaningsDefaultMeaningLanguageFromBook,
+  normalizeWordMeaningsEnabledLevels,
+  getBookThumbnailUrl,
+  normalizeBookMediaType,
+  getBookMetadataObject,
+  getBookMediaItems,
+  getBookMediaDisplayOrder,
+  sortBookMediaItems,
+  getNodeThumbnailUrl,
+  getYouTubeEmbedUrl,
+  getYouTubeVideoId,
+  getMediaLookupKey,
+} from "../../lib/bookMediaUtils";
+import type { EditableTranslationLanguage, AuthorVariantKind } from "../../lib/translationUtils";
+import {
+  TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL,
+  TRANSLATION_CANONICAL_TO_CODE,
+  TRANSLATION_LANGUAGE_LABELS,
+  PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY,
+  PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY,
+  PREVIEW_EDIT_MODE_SESSION_STORAGE_KEY,
+  BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY,
+  PREVIEW_FONT_SIZE_PERCENT_MIN,
+  PREVIEW_FONT_SIZE_PERCENT_MAX,
+  PREVIEW_FONT_SIZE_PERCENT_STEP,
+  EDITABLE_TRANSLATION_LANGUAGES,
+  SORTED_EDITABLE_TRANSLATION_LANGUAGES,
+  LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL,
+  sortEditableTranslationLanguages,
+  normalizeTranslationLanguage,
+  translationLanguageToCode,
+  translationLanguageLabel,
+  getWordMeaningLanguageFromNodeTranslation,
+  getVariantKindSuffix,
+  deriveVariantLanguageFromField,
+  buildVariantFieldCode,
+  toTranslationRecord,
+  normalizeAuthorVariantDrafts,
+  buildEmptyAuthorVariantDraft,
+  getVariantAuthorOptions,
+  applyVariantAuthorSelection,
+  applyVariantLanguageSelection,
+  getTranslationLookupKeys,
+  pickPreferredTranslationText,
+  pickTranslationTextForLanguageOnly,
+  applyTranslationDraftValue,
+  buildEditableTranslationDrafts,
+  normalizeSelectedEditableTranslationLanguages,
+  parseStoredPreviewTranslationLanguages,
+  serializePreviewTranslationLanguages,
+} from "../../lib/translationUtils";
+import {
+  parseStoredHiddenPreviewLevels,
+  normalizePreviewFontSizePercent,
+  serializeHiddenPreviewLevels,
+  normalizeTranslationDraftsForCompare,
+  areEditableLanguageSelectionsEqual,
+  areStringSetsEqual,
+  normalizeSourceLanguage,
+  normalizeWordMeaningSourceLanguage,
+  normalizeWordMeaningMeaningLanguage,
+  normalizePreviewWordMeaningsDisplayMode,
+  isBookScopedCategory,
+  metadataObjectToDisplayText,
+  normalizeMetadataValue,
+  valuesEqual,
+  isSingleLineTextMetadataField,
+  isTemplateMetadataField,
+  filterVisibleMetadataFields,
+  getFieldDefaultValue,
+  isEmptyMetadataValue,
+  normalizeMetadataKey,
+  isUsableBindingValueForField,
+  toDatetimeLocalValue,
+} from "../../lib/previewUtils";
+import {
+  usePreferences,
+  normalizePreferences,
+  type StoredScripturesPreferences,
+} from "./hooks/usePreferences";
+import { useNodeCommentary } from "./hooks/useNodeCommentary";
+import { useShareDialog } from "./hooks/useShareDialog";
+import { useBasket } from "./hooks/useBasket";
+import { useNodeMedia, sortNodeMediaItems, isNodeMediaDefault } from "./hooks/useNodeMedia";
+import { useScripturesAuth } from "./hooks/useScripturesAuth";
 
-type ImportJobLifecycleStatus = "queued" | "running" | "succeeded" | "failed";
-
-type PersistedImportJobState = {
-  jobId: string;
-  status?: ImportJobLifecycleStatus | "uploading";
-  progressMessage?: string | null;
-  progressCurrent?: number | null;
-  progressTotal?: number | null;
-  canonicalJsonUrl?: string | null;
-  fromUrlInput?: boolean;
-};
-
-type MediaFile = {
-  id: number;
-  node_id: number;
-  media_type: "image" | "audio" | "video" | string;
-  url: string;
-  metadata?: {
-    content_type?: string;
-    original_filename?: string;
-    display_name?: string;
-    asset_id?: number | string;
-    asset_display_name?: string;
-    size_bytes?: number;
-    display_order?: number;
-    is_default?: boolean;
-    [key: string]: unknown;
-  } | null;
-  metadata_json?: {
-    content_type?: string;
-    original_filename?: string;
-    display_name?: string;
-    asset_id?: number | string;
-    asset_display_name?: string;
-    size_bytes?: number;
-    display_order?: number;
-    is_default?: boolean;
-    [key: string]: unknown;
-  } | null;
-  created_at?: string | null;
-};
-
-type MediaAsset = {
-  id: number;
-  media_type: "image" | "audio" | "video" | string;
-  url: string;
-  metadata?: {
-    content_type?: string;
-    original_filename?: string;
-    display_name?: string;
-    size_bytes?: number;
-    [key: string]: unknown;
-  } | null;
-  created_by?: number | null;
-  created_at?: string | null;
-};
-
-type MediaLinkContext = "bank" | "node" | "book";
-
-type BookMediaItem = {
-  media_type: "image" | "audio" | "video" | "link" | string;
-  url: string;
-  display_name?: string;
-  content_type?: string;
-  asset_id?: number | string;
-  size_bytes?: number | string;
-  replaced_at?: string;
-  is_default?: boolean;
-  display_order?: number | string;
-};
-
-type SharePermission = "viewer" | "contributor" | "editor";
-
-type BookMetadata = Record<string, unknown> & {
-  owner_id?: number | string | null;
-  visibility?: "private" | "public" | string;
-};
-
-type BookSchema = {
-  id: number;
-  name?: string;
-  levels: string[];
-  level_template_defaults?: Record<string, number | string | null>;
-};
-
-type BookOption = {
-  id: number;
-  book_name: string;
-  title_sanskrit?: string | null;
-  title_transliteration?: string | null;
-  title_english?: string | null;
-  has_content?: boolean;
-  content_data?: {
-    basic?: {
-      sanskrit?: string;
-      transliteration?: string;
-      translation?: string;
-    };
-    translations?: Record<string, string>;
-  } | null;
-  status?: string;
-  visibility?: "private" | "public" | string;
-  metadata?: BookMetadata | null;
-  metadata_json?: BookMetadata | null;
-  schema?: BookSchema | null;
-  variant_authors?: Record<string, string>;
-  level_name_overrides?: Record<string, string> | null;
-};
-
-type BookDetails = BookOption & {
-  schema: BookSchema;
-};
-
-type SchemaOption = {
-  id: number;
-  name: string;
-  description?: string | null;
-  levels: string[];
-};
-
-type BookShare = {
-  id: number;
-  shared_with_user_id: number;
-  shared_with_email: string;
-  shared_with_username?: string | null;
-  shared_with_is_active?: boolean;
-  permission: SharePermission;
-};
-
-type OwnedBookSummary = {
-  id: number;
-  book_name: string;
-  book_code?: string | null;
-  visibility: "private" | "public";
-  status: "draft" | "published";
-};
-
-type BookOwnershipTransferResponse = {
-  source_user_id: number;
-  target_user_id: number;
-  target_email: string;
-  transferred_book_ids: number[];
-  transferred_count: number;
-};
-
-type ShareDialogLinkOption = {
-  key: string;
-  label: string;
-  url: string;
-  emailSubject: string;
-  emailBody: string;
-  target: "book" | "node" | "leaf";
-};
-
-type ShareDialogState = {
-  bookId: string;
-  bookName: string;
-  visibility: "private" | "public";
-  canManageShares: boolean;
-  description: string;
-  linkOptions: ShareDialogLinkOption[];
-  privateAccessPath: string;
-  privateCopyTarget: "book" | "node" | "leaf";
-};
-
-type ImportResult = {
-  success?: boolean;
-  book_id?: number;
-  nodes_created?: number;
-  warnings?: string[];
-  detail?: string;
-  error?: string;
-};
-type ImportJobStatus = {
-  job_id?: string;
-  status?: ImportJobLifecycleStatus;
-  progress_message?: string | null;
-  progress_current?: number | null;
-  progress_total?: number | null;
-  detail?: string;
-  error?: string;
-  result?: ImportResult | null;
-};
-
-type CanonicalUploadInit = {
-  upload_id?: string;
-  chunk_size_bytes?: number;
-  max_size_bytes?: number;
-  detail?: string;
-  error?: string;
-};
-
-type CanonicalUploadChunk = {
-  upload_id?: string;
-  received_bytes?: number;
-  next_index?: number;
-  detail?: string;
-  error?: string;
-};
-
-type ImportJobStart = {
-  job_id?: string;
-  status?: ImportJobLifecycleStatus;
-  detail?: string;
-  error?: string;
-};
-
-type ImportResultDialogState = {
-  bookName: string;
-  status: "completed" | "error";
-  nodesCreated: number | null;
-  reason: string;
-};
-
-type CommentaryEntry = {
-  id: number;
-  node_id: number;
-  author_id?: number | null;
-  work_id?: number | null;
-  content_text: string;
-  language_code: string;
-  display_order: number;
-  metadata?: {
-    [key: string]: unknown;
-  } | null;
-  created_at?: string | null;
-};
-
-type CommentaryDisplayItem = {
-  id: number | string;
-  author: string;
-  text: string;
-};
-
-type AuthorVariantDraft = {
-  author_slug: string;
-  author: string;
-  language: string;
-  field: string;
-  text: string;
-};
-
-type NodeComment = {
-  id: number;
-  node_id: number;
-  parent_comment_id?: number | null;
-  content_text: string;
-  language_code: string;
-  metadata?: {
-    [key: string]: unknown;
-  } | null;
-  created_by?: number | null;
-  created_at?: string | null;
-};
-
-type BookPreviewBlock = {
-  section: "body";
-  order: number;
-  block_type: string;
-  template_key: string;
-  source_node_id: number | null;
-  source_book_id: number | null;
-  title: string;
-  content: {
-    level_name?: string;
-    sequence_number?: string | number | null;
-    sanskrit?: string;
-    transliteration?: string;
-    english?: string;
-    translations?: Record<string, string>;
-    translation_variants?: Array<{
-      author_slug?: string;
-      author?: string;
-      language?: string;
-      field?: string;
-      text?: string;
-    }>;
-    commentary_variants?: Array<{
-      author_slug?: string;
-      author?: string;
-      language?: string;
-      field?: string;
-      text?: string;
-    }>;
-    text?: string;
-    rendered_lines?: Array<{
-      field?: string;
-      label?: string;
-      value?: string;
-    }>;
-    word_meanings_rows?: Array<{
-      id?: string;
-      order?: number;
-      source?: {
-        language?: string | null;
-        script_text?: string | null;
-        transliteration?: Record<string, string | null | undefined> | null;
-      };
-      resolved_source?: {
-        text?: string;
-        mode?: string | null;
-        scheme?: string | null;
-        generated?: boolean;
-      };
-      resolved_meaning?: {
-        language?: string | null;
-        text?: string;
-        fallback_used?: boolean;
-        fallback_badge_visible?: boolean;
-      };
-    }>;
-    word_meanings?: {
-      rows?: Array<{
-        id?: string;
-        order?: number;
-        source?: {
-          language?: string | null;
-          script_text?: string | null;
-          transliteration?: Record<string, string | null | undefined> | null;
-        };
-        meanings?: Record<string, { text?: string } | null>;
-      }>;
-    };
-    media_items?: Array<{
-      id?: number | null;
-      media_type?: string;
-      url?: string;
-      metadata?: Record<string, unknown>;
-    }>;
-  };
-};
-
-type BookPreviewRenderSettings = {
-  show_sanskrit: boolean;
-  show_transliteration: boolean;
-  show_english: boolean;
-  show_metadata: boolean;
-  show_media: boolean;
-  text_order: Array<"sanskrit" | "transliteration" | "english" | "text">;
-};
-
-type BookPreviewLanguageSettings = {
-  show_sanskrit: boolean;
-  show_transliteration: boolean;
-  show_english: boolean;
-  show_commentary: boolean;
-};
-
-type BookPreviewArtifact = {
-  book_id: number;
-  book_name: string;
-  preview_scope?: "book" | "node";
-  root_node_id?: number | null;
-  root_title?: string | null;
-  reader_hierarchy_path?: string | null;
-  section_order: Array<"body">;
-  sections: {
-    body: BookPreviewBlock[];
-  };
-  book_media_items?: BookMediaItem[];
-  book_template?: {
-    template_key: string;
-    resolved_template_source: string;
-    rendered_text: string;
-    child_count: number;
-  };
-  render_settings: BookPreviewRenderSettings;
-  warnings?: string[];
-  offset?: number;
-  limit?: number;
-  total_blocks?: number;
-  has_more?: boolean;
-};
-
-type BasketItem = {
-  cart_item_id?: number;
-  node_id: number;
-  title?: string;
-  content?: string;
-  breadcrumb?: string;
-  order: number;
-  book_name?: string;
-  level_name?: string;
-};
-
-type MetadataCategory = {
-  id: number;
-  name: string;
-  description?: string | null;
-  applicable_scopes: string[];
-  is_deprecated: boolean;
-};
-
-type EffectivePropertyBinding = {
-  property_internal_name: string;
-  property_display_name: string;
-  property_data_type: "text" | "boolean" | "number" | "dropdown" | "date" | "datetime";
-  description?: string | null;
-  default_value?: unknown;
-  is_required?: boolean;
-  dropdown_options?: string[] | null;
-};
-
-
-type CategoryEffectiveProperties = {
-  category_id: number;
-  category_name: string;
-  properties: EffectivePropertyBinding[];
-};
-
-type ResolvedPropertyValue = {
-  property_internal_name: string;
-  property_data_type: string;
-  value: unknown;
-};
-
-type ResolvedMetadata = {
-  category_id: number | null;
-  property_overrides: Record<string, unknown>;
-  properties: ResolvedPropertyValue[];
-};
-
-type PropertiesScope = "book" | "node";
-
-type TreeNode = {
-  id: number;
-  parent_node_id?: number | null;
-  level_name: string;
-  level_order?: number | null;
-  sequence_number?: number | string | null;
-  title_english?: string | null;
-  title_hindi?: string | null;
-  title_sanskrit?: string | null;
-  title_transliteration?: string | null;
-  has_content?: boolean | null;
-  children?: TreeNode[];
-};
-
-type NodeContent = {
-  id: number;
-  parent_node_id?: number | null;
-  level_name: string;
-  level_order?: number | null;
-  sequence_number?: number | string | null;
-  title_english?: string | null;
-  title_hindi?: string | null;
-  title_sanskrit?: string | null;
-  title_transliteration?: string | null;
-  has_content?: boolean | null;
-  tags?: string[] | null;
-  metadata?: Record<string, unknown> | null;
-  metadata_json?: Record<string, unknown> | null;
-  content_data?: {
-    basic?: {
-      sanskrit?: string | null;
-      transliteration?: string | null;
-      translation?: string | null;
-      [key: string]: unknown;
-    } | null;
-    translations?: Record<string, string> | null;
-    word_meanings?: {
-      version?: string;
-      rows?: Array<{
-        id?: string;
-        order?: number;
-        source?: {
-          language?: string;
-          script_text?: string;
-          transliteration?: {
-            iast?: string;
-            [key: string]: string | undefined;
-          };
-        };
-        meanings?: Record<string, { text?: string }>;
-      }>;
-      [key: string]: unknown;
-    } | null;
-    [key: string]: unknown;
-  } | null;
-  [key: string]: unknown;
-};
-
-type LevelTemplateOption = {
-  id: number;
-  name: string;
-  target_schema_id?: number | null;
-  target_level?: string | null;
-  visibility: "private" | "published";
-  is_system?: boolean;
-  system_key?: string | null;
-  current_version: number;
-  is_active: boolean;
-};
-
-type LevelTemplateAssignment = {
-  id: number;
-  entity_type: string;
-  entity_id: number;
-  level_key: string;
-  template_id: number;
-  is_active: boolean;
-};
-
-const formatValue = (value: unknown) => {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number") {
-    return value.toString();
-  }
-  if (value && typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return "[object]";
-    }
-  }
-  return "";
-};
-
-const normalizeErrorValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    const parts = value.map((entry) => normalizeErrorValue(entry)).filter(Boolean);
-    return parts.join("; ");
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if (typeof record.msg === "string" && record.msg.trim()) {
-      return record.msg.trim();
-    }
-    if (typeof record.message === "string" && record.message.trim()) {
-      return record.message.trim();
-    }
-    if ("detail" in record) {
-      const nested = normalizeErrorValue(record.detail);
-      if (nested) return nested;
-    }
-    return formatValue(value);
-  }
-  return "";
-};
-
-const getErrorMessageFromPayload = (payload: unknown, fallback: string): string => {
-  if (payload && typeof payload === "object" && "detail" in payload) {
-    const detail = normalizeErrorValue((payload as { detail?: unknown }).detail);
-    if (detail) return detail;
-  }
-  const generic = normalizeErrorValue(payload);
-  return generic || fallback;
-};
-
-const parseSequenceNumber = (value: unknown) => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const match = value.toString().match(/(\d+)(?!.*\d)/);
-  return match ? parseInt(match[1], 10) : null;
-};
-
-const getSequenceSortValue = (node: TreeNode) => {
-  const direct = parseSequenceNumber(node.sequence_number);
-  if (direct !== null) return direct;
-  const titleCandidate =
-    node.title_english || node.title_sanskrit || node.title_transliteration;
-  const titleSeq = titleCandidate ? parseSequenceNumber(titleCandidate) : null;
-  if (titleSeq !== null) return titleSeq;
-  return node.id;
-};
-
-const formatSequenceDisplay = (value: unknown, isLeaf: boolean) => {
-  if (value === null || value === undefined) return "";
-  const raw = String(value).trim();
-  if (!raw) return "";
-  const dottedMatch = raw.match(/\d+(?:\.\d+)*/);
-  if (dottedMatch) return dottedMatch[0];
-  const parsed = parseSequenceNumber(raw);
-  if (parsed === null) return "";
-  if (!isLeaf) return parsed.toString();
-  return parsed.toString();
-};
-
-const LOCAL_SCRIPTURES_PREFERENCES_KEY = "scriptures_preferences";
-const ACTIVE_IMPORT_JOB_STORAGE_KEY = "scriptures_active_import_job";
-const SCRIPTURES_BOOK_BROWSER_VIEW_KEY = "scriptures_book_browser_view";
-const SCRIPTURES_BOOK_BROWSER_DENSITY_KEY = "scriptures_book_browser_density";
-const SCRIPTURES_MEDIA_MANAGER_VIEW_KEY = "scriptures_media_manager_view";
-const SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY = "scriptures_media_manager_density";
-const SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY = "scriptures_media_manager_density_node";
-const SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY = "scriptures_media_manager_density_book";
-const SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY = "scriptures_media_manager_density_bank";
-const ANONYMOUS_BOOK_NOT_FOUND_MESSAGE = "Book not found. Sign in and try again.";
-const BOOK_PREVIEW_PAGE_SIZE = 500;
-const BOOK_PREVIEW_LOAD_MORE_THRESHOLD_PX = 240;
-const NODE_CONTENT_CACHE_TTL_MS = 60_000;
-const NODE_CONTENT_CACHE_MAX_ENTRIES = 250;
-const BOOK_PREVIEW_CACHE_TTL_MS = 120_000;
-const BOOK_PREVIEW_CACHE_MAX_ENTRIES = 120;
-const DEFAULT_CONTENT_FIELD_LABELS = {
-  sanskrit: "Sanskrit",
-  transliteration: "Transliteration",
-  english: "English",
-} as const;
-
-const readPersistedImportJobState = (): PersistedImportJobState | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(ACTIVE_IMPORT_JOB_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as PersistedImportJobState | null;
-    if (!parsed || typeof parsed !== "object" || typeof parsed.jobId !== "string") {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const writePersistedImportJobState = (state: PersistedImportJobState) => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(ACTIVE_IMPORT_JOB_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage failures
-  }
-};
-
-const clearPersistedImportJobState = () => {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(ACTIVE_IMPORT_JOB_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures
-  }
-};
-
-type LayoutDeviceBucket = "phone" | "tablet" | "desktop";
-
-const getLayoutDeviceBucket = (): LayoutDeviceBucket => {
-  if (typeof window === "undefined") {
-    return "desktop";
-  }
-  const width = window.innerWidth;
-  if (width < 768) {
-    return "phone";
-  }
-  if (width < 1024) {
-    return "tablet";
-  }
-  return "desktop";
-};
-
-const getDeviceScopedStorageKey = (baseKey: string): string =>
-  `${baseKey}_${getLayoutDeviceBucket()}`;
-
-const resolvePreviewQueryScope = (
-  params: URLSearchParams | ReadonlyURLSearchParams
-): "book" | "node" | null => {
-  const previewParam = params.get("preview");
-  if (previewParam === "book" || previewParam === "node") {
-    return previewParam;
-  }
-  if (params.get("browse") === "1") {
-    return null;
-  }
-  return params.get("book") ? "book" : null;
-};
-
-const readStoredBrowserView = (storageKey: string): "list" | "icon" => {
-  if (typeof window === "undefined") {
-    return "list";
-  }
-  const scopedValue = window.localStorage.getItem(getDeviceScopedStorageKey(storageKey));
-  if (scopedValue !== null) {
-    return scopedValue === "icon" ? "icon" : "list";
-  }
-  return window.localStorage.getItem(storageKey) === "icon" ? "icon" : "list";
-};
-
-const normalizeBookBrowserDensity = (value: unknown): 0 | 1 | 2 | 3 | 4 | 5 => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const normalized = Math.min(5, Math.max(0, Math.round(value)));
-    return normalized as 0 | 1 | 2 | 3 | 4 | 5;
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10);
-    if (Number.isFinite(parsed)) {
-      const normalized = Math.min(5, Math.max(0, Math.round(parsed)));
-      return normalized as 0 | 1 | 2 | 3 | 4 | 5;
-    }
-  }
-  return 0;
-};
-
-const readStoredBookBrowserDensity = (): 0 | 1 | 2 | 3 | 4 | 5 => {
-  if (typeof window === "undefined") {
-    return 0;
-  }
-  const scopedValue = window.localStorage.getItem(
-    getDeviceScopedStorageKey(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY)
-  );
-  if (scopedValue !== null) {
-    return normalizeBookBrowserDensity(scopedValue);
-  }
-  return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_BOOK_BROWSER_DENSITY_KEY));
-};
-
-const mediaManagerDensityStorageKey = (scope: "node" | "book" | "bank"): string => {
-  if (scope === "book") return SCRIPTURES_MEDIA_MANAGER_DENSITY_BOOK_KEY;
-  if (scope === "bank") return SCRIPTURES_MEDIA_MANAGER_DENSITY_BANK_KEY;
-  return SCRIPTURES_MEDIA_MANAGER_DENSITY_NODE_KEY;
-};
-
-const readStoredMediaManagerDensity = (scope: "node" | "book" | "bank"): 0 | 1 | 2 | 3 | 4 | 5 => {
-  if (typeof window === "undefined") {
-    return 0;
-  }
-  const scopedValue = window.localStorage.getItem(
-    getDeviceScopedStorageKey(mediaManagerDensityStorageKey(scope))
-  );
-  if (scopedValue !== null) {
-    return normalizeBookBrowserDensity(scopedValue);
-  }
-  const legacyScopedValue = window.localStorage.getItem(mediaManagerDensityStorageKey(scope));
-  if (legacyScopedValue !== null) {
-    return normalizeBookBrowserDensity(legacyScopedValue);
-  }
-  return normalizeBookBrowserDensity(window.localStorage.getItem(SCRIPTURES_MEDIA_MANAGER_DENSITY_KEY));
-};
-
-const resolveBookBrowserDensity = (
-  storedDensity: unknown,
-  preferenceDensity: unknown,
-  preferenceView: "list" | "icon"
-): 0 | 1 | 2 | 3 | 4 | 5 => {
-  const normalizedStoredDensity = normalizeBookBrowserDensity(storedDensity);
-  if (normalizedStoredDensity !== 0) {
-    return normalizedStoredDensity;
-  }
-  const normalizedPreferenceDensity = normalizeBookBrowserDensity(preferenceDensity);
-  if (preferenceView === "icon" && normalizedPreferenceDensity === 0) {
-    return 3;
-  }
-  return normalizedPreferenceDensity;
-};
-
-const normalizeBrowserView = (value: unknown): "list" | "icon" =>
-  value === "icon" ? "icon" : "list";
-
-const WORD_MEANINGS_VERSION = "1.0";
 const BOOK_ROOT_NODE_ID = 0;
-const WORD_MEANINGS_REQUIRED_LANGUAGE = "en";
-const WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES = ["sa", "pi", "hi", "ta"] as const;
-const WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES = ["en", "hi", "ta", "te", "kn", "ml"] as const;
-const WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE = "sa";
-const WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE = "en";
-const WORD_MEANINGS_MAX_ROWS = 400;
-const WORD_MEANINGS_MAX_SOURCE_CHARS = 120;
-const WORD_MEANINGS_MAX_MEANING_CHARS = 400;
-const WORD_MEANINGS_HTML_TAG_PATTERN = /<[^>]+>/;
-
-type WordMeaningPayloadRow = {
-  id: string;
-  order: number;
-  source: {
-    language: string;
-    script_text?: string;
-    transliteration?: Record<string, string>;
-  };
-  meanings: Record<string, { text: string }>;
-};
-
-type WordMeaningRow = {
-  id: string;
-  order: number;
-  sourceLanguage: string;
-  sourceScriptText: string;
-  sourceTransliterationIast: string;
-  meanings: Record<string, string>;
-  activeMeaningLanguage: string;
-};
-
-const validateWordMeaningsPlainText = (value: unknown, path: string, maxChars: number): string[] => {
-  if (typeof value !== "string") {
-    return [`${path} must be a string`];
-  }
-  const trimmed = value.trim();
-  if (trimmed.length > maxChars) {
-    return [`${path} exceeds max length of ${maxChars}`];
-  }
-  if (WORD_MEANINGS_HTML_TAG_PATTERN.test(trimmed)) {
-    return [`${path} must not contain HTML`];
-  }
-  return [];
-};
-
-const mapWordMeaningRowsForPayload = (rows: WordMeaningRow[]): WordMeaningPayloadRow[] =>
-  rows
-    .map((row, index) => {
-      const sourcePair = autoFillSanskritTransliterationPair(
-        row.sourceScriptText,
-        row.sourceTransliterationIast
-      );
-
-      return {
-        id: row.id.trim() || `wm_row_${index + 1}`,
-        order: Number.isFinite(row.order) && row.order >= 1 ? row.order : index + 1,
-        sourceLanguage: row.sourceLanguage.trim() || "sa",
-        sourceScriptText: sourcePair.sanskrit,
-        sourceTransliterationIast: sourcePair.transliteration,
-        meanings: Object.entries(row.meanings)
-          .map(([language, text]) => [language.trim(), text.trim()] as const)
-          .filter(([language, text]) => language && text)
-          .reduce<Record<string, string>>((acc, [language, text]) => {
-            acc[language] = text;
-            return acc;
-          }, {}),
-      };
-    })
-    .filter(
-      (row) =>
-        row.sourceScriptText ||
-        row.sourceTransliterationIast ||
-        Object.values(row.meanings).some((text) => Boolean(text))
-    )
-    .map((row) => ({
-      id: row.id,
-      order: row.order,
-      source: {
-        language: row.sourceLanguage,
-        script_text: row.sourceScriptText || undefined,
-        transliteration: row.sourceTransliterationIast
-          ? { iast: row.sourceTransliterationIast }
-          : undefined,
-      },
-      meanings: Object.entries(row.meanings).reduce<Record<string, { text: string }>>(
-        (acc, [language, text]) => {
-          acc[language] = { text };
-          return acc;
-        },
-        {}
-      ),
-    }));
-
-const validateWordMeaningPayloadRows = (rows: WordMeaningPayloadRow[]): string[] => {
-  const errors: string[] = [];
-
-  if (rows.length > WORD_MEANINGS_MAX_ROWS) {
-    errors.push(`content_data.word_meanings.rows exceeds max size of ${WORD_MEANINGS_MAX_ROWS}`);
-  }
-
-  const seenIds = new Set<string>();
-  rows.forEach((row, index) => {
-    const rowPath = `content_data.word_meanings.rows[${index}]`;
-
-    if (!row.id.trim()) {
-      errors.push(`${rowPath}.id is required`);
-    }
-
-    const normalizedRowId = row.id.trim();
-    if (normalizedRowId) {
-      if (seenIds.has(normalizedRowId)) {
-        errors.push(`${rowPath}.id must be unique`);
-      }
-      seenIds.add(normalizedRowId);
-    }
-
-    if (!Number.isInteger(row.order) || row.order < 1) {
-      errors.push(`${rowPath}.order must be an integer >= 1`);
-    }
-
-    if (!WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES.includes(row.source.language as (typeof WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES)[number])) {
-      errors.push(
-        `${rowPath}.source.language must be one of ${JSON.stringify([...WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES].sort())}`
-      );
-    }
-
-    let hasSourceForm = false;
-
-    if (row.source.script_text !== undefined) {
-      const sourceTextErrors = validateWordMeaningsPlainText(
-        row.source.script_text,
-        `${rowPath}.source.script_text`,
-        WORD_MEANINGS_MAX_SOURCE_CHARS
-      );
-      errors.push(...sourceTextErrors);
-      if (typeof row.source.script_text === "string" && row.source.script_text.trim()) {
-        hasSourceForm = true;
-      }
-    }
-
-    if (row.source.transliteration !== undefined) {
-      Object.entries(row.source.transliteration).forEach(([scheme, value]) => {
-        if (!scheme.trim()) {
-          errors.push(`${rowPath}.source.transliteration keys must be non-empty strings`);
-          return;
-        }
-        const transliterationErrors = validateWordMeaningsPlainText(
-          value,
-          `${rowPath}.source.transliteration.${scheme}`,
-          WORD_MEANINGS_MAX_SOURCE_CHARS
-        );
-        errors.push(...transliterationErrors);
-        if (typeof value === "string" && value.trim()) {
-          hasSourceForm = true;
-        }
-      });
-    }
-
-    if (!hasSourceForm) {
-      errors.push(
-        `${rowPath}.source requires at least one non-empty form in script_text or transliteration`
-      );
-    }
-
-    const meaningEntries = Object.entries(row.meanings);
-    if (meaningEntries.length === 0) {
-      errors.push(`${rowPath}.meanings must be a non-empty object`);
-    }
-
-    let nonEmptyMeanings = 0;
-    meaningEntries.forEach(([languageCode, payload]) => {
-      if (!languageCode.trim()) {
-        errors.push(`${rowPath}.meanings contains an invalid language key`);
-        return;
-      }
-
-      const meaningTextErrors = validateWordMeaningsPlainText(
-        payload?.text,
-        `${rowPath}.meanings.${languageCode}.text`,
-        WORD_MEANINGS_MAX_MEANING_CHARS
-      );
-      errors.push(...meaningTextErrors);
-      if (typeof payload?.text === "string" && payload.text.trim()) {
-        nonEmptyMeanings += 1;
-      }
-    });
-
-    if (nonEmptyMeanings === 0) {
-      errors.push(`${rowPath}.meanings requires at least one non-empty text value`);
-    }
-
-    const requiredPayload = row.meanings[WORD_MEANINGS_REQUIRED_LANGUAGE];
-    if (!requiredPayload) {
-      errors.push(`${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`);
-    } else {
-      const requiredTextErrors = validateWordMeaningsPlainText(
-        requiredPayload.text,
-        `${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text`,
-        WORD_MEANINGS_MAX_MEANING_CHARS
-      );
-      errors.push(...requiredTextErrors);
-      if (!requiredPayload.text.trim()) {
-        errors.push(`${rowPath}.meanings.${WORD_MEANINGS_REQUIRED_LANGUAGE}.text is required`);
-      }
-    }
-  });
-
-  return [...new Set(errors)];
-};
-
-const createWordMeaningRowId = () => `wm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-const createEmptyWordMeaningRow = (
-  order: number,
-  sourceLanguage: string = WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE,
-  meaningLanguage: string = WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE
-): WordMeaningRow => ({
-  id: createWordMeaningRowId(),
-  order,
-  sourceLanguage,
-  sourceScriptText: "",
-  sourceTransliterationIast: "",
-  meanings: {
-    [WORD_MEANINGS_REQUIRED_LANGUAGE]: "",
-    ...(meaningLanguage === WORD_MEANINGS_REQUIRED_LANGUAGE ? {} : { [meaningLanguage]: "" }),
-  },
-  activeMeaningLanguage: meaningLanguage,
-});
-
-const splitLegacyWordMeaningEntries = (value: unknown): string[] => {
-  if (typeof value !== "string") {
-    return [];
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return [];
-  }
-
-  if (trimmed.includes(";")) {
-    return trimmed
-      .split(";")
-      .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
-      .filter(Boolean);
-  }
-
-  const questionMarkCount = (trimmed.match(/\?/g) || []).length;
-  if (questionMarkCount > 1) {
-    return trimmed
-      .split("?")
-      .map((entry) => entry.trim().replace(/^\d+\.\s*/, ""))
-      .filter(Boolean);
-  }
-
-  return [trimmed.replace(/^\d+\.\s*/, "")].filter(Boolean);
-};
-
-// Separators tried in precedence order. Only the first match wins; combinations are not allowed.
-// `:` and `-` are treated as delimiters only when separated from the key by whitespace,
-// so embedded forms like `nama:` or `dharma-kshetre` do not split accidentally.
-const WORD_MEANING_SEPARATOR_PATTERNS: RegExp[] = [
-  /^(.*?)\s+:\s*(.+)$/,
-  /^(.*?)\s*=\s*(.+)$/,
-  /^(.*?)\s*\?\s*(.+)$/,
-  /^(.*?)\s+-\s*(.+)$/,
-];
-
-const parseWordMeaningEntry = (entry: string): { sourceText: string; meaningText: string } | null => {
-  const trimmed = entry.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  for (const pattern of WORD_MEANING_SEPARATOR_PATTERNS) {
-    const match = trimmed.match(pattern);
-    if (match) {
-      const sourceText = match[1].trim();
-      const meaningText = match[2].trim();
-      if (!sourceText) {
-        return null;
-      }
-      return { sourceText, meaningText };
-    }
-  }
-
-  return {
-    sourceText: trimmed,
-    meaningText: "",
-  };
-};
-
-const normalizeWordMeaningSourceForms = (
-  source:
-    | { script_text?: string; transliteration?: Record<string, string | undefined> }
-    | undefined
-): { sourceScriptText: string; sourceTransliterationIast: string } => {
-  const rawScriptText =
-    typeof source?.script_text === "string" ? source.script_text.trim() : "";
-  const rawTransliteration =
-    source?.transliteration && typeof source.transliteration === "object"
-      ? source.transliteration
-      : undefined;
-
-  let sourceTransliterationIast = "";
-
-  if (rawTransliteration) {
-    const directIast = rawTransliteration.iast;
-    if (typeof directIast === "string" && directIast.trim()) {
-      // IAST is a Latin-based scheme. If the stored value contains Indic script characters
-      // it is corrupt data (e.g. Telugu stored verbatim in the iast field). Discard it and
-      // fall through to re-derive from script_text below.
-      if (!inferIndicScriptFromText(directIast.trim())) {
-        sourceTransliterationIast = directIast.trim();
-      }
-    } else {
-      for (const [scheme, value] of Object.entries(rawTransliteration)) {
-        if (typeof value !== "string" || !value.trim()) {
-          continue;
-        }
-        const sourceScheme = normalizeTransliterationScript(scheme);
-        const converted = transliterateBetweenScripts(value, sourceScheme, "iast").trim();
-        if (converted) {
-          sourceTransliterationIast = converted;
-          break;
-        }
-      }
-    }
-  }
-
-  if (!sourceTransliterationIast && rawScriptText) {
-    if (hasDevanagariLetters(rawScriptText)) {
-      sourceTransliterationIast = transliterateFromDevanagari(rawScriptText, "iast").trim();
-    } else {
-      const inferredScript = inferIndicScriptFromText(rawScriptText);
-      if (inferredScript && inferredScript !== "devanagari") {
-        const devanagariCandidate = transliterateBetweenScripts(
-          rawScriptText,
-          inferredScript,
-          "devanagari"
-        ).trim();
-        if (hasDevanagariLetters(devanagariCandidate)) {
-          sourceTransliterationIast = transliterateFromDevanagari(
-            devanagariCandidate,
-            "iast"
-          ).trim();
-        }
-      }
-      if (!sourceTransliterationIast) {
-        for (const scriptOption of INDIC_SCRIPT_OPTIONS) {
-          if (scriptOption === "devanagari") continue;
-          const devanagariCandidate = transliterateBetweenScripts(
-            rawScriptText,
-            scriptOption,
-            "devanagari"
-          ).trim();
-          if (!hasDevanagariLetters(devanagariCandidate)) {
-            continue;
-          }
-          sourceTransliterationIast = transliterateFromDevanagari(
-            devanagariCandidate,
-            "iast"
-          ).trim();
-          break;
-        }
-      }
-      if (!sourceTransliterationIast) {
-        sourceTransliterationIast = transliterateLatinToIast(rawScriptText).trim();
-      }
-    }
-  }
-
-  const sourceScriptText = rawScriptText
-    ? hasDevanagariLetters(rawScriptText)
-      ? rawScriptText
-      : sourceTransliterationIast
-        ? transliterateFromIast(sourceTransliterationIast, "devanagari").trim()
-        : rawScriptText
-    : sourceTransliterationIast
-      ? transliterateFromIast(sourceTransliterationIast, "devanagari").trim()
-      : "";
-
-  return {
-    sourceScriptText,
-    sourceTransliterationIast,
-  };
-};
-
-const mapLegacyWordMeaningsRowsFromContent = (wordMeanings: Record<string, unknown>): WordMeaningRow[] => {
-  const entriesByLanguage = Object.entries(wordMeanings).reduce<Record<string, string[]>>((acc, [rawLanguage, rawValue]) => {
-    const normalizedLanguage = rawLanguage.trim().toLowerCase() === "english" ? "en" : rawLanguage.trim().toLowerCase();
-    if (!normalizedLanguage || normalizedLanguage === "version" || normalizedLanguage === "rows") {
-      return acc;
-    }
-    const entries = splitLegacyWordMeaningEntries(rawValue);
-    if (entries.length > 0) {
-      acc[normalizedLanguage] = entries;
-    }
-    return acc;
-  }, {});
-
-  const primaryEntries = entriesByLanguage.en || Object.values(entriesByLanguage)[0] || [];
-  return primaryEntries.map((entry, index) => {
-    const parsedEntry = parseWordMeaningEntry(entry);
-    const sourceText = parsedEntry?.sourceText || "";
-    const fallbackMeaningText = parsedEntry?.meaningText || entry.trim();
-    const meanings = Object.entries(entriesByLanguage).reduce<Record<string, string>>((acc, [language, entries]) => {
-      const candidate = entries[index];
-      if (!candidate) {
-        return acc;
-      }
-      const parsedCandidate = parseWordMeaningEntry(candidate);
-      acc[language] = (parsedCandidate?.meaningText || candidate).trim();
-      return acc;
-    }, {});
-
-    if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in meanings)) {
-      meanings[WORD_MEANINGS_REQUIRED_LANGUAGE] = fallbackMeaningText;
-    }
-
-    const activeMeaningLanguage =
-      Object.entries(meanings).find(([, text]) => text.trim())?.[0] || WORD_MEANINGS_REQUIRED_LANGUAGE;
-
-    return {
-      id: createWordMeaningRowId(),
-      order: index + 1,
-      sourceLanguage: "sa",
-      sourceScriptText: /[\u0900-\u097F]/.test(sourceText)
-        ? sourceText
-        : transliterateLatinToDevanagari(sourceText),
-      sourceTransliterationIast: /[\u0900-\u097F]/.test(sourceText)
-        ? ""
-        : transliterateLatinToIast(sourceText),
-      meanings,
-      activeMeaningLanguage,
-    };
-  });
-};
-
-const mapWordMeaningsRowsFromContent = (node: NodeContent): WordMeaningRow[] => {
-  const wordMeanings = node.content_data?.word_meanings;
-  const rows = wordMeanings?.rows;
-  if (!Array.isArray(rows)) {
-    if (wordMeanings && typeof wordMeanings === "object") {
-      return mapLegacyWordMeaningsRowsFromContent(wordMeanings as Record<string, unknown>);
-    }
-    return [];
-  }
-
-  return rows.map((row, index) => ({
-    ...(function () {
-      const normalizedSource = normalizeWordMeaningSourceForms(row?.source);
-      const rawMeanings = row?.meanings;
-      const mapped: Record<string, string> = {};
-      if (rawMeanings && typeof rawMeanings === "object") {
-        Object.entries(rawMeanings).forEach(([language, payload]) => {
-          const text = payload?.text || "";
-          if (typeof language === "string") {
-            mapped[language] = text;
-          }
-        });
-      }
-      if (!(WORD_MEANINGS_REQUIRED_LANGUAGE in mapped)) {
-        mapped[WORD_MEANINGS_REQUIRED_LANGUAGE] = "";
-      }
-      const firstNonEmptyLanguage =
-        Object.entries(mapped).find(([, text]) => text.trim())?.[0] ||
-        WORD_MEANINGS_REQUIRED_LANGUAGE;
-      return {
-        id: typeof row?.id === "string" && row.id.trim() ? row.id.trim() : createWordMeaningRowId(),
-        order:
-          typeof row?.order === "number" && Number.isFinite(row.order) && row.order >= 1
-            ? row.order
-            : index + 1,
-        sourceLanguage:
-          typeof row?.source?.language === "string" && row.source.language.trim()
-            ? row.source.language.trim()
-            : "sa",
-        sourceScriptText: normalizedSource.sourceScriptText,
-        sourceTransliterationIast: normalizedSource.sourceTransliterationIast,
-        meanings: mapped,
-        activeMeaningLanguage: firstNonEmptyLanguage,
-      };
-    })(),
-  }));
-};
-
-const resolveCanonicalLevelName = (
-  levelName: string,
-  levelNameOverrides: Record<string, unknown> | null | undefined,
-): string => {
-  const trimmed = levelName.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  if (!levelNameOverrides || typeof levelNameOverrides !== "object") {
-    return trimmed;
-  }
-
-  const normalizedInput = trimmed.toLowerCase();
-  for (const [canonicalRaw, displayRaw] of Object.entries(levelNameOverrides)) {
-    if (typeof canonicalRaw !== "string") {
-      continue;
-    }
-
-    const canonical = canonicalRaw.trim();
-    if (!canonical) {
-      continue;
-    }
-    if (canonical.toLowerCase() === normalizedInput) {
-      return canonical;
-    }
-
-    if (typeof displayRaw !== "string") {
-      continue;
-    }
-    const display = displayRaw.trim();
-    if (!display) {
-      continue;
-    }
-    if (display.toLowerCase() === normalizedInput) {
-      return canonical;
-    }
-  }
-
-  return trimmed;
-};
-
-const getWordMeaningsEnabledLevelsFromBook = (book: BookDetails | null): Set<string> => {
-  if (!book) {
-    return new Set();
-  }
-
-  const metadata =
-    book.metadata_json && typeof book.metadata_json === "object"
-      ? book.metadata_json
-      : book.metadata && typeof book.metadata === "object"
-        ? book.metadata
-        : null;
-
-  const wordMeaningsConfig =
-    metadata &&
-    typeof metadata.word_meanings === "object" &&
-    metadata.word_meanings !== null
-      ? (metadata.word_meanings as Record<string, unknown>)
-      : null;
-
-  const enabledLevels = wordMeaningsConfig?.enabled_levels;
-  if (!Array.isArray(enabledLevels)) {
-    return new Set();
-  }
-
-  const levelNameOverrides =
-    book.level_name_overrides && typeof book.level_name_overrides === "object"
-      ? (book.level_name_overrides as Record<string, unknown>)
-      : null;
-
-  return new Set(
-    enabledLevels
-      .filter((level): level is string => typeof level === "string" && level.trim().length > 0)
-      .map((level) => resolveCanonicalLevelName(level, levelNameOverrides).toLowerCase())
-      .filter(Boolean)
-  );
-};
-
-const getWordMeaningsMetadataConfig = (
-  metadata: Record<string, unknown> | null | undefined,
-): Record<string, unknown> | null => {
-  if (!metadata || typeof metadata !== "object") {
-    return null;
-  }
-
-  const candidate = metadata.word_meanings;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return null;
-  }
-
-  return candidate as Record<string, unknown>;
-};
-
-const getWordMeaningsDefaultSourceLanguageFromBook = (book: BookDetails | null): string | null => {
-  const metadata = getBookMetadataObject(book);
-  const config = getWordMeaningsMetadataConfig(metadata);
-  const rawValue = typeof config?.default_source_language === "string"
-    ? config.default_source_language.trim().toLowerCase()
-    : "";
-  if (
-    WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES.includes(
-      rawValue as (typeof WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES)[number]
-    )
-  ) {
-    return rawValue;
-  }
-  return null;
-};
-
-const getWordMeaningsDefaultMeaningLanguageFromBook = (book: BookDetails | null): string | null => {
-  const metadata = getBookMetadataObject(book);
-  const config = getWordMeaningsMetadataConfig(metadata);
-  const rawValue = typeof config?.default_meaning_language === "string"
-    ? config.default_meaning_language.trim().toLowerCase()
-    : "";
-  if (
-    WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.includes(
-      rawValue as (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number]
-    )
-  ) {
-    return rawValue;
-  }
-  return null;
-};
-
-const normalizeWordMeaningsEnabledLevels = (levels: string[]): string[] =>
-  Array.from(
-    new Set(
-      levels
-        .map((level) => level.trim())
-        .filter(Boolean)
-        .map((level) => level.toLowerCase())
-    )
-  ).sort();
-
-const getBookThumbnailUrl = (book: BookDetails | BookOption | null): string | null => {
-  if (!book) {
-    return null;
-  }
-
-  const metadata =
-    book.metadata_json && typeof book.metadata_json === "object"
-      ? book.metadata_json
-      : book.metadata && typeof book.metadata === "object"
-        ? book.metadata
-        : null;
-
-  if (!metadata) {
-    return null;
-  }
-
-  const thumbnailUrlCandidates = [
-    metadata.thumbnail_url,
-    metadata.thumbnailUrl,
-    metadata.cover_image_url,
-    metadata.coverImageUrl,
-  ];
-
-  for (const candidate of thumbnailUrlCandidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return resolveMediaUrlWithMetadataVersion(candidate, metadata);
-    }
-  }
-
-  return null;
-};
-
-const normalizeBookMediaType = (rawType: unknown, rawUrl: string): BookMediaItem["media_type"] => {
-  if (typeof rawType === "string" && rawType.trim()) {
-    return rawType.trim().toLowerCase();
-  }
-  return inferMediaTypeFromUrl(rawUrl);
-};
-
-const getBookMetadataObject = (book: BookDetails | BookOption | null): Record<string, unknown> | null => {
-  const metadata =
-    book?.metadata_json && typeof book.metadata_json === "object"
-      ? book.metadata_json
-      : book?.metadata && typeof book.metadata === "object"
-        ? book.metadata
-        : null;
-  return metadata ? { ...metadata } : null;
-};
-
-const getBookMediaItems = (book: BookDetails | BookOption | null): BookMediaItem[] => {
-  const metadata = getBookMetadataObject(book);
-  const mediaItemsRaw = metadata?.media_items;
-  const normalized: BookMediaItem[] = [];
-
-  if (Array.isArray(mediaItemsRaw)) {
-    for (const item of mediaItemsRaw) {
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-      const candidate = item as Record<string, unknown>;
-      const rawUrl = typeof candidate.url === "string" ? candidate.url.trim() : "";
-      if (!rawUrl) {
-        continue;
-      }
-      const mediaType = normalizeBookMediaType(candidate.media_type, rawUrl);
-      const assetIdRaw = candidate.asset_id;
-      const assetId =
-        typeof assetIdRaw === "number"
-          ? assetIdRaw
-          : typeof assetIdRaw === "string" && assetIdRaw.trim()
-            ? Number.parseInt(assetIdRaw, 10)
-            : undefined;
-      const displayOrderRaw = candidate.display_order;
-      const displayOrder =
-        typeof displayOrderRaw === "number"
-          ? displayOrderRaw
-          : typeof displayOrderRaw === "string" && displayOrderRaw.trim()
-            ? Number.parseInt(displayOrderRaw, 10)
-            : undefined;
-
-      normalized.push({
-        media_type: mediaType,
-        url: rawUrl,
-        display_name:
-          typeof candidate.display_name === "string" && candidate.display_name.trim()
-            ? candidate.display_name.trim()
-            : undefined,
-        content_type:
-          typeof candidate.content_type === "string" && candidate.content_type.trim()
-            ? candidate.content_type.trim()
-            : undefined,
-        size_bytes:
-          typeof candidate.size_bytes === "number" || typeof candidate.size_bytes === "string"
-            ? candidate.size_bytes
-            : undefined,
-        replaced_at:
-          typeof candidate.replaced_at === "string" && candidate.replaced_at.trim()
-            ? candidate.replaced_at.trim()
-            : undefined,
-        asset_id: typeof assetId === "number" && Number.isFinite(assetId) ? assetId : undefined,
-        is_default: Boolean(candidate.is_default),
-        display_order: typeof displayOrder === "number" && Number.isFinite(displayOrder) ? displayOrder : undefined,
-      });
-    }
-  }
-
-  if (normalized.length > 0) {
-    return normalized;
-  }
-
-  const fallbackThumbnailUrl = getBookThumbnailUrl(book);
-  if (!fallbackThumbnailUrl) {
-    return [];
-  }
-
-  return [
-    {
-      media_type: "image",
-      url: fallbackThumbnailUrl,
-      display_name: "Book Thumbnail",
-      is_default: true,
-      display_order: 0,
-    },
-  ];
-};
-
-const getBookMediaDisplayOrder = (media: BookMediaItem): number => {
-  const raw = media.display_order;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    return raw;
-  }
-  if (typeof raw === "string") {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return 0;
-};
-
-const sortBookMediaItems = (items: BookMediaItem[]): BookMediaItem[] =>
-  [...items].sort((a, b) => {
-    const typeCompare = (a.media_type || "").localeCompare(b.media_type || "");
-    if (typeCompare !== 0) {
-      return typeCompare;
-    }
-    const defaultCompare = Number(Boolean(b.is_default)) - Number(Boolean(a.is_default));
-    if (defaultCompare !== 0) {
-      return defaultCompare;
-    }
-    return getBookMediaDisplayOrder(a) - getBookMediaDisplayOrder(b);
-  });
-
-const getNodeThumbnailUrl = (mediaItems: MediaFile[]): string | null => {
-  const imageItems = mediaItems.filter((item) => item.media_type === "image" && typeof item.url === "string" && item.url.trim());
-  if (imageItems.length === 0) {
-    return null;
-  }
-  const defaultImage = imageItems.find((item) => {
-    const metadata =
-      item.metadata && typeof item.metadata === "object"
-        ? item.metadata
-        : item.metadata_json && typeof item.metadata_json === "object"
-          ? item.metadata_json
-          : null;
-    return Boolean(metadata?.is_default);
-  });
-  const picked = defaultImage || imageItems[0];
-  const metadata =
-    picked.metadata && typeof picked.metadata === "object"
-      ? picked.metadata
-      : picked.metadata_json && typeof picked.metadata_json === "object"
-        ? picked.metadata_json
-        : null;
-  return resolveMediaUrlWithMetadataVersion(picked.url, metadata);
-};
-
-const getYouTubeEmbedUrl = (rawUrl: string): string | null => {
-  if (!rawUrl || typeof rawUrl !== "string") {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(rawUrl);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-
-    if (host === "youtu.be") {
-      const videoId = parsed.pathname.replace(/^\//, "").split("/")[0];
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-    }
-
-    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
-      if (parsed.pathname === "/watch") {
-        const videoId = parsed.searchParams.get("v");
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      }
-
-      if (parsed.pathname.startsWith("/embed/")) {
-        const videoId = parsed.pathname.split("/")[2];
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      }
-
-      if (parsed.pathname.startsWith("/shorts/")) {
-        const videoId = parsed.pathname.split("/")[2];
-        return videoId ? `https://www.youtube.com/embed/${videoId}` : null;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-};
-
-const getYouTubeVideoId = (rawUrl: string): string | null => {
-  if (!rawUrl || typeof rawUrl !== "string") {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(rawUrl);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-
-    if (host === "youtu.be") {
-      const videoId = parsed.pathname.replace(/^\//, "").split("/")[0];
-      return videoId || null;
-    }
-
-    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
-      if (parsed.pathname === "/watch") {
-        return parsed.searchParams.get("v") || null;
-      }
-      if (parsed.pathname.startsWith("/embed/") || parsed.pathname.startsWith("/shorts/")) {
-        const videoId = parsed.pathname.split("/")[2];
-        return videoId || null;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-};
-
-const getMediaLookupKey = (mediaType: string | undefined, rawUrl: string): string => {
-  const normalizedType = (mediaType || "").trim().toLowerCase() || "unknown";
-  const trimmedUrl = (rawUrl || "").trim();
-  if (!trimmedUrl) {
-    return `${normalizedType}:`;
-  }
-
-  const youTubeVideoId = getYouTubeVideoId(trimmedUrl);
-  if (youTubeVideoId) {
-    return `${normalizedType}:youtube:${youTubeVideoId.toLowerCase()}`;
-  }
-
-  try {
-    const parsed = new URL(trimmedUrl);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-    const pathname = decodeURIComponent(parsed.pathname || "").replace(/\/+$/, "");
-    return `${normalizedType}:${host}${pathname}`;
-  } catch {
-    return `${normalizedType}:${trimmedUrl.toLowerCase()}`;
-  }
-};
 
 const DEFAULT_USER_PREFERENCES: UserPreferences = {
   source_language: "english",
@@ -1774,866 +304,9 @@ const DEFAULT_USER_PREFERENCES: UserPreferences = {
   admin_media_bank_browser_view: "list",
 };
 
-const TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL: Record<string, string> = {
-  en: "english",
-  eng: "english",
-  english: "english",
-  hi: "hindi",
-  hindi: "hindi",
-  te: "telugu",
-  telugu: "telugu",
-  kn: "kannada",
-  kannada: "kannada",
-  ta: "tamil",
-  tamil: "tamil",
-  ml: "malayalam",
-  malayalam: "malayalam",
-  sa: "sanskrit",
-  sanskrit: "sanskrit",
-};
 
-const TRANSLATION_CANONICAL_TO_CODE: Record<string, string> = {
-  english: "en",
-  hindi: "hi",
-  telugu: "te",
-  kannada: "kn",
-  tamil: "ta",
-  malayalam: "ml",
-  sanskrit: "sa",
-};
 
-const TRANSLATION_LANGUAGE_LABELS: Record<string, string> = {
-  english: "English",
-  hindi: "Hindi",
-  telugu: "Telugu",
-  kannada: "Kannada",
-  tamil: "Tamil",
-  malayalam: "Malayalam",
-  sanskrit: "Sanskrit",
-};
 
-const PREVIEW_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.preview.translationLanguages";
-const PREVIEW_FONT_SIZE_PERCENT_STORAGE_KEY = "scriptures.preview.fontSizePercent";
-const PREVIEW_EDIT_MODE_SESSION_STORAGE_KEY = "scriptures.preview.editMode";
-const BROWSE_TRANSLATION_LANGUAGES_STORAGE_KEY = "scriptures.browse.translationLanguages";
-const IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES = 512 * 1024;
-const PREVIEW_FONT_SIZE_PERCENT_MIN = 75;
-const PREVIEW_FONT_SIZE_PERCENT_MAX = 200;
-const PREVIEW_FONT_SIZE_PERCENT_STEP = 5;
-
-const EDITABLE_TRANSLATION_LANGUAGES = [
-  "english",
-  "hindi",
-  "kannada",
-  "malayalam",
-  "sanskrit",
-  "tamil",
-  "telugu",
-] as const;
-
-type EditableTranslationLanguage = (typeof EDITABLE_TRANSLATION_LANGUAGES)[number];
-
-type AuthorVariantKind = "translation" | "commentary";
-
-const sortEditableTranslationLanguages = (
-  values: EditableTranslationLanguage[]
-): EditableTranslationLanguage[] =>
-  [...values].sort((left, right) =>
-    translationLanguageLabel(left).localeCompare(translationLanguageLabel(right))
-  );
-
-const normalizeTranslationLanguage = (value?: string | null): string => {
-  const normalized = (value || "").trim().toLowerCase();
-  if (!normalized) {
-    return "english";
-  }
-  return TRANSLATION_LANGUAGE_ALIAS_TO_CANONICAL[normalized] || normalized;
-};
-
-const translationLanguageToCode = (value?: string | null): string => {
-  const canonical = normalizeTranslationLanguage(value);
-  return TRANSLATION_CANONICAL_TO_CODE[canonical] || canonical;
-};
-
-const translationLanguageLabel = (value?: string | null): string => {
-  const canonical = normalizeTranslationLanguage(value);
-  return TRANSLATION_LANGUAGE_LABELS[canonical] || canonical.toUpperCase();
-};
-
-const getWordMeaningLanguageFromNodeTranslation = (node: NodeContent | null): string | null => {
-  if (!node) {
-    return null;
-  }
-
-  const metadata =
-    node.metadata_json && typeof node.metadata_json === "object"
-      ? node.metadata_json
-      : node.metadata && typeof node.metadata === "object"
-        ? node.metadata
-        : null;
-
-  const candidates: unknown[] = [
-    metadata?.translation_language,
-    metadata?.preferred_translation_language,
-    metadata?.meaning_language,
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string" || !candidate.trim()) {
-      continue;
-    }
-    const normalized = normalizeTranslationLanguage(candidate);
-    const languageCode = translationLanguageToCode(normalized);
-    if (
-      WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.includes(
-        languageCode as (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number]
-      )
-    ) {
-      return languageCode;
-    }
-  }
-
-  return null;
-};
-
-const SORTED_EDITABLE_TRANSLATION_LANGUAGES: EditableTranslationLanguage[] =
-  sortEditableTranslationLanguages([...EDITABLE_TRANSLATION_LANGUAGES]);
-
-const LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL: Record<string, string> = {
-  e: "english",
-  h: "hindi",
-  k: "kannada",
-  m: "malayalam",
-  s: "sanskrit",
-  t: "tamil",
-};
-
-const getVariantKindSuffix = (kind: AuthorVariantKind): string =>
-  kind === "translation" ? "t" : "c";
-
-const deriveVariantLanguageFromField = (field?: string | null): string => {
-  const normalizedField = (field || "").trim().toLowerCase();
-  if (!normalizedField) {
-    return "";
-  }
-
-  const base = normalizedField.replace(/[tc]$/, "");
-  if (!base) {
-    return "";
-  }
-
-  if (base in LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL) {
-    return LEGACY_VARIANT_LANGUAGE_PREFIX_TO_CANONICAL[base];
-  }
-
-  return normalizeTranslationLanguage(base);
-};
-
-const buildVariantFieldCode = (language: string, kind: AuthorVariantKind): string => {
-  const normalizedLanguage = normalizeTranslationLanguage(language || "");
-  if (!normalizedLanguage) {
-    return "";
-  }
-  return `${translationLanguageToCode(normalizedLanguage)}${getVariantKindSuffix(kind)}`;
-};
-
-const toTranslationRecord = (value: unknown): Record<string, string> => {
-  if (!value || typeof value !== "object") {
-    return {};
-  }
-  const record: Record<string, string> = {};
-  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof key !== "string" || !key.trim()) {
-      continue;
-    }
-    if (typeof rawValue !== "string" || !rawValue.trim()) {
-      continue;
-    }
-    record[key.trim().toLowerCase()] = rawValue.trim();
-  }
-  return record;
-};
-
-const normalizeAuthorVariantDrafts = (
-  value: unknown,
-  kind: AuthorVariantKind,
-): AuthorVariantDraft[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-      const objectEntry = entry as Record<string, unknown>;
-      const text = typeof objectEntry.text === "string" ? objectEntry.text.replace(/\r\n/g, "\n") : "";
-      if (!text.trim()) {
-        return null;
-      }
-      const rawLanguage =
-        typeof objectEntry.language === "string"
-          ? normalizeTranslationLanguage(objectEntry.language)
-          : "";
-      const rawField =
-        typeof objectEntry.field === "string" ? objectEntry.field.trim().toLowerCase() : "";
-      const resolvedLanguage = rawLanguage || deriveVariantLanguageFromField(rawField);
-      return {
-        author_slug:
-          typeof objectEntry.author_slug === "string" ? objectEntry.author_slug.trim() : "",
-        author: typeof objectEntry.author === "string" ? objectEntry.author.trim() : "",
-        language: resolvedLanguage,
-        field: buildVariantFieldCode(resolvedLanguage, kind),
-        text,
-      };
-    })
-    .filter((entry): entry is AuthorVariantDraft => Boolean(entry));
-};
-
-const buildEmptyAuthorVariantDraft = (): AuthorVariantDraft => ({
-  author_slug: "",
-  author: "",
-  language: "",
-  field: "",
-  text: "",
-});
-
-const getVariantAuthorOptions = (
-  book: BookDetails | null | undefined,
-  entry: AuthorVariantDraft,
-): Array<{ slug: string; name: string }> => {
-  const options = Object.entries(book?.variant_authors ?? {})
-    .map(([slug, name]) => ({
-      slug: slug.trim(),
-      name: typeof name === "string" ? name.trim() : "",
-    }))
-    .filter((option) => option.slug && option.name)
-    .sort((left, right) => left.name.localeCompare(right.name));
-
-  if (entry.author_slug && !options.some((option) => option.slug === entry.author_slug)) {
-    options.unshift({
-      slug: entry.author_slug,
-      name: entry.author || entry.author_slug,
-    });
-  }
-
-  return options;
-};
-
-const applyVariantAuthorSelection = (
-  entry: AuthorVariantDraft,
-  slug: string,
-  book: BookDetails | null | undefined,
-): AuthorVariantDraft => ({
-  ...entry,
-  author_slug: slug,
-  author: slug ? book?.variant_authors?.[slug] || entry.author || "" : "",
-});
-
-const applyVariantLanguageSelection = (
-  entry: AuthorVariantDraft,
-  language: string,
-  kind: AuthorVariantKind,
-): AuthorVariantDraft => {
-  const normalizedLanguage = normalizeTranslationLanguage(language || "");
-  return {
-    ...entry,
-    language: normalizedLanguage,
-    field: buildVariantFieldCode(normalizedLanguage, kind),
-  };
-};
-
-const getTranslationLookupKeys = (language: string): string[] => {
-  const canonical = normalizeTranslationLanguage(language);
-  const code = translationLanguageToCode(canonical);
-  const keys = [canonical, code];
-  if (canonical === "english") {
-    keys.push("english", "en");
-  }
-  return Array.from(new Set(keys.filter(Boolean)));
-};
-
-const pickPreferredTranslationText = (
-  translations: Record<string, string>,
-  preferredLanguage: string,
-  ...fallbackValues: unknown[]
-): string => {
-  const preferredKeys = getTranslationLookupKeys(preferredLanguage);
-  const englishKeys = getTranslationLookupKeys("english");
-  const candidateValues = [
-    ...preferredKeys.map((key) => translations[key]),
-    ...englishKeys.map((key) => translations[key]),
-    ...fallbackValues,
-  ];
-
-  for (const value of candidateValues) {
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  // Last resort: return any available translation value (e.g. translations.te
-  // when preferred language is English but only Telugu is stored).
-  for (const v of Object.values(translations)) {
-    if (typeof v === "string" && v.trim()) {
-      return v;
-    }
-  }
-  return "";
-};
-
-const pickTranslationTextForLanguageOnly = (
-  translations: Record<string, string>,
-  language: string
-): string => {
-  const keys = getTranslationLookupKeys(language);
-  for (const key of keys) {
-    const value = translations[key];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  return "";
-};
-
-const applyTranslationDraftValue = (
-  translations: Record<string, string>,
-  language: string,
-  rawValue: string
-) => {
-  const canonical = normalizeTranslationLanguage(language);
-  const code = translationLanguageToCode(canonical);
-  const keys = getTranslationLookupKeys(canonical);
-
-  for (const key of keys) {
-    delete translations[key];
-  }
-
-  const value = rawValue.replace(/\r\n/g, "\n");
-  if (!value.trim()) {
-    return;
-  }
-
-  if (code) {
-    translations[code] = value;
-  }
-  if (canonical) {
-    translations[canonical] = value;
-  }
-};
-
-const buildEditableTranslationDrafts = (
-  translations: Record<string, string>
-): Record<EditableTranslationLanguage, string> => {
-  const drafts = {} as Record<EditableTranslationLanguage, string>;
-  for (const language of EDITABLE_TRANSLATION_LANGUAGES) {
-    drafts[language] = pickTranslationTextForLanguageOnly(translations, language);
-  }
-  return drafts;
-};
-
-const normalizeSelectedEditableTranslationLanguages = (
-  values: string[] | undefined,
-  fallbackLanguage: string
-): EditableTranslationLanguage[] => {
-  const allowed = new Set<string>(EDITABLE_TRANSLATION_LANGUAGES);
-  const normalized = Array.from(
-    new Set(
-      (values || [])
-        .map((value) => normalizeTranslationLanguage(value))
-        .filter((value) => allowed.has(value))
-    )
-  ) as EditableTranslationLanguage[];
-
-  if (normalized.length > 0) {
-    return sortEditableTranslationLanguages(normalized);
-  }
-
-  const fallbackCanonical = normalizeTranslationLanguage(fallbackLanguage);
-  if (allowed.has(fallbackCanonical)) {
-    return sortEditableTranslationLanguages([fallbackCanonical as EditableTranslationLanguage]);
-  }
-  return sortEditableTranslationLanguages(["english"]);
-};
-
-const parseStoredPreviewTranslationLanguages = (
-  value: unknown,
-  fallbackLanguage: string
-): EditableTranslationLanguage[] => {
-  if (Array.isArray(value)) {
-    return normalizeSelectedEditableTranslationLanguages(
-      value.filter((item): item is string => typeof item === "string"),
-      fallbackLanguage
-    );
-  }
-
-  if (typeof value === "string") {
-    const raw = value.trim();
-    if (!raw) {
-      return normalizeSelectedEditableTranslationLanguages([], fallbackLanguage);
-    }
-
-    if (raw.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return normalizeSelectedEditableTranslationLanguages(
-            parsed.filter((item): item is string => typeof item === "string"),
-            fallbackLanguage
-          );
-        }
-      } catch {
-        // Fall back to CSV parsing below.
-      }
-    }
-
-    return normalizeSelectedEditableTranslationLanguages(
-      raw.split(",").map((item) => item.trim()).filter(Boolean),
-      fallbackLanguage
-    );
-  }
-
-  return normalizeSelectedEditableTranslationLanguages([], fallbackLanguage);
-};
-
-const serializePreviewTranslationLanguages = (
-  values: EditableTranslationLanguage[]
-): string => values.join(",");
-
-const parseStoredHiddenPreviewLevels = (value: unknown): Set<string> => {
-  if (Array.isArray(value)) {
-    return new Set(
-      value
-        .filter((item): item is string => typeof item === "string")
-        .map((item) => item.trim())
-        .filter(Boolean)
-    );
-  }
-
-  if (typeof value === "string") {
-    const raw = value.trim();
-    if (!raw) {
-      return new Set<string>();
-    }
-
-    if (raw.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          return new Set(
-            parsed
-              .filter((item): item is string => typeof item === "string")
-              .map((item) => item.trim())
-              .filter(Boolean)
-          );
-        }
-      } catch {
-        // Fall back to CSV parsing below.
-      }
-    }
-
-    return new Set(raw.split(",").map((item) => item.trim()).filter(Boolean));
-  }
-
-  return new Set<string>();
-};
-
-const normalizePreviewFontSizePercent = (value: unknown): number => {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number.parseInt(value, 10)
-        : NaN;
-  if (!Number.isFinite(parsed)) {
-    return 100;
-  }
-  const stepped = Math.round(parsed / PREVIEW_FONT_SIZE_PERCENT_STEP) * PREVIEW_FONT_SIZE_PERCENT_STEP;
-  return Math.min(PREVIEW_FONT_SIZE_PERCENT_MAX, Math.max(PREVIEW_FONT_SIZE_PERCENT_MIN, stepped));
-};
-
-const serializeHiddenPreviewLevels = (values: Set<string>): string =>
-  [...values].map((item) => item.trim()).filter(Boolean).join(",");
-
-const normalizeTranslationDraftsForCompare = (
-  drafts: Record<EditableTranslationLanguage, string>,
-  selectedLanguages: EditableTranslationLanguage[]
-) => {
-  const normalizedSelected = [...selectedLanguages].sort();
-  const normalizedDrafts = normalizedSelected.reduce<Record<string, string>>((acc, language) => {
-    acc[language] = (drafts[language] || "").trim();
-    return acc;
-  }, {});
-  return {
-    selectedLanguages: normalizedSelected,
-    drafts: normalizedDrafts,
-  };
-};
-
-const areEditableLanguageSelectionsEqual = (
-  left: EditableTranslationLanguage[],
-  right: EditableTranslationLanguage[]
-) => {
-  if (left.length !== right.length) {
-    return false;
-  }
-  const normalizedLeft = [...left].sort();
-  const normalizedRight = [...right].sort();
-  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
-};
-
-const areStringSetsEqual = (left: Set<string>, right: Set<string>) => {
-  if (left.size !== right.size) {
-    return false;
-  }
-  for (const value of left) {
-    if (!right.has(value)) {
-      return false;
-    }
-  }
-  return true;
-};
-
-type StoredScripturesPreferences = {
-  preferences?: Partial<UserPreferences>;
-  show_only_preferred_script?: boolean;
-};
-
-const normalizePreferences = (value: Partial<UserPreferences> | null | undefined): UserPreferences => ({
-  source_language: normalizeSourceLanguage(value?.source_language),
-  transliteration_enabled: value?.transliteration_enabled ?? true,
-  transliteration_script: normalizeTransliterationScript(value?.transliteration_script),
-  show_roman_transliteration: value?.show_roman_transliteration ?? true,
-  show_only_preferred_script: value?.show_only_preferred_script ?? false,
-  show_media: value?.show_media ?? true,
-  show_commentary: value?.show_commentary ?? true,
-  preview_show_titles: value?.preview_show_titles ?? false,
-  preview_show_labels: value?.preview_show_labels ?? false,
-  preview_show_level_numbers: value?.preview_show_level_numbers ?? false,
-  preview_show_details: value?.preview_show_details ?? false,
-  preview_show_media: value?.preview_show_media ?? true,
-  preview_show_sanskrit: value?.preview_show_sanskrit ?? true,
-  preview_show_transliteration: value?.preview_show_transliteration ?? true,
-  preview_show_english: value?.preview_show_english ?? true,
-  preview_show_commentary: value?.preview_show_commentary ?? true,
-  preview_transliteration_script: normalizeTransliterationScript(
-    value?.preview_transliteration_script
-  ),
-  preview_word_meanings_display_mode: normalizePreviewWordMeaningsDisplayMode(
-    value?.preview_word_meanings_display_mode
-  ),
-  word_meanings_default_source_language: normalizeWordMeaningSourceLanguage(
-    value?.word_meanings_default_source_language
-  ),
-  word_meanings_default_meaning_language: normalizeWordMeaningMeaningLanguage(
-    value?.word_meanings_default_meaning_language
-  ),
-  preview_translation_languages:
-    typeof value?.preview_translation_languages === "string"
-      ? value.preview_translation_languages
-      : "english",
-  preview_hidden_levels:
-    typeof value?.preview_hidden_levels === "string"
-      ? value.preview_hidden_levels
-      : "",
-  ui_theme: normalizeUiTheme(value?.ui_theme),
-  ui_density: normalizeUiDensity(value?.ui_density),
-  scriptures_book_browser_view: normalizeBrowserView(value?.scriptures_book_browser_view),
-  scriptures_book_browser_density: normalizeBookBrowserDensity(value?.scriptures_book_browser_density),
-  scriptures_media_manager_view: normalizeBrowserView(value?.scriptures_media_manager_view),
-  admin_media_bank_browser_view: normalizeBrowserView(value?.admin_media_bank_browser_view),
-});
-
-const normalizeSourceLanguage = (value?: string | null): string =>
-  normalizeTranslationLanguage(value);
-
-const normalizeWordMeaningSourceLanguage = (value?: string | null): string => {
-  const normalized = (value || "").trim().toLowerCase();
-  return WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES.includes(
-    normalized as (typeof WORD_MEANINGS_ALLOWED_SOURCE_LANGUAGES)[number]
-  )
-    ? normalized
-    : WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE;
-};
-
-const normalizeWordMeaningMeaningLanguage = (value?: string | null): string => {
-  const normalized = (value || "").trim().toLowerCase();
-  return WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES.includes(
-    normalized as (typeof WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES)[number]
-  )
-    ? normalized
-    : WORD_MEANINGS_DEFAULT_MEANING_LANGUAGE;
-};
-
-const normalizePreviewWordMeaningsDisplayMode = (
-  value?: string | null
-): "inline" | "table" | "hide" => {
-  const normalized = (value || "").trim().toLowerCase();
-  if (normalized === "table") return "table";
-  if (normalized === "hide") return "hide";
-  return "inline";
-};
-
-const isBookScopedCategory = (category: MetadataCategory): boolean => {
-  const scopes = category.applicable_scopes || [];
-  return scopes.includes("book") || scopes.includes("all") || scopes.includes("node");
-};
-
-const metadataObjectToDisplayText = (rawValue: unknown): string => {
-  if (rawValue === null || rawValue === undefined) {
-    return "";
-  }
-
-  if (typeof rawValue === "string") {
-    return rawValue;
-  }
-
-  if (typeof rawValue === "number" || typeof rawValue === "boolean") {
-    return String(rawValue);
-  }
-
-  if (typeof rawValue === "object") {
-    if (!Array.isArray(rawValue)) {
-      const textCandidate = (rawValue as Record<string, unknown>).text;
-      if (typeof textCandidate === "string") {
-        return textCandidate;
-      }
-    }
-    return "";
-  }
-
-  return String(rawValue);
-};
-
-const normalizeMetadataValue = (dataType: string, rawValue: unknown): unknown => {
-  if (dataType === "boolean") {
-    return Boolean(rawValue);
-  }
-
-  if (dataType === "number") {
-    if (rawValue === null || rawValue === undefined || rawValue === "") {
-      return null;
-    }
-    const numeric = Number(rawValue);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-
-  if (rawValue === null || rawValue === undefined) {
-    return null;
-  }
-
-  const stringValue = metadataObjectToDisplayText(rawValue);
-  if (!stringValue.trim()) {
-    return null;
-  }
-
-  if (dataType === "datetime") {
-    const parsed = new Date(stringValue);
-    return Number.isNaN(parsed.getTime()) ? stringValue : parsed.toISOString();
-  }
-
-  return stringValue;
-};
-
-const valuesEqual = (left: unknown, right: unknown): boolean => {
-  if (left === right) return true;
-  try {
-    return JSON.stringify(left) === JSON.stringify(right);
-  } catch {
-    return false;
-  }
-};
-
-const isSingleLineTextMetadataField = (field: EffectivePropertyBinding): boolean => {
-  const name = field.property_internal_name.toLowerCase();
-  if (name.includes("template") || name.endsWith("_key") || name.includes("render_key")) {
-    return true;
-  }
-  if (name.includes("language") || name.includes("slug") || name.includes("code")) {
-    return true;
-  }
-  return false;
-};
-
-const isTemplateMetadataField = (field: EffectivePropertyBinding): boolean => {
-  const name = field.property_internal_name.toLowerCase();
-  return name.includes("template") && name.endsWith("_key");
-};
-
-const filterVisibleMetadataFields = (fields: EffectivePropertyBinding[]): EffectivePropertyBinding[] =>
-  fields.filter((field) => field.property_internal_name !== "text");
-
-const getFieldDefaultValue = (field: EffectivePropertyBinding): unknown => {
-  return field.default_value ?? null;
-};
-
-const isEmptyMetadataValue = (value: unknown): boolean => {
-  if (value === null || value === undefined) {
-    return true;
-  }
-  if (typeof value === "string") {
-    return value.trim().length === 0;
-  }
-  return false;
-};
-
-const normalizeMetadataKey = (value: string): string =>
-  value.trim().toLowerCase().replace(/[\s-]+/g, "_");
-
-const isUsableBindingValueForField = (
-  field: EffectivePropertyBinding,
-  value: unknown
-): boolean => {
-  if (value === null || value === undefined) {
-    return false;
-  }
-
-  switch (field.property_data_type) {
-    case "text":
-    case "date":
-    case "datetime":
-    case "dropdown":
-      return typeof value === "string" && value.trim().length > 0;
-    case "number":
-      if (typeof value === "number") {
-        return Number.isFinite(value);
-      }
-      if (typeof value === "string") {
-        const trimmed = value.trim();
-        return trimmed.length > 0 && Number.isFinite(Number(trimmed));
-      }
-      return false;
-    case "boolean":
-      return typeof value === "boolean";
-    default:
-      return false;
-  }
-};
-
-const autoFillSanskritTransliterationPair = (
-  sanskritRaw: string,
-  transliterationRaw: string,
-  preserveWhitespace: boolean = false
-): { sanskrit: string; transliteration: string } => {
-  const sanskrit = preserveWhitespace ? sanskritRaw.replace(/\r\n/g, "\n") : sanskritRaw.trim();
-  const transliteration = preserveWhitespace
-    ? transliterationRaw.replace(/\r\n/g, "\n")
-    : transliterationRaw.trim();
-  const hasSanskrit = Boolean(sanskrit.trim());
-  const hasTransliteration = Boolean(transliteration.trim());
-
-  if (!hasSanskrit && !hasTransliteration) {
-    return { sanskrit: "", transliteration: "" };
-  }
-
-  if (hasSanskrit && hasTransliteration) {
-    return { sanskrit, transliteration };
-  }
-
-  if (!hasSanskrit && hasTransliteration) {
-    if (hasDevanagariLetters(transliteration)) {
-      return {
-        sanskrit: transliteration,
-        transliteration: transliterateFromDevanagari(transliteration, "iast"),
-      };
-    }
-
-    const inferredScript = inferIndicScriptFromText(transliteration);
-    if (inferredScript && inferredScript !== "devanagari") {
-      const devanagariCandidate = transliterateBetweenScripts(
-        transliteration,
-        inferredScript,
-        "devanagari"
-      );
-      if (hasDevanagariLetters(devanagariCandidate)) {
-        return {
-          sanskrit: devanagariCandidate,
-          transliteration: transliterateFromDevanagari(devanagariCandidate, "iast"),
-        };
-      }
-    }
-
-    for (const scriptOption of INDIC_SCRIPT_OPTIONS) {
-      if (scriptOption === "devanagari") continue;
-      const devanagariCandidate = transliterateBetweenScripts(
-        transliteration,
-        scriptOption,
-        "devanagari"
-      );
-      if (!hasDevanagariLetters(devanagariCandidate)) {
-        continue;
-      }
-      return {
-        sanskrit: devanagariCandidate,
-        transliteration: transliterateFromDevanagari(devanagariCandidate, "iast"),
-      };
-    }
-
-    return {
-      sanskrit: transliterateLatinToDevanagari(transliteration),
-      transliteration: transliterateLatinToIast(transliteration),
-    };
-  }
-
-  if (hasDevanagariLetters(sanskrit)) {
-    return {
-      sanskrit,
-      transliteration: transliterateFromDevanagari(sanskrit, "iast"),
-    };
-  }
-
-  const inferredScript = inferIndicScriptFromText(sanskrit);
-  if (inferredScript && inferredScript !== "devanagari") {
-    const devanagariCandidate = transliterateBetweenScripts(
-      sanskrit,
-      inferredScript,
-      "devanagari"
-    );
-    if (hasDevanagariLetters(devanagariCandidate)) {
-      return {
-        sanskrit: devanagariCandidate,
-        transliteration: transliterateFromDevanagari(devanagariCandidate, "iast"),
-      };
-    }
-  }
-
-  for (const scriptOption of INDIC_SCRIPT_OPTIONS) {
-    if (scriptOption === "devanagari") continue;
-    const devanagariCandidate = transliterateBetweenScripts(
-      sanskrit,
-      scriptOption,
-      "devanagari"
-    );
-    if (!hasDevanagariLetters(devanagariCandidate)) {
-      continue;
-    }
-    return {
-      sanskrit: devanagariCandidate,
-      transliteration: transliterateFromDevanagari(devanagariCandidate, "iast"),
-    };
-  }
-
-  return {
-    sanskrit: transliterateLatinToDevanagari(sanskrit),
-    transliteration: transliterateLatinToIast(sanskrit),
-  };
-};
-
-const toDatetimeLocalValue = (value: unknown): string => {
-  if (typeof value !== "string" || !value.trim()) {
-    return "";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
 
 type BrowseSectionProps = {
   title: string;
@@ -2692,81 +365,15 @@ function ScripturesContent() {
     params.set("next", scripturesReturnPath);
     return `/signup?${params.toString()}`;
   }, [inviteEmailFromQuery, scripturesReturnPath]);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [showLogin, setShowLogin] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<"book" | "node" | "leaf" | null>(null);
-  const [shareDialogCopyFeedback, setShareDialogCopyFeedback] = useState<{
-    key: string;
-    ok: boolean;
-  } | null>(null);
-  const [, setAuthStatus] = useState<string | null>(null);
-  const [authResolved, setAuthResolved] = useState(false);
-  const [authUserId, setAuthUserId] = useState<number | null>(null);
   const [bookVisibilitySubmitting, setBookVisibilitySubmitting] = useState<number | null>(null);
   const [bookDeleteSubmitting, setBookDeleteSubmitting] = useState<number | null>(null);
-  const [canView, setCanView] = useState(false);
-  const [canAdmin, setCanAdmin] = useState(false);
-  const [canContribute, setCanContribute] = useState(false);
-  const [canEdit, setCanEdit] = useState(false);
-  const [canImport, setCanImport] = useState(false);
   const [nodeContent, setNodeContent] = useState<NodeContent | null>(null);
   const [contentLoading, setContentLoading] = useState(false);
-  const [nodeMedia, setNodeMedia] = useState<MediaFile[]>([]);
-  const [nodeMediaLoading, setNodeMediaLoading] = useState(false);
-  const [nodeMediaError, setNodeMediaError] = useState<string | null>(null);
-  const [nodeMediaUploading, setNodeMediaUploading] = useState(false);
-  const [nodeMediaUpdating, setNodeMediaUpdating] = useState(false);
-  const [nodeMediaMessage, setNodeMediaMessage] = useState<string | null>(null);
-  const [nodeMediaSearchQuery, setNodeMediaSearchQuery] = useState("");
-  const [mediaBankAssets, setMediaBankAssets] = useState<MediaAsset[]>([]);
-  const [mediaBankLoading, setMediaBankLoading] = useState(false);
-  const [mediaBankError, setMediaBankError] = useState<string | null>(null);
-  const [mediaBankMessage, setMediaBankMessage] = useState<string | null>(null);
-  const [mediaBankUploading, setMediaBankUploading] = useState(false);
-  const [mediaBankUpdating, setMediaBankUpdating] = useState(false);
-  const [mediaBankRenameId, setMediaBankRenameId] = useState<number | null>(null);
-  const [mediaBankRenameValue, setMediaBankRenameValue] = useState("");
-  const [externalMediaFormOpen, setExternalMediaFormOpen] = useState(false);
-  const [externalMediaFormContext, setExternalMediaFormContext] = useState<MediaLinkContext>("bank");
-  const [externalMediaFormSubmitting, setExternalMediaFormSubmitting] = useState(false);
-  const [bookMediaActionsOpen, setBookMediaActionsOpen] = useState(false);
-  const [nodeMediaActionsOpen, setNodeMediaActionsOpen] = useState(false);
-  const [mediaManagerSearchQuery, setMediaManagerSearchQuery] = useState("");
-  const [mediaManagerTypeFilter, setMediaManagerTypeFilter] = useState("all");
   const [bookBrowserView, setBookBrowserView] = useState<"list" | "icon">("list");
   const [bookBrowserDensity, setBookBrowserDensity] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
   const [bookBrowserDensityHydrated, setBookBrowserDensityHydrated] = useState(false);
   const [showBookBrowserDensityMenu, setShowBookBrowserDensityMenu] = useState(false);
-  const [mediaManagerView, setMediaManagerView] = useState<"list" | "icon">("list");
-  const [mediaManagerDensity, setMediaManagerDensity] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
-  const [mediaManagerDensityHydrated, setMediaManagerDensityHydrated] = useState(false);
-  const [showMediaManagerDensityMenu, setShowMediaManagerDensityMenu] = useState(false);
-  const [showMediaManagerModal, setShowMediaManagerModal] = useState(false);
-  const [mediaManagerScope, setMediaManagerScope] = useState<"node" | "book" | "bank">("node");
-  const [mediaBankViewMode, setMediaBankViewMode] = useState<"manage" | "pick-node" | "pick-book">("manage");
-  const [nodeCommentary, setNodeCommentary] = useState<CommentaryEntry[]>([]);
-  const [nodeCommentaryLoading, setNodeCommentaryLoading] = useState(false);
-  const [nodeCommentaryError, setNodeCommentaryError] = useState<string | null>(null);
-  const [nodeComments, setNodeComments] = useState<NodeComment[]>([]);
-  const [nodeCommentsLoading, setNodeCommentsLoading] = useState(false);
-  const [nodeCommentsError, setNodeCommentsError] = useState<string | null>(null);
-  const [nodeCommentEditorOpen, setNodeCommentEditorOpen] = useState(false);
-  const [nodeCommentEditingId, setNodeCommentEditingId] = useState<number | null>(null);
-  const [nodeCommentFormLanguage, setNodeCommentFormLanguage] = useState("en");
-  const [nodeCommentFormText, setNodeCommentFormText] = useState("");
-  const [nodeCommentSubmitting, setNodeCommentSubmitting] = useState(false);
-  const [nodeCommentMessage, setNodeCommentMessage] = useState<string | null>(null);
-  const [commentaryEditorOpen, setCommentaryEditorOpen] = useState(false);
-  const [commentaryEditingId, setCommentaryEditingId] = useState<number | null>(null);
-  const [commentaryFormAuthor, setCommentaryFormAuthor] = useState("");
-  const [commentaryFormWorkTitle, setCommentaryFormWorkTitle] = useState("");
-  const [commentaryFormLanguage, setCommentaryFormLanguage] = useState("en");
-  const [commentaryFormText, setCommentaryFormText] = useState("");
-  const [commentarySubmitting, setCommentarySubmitting] = useState(false);
-  const [commentaryMessage, setCommentaryMessage] = useState<string | null>(null);
   const [actionNode, setActionNode] = useState<TreeNode | null>(null);
   const [action, setAction] = useState<"add" | "edit" | null>(null);
   const [createParentNodeIdOverride, setCreateParentNodeIdOverride] = useState<number | null>(null);
@@ -2787,23 +394,12 @@ function ScripturesContent() {
   const activeContentRequestId = useRef(0);
   const activeContentAbortController = useRef<AbortController | null>(null);
   const activeContentNodeId = useRef<number | null>(null);
-  const activeNodeMediaRequestId = useRef(0);
-  const activeNodeMediaAbortController = useRef<AbortController | null>(null);
-  const activeNodeMediaNodeId = useRef<number | null>(null);
   const mediaBankUploadInputRef = useRef<HTMLInputElement | null>(null);
   const mediaBankReplaceInputRef = useRef<HTMLInputElement | null>(null);
   const mediaBankReplaceTargetIdRef = useRef<number | null>(null);
   const mediaBankSuppressRenameBlurRef = useRef(false);
   const nodeMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
   const bookMediaUploadInputRef = useRef<HTMLInputElement | null>(null);
-  const importBookInputRef = useRef<HTMLInputElement | null>(null);
-  const activeNodeCommentaryRequestId = useRef(0);
-  const activeNodeCommentaryAbortController = useRef<AbortController | null>(null);
-  const activeNodeCommentaryNodeId = useRef<number | null>(null);
-  const activeNodeCommentsRequestId = useRef(0);
-  const activeNodeCommentsAbortController = useRef<AbortController | null>(null);
-  const activeNodeCommentsNodeId = useRef<number | null>(null);
-  const shareDialogCopyFeedbackTimerRef = useRef<number | null>(null);
   const pendingSavedNodeId = useRef<number | null>(null);
   const lastHandledPreviewRequestKey = useRef<string | null>(null);
   const lastFailedPreviewRequestKey = useRef<string | null>(null);
@@ -2821,8 +417,6 @@ function ScripturesContent() {
   const bookPreviewScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const previewSettingsInitialized = useRef(false);
   const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
-  const importPollingRunIdRef = useRef(0);
-  const activeImportJobIdRef = useRef<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [showExploreStructure, setShowExploreStructure] = useState(false);
   const [formData, setFormData] = useState({
@@ -2840,30 +434,6 @@ function ScripturesContent() {
   });
   const [inlineEditMode, setInlineEditMode] = useState(false);
   const [inlineSubmitting, setInlineSubmitting] = useState(false);
-  const [importSubmitting, setImportSubmitting] = useState(false);
-  const [importProgressMessage, setImportProgressMessage] = useState<string | null>(null);
-  const [importProgressCurrent, setImportProgressCurrent] = useState<number | null>(null);
-  const [importProgressTotal, setImportProgressTotal] = useState<number | null>(null);
-  const [showImportUrlInput, setShowImportUrlInput] = useState(false);
-  const [importUrl, setImportUrl] = useState("");
-  const [appendImportToExisting, setAppendImportToExisting] = useState(false);
-  const [importResultDialog, setImportResultDialog] = useState<ImportResultDialogState | null>(null);
-  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
-  const [pendingImportBookName, setPendingImportBookName] = useState<string | null>(null);
-  const [pendingImportBookCode, setPendingImportBookCode] = useState<string | null>(null);
-  const [showImportUploadConfirm, setShowImportUploadConfirm] = useState(false);
-  type BulkFileStatus = "pending" | "uploading" | "success" | "skipped" | "error";
-  type BulkFileResult = {
-    name: string;
-    status: BulkFileStatus;
-    message: string;
-    elapsedMs?: number;
-    progressMessage?: string | null;
-    progressCurrent?: number | null;
-    progressTotal?: number | null;
-  };
-  const [bulkFileResults, setBulkFileResults] = useState<BulkFileResult[]>([]);
-  const [bulkRunning, setBulkRunning] = useState(false);
   const [inlineMessage, setInlineMessage] = useState<string | null>(null);
   const [inlineFormData, setInlineFormData] = useState({
     levelName: "",
@@ -2996,8 +566,6 @@ function ScripturesContent() {
   const [bookPreviewTransliterationScript, setBookPreviewTransliterationScript] =
     useState<TransliterationScriptOption>("iast");
   const [bookBrowseMediaSearchQuery, setBookBrowseMediaSearchQuery] = useState("");
-  const [showShareManager, setShowShareManager] = useState(false);
-  const [shareDialogState, setShareDialogState] = useState<ShareDialogState | null>(null);
   const [schemas, setSchemas] = useState<SchemaOption[]>([]);
   const [selectedSchema, setSelectedSchema] = useState<number | null>(null);
   const [modalTranslationDrafts, setModalTranslationDrafts] =
@@ -3020,29 +588,73 @@ function ScripturesContent() {
     languagePrimary: "sanskrit",
   });
   const [bookSubmitting, setBookSubmitting] = useState(false);
-  const [bookShares, setBookShares] = useState<BookShare[]>([]);
-  const [sharesLoading, setSharesLoading] = useState(false);
-  const [sharesError, setSharesError] = useState<string | null>(null);
-  const [shareEmail, setShareEmail] = useState("");
-  const [sharePermission, setSharePermission] = useState<SharePermission>("viewer");
-  const [sharesSubmitting, setSharesSubmitting] = useState(false);
-  const [sendEmailWithShare, setSendEmailWithShare] = useState(true);
-  const [publicShareRecipientEmail, setPublicShareRecipientEmail] = useState("");
-  const [publicShareEmailSending, setPublicShareEmailSending] = useState(false);
-  const [shareUpdatingUserId, setShareUpdatingUserId] = useState<number | null>(null);
-  const [shareRemovingUserId, setShareRemovingUserId] = useState<number | null>(null);
-  const [preferences, setPreferences] = useState<UserPreferences | null>(null);
-  const [preferencesSaving, setPreferencesSaving] = useState(false);
-  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
-  const [showPreferencesDialog, setShowPreferencesDialog] = useState(false);
-  const [isReorderingBasket, setIsReorderingBasket] = useState(false);
-  const [basketItems, setBasketItems] = useState<BasketItem[]>([]);
+  const setBasketItemsRef = useRef<React.Dispatch<React.SetStateAction<BasketItem[]>> | null>(null);
+  const setUrlInitializedRef = useRef<((value: boolean) => void) | null>(null);
+  const {
+    authEmail,
+    showLogin, setShowLogin,
+    email, setEmail,
+    password, setPassword,
+    authMessage,
+    setAuthMessage,
+    authStatus,
+    authResolved,
+    authUserId,
+    canView,
+    canAdmin,
+    canContribute,
+    canEdit,
+    canImport,
+    loadAuth,
+    handleLogin,
+    handleSignOut,
+  } = useScripturesAuth({
+    router,
+    setBasketItemsRef,
+    setUrlInitializedRef,
+  });
+  const {
+    preferences,
+    setPreferences,
+    preferencesSaving,
+    preferencesMessage,
+    showPreferencesDialog,
+    setShowPreferencesDialog,
+    savePreferences,
+  } = usePreferences(authEmail);
+  const loadBooksRefreshRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const {
+    importBookInputRef,
+    importSubmitting,
+    importProgressMessage,
+    importProgressCurrent,
+    importProgressTotal,
+    showImportUrlInput,
+    setShowImportUrlInput,
+    importUrl,
+    setImportUrl,
+    appendImportToExisting,
+    setAppendImportToExisting,
+    importResultDialog,
+    setImportResultDialog,
+    pendingImportFile,
+    setPendingImportFile,
+    pendingImportBookName,
+    setPendingImportBookName,
+    pendingImportBookCode,
+    setPendingImportBookCode,
+    showImportUploadConfirm,
+    setShowImportUploadConfirm,
+    bulkFileResults,
+    setBulkFileResults,
+    bulkRunning,
+    pollImportJob,
+    startImportBookFile,
+    runBulkImportFiles,
+    handleImportBookFile,
+    handleImportBookUrl,
+  } = useImportPipeline({ canImport, loadBooksRefreshRef });
   const [previewBasketUiOverrides, setPreviewBasketUiOverrides] = useState<Record<number, boolean>>({});
-  const cancelledPreviewBasketAddsRef = useRef<Set<number>>(new Set());
-  const [basketRangeStart, setBasketRangeStart] = useState("");
-  const [basketRangeEnd, setBasketRangeEnd] = useState("");
-  const [basketRangeSubmitting, setBasketRangeSubmitting] = useState(false);
-  const [basketRangeMessage, setBasketRangeMessage] = useState<string | null>(null);
   const [metadataCategories, setMetadataCategories] = useState<MetadataCategory[]>([]);
   const [metadataCategoriesLoading, setMetadataCategoriesLoading] = useState(false);
   const [contentFieldLabels, setContentFieldLabels] = useState<Record<string, string>>({
@@ -3077,14 +689,6 @@ function ScripturesContent() {
   const [propertiesBookContentSanskrit, setPropertiesBookContentSanskrit] = useState("");
   const [propertiesBookContentTransliteration, setPropertiesBookContentTransliteration] = useState("");
   const [propertiesBookContentEnglish, setPropertiesBookContentEnglish] = useState("");
-  const [ownershipTargetEmail, setOwnershipTargetEmail] = useState("");
-  const [ownedBooksForTransfer, setOwnedBooksForTransfer] = useState<OwnedBookSummary[]>([]);
-  const [ownedBooksForTransferLoading, setOwnedBooksForTransferLoading] = useState(false);
-  const [selectedOwnedBookIds, setSelectedOwnedBookIds] = useState<number[]>([]);
-  const [showOwnershipTransferDialog, setShowOwnershipTransferDialog] = useState(false);
-  const [ownershipTransferSubmitting, setOwnershipTransferSubmitting] = useState(false);
-  const [ownershipTransferError, setOwnershipTransferError] = useState<string | null>(null);
-  const [ownershipTransferMessage, setOwnershipTransferMessage] = useState<string | null>(null);
   const [propertiesWordMeaningsEnabledLevels, setPropertiesWordMeaningsEnabledLevels] = useState<string[]>([]);
   const [propertiesWordMeaningsDefaultSourceLanguage, setPropertiesWordMeaningsDefaultSourceLanguage] =
     useState<string>(WORD_MEANINGS_DEFAULT_SOURCE_LANGUAGE);
@@ -3226,10 +830,122 @@ function ScripturesContent() {
     const privateBookGate = browsingHook.privateBookGate;
     const expandedIds = browsingHook.expandedIds;
     const selectedId = browsingHook.selectedId;
+  const {
+    nodeCommentary,
+    nodeCommentaryLoading,
+    nodeCommentaryError,
+    nodeComments,
+    nodeCommentsLoading,
+    nodeCommentsError,
+    nodeCommentEditorOpen,
+    setNodeCommentEditorOpen,
+    nodeCommentEditingId,
+    nodeCommentFormLanguage,
+    setNodeCommentFormLanguage,
+    nodeCommentFormText,
+    setNodeCommentFormText,
+    nodeCommentSubmitting,
+    nodeCommentMessage,
+    commentaryEditorOpen,
+    setCommentaryEditorOpen,
+    commentaryEditingId,
+    commentaryFormAuthor,
+    setCommentaryFormAuthor,
+    commentaryFormWorkTitle,
+    setCommentaryFormWorkTitle,
+    commentaryFormLanguage,
+    setCommentaryFormLanguage,
+    commentaryFormText,
+    setCommentaryFormText,
+    commentarySubmitting,
+    commentaryMessage,
+    resetNodeCommentEditor,
+    openCreateNodeCommentEditor,
+    openEditNodeCommentEditor,
+    handleSubmitNodeComment,
+    handleDeleteNodeComment,
+    resetCommentaryEditor,
+    openCreateCommentaryEditor,
+    openEditCommentaryEditor,
+    handleSubmitCommentary,
+    handleDeleteCommentary,
+  } = useNodeCommentary({ selectedId });
     const urlInitialized = browsingHook.urlInitialized;
     const breadcrumb = browsingHook.breadcrumb;
     const resolvedCurrentBookId =
       currentBook && typeof currentBook.id === "number" ? String(currentBook.id) : bookId;
+
+  const selectNodeRef = useRef<
+    ((nodeId: number, syncUrl?: boolean, expandPath?: boolean) => void) | null
+  >(null);
+  const saveBookMediaItemsRef = useRef<
+    | ((items: BookMediaItem[], successMessage: string, failureMessage: string) => Promise<boolean>)
+    | null
+  >(null);
+  const {
+    nodeMedia, setNodeMedia,
+    nodeMediaLoading, setNodeMediaLoading,
+    nodeMediaError, setNodeMediaError,
+    nodeMediaUploading, setNodeMediaUploading,
+    nodeMediaUpdating, setNodeMediaUpdating,
+    nodeMediaMessage, setNodeMediaMessage,
+    nodeMediaSearchQuery, setNodeMediaSearchQuery,
+    mediaBankAssets, setMediaBankAssets,
+    mediaBankLoading,
+    mediaBankError, setMediaBankError,
+    mediaBankMessage, setMediaBankMessage,
+    mediaBankUploading,
+    mediaBankUpdating,
+    mediaBankRenameId, setMediaBankRenameId,
+    mediaBankRenameValue, setMediaBankRenameValue,
+    externalMediaFormOpen, setExternalMediaFormOpen,
+    externalMediaFormContext, setExternalMediaFormContext,
+    externalMediaFormSubmitting, setExternalMediaFormSubmitting,
+    bookMediaActionsOpen, setBookMediaActionsOpen,
+    nodeMediaActionsOpen, setNodeMediaActionsOpen,
+    mediaManagerSearchQuery, setMediaManagerSearchQuery,
+    mediaManagerTypeFilter, setMediaManagerTypeFilter,
+    mediaManagerView, setMediaManagerView,
+    mediaManagerDensity, setMediaManagerDensity,
+    mediaManagerDensityHydrated, setMediaManagerDensityHydrated,
+    showMediaManagerDensityMenu, setShowMediaManagerDensityMenu,
+    showMediaManagerModal, setShowMediaManagerModal,
+    mediaManagerScope, setMediaManagerScope,
+    mediaBankViewMode, setMediaBankViewMode,
+    loadMediaBankAssets,
+    handleUploadMediaBankAsset,
+    openMediaLinkForm,
+    handleSubmitMediaLinkForm,
+    beginRenameMediaBankAsset,
+    cancelRenameMediaBankAsset,
+    handleRenameMediaBankAsset,
+    handleDeleteMediaBankAsset,
+    handleReplaceMediaBankAsset,
+    handleAttachMediaBankAssetToSelectedNode,
+    handleAttachMediaBankAssetToBook,
+    handleUploadNodeMediaViaBank,
+    handleUploadBookMediaViaBank,
+    loadNodeMedia,
+    handleDeleteNodeMedia,
+    handleSetDefaultNodeMedia,
+    handleMoveNodeMedia,
+    openNodeMediaManager,
+    getMediaBankAssetDisplayName,
+    getNodeMediaLabel,
+    getBookMediaLabel,
+  } = useNodeMedia({
+    authEmail,
+    authResolved,
+    selectedId,
+    bookId,
+    currentBook,
+    resolvedCurrentBookId,
+    setPropertiesError,
+    setPropertiesMessage,
+    setBookThumbnailUploading,
+    selectNodeRef,
+    saveBookMediaItemsRef,
+  });
 
     // Create setters for backward compatibility
     const setBookId = browsingHook.setBookId;
@@ -3248,6 +964,7 @@ function ScripturesContent() {
     const setSelectedId = browsingHook.setSelectedId;
     const setUrlInitialized = browsingHook.setUrlInitialized;
     const setBreadcrumb = browsingHook.setBreadcrumb;
+  setUrlInitializedRef.current = browsingHook.setUrlInitialized;
 
   const activeBooksRequestId = useRef(0);
   const bookNextOffsetRef = useRef(0);
@@ -3468,64 +1185,6 @@ function ScripturesContent() {
   useEffect(() => {
     setInlineMessage(null);
   }, [selectedId]);
-
-  useEffect(() => {
-    const shouldLockBodyScroll =
-      showPropertiesModal ||
-      showOwnershipTransferDialog ||
-      showBookPreview ||
-      showPdfExportDialog ||
-      showShareManager ||
-      showCreateBook ||
-      showPreferencesDialog ||
-      Boolean(action && actionNode);
-
-    if (!shouldLockBodyScroll) {
-      return;
-    }
-
-    const { body, documentElement } = document;
-    const scrollY = window.scrollY;
-    const previousBodyOverflow = body.style.overflow;
-    const previousBodyPosition = body.style.position;
-    const previousBodyTop = body.style.top;
-    const previousBodyWidth = body.style.width;
-    const previousBodyPaddingRight = body.style.paddingRight;
-    const previousBodyOverscrollBehavior = body.style.overscrollBehavior;
-    const previousHtmlOverscrollBehavior = documentElement.style.overscrollBehavior;
-    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
-
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
-    body.style.overscrollBehavior = "none";
-    documentElement.style.overscrollBehavior = "none";
-    if (scrollbarWidth > 0) {
-      body.style.paddingRight = `${scrollbarWidth}px`;
-    }
-
-    return () => {
-      body.style.overflow = previousBodyOverflow;
-      body.style.position = previousBodyPosition;
-      body.style.top = previousBodyTop;
-      body.style.width = previousBodyWidth;
-      body.style.paddingRight = previousBodyPaddingRight;
-      body.style.overscrollBehavior = previousBodyOverscrollBehavior;
-      documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior;
-      window.scrollTo(0, scrollY);
-    };
-  }, [
-    showPropertiesModal,
-    showOwnershipTransferDialog,
-    showBookPreview,
-    showPdfExportDialog,
-    showShareManager,
-    showCreateBook,
-    showPreferencesDialog,
-    action,
-    actionNode,
-  ]);
 
   const resolvePreviewContentLines = useCallback((
     block: BookPreviewBlock,
@@ -5443,88 +3102,6 @@ function ScripturesContent() {
     }
   };
 
-  const loadBasket = async () => {
-    try {
-      const response = await fetch("/api/cart/me", { credentials: "include" });
-      if (!response.ok) {
-        setBasketItems([]);
-        return;
-      }
-      const data = (await response.json()) as {
-        items?: Array<{
-          id: number;
-          item_id: number;
-          order: number;
-          metadata?: {
-            title?: string;
-            content?: string;
-            breadcrumb?: string;
-            book_name?: string;
-            level_name?: string;
-          };
-        }>;
-      };
-
-      const mappedItems = (data.items || [])
-        .map((item) => ({
-          cart_item_id: item.id,
-          node_id: item.item_id,
-          title: item.metadata?.title,
-          content: item.metadata?.content,
-          breadcrumb: item.metadata?.breadcrumb,
-          book_name: item.metadata?.book_name,
-          level_name: item.metadata?.level_name,
-          order: item.order,
-        }))
-        .sort((a, b) => a.order - b.order);
-
-      setBasketItems(mappedItems);
-    } catch {
-      setBasketItems([]);
-    }
-  };
-
-  const loadAuth = async (force = false) => {
-    try {
-      const data = await getMe(force ? { force: true } : undefined);
-      if (!data) {
-        setAuthEmail(null);
-        setAuthUserId(null);
-        setAuthStatus("Not authenticated");
-        setCanView(false);
-        setCanAdmin(false);
-        setCanContribute(false);
-        setCanEdit(false);
-        setCanImport(false);
-        return;
-      }
-      setAuthUserId(data.id ?? null);
-      setAuthEmail(data.email || null);
-      setAuthStatus(data.email ? `Signed in as ${data.email}` : "Authenticated");
-      const canViewPermission = (data.permissions as { can_view?: boolean } | undefined)?.can_view;
-      const canImportPermission = (data.permissions as { can_import?: boolean } | undefined)?.can_import;
-      setCanView(Boolean(canViewPermission || data.role === "viewer" || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
-      setCanAdmin(Boolean(data.permissions?.can_admin || data.role === "admin"));
-      setCanContribute(Boolean(data.permissions?.can_contribute || data.role === "contributor" || data.role === "editor" || data.role === "admin"));
-      setCanEdit(Boolean(data.permissions?.can_edit || data.role === "editor" || data.role === "admin"));
-      setCanImport(Boolean(canImportPermission || data.permissions?.can_admin || data.role === "admin"));
-    } catch {
-      setAuthEmail(null);
-      setAuthUserId(null);
-      setAuthStatus("Auth check failed");
-      setCanView(false);
-      setCanAdmin(false);
-      setCanContribute(false);
-      setCanEdit(false);
-      setCanImport(false);
-    } finally {
-      setAuthResolved(true);
-    }
-  };
-
-  useEffect(() => {
-    loadAuth();
-  }, []);
 
   const currentBookMetadata =
     currentBook?.metadata_json || currentBook?.metadata || null;
@@ -5580,37 +3157,6 @@ function ScripturesContent() {
       setMobilePanel("content");
     }
   }, [canExploreStructure, showExploreStructure]);
-
-  useEffect(() => {
-    if (!authResolved) return;
-
-    if (!authEmail) {
-      setBasketItems([]);
-      return;
-    }
-    void loadBasket();
-  }, [authResolved, authEmail]);
-
-  useEffect(() => {
-    setPreviewBasketUiOverrides((prev) => {
-      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
-      let next: Record<number, boolean> | null = null;
-      for (const [rawNodeId, overrideValue] of Object.entries(prev)) {
-        const nodeId = Number(rawNodeId);
-        if (!Number.isFinite(nodeId)) {
-          continue;
-        }
-        const inBasket = basketNodeIds.has(nodeId);
-        if (inBasket === overrideValue) {
-          if (!next) {
-            next = { ...prev };
-          }
-          delete next[nodeId];
-        }
-      }
-      return next ?? prev;
-    });
-  }, [basketItems]);
 
   useEffect(() => {
     const loadPreferences = async () => {
@@ -5779,66 +3325,6 @@ function ScripturesContent() {
     return () => window.clearTimeout(timer);
   }, [authResolved, authEmail, bookBrowserView, bookBrowserDensity, mediaManagerView, mediaManagerDensity]);
 
-  useEffect(() => {
-    if (!selectedId) {
-      activeNodeMediaAbortController.current?.abort();
-      setNodeMedia([]);
-      setNodeMediaError(null);
-      setNodeMediaLoading(false);
-      setNodeMediaUploading(false);
-      setNodeMediaUpdating(false);
-      setNodeMediaMessage(null);
-      setNodeMediaSearchQuery("");
-      if (mediaManagerScope === "node") {
-        setShowMediaManagerModal(false);
-      }
-      activeNodeCommentaryAbortController.current?.abort();
-      setNodeCommentary([]);
-      setNodeCommentaryError(null);
-      setNodeCommentaryLoading(false);
-      activeNodeCommentsAbortController.current?.abort();
-      setNodeComments([]);
-      setNodeCommentsError(null);
-      setNodeCommentsLoading(false);
-      setNodeCommentEditorOpen(false);
-      setNodeCommentEditingId(null);
-      setNodeCommentFormLanguage("en");
-      setNodeCommentFormText("");
-      setNodeCommentMessage(null);
-      setCommentaryEditorOpen(false);
-      setCommentaryEditingId(null);
-      setCommentaryFormAuthor("");
-      setCommentaryFormWorkTitle("");
-      setCommentaryFormLanguage("en");
-      setCommentaryFormText("");
-      setCommentaryMessage(null);
-      return;
-    }
-
-    void loadNodeMedia(selectedId);
-    void loadNodeCommentary(selectedId);
-    void loadNodeComments(selectedId);
-  }, [selectedId, mediaManagerScope]);
-
-  useEffect(() => {
-    if (!showMediaManagerModal) {
-      setMediaBankViewMode("manage");
-      setExternalMediaFormOpen(false);
-      setExternalMediaFormSubmitting(false);
-      setBookMediaActionsOpen(false);
-      setNodeMediaActionsOpen(false);
-      return;
-    }
-    setMediaManagerSearchQuery("");
-    setMediaManagerTypeFilter("all");
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    setExternalMediaFormOpen(false);
-    setExternalMediaFormSubmitting(false);
-    setBookMediaActionsOpen(false);
-    setNodeMediaActionsOpen(false);
-    void loadMediaBankAssets();
-  }, [showMediaManagerModal, mediaManagerScope, selectedId, bookId]);
 
   useEffect(() => {
     if (!authEmail) {
@@ -5881,721 +3367,6 @@ function ScripturesContent() {
 
     void loadContentFieldLabels();
   }, [authEmail, metadataCategories]);
-
-  const addCurrentToBasket = () => {
-    if (!nodeContent) return;
-
-    void (async () => {
-      if (basketItems.some((item) => item.node_id === nodeContent.id)) {
-        return;
-      }
-
-      const seq = formatSequenceDisplay(
-        nodeContent.sequence_number ?? nodeContent.id,
-        Boolean(nodeContent.has_content)
-      ) || nodeContent.id;
-      const title = `${formatValue(nodeContent.level_name) || "Level"} ${seq}`;
-      const contentPreview =
-        formatValue(nodeContent.content_data?.basic?.translation) ||
-        formatValue(nodeContent.content_data?.translations?.english) ||
-        formatValue(nodeContent.content_data?.basic?.transliteration) ||
-        formatValue(nodeContent.content_data?.basic?.sanskrit) ||
-        undefined;
-      const fullPath = findPath(treeData, nodeContent.id) || breadcrumb;
-      const breadcrumbPathParts = fullPath.map((node, index) => {
-        const canonicalLevel = getSchemaMatchedLevelName(
-          formatValue(node.level_name) || "",
-          typeof node.level_order === "number" ? node.level_order : null
-        );
-        const levelRaw = canonicalLevel || formatValue(node.level_name) || "Level";
-        const levelLabel = levelRaw
-          .toString()
-          .replace(/_/g, " ")
-          .toLowerCase()
-          .replace(/\b\w/g, (char) => char.toUpperCase());
-        const isLeaf = index === fullPath.length - 1;
-        const seq = formatSequenceDisplay(node.sequence_number || node.id, isLeaf);
-        const levelWithSeq = seq ? `${levelLabel} ${seq}` : levelLabel;
-        const preferred = getNodeBreadcrumbLabel(node).trim();
-        const normalizedPreferred = preferred.toLowerCase();
-        const normalizedLevelWithSeq = levelWithSeq.toLowerCase();
-        const preferredHasSameSeq = Boolean(seq) && normalizedPreferred.includes(seq.toString());
-        const levelHasSameSeq = Boolean(seq) && normalizedLevelWithSeq.includes(seq.toString());
-
-        if (!preferred) return levelWithSeq;
-        if (normalizedPreferred === levelLabel.toLowerCase()) return levelWithSeq;
-        if (normalizedPreferred === normalizedLevelWithSeq) return preferred;
-        if (preferredHasSameSeq && levelHasSameSeq) return preferred;
-        return `${preferred}: ${levelWithSeq}`;
-      });
-      const breadcrumbParts = [
-        currentBook?.book_name,
-        ...breadcrumbPathParts,
-      ].filter((part): part is string => Boolean(part && part.trim()));
-      const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
-
-      try {
-        const response = await fetch("/api/cart/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            item_id: nodeContent.id,
-            item_type: "library_node",
-            metadata: {
-              title,
-              content: contentPreview,
-              breadcrumb: breadcrumbText,
-              book_name: currentBook?.book_name,
-              level_name: nodeContent.level_name,
-            },
-          }),
-        });
-
-        if (response.status === 409) {
-          await loadBasket();
-          return;
-        }
-
-        if (!response.ok) {
-          return;
-        }
-
-        const item = (await response.json()) as {
-          id: number;
-          item_id: number;
-          order: number;
-          metadata?: {
-            title?: string;
-            content?: string;
-            breadcrumb?: string;
-            book_name?: string;
-            level_name?: string;
-          };
-        };
-
-        setBasketItems((prev) =>
-          [
-            ...prev,
-            {
-              cart_item_id: item.id,
-              node_id: item.item_id,
-              title: item.metadata?.title || title,
-              content: item.metadata?.content || contentPreview,
-              breadcrumb: item.metadata?.breadcrumb || breadcrumbText,
-              book_name: item.metadata?.book_name || currentBook?.book_name,
-              level_name: item.metadata?.level_name || nodeContent.level_name,
-              order: item.order,
-            },
-          ].sort((a, b) => a.order - b.order)
-        );
-      } catch {
-        // ignore basket add failures for now
-      }
-    })();
-  };
-
-  const addSelectedRangeToBasket = () => {
-    if (!selectedTreeNode || !authEmail) {
-      return;
-    }
-
-    void (async () => {
-      const parsedStart = Number.parseInt(basketRangeStart.trim(), 10);
-      const parsedEnd = Number.parseInt(basketRangeEnd.trim(), 10);
-
-      if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) {
-        setBasketRangeMessage("Enter valid start and end verse numbers.");
-        return;
-      }
-
-      if (parsedStart <= 0 || parsedEnd <= 0) {
-        setBasketRangeMessage("Verse numbers must be positive.");
-        return;
-      }
-
-      if (parsedStart > parsedEnd) {
-        setBasketRangeMessage("Start verse must be less than or equal to end verse.");
-        return;
-      }
-
-      const directChildren = Array.isArray(selectedTreeNode.children)
-        ? selectedTreeNode.children
-        : [];
-      const candidateVerses = directChildren
-        .filter((node) => !node.children || node.children.length === 0)
-        .map((node) => ({
-          node,
-          sequence: getSequenceSortValue(node),
-        }))
-        .filter((entry) => Number.isFinite(entry.sequence))
-        .sort((a, b) => a.sequence - b.sequence)
-        .filter((entry) => entry.sequence >= parsedStart && entry.sequence <= parsedEnd)
-        .map((entry) => entry.node);
-
-      if (candidateVerses.length === 0) {
-        setBasketRangeMessage(
-          `No direct verses found in this section for range ${parsedStart}-${parsedEnd}.`
-        );
-        return;
-      }
-
-      if (candidateVerses.length > 250) {
-        setBasketRangeMessage("Range is too large. Please use a smaller span (max 250 verses).");
-        return;
-      }
-
-      setBasketRangeSubmitting(true);
-      setBasketRangeMessage(null);
-
-      let addedCount = 0;
-      let skippedCount = 0;
-      let failedCount = 0;
-      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
-
-      try {
-        for (const verseNode of candidateVerses) {
-          if (basketNodeIds.has(verseNode.id)) {
-            skippedCount += 1;
-            continue;
-          }
-
-          const isLeaf = !verseNode.children || verseNode.children.length === 0;
-          const sequenceDisplay =
-            formatSequenceDisplay(verseNode.sequence_number || verseNode.id, isLeaf) || verseNode.id;
-          const levelLabel = formatValue(verseNode.level_name) || "Level";
-          const titleLabel = getNodeBreadcrumbLabel(verseNode).trim();
-          const title = titleLabel || `${levelLabel} ${sequenceDisplay}`;
-          const fullPath = findPath(treeData, verseNode.id) || breadcrumb;
-          const breadcrumbPathParts = fullPath.map((node, index) => {
-            const canonicalLevel = getSchemaMatchedLevelName(
-              formatValue(node.level_name) || "",
-              typeof node.level_order === "number" ? node.level_order : null
-            );
-            const levelRaw = canonicalLevel || formatValue(node.level_name) || "Level";
-            const levelDisplay = levelRaw
-              .toString()
-              .replace(/_/g, " ")
-              .toLowerCase()
-              .replace(/\b\w/g, (char) => char.toUpperCase());
-            const pathIsLeaf = index === fullPath.length - 1;
-            const seq = formatSequenceDisplay(node.sequence_number || node.id, pathIsLeaf);
-            const levelWithSeq = seq ? `${levelDisplay} ${seq}` : levelDisplay;
-            const preferred = getNodeBreadcrumbLabel(node).trim();
-            const normalizedPreferred = preferred.toLowerCase();
-            const normalizedLevelWithSeq = levelWithSeq.toLowerCase();
-            const preferredHasSameSeq = Boolean(seq) && normalizedPreferred.includes(seq.toString());
-            const levelHasSameSeq = Boolean(seq) && normalizedLevelWithSeq.includes(seq.toString());
-
-            if (!preferred) return levelWithSeq;
-            if (normalizedPreferred === levelDisplay.toLowerCase()) return levelWithSeq;
-            if (normalizedPreferred === normalizedLevelWithSeq) return preferred;
-            if (preferredHasSameSeq && levelHasSameSeq) return preferred;
-            return `${preferred}: ${levelWithSeq}`;
-          });
-          const breadcrumbParts = [currentBook?.book_name, ...breadcrumbPathParts].filter(
-            (part): part is string => Boolean(part && part.trim())
-          );
-          const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
-
-          const response = await fetch("/api/cart/items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              item_id: verseNode.id,
-              item_type: "library_node",
-              metadata: {
-                title,
-                breadcrumb: breadcrumbText,
-                book_name: currentBook?.book_name,
-                level_name: verseNode.level_name,
-              },
-            }),
-          });
-
-          if (response.status === 409) {
-            skippedCount += 1;
-            basketNodeIds.add(verseNode.id);
-            continue;
-          }
-
-          if (!response.ok) {
-            failedCount += 1;
-            continue;
-          }
-
-          addedCount += 1;
-          basketNodeIds.add(verseNode.id);
-        }
-
-        await loadBasket();
-        const summaryParts = [
-          `${addedCount} added`,
-          `${skippedCount} skipped`,
-          `${failedCount} failed`,
-        ];
-        setBasketRangeMessage(`Range ${parsedStart}-${parsedEnd}: ${summaryParts.join(", ")}.`);
-      } catch {
-        setBasketRangeMessage("Could not add range to basket. Please try again.");
-      } finally {
-        setBasketRangeSubmitting(false);
-      }
-    })();
-  };
-
-  const addPreviewBlockToBasket = useCallback(
-    (nodeId: number, block: BookPreviewBlock) => {
-      if (!authEmail) return;
-      if (basketItems.some((item) => item.node_id === nodeId)) return;
-      cancelledPreviewBasketAddsRef.current.delete(nodeId);
-
-      const seq =
-        formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
-      const levelLabel = formatValue(block.content.level_name) || "Level";
-      const title = block.title || `${levelLabel} ${seq}`;
-      const contentPreview =
-        (block.content.translations?.english) ||
-        (typeof block.content.english === "string" ? block.content.english : undefined) ||
-        (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
-        (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
-        undefined;
-      const breadcrumbParts = [
-        currentBook?.book_name,
-        ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
-      ].filter((p): p is string => Boolean(p?.trim()));
-      const breadcrumbText = breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
-
-      // Optimistically mark as added so the basket icon remains visible immediately.
-      setBasketItems((prev) => {
-        if (prev.some((item) => item.node_id === nodeId)) {
-          return prev;
-        }
-        const nextOrder = prev.reduce((maxOrder, item) => Math.max(maxOrder, item.order), 0) + 1;
-        return [
-          ...prev,
-          {
-            node_id: nodeId,
-            title,
-            content: contentPreview,
-            breadcrumb: breadcrumbText,
-            book_name: currentBook?.book_name,
-            level_name: block.content.level_name,
-            order: nextOrder,
-          },
-        ].sort((a, b) => a.order - b.order);
-      });
-
-      void (async () => {
-        try {
-          const response = await fetch("/api/cart/items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              item_id: nodeId,
-              item_type: "library_node",
-              metadata: {
-                title,
-                content: contentPreview,
-                breadcrumb: breadcrumbText,
-                book_name: currentBook?.book_name,
-                level_name: block.content.level_name,
-              },
-            }),
-          });
-
-          if (response.status === 409) {
-            await loadBasket();
-            return;
-          }
-          if (!response.ok) {
-            setBasketItems((prev) =>
-              prev.filter((item) => !(item.node_id === nodeId && !item.cart_item_id))
-            );
-            setPreviewBasketUiOverrides((prev) => ({ ...prev, [nodeId]: false }));
-            return;
-          }
-
-          const item = (await response.json()) as {
-            id: number;
-            item_id: number;
-            order: number;
-            metadata?: {
-              title?: string;
-              content?: string;
-              breadcrumb?: string;
-              book_name?: string;
-              level_name?: string;
-            };
-          };
-
-          if (cancelledPreviewBasketAddsRef.current.has(item.item_id)) {
-            cancelledPreviewBasketAddsRef.current.delete(item.item_id);
-            setBasketItems((prev) =>
-              prev.filter((candidate) => !(candidate.node_id === item.item_id && !candidate.cart_item_id))
-            );
-            try {
-              await fetch(`/api/cart/items/${item.id}`, {
-                method: "DELETE",
-                credentials: "include",
-              });
-            } catch {
-              // ignore cleanup failures
-            }
-            return;
-          }
-
-          setBasketItems((prev) => {
-            const filtered = prev.filter((candidate) => candidate.node_id !== item.item_id);
-            return [
-              ...filtered,
-              {
-                cart_item_id: item.id,
-                node_id: item.item_id,
-                title: item.metadata?.title || title,
-                content: item.metadata?.content || contentPreview,
-                breadcrumb: item.metadata?.breadcrumb || breadcrumbText,
-                book_name: item.metadata?.book_name || currentBook?.book_name,
-                level_name: item.metadata?.level_name || block.content.level_name,
-                order: item.order,
-              },
-            ].sort((a, b) => a.order - b.order);
-          });
-        } catch {
-          setBasketItems((prev) =>
-            prev.filter((item) => !(item.node_id === nodeId && !item.cart_item_id))
-          );
-          setPreviewBasketUiOverrides((prev) => ({ ...prev, [nodeId]: false }));
-        }
-      })();
-    },
-    [authEmail, basketItems, breadcrumb, currentBook, loadBasket, setBasketItems]
-  );
-
-  const addPreviewRangeToBasket = () => {
-    if (!authEmail || !bookPreviewArtifact) return;
-
-    void (async () => {
-      const parsedStart = Number.parseInt(basketRangeStart.trim(), 10);
-      const parsedEnd = Number.parseInt(basketRangeEnd.trim(), 10);
-
-      if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) {
-        setBasketRangeMessage("Enter valid start and end verse numbers.");
-        return;
-      }
-      if (parsedStart <= 0 || parsedEnd <= 0) {
-        setBasketRangeMessage("Verse numbers must be positive.");
-        return;
-      }
-      if (parsedStart > parsedEnd) {
-        setBasketRangeMessage("Start verse must be less than or equal to end verse.");
-        return;
-      }
-
-      const candidateBlocks = bookPreviewArtifact.sections.body.filter((block) => {
-        if (!block.source_node_id) return false;
-        const seq = parseSequenceNumber(block.content.sequence_number);
-        return seq !== null && seq >= parsedStart && seq <= parsedEnd;
-      });
-
-      if (candidateBlocks.length === 0) {
-        setBasketRangeMessage(
-          `No verses found in preview for range ${parsedStart}-${parsedEnd}.`
-        );
-        return;
-      }
-      if (candidateBlocks.length > 250) {
-        setBasketRangeMessage("Range is too large. Please use a smaller span (max 250 verses).");
-        return;
-      }
-
-      setBasketRangeSubmitting(true);
-      setBasketRangeMessage(null);
-
-      let addedCount = 0;
-      let skippedCount = 0;
-      let failedCount = 0;
-      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
-
-      try {
-        for (const block of candidateBlocks) {
-          const nodeId = block.source_node_id!;
-          if (basketNodeIds.has(nodeId)) {
-            skippedCount += 1;
-            continue;
-          }
-          const seq =
-            formatSequenceDisplay(block.content.sequence_number ?? nodeId, true) || nodeId;
-          const levelLabel = formatValue(block.content.level_name) || "Level";
-          const title = block.title || `${levelLabel} ${seq}`;
-          const contentPreview =
-            block.content.translations?.english ||
-            (typeof block.content.english === "string" ? block.content.english : undefined) ||
-            (typeof block.content.transliteration === "string" ? block.content.transliteration : undefined) ||
-            (typeof block.content.sanskrit === "string" ? block.content.sanskrit : undefined) ||
-            undefined;
-          const breadcrumbParts = [
-            currentBook?.book_name,
-            ...breadcrumb.map((n) => getNodeBreadcrumbLabel(n)),
-          ].filter((p): p is string => Boolean(p?.trim()));
-          const breadcrumbText =
-            breadcrumbParts.length > 0 ? breadcrumbParts.join(" / ") : undefined;
-
-          const response = await fetch("/api/cart/items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({
-              item_id: nodeId,
-              item_type: "library_node",
-              metadata: {
-                title,
-                content: contentPreview,
-                breadcrumb: breadcrumbText,
-                book_name: currentBook?.book_name,
-                level_name: block.content.level_name,
-              },
-            }),
-          });
-
-          if (response.status === 409) {
-            skippedCount += 1;
-            basketNodeIds.add(nodeId);
-            continue;
-          }
-          if (!response.ok) {
-            failedCount += 1;
-            continue;
-          }
-          addedCount += 1;
-          basketNodeIds.add(nodeId);
-        }
-
-        await loadBasket();
-        setBasketRangeMessage(
-          `Range ${parsedStart}-${parsedEnd}: ${addedCount} added, ${skippedCount} skipped, ${failedCount} failed.`
-        );
-      } catch {
-        setBasketRangeMessage("Could not add range to basket. Please try again.");
-      } finally {
-        setBasketRangeSubmitting(false);
-      }
-    })();
-  };
-
-  const removeFromBasket = (item: BasketItem) => {
-    const removeMatches = (candidate: BasketItem): boolean => {
-      if (item.cart_item_id && candidate.cart_item_id) {
-        return candidate.cart_item_id === item.cart_item_id;
-      }
-      return candidate.node_id === item.node_id && candidate.order === item.order;
-    };
-
-    // Optimistically hide/remove immediately so inactive-node taps reflect state instantly.
-    setBasketItems((prev) => prev.filter((candidate) => !removeMatches(candidate)));
-
-    void (async () => {
-      if (!item.cart_item_id) {
-        // If this is an optimistic preview add, cancel the in-flight create.
-        cancelledPreviewBasketAddsRef.current.add(item.node_id);
-        return;
-      }
-
-      cancelledPreviewBasketAddsRef.current.delete(item.node_id);
-
-      try {
-        const response = await fetch(`/api/cart/items/${item.cart_item_id}`, {
-          method: "DELETE",
-          credentials: "include",
-        });
-        if (!response.ok && response.status !== 404) {
-          // Roll back optimistic remove if delete failed server-side.
-          setBasketItems((prev) => {
-            if (prev.some((candidate) => removeMatches(candidate))) {
-              return prev;
-            }
-            return [...prev, item].sort((a, b) => a.order - b.order);
-          });
-          return;
-        }
-      } catch {
-        // Roll back optimistic remove on request failure.
-        setBasketItems((prev) => {
-          if (prev.some((candidate) => removeMatches(candidate))) {
-            return prev;
-          }
-          return [...prev, item].sort((a, b) => a.order - b.order);
-        });
-      }
-    })();
-  };
-
-  const removePreviewNodeFromBasket = useCallback(
-    (nodeId: number) => {
-      const matchingItems = basketItems.filter((item) => item.node_id === nodeId);
-      if (matchingItems.length === 0) {
-        return;
-      }
-
-      // Ensure any in-flight optimistic add for this node cannot re-appear.
-      cancelledPreviewBasketAddsRef.current.add(nodeId);
-
-      // Remove all node duplicates immediately so inactive-node toggle reflects instantly.
-      setBasketItems((prev) => prev.filter((item) => item.node_id !== nodeId));
-
-      const cartItemIds = matchingItems
-        .map((item) => item.cart_item_id)
-        .filter((id): id is number => typeof id === "number");
-      if (cartItemIds.length === 0) {
-        return;
-      }
-
-      void (async () => {
-        let shouldReload = false;
-        try {
-          for (const cartItemId of cartItemIds) {
-            const response = await fetch(`/api/cart/items/${cartItemId}`, {
-              method: "DELETE",
-              credentials: "include",
-            });
-            if (!response.ok && response.status !== 404) {
-              shouldReload = true;
-            }
-          }
-        } catch {
-          shouldReload = true;
-        } finally {
-          cancelledPreviewBasketAddsRef.current.delete(nodeId);
-          if (shouldReload) {
-            await loadBasket();
-            setPreviewBasketUiOverrides((prev) => {
-              if (!(nodeId in prev)) {
-                return prev;
-              }
-              const next = { ...prev };
-              delete next[nodeId];
-              return next;
-            });
-          }
-        }
-      })();
-    },
-    [basketItems, loadBasket]
-  );
-
-  const moveBasketItem = (item: BasketItem, direction: "up" | "down") => {
-    void (async () => {
-      if (isReorderingBasket) return;
-
-      setIsReorderingBasket(true);
-      const current = [...basketItems].sort((a, b) => a.order - b.order);
-      const index = current.findIndex((candidate) => {
-        if (item.cart_item_id && candidate.cart_item_id) {
-          return candidate.cart_item_id === item.cart_item_id;
-        }
-        return candidate.node_id === item.node_id && candidate.order === item.order;
-      });
-      if (index === -1) {
-        setIsReorderingBasket(false);
-        return;
-      }
-
-      const targetIndex = direction === "up" ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= current.length) {
-        setIsReorderingBasket(false);
-        return;
-      }
-
-      const [moved] = current.splice(index, 1);
-      current.splice(targetIndex, 0, moved);
-
-      const reordered = current.map((item, idx) => ({ ...item, order: idx }));
-      setBasketItems(reordered);
-
-      const itemOrder = reordered
-        .map((item) => item.cart_item_id)
-        .filter((id): id is number => typeof id === "number");
-
-      if (itemOrder.length !== reordered.length) {
-        await loadBasket();
-        return;
-      }
-
-      try {
-        const response = await fetch("/api/cart/items/reorder", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ item_order: itemOrder }),
-        });
-
-        if (!response.ok) {
-          await loadBasket();
-        }
-      } catch {
-        await loadBasket();
-      } finally {
-        setIsReorderingBasket(false);
-      }
-    })();
-  };
-
-  const clearBasket = () => {
-    void (async () => {
-      try {
-        await fetch("/api/cart/me", {
-          method: "DELETE",
-          credentials: "include",
-        });
-      } finally {
-        setBasketItems([]);
-      }
-    })();
-  };
-
-  const savePreferences = async (nextPreferences?: UserPreferences | null): Promise<boolean> => {
-    const preferencesToSave = normalizePreferences(nextPreferences ?? preferences);
-    if (!preferencesToSave) return false;
-    try {
-      setPreferencesSaving(true);
-      setPreferencesMessage(null);
-
-      if (!authEmail && typeof window !== "undefined") {
-        const toStore: StoredScripturesPreferences = {
-          preferences: preferencesToSave,
-        };
-        window.localStorage.setItem(LOCAL_SCRIPTURES_PREFERENCES_KEY, JSON.stringify(toStore));
-        persistUiPreferences(preferencesToSave);
-      }
-
-      if (authEmail) {
-        const response = await fetch("/api/preferences", {
-          method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(preferencesToSave),
-        });
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        if (!response.ok) {
-          throw new Error(payload?.detail || "Failed to save preferences");
-        }
-      }
-
-      setPreferencesMessage("Preferences saved");
-      return true;
-    } catch (err) {
-      setPreferencesMessage(err instanceof Error ? err.message : "Failed to save preferences");
-      return false;
-    } finally {
-      setPreferencesSaving(false);
-      setTimeout(() => setPreferencesMessage(null), 2000);
-    }
-  };
-
-  useEffect(() => {
-    applyUiPreferencesToDocument(preferences);
-  }, [preferences]);
 
   useEffect(() => {
     const bookSource = getWordMeaningsDefaultSourceLanguageFromBook(currentBook);
@@ -7948,58 +4719,6 @@ function ScripturesContent() {
     }
   };
 
-  const getNodeMediaDisplayOrder = (media: MediaFile): number => {
-    const metadata =
-      media.metadata && typeof media.metadata === "object"
-        ? media.metadata
-        : media.metadata_json && typeof media.metadata_json === "object"
-          ? media.metadata_json
-          : null;
-    const raw = metadata?.display_order;
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      return raw;
-    }
-    if (typeof raw === "string") {
-      const parsed = Number(raw);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-    return 0;
-  };
-
-  const isNodeMediaDefault = (media: MediaFile): boolean => {
-    const metadata =
-      media.metadata && typeof media.metadata === "object"
-        ? media.metadata
-        : media.metadata_json && typeof media.metadata_json === "object"
-          ? media.metadata_json
-          : null;
-    return Boolean(metadata?.is_default);
-  };
-
-  const sortNodeMediaItems = (items: MediaFile[]): MediaFile[] =>
-    [...items].sort((a, b) => {
-      const typeCompare = (a.media_type || "").localeCompare(b.media_type || "");
-      if (typeCompare !== 0) {
-        return typeCompare;
-      }
-      const defaultCompare = Number(isNodeMediaDefault(b)) - Number(isNodeMediaDefault(a));
-      if (defaultCompare !== 0) {
-        return defaultCompare;
-      }
-      const orderCompare = getNodeMediaDisplayOrder(a) - getNodeMediaDisplayOrder(b);
-      if (orderCompare !== 0) {
-        return orderCompare;
-      }
-      const aCreated = a.created_at ? Date.parse(a.created_at) : 0;
-      const bCreated = b.created_at ? Date.parse(b.created_at) : 0;
-      if (aCreated !== bCreated) {
-        return aCreated - bCreated;
-      }
-      return a.id - b.id;
-    });
-
   const mediaMatchesSearch = (media: MediaFile, query: string): boolean => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
@@ -8122,343 +4841,8 @@ function ScripturesContent() {
     return haystack.includes(normalized);
   };
 
-  const getNodeMediaLabel = (media: MediaFile): string => {
-    const mediaType = (media.media_type || "").trim();
-    const mediaLookupKey = getMediaLookupKey(mediaType, media.url);
-    const metadata =
-      media.metadata && typeof media.metadata === "object"
-        ? media.metadata
-        : media.metadata_json && typeof media.metadata_json === "object"
-          ? media.metadata_json
-          : null;
 
-    const metadataAssetIdRaw = metadata?.asset_id;
-    const metadataAssetId =
-      typeof metadataAssetIdRaw === "number"
-        ? metadataAssetIdRaw
-        : typeof metadataAssetIdRaw === "string" && metadataAssetIdRaw.trim()
-          ? Number.parseInt(metadataAssetIdRaw, 10)
-          : null;
 
-    const matchingAssetById =
-      typeof metadataAssetId === "number" && Number.isFinite(metadataAssetId)
-        ? mediaBankAssets.find((asset) => asset.id === metadataAssetId)
-        : undefined;
-
-    const matchingAssetByLookup = mediaBankAssets.find((asset) => {
-      const assetType = (asset.media_type || "").trim();
-      if (assetType !== mediaType) {
-        return false;
-      }
-      const assetLookupKey = getMediaLookupKey(assetType, asset.url || "");
-      if (assetLookupKey === mediaLookupKey) {
-        return true;
-      }
-      return (asset.url || "").trim() === (media.url || "").trim();
-    });
-
-    const matchingAsset = matchingAssetById ?? matchingAssetByLookup;
-
-    const repoDisplayName =
-      typeof matchingAsset?.metadata?.display_name === "string" ? matchingAsset.metadata.display_name.trim() : "";
-    if (repoDisplayName) {
-      return repoDisplayName;
-    }
-    const repoFilename =
-      typeof matchingAsset?.metadata?.original_filename === "string"
-        ? matchingAsset.metadata.original_filename.trim()
-        : "";
-    if (repoFilename) {
-      return repoFilename;
-    }
-
-    const directDisplayName = typeof metadata?.display_name === "string" ? metadata.display_name.trim() : "";
-    if (directDisplayName) {
-      return directDisplayName;
-    }
-
-    const directAssetDisplayName =
-      typeof metadata?.asset_display_name === "string" ? metadata.asset_display_name.trim() : "";
-    if (directAssetDisplayName) {
-      return directAssetDisplayName;
-    }
-
-    const directFilename = typeof metadata?.original_filename === "string" ? metadata.original_filename.trim() : "";
-    if (directFilename) {
-      return directFilename;
-    }
-
-    return inferDisplayNameFromUrl(media.url) || `${mediaType || "media"} #${media.id}`;
-  };
-
-  const loadMediaBankAssets = async () => {
-    setMediaBankLoading(true);
-    setMediaBankError(null);
-    try {
-      const data = await listMediaBankAssets(300);
-      setMediaBankAssets(Array.isArray(data) ? (data as MediaAsset[]) : []);
-    } catch (err) {
-      setMediaBankAssets([]);
-      setMediaBankError(err instanceof Error ? err.message : "Unable to load media repo");
-    } finally {
-      setMediaBankLoading(false);
-    }
-  };
-
-  const handleUploadMediaBankAsset = async (file: File) => {
-    setMediaBankUploading(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    try {
-      await uploadMediaBankAsset(file);
-      setMediaBankMessage("Media asset uploaded.");
-      await loadMediaBankAssets();
-    } catch (err) {
-      setMediaBankError(err instanceof Error ? err.message : "Failed to upload media asset");
-    } finally {
-      setMediaBankUploading(false);
-    }
-  };
-
-  const openMediaLinkForm = (context: MediaLinkContext) => {
-    setExternalMediaFormContext(context);
-    setExternalMediaFormOpen(true);
-  };
-
-  const createMediaBankLinkAsset = async (
-    url: string,
-    displayName?: string,
-    mediaType?: ExternalMediaType
-  ): Promise<MediaAsset> => {
-    const asset = await createMediaBankLinkAssetRequest({
-      url,
-      displayName,
-      mediaType,
-    });
-    if (!asset || typeof asset.id !== "number") {
-      throw new Error("Link created but no media asset was returned.");
-    }
-    return asset as MediaAsset;
-  };
-
-  const uploadMediaBankAssetAndReturn = async (file: File): Promise<MediaAsset> => {
-    const asset = (await uploadMediaBankAsset(file)) as MediaAsset | null;
-    if (!asset || typeof asset.id !== "number") {
-      throw new Error("Upload succeeded but no media asset was returned.");
-    }
-    return asset;
-  };
-
-  const attachMediaBankAssetToNode = async (assetId: number, nodeId: number): Promise<void> => {
-    const response = await fetchContentWithSessionRecovery(`/media-bank/assets/${assetId}/attach/nodes/${nodeId}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ is_default: false }),
-    });
-    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    if (!response.ok) {
-      throw new Error(getErrorMessageFromPayload(payload, "Failed to attach media asset"));
-    }
-  };
-
-  const handleSubmitMediaLinkForm = async (payload: {
-    url: string;
-    displayName?: string;
-    mediaType?: ExternalMediaType;
-  }) => {
-    if (!payload.url.trim()) {
-      setMediaBankError("URL is required.");
-      return;
-    }
-
-    setExternalMediaFormSubmitting(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    setNodeMediaError(null);
-    setNodeMediaMessage(null);
-    setPropertiesError(null);
-    setPropertiesMessage(null);
-
-    try {
-      const createdAsset = await createMediaBankLinkAsset(
-        payload.url,
-        payload.displayName,
-        payload.mediaType
-      );
-
-      if (externalMediaFormContext === "node") {
-        if (!selectedId) {
-          throw new Error("Select a node first to attach media.");
-        }
-        await attachMediaBankAssetToNode(createdAsset.id, selectedId);
-        setNodeMediaMessage("Link added to repo and attached to node.");
-        await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
-      } else if (externalMediaFormContext === "book") {
-        const attached = await handleAttachMediaBankAssetToBook(createdAsset);
-        if (!attached) {
-          throw new Error("Failed to attach external media to book.");
-        }
-        await loadMediaBankAssets();
-      } else {
-        setMediaBankMessage("External media link added.");
-        await loadMediaBankAssets();
-      }
-
-      setExternalMediaFormOpen(false);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to add external media link";
-      if (externalMediaFormContext === "node") {
-        setNodeMediaError(message);
-      } else if (externalMediaFormContext === "book") {
-        setPropertiesError(message);
-      } else {
-        setMediaBankError(message);
-      }
-    } finally {
-      setExternalMediaFormSubmitting(false);
-    }
-  };
-
-  const getMediaBankAssetDisplayName = (asset: MediaAsset): string => {
-    if (typeof asset.metadata?.display_name === "string" && asset.metadata.display_name.trim()) {
-      return asset.metadata.display_name.trim();
-    }
-    if (typeof asset.metadata?.original_filename === "string" && asset.metadata.original_filename.trim()) {
-      return asset.metadata.original_filename.trim();
-    }
-    return `${asset.media_type} #${asset.id}`;
-  };
-
-  const beginRenameMediaBankAsset = (asset: MediaAsset) => {
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    setMediaBankRenameId(asset.id);
-    setMediaBankRenameValue(getMediaBankAssetDisplayName(asset));
-  };
-
-  const cancelRenameMediaBankAsset = () => {
-    setMediaBankRenameId(null);
-    setMediaBankRenameValue("");
-  };
-
-  const handleRenameMediaBankAsset = async (assetId: number) => {
-    const asset = mediaBankAssets.find((entry) => entry.id === assetId);
-    if (!asset) {
-      cancelRenameMediaBankAsset();
-      return;
-    }
-
-    const currentName = getMediaBankAssetDisplayName(asset);
-    const trimmed = mediaBankRenameValue.trim();
-    if (!trimmed) {
-      setMediaBankError("Name cannot be empty.");
-      return;
-    }
-
-    if (trimmed === currentName) {
-      cancelRenameMediaBankAsset();
-      return;
-    }
-
-    setMediaBankUpdating(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    try {
-      const updatedAsset = await renameMediaBankAsset(assetId, trimmed);
-      setMediaBankAssets((prev) =>
-        prev.map((entry) =>
-          entry.id === assetId
-            ? {
-                ...entry,
-                ...updatedAsset,
-              }
-            : entry
-        )
-      );
-      cancelRenameMediaBankAsset();
-      setMediaBankMessage("Media asset renamed.");
-    } catch (err) {
-      setMediaBankError(err instanceof Error ? err.message : "Failed to rename media asset");
-    } finally {
-      setMediaBankUpdating(false);
-    }
-  };
-
-  const handleDeleteMediaBankAsset = async (assetId: number) => {
-    setMediaBankUpdating(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    try {
-      await deleteMediaBankAsset(assetId);
-      setMediaBankMessage("Media asset removed from repo.");
-      await loadMediaBankAssets();
-    } catch (err) {
-      if (err instanceof MediaBankClientError && err.status === 409) {
-        setMediaBankError(
-          "Cannot remove this asset yet. Detach it from all nodes first, then delete it from the multimedia repo."
-        );
-      } else {
-        setMediaBankError(err instanceof Error ? err.message : "Failed to delete media asset");
-      }
-    } finally {
-      setMediaBankUpdating(false);
-    }
-  };
-
-  const handleReplaceMediaBankAsset = async (asset: MediaAsset, file: File) => {
-    setMediaBankUpdating(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    try {
-      await replaceMediaBankAssetFile(asset.id, file);
-      setMediaBankMessage("Media asset file replaced. Existing links remain intact.");
-      await Promise.all([
-        loadMediaBankAssets(),
-        mediaManagerScope === "node" && selectedId ? loadNodeMedia(selectedId, true) : Promise.resolve(),
-      ]);
-    } catch (err) {
-      setMediaBankError(err instanceof Error ? err.message : "Failed to replace media asset");
-    } finally {
-      setMediaBankUpdating(false);
-    }
-  };
-
-  const handleAttachMediaBankAssetToSelectedNode = async (assetId: number): Promise<boolean> => {
-    if (!selectedId) {
-      setMediaBankError("Select a node first to attach media.");
-      return false;
-    }
-
-    setMediaBankUpdating(true);
-    setMediaBankError(null);
-    setMediaBankMessage(null);
-    try {
-      await attachMediaBankAssetToNode(assetId, selectedId);
-      setMediaBankMessage("Media asset attached to node.");
-      await loadNodeMedia(selectedId, true);
-      return true;
-    } catch (err) {
-      setMediaBankError(err instanceof Error ? err.message : "Failed to attach media asset");
-      return false;
-    } finally {
-      setMediaBankUpdating(false);
-    }
-  };
-
-  const getBookMediaLabel = (media: BookMediaItem): string => {
-    if (typeof media.display_name === "string" && media.display_name.trim()) {
-      return media.display_name.trim();
-    }
-    const matchingAsset =
-      typeof media.asset_id === "number"
-        ? mediaBankAssets.find((asset) => asset.id === media.asset_id)
-        : undefined;
-    if (matchingAsset) {
-      return getMediaBankAssetDisplayName(matchingAsset);
-    }
-    return inferDisplayNameFromUrl(media.url) || `${media.media_type || "media"}`;
-  };
 
   const handleLevelNameOverrideChange = (canonicalLevelName: string, nextDisplayName: string) => {
     setLevelNameOverridesDraft((prev) => ({
@@ -8602,51 +4986,8 @@ function ScripturesContent() {
     return saveBookMetadata(nextMetadata, successMessage, failureMessage);
   };
 
-  const handleAttachMediaBankAssetToBook = async (asset: MediaAsset): Promise<boolean> => {
-    const currentItems = getBookMediaItems(currentBook);
-    const assetDisplayName = getMediaBankAssetDisplayName(asset);
-    const mediaLookupKey = getMediaLookupKey(asset.media_type, asset.url || "");
 
-    const exists = currentItems.some((item) => {
-      const itemLookupKey = getMediaLookupKey(item.media_type, item.url || "");
-      if (typeof item.asset_id === "number" && item.asset_id === asset.id) {
-        return true;
-      }
-      return itemLookupKey === mediaLookupKey;
-    });
-    if (exists) {
-      setPropertiesMessage("Media is already attached to this book.");
-      return true;
-    }
-
-    const normalizedType = normalizeBookMediaType(asset.media_type, asset.url || "");
-    const sameTypeItems = currentItems.filter((item) => item.media_type === normalizedType);
-    const isDefault = sameTypeItems.length === 0;
-
-    const nextItems = [
-      ...currentItems,
-      {
-        media_type: normalizedType,
-        url: asset.url,
-        display_name: assetDisplayName,
-        content_type:
-          typeof asset.metadata?.content_type === "string" && asset.metadata.content_type.trim()
-            ? asset.metadata.content_type.trim()
-            : undefined,
-        size_bytes:
-          typeof asset.metadata?.size_bytes === "number" || typeof asset.metadata?.size_bytes === "string"
-            ? asset.metadata.size_bytes
-            : undefined,
-        replaced_at:
-          typeof asset.metadata?.replaced_at === "string" && asset.metadata.replaced_at.trim()
-            ? asset.metadata.replaced_at.trim()
-            : undefined,
-        asset_id: asset.id,
-        is_default: isDefault,
-      },
-    ];
-    return saveBookMediaItems(nextItems, "Media attached to book.", "Failed to attach media to book");
-  };
+  saveBookMediaItemsRef.current = saveBookMediaItems;
 
   const handleDeleteBookMedia = async (targetMedia: BookMediaItem) => {
     const items = getBookMediaItems(currentBook);
@@ -8677,528 +5018,7 @@ function ScripturesContent() {
     await saveBookMediaItems(nextItems, "Book media removed.", "Failed to remove book media");
   };
 
-  const handleUploadNodeMediaViaBank = async (file: File) => {
-    if (!selectedId) {
-      setNodeMediaError("Select a node first to attach media.");
-      return;
-    }
 
-    setNodeMediaUploading(true);
-    setNodeMediaError(null);
-    setNodeMediaMessage(null);
-    try {
-      const uploadedAsset = await uploadMediaBankAssetAndReturn(file);
-      await attachMediaBankAssetToNode(uploadedAsset.id, selectedId);
-
-      setNodeMediaMessage("Multimedia uploaded to repo and attached to node.");
-      await Promise.all([loadNodeMedia(selectedId, true), loadMediaBankAssets()]);
-    } catch (err) {
-      setNodeMediaError(err instanceof Error ? err.message : "Failed to upload multimedia");
-    } finally {
-      setNodeMediaUploading(false);
-    }
-  };
-
-  const handleUploadBookMediaViaBank = async (file: File) => {
-    if (!resolvedCurrentBookId) {
-      setPropertiesError("Select a book first.");
-      return;
-    }
-
-    setBookThumbnailUploading(true);
-    setPropertiesError(null);
-    setPropertiesMessage(null);
-    try {
-      const uploadedAsset = await uploadMediaBankAssetAndReturn(file);
-      const attached = await handleAttachMediaBankAssetToBook(uploadedAsset);
-      if (attached) {
-        await loadMediaBankAssets();
-      }
-    } catch (err) {
-      setPropertiesError(err instanceof Error ? err.message : "Failed to upload media");
-    } finally {
-      setBookThumbnailUploading(false);
-    }
-  };
-
-  const loadNodeMedia = async (nodeId: number, force = false) => {
-    if (!force && activeNodeMediaNodeId.current === nodeId) return;
-
-    activeNodeMediaAbortController.current?.abort();
-    const abortController = new AbortController();
-    activeNodeMediaAbortController.current = abortController;
-    const requestId = activeNodeMediaRequestId.current + 1;
-    activeNodeMediaRequestId.current = requestId;
-    activeNodeMediaNodeId.current = nodeId;
-
-    setNodeMediaLoading(true);
-    setNodeMediaError(null);
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/media?limit=20`, {
-        credentials: "include",
-        signal: abortController.signal,
-      });
-      if (requestId !== activeNodeMediaRequestId.current) return;
-      if (!response.ok) {
-        setNodeMedia([]);
-        setNodeMediaError("Unable to load multimedia for this node.");
-        return;
-      }
-      const data = (await response.json()) as MediaFile[];
-      if (requestId !== activeNodeMediaRequestId.current) return;
-      setNodeMedia(sortNodeMediaItems(Array.isArray(data) ? data : []));
-      setNodeMediaError(null);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return;
-      }
-      if (requestId !== activeNodeMediaRequestId.current) return;
-      setNodeMedia([]);
-      setNodeMediaError("Unable to load multimedia for this node.");
-    } finally {
-      if (requestId === activeNodeMediaRequestId.current) {
-        setNodeMediaLoading(false);
-        activeNodeMediaNodeId.current = null;
-      }
-    }
-  };
-
-  const handleDeleteNodeMedia = async (media: MediaFile) => {
-    const targetNodeId = typeof media.node_id === "number" ? media.node_id : selectedId;
-    if (!targetNodeId) {
-      return;
-    }
-
-    setNodeMediaUpdating(true);
-    setNodeMediaError(null);
-    setNodeMediaMessage(null);
-
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${targetNodeId}/media/${media.id}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as unknown;
-      if (!response.ok) {
-        throw new Error(getErrorMessageFromPayload(payload, "Failed to delete media"));
-      }
-
-      setNodeMediaMessage("Multimedia removed.");
-      if (selectedId === targetNodeId) {
-        await loadNodeMedia(targetNodeId, true);
-      }
-    } catch (err) {
-      setNodeMediaError(err instanceof Error ? err.message : "Failed to delete media");
-    } finally {
-      setNodeMediaUpdating(false);
-    }
-  };
-
-  const handleSetDefaultNodeMedia = async (mediaId: number) => {
-    if (!selectedId) {
-      return;
-    }
-
-    setNodeMediaUpdating(true);
-    setNodeMediaError(null);
-    setNodeMediaMessage(null);
-
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/media/${mediaId}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_default: true }),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to set default media");
-      }
-
-      setNodeMediaMessage("Default media updated.");
-      await loadNodeMedia(selectedId, true);
-    } catch (err) {
-      setNodeMediaError(err instanceof Error ? err.message : "Failed to set default media");
-    } finally {
-      setNodeMediaUpdating(false);
-    }
-  };
-
-  const handleMoveNodeMedia = async (mediaId: number, direction: "up" | "down") => {
-    if (!selectedId) {
-      return;
-    }
-
-    const targetMedia = nodeMedia.find((item) => item.id === mediaId);
-    if (!targetMedia) {
-      return;
-    }
-
-    const sameType = sortNodeMediaItems(
-      nodeMedia.filter((item) => (item.media_type || "") === (targetMedia.media_type || ""))
-    );
-    const currentIndex = sameType.findIndex((item) => item.id === mediaId);
-    if (currentIndex < 0) {
-      return;
-    }
-
-    const swapIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (swapIndex < 0 || swapIndex >= sameType.length) {
-      return;
-    }
-
-    const reordered = [...sameType];
-    const [moved] = reordered.splice(currentIndex, 1);
-    reordered.splice(swapIndex, 0, moved);
-    const orderedIds = reordered.map((item) => item.id);
-
-    setNodeMediaUpdating(true);
-    setNodeMediaError(null);
-    setNodeMediaMessage(null);
-
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/media/reorder`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          media_type: targetMedia.media_type,
-          media_ids: orderedIds,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(payload?.detail || "Failed to reorder media");
-      }
-
-      setNodeMediaMessage("Media order updated.");
-      await loadNodeMedia(selectedId, true);
-    } catch (err) {
-      setNodeMediaError(err instanceof Error ? err.message : "Failed to reorder media");
-    } finally {
-      setNodeMediaUpdating(false);
-    }
-  };
-
-  const openNodeMediaManager = (targetNodeId?: number | null) => {
-    const nextNodeId =
-      typeof targetNodeId === "number" && Number.isFinite(targetNodeId)
-        ? targetNodeId
-        : selectedId;
-
-    if (!nextNodeId) {
-      setNodeMediaError("Select a node first to manage multimedia.");
-      return;
-    }
-
-    if (nextNodeId !== selectedId) {
-      selectNode(nextNodeId);
-    }
-
-    void loadNodeMedia(nextNodeId, true);
-    setMediaManagerScope("node");
-    setShowMediaManagerModal(true);
-  };
-
-  const loadNodeCommentary = async (nodeId: number, force = false) => {
-    if (!force && activeNodeCommentaryNodeId.current === nodeId) return;
-
-    activeNodeCommentaryAbortController.current?.abort();
-    const abortController = new AbortController();
-    activeNodeCommentaryAbortController.current = abortController;
-    const requestId = activeNodeCommentaryRequestId.current + 1;
-    activeNodeCommentaryRequestId.current = requestId;
-    activeNodeCommentaryNodeId.current = nodeId;
-
-    setNodeCommentaryLoading(true);
-    setNodeCommentaryError(null);
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/commentary?limit=100`, {
-        credentials: "include",
-        signal: abortController.signal,
-      });
-      if (requestId !== activeNodeCommentaryRequestId.current) return;
-      if (!response.ok) {
-        setNodeCommentary([]);
-        setNodeCommentaryError("Unable to load commentary for this node.");
-        return;
-      }
-      const data = (await response.json()) as CommentaryEntry[];
-      if (requestId !== activeNodeCommentaryRequestId.current) return;
-      setNodeCommentary(Array.isArray(data) ? data : []);
-      setNodeCommentaryError(null);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return;
-      }
-      if (requestId !== activeNodeCommentaryRequestId.current) return;
-      setNodeCommentary([]);
-      setNodeCommentaryError("Unable to load commentary for this node.");
-    } finally {
-      if (requestId === activeNodeCommentaryRequestId.current) {
-        setNodeCommentaryLoading(false);
-        activeNodeCommentaryNodeId.current = null;
-      }
-    }
-  };
-
-  const loadNodeComments = async (nodeId: number, force = false) => {
-    if (!force && activeNodeCommentsNodeId.current === nodeId) return;
-
-    activeNodeCommentsAbortController.current?.abort();
-    const abortController = new AbortController();
-    activeNodeCommentsAbortController.current = abortController;
-    const requestId = activeNodeCommentsRequestId.current + 1;
-    activeNodeCommentsRequestId.current = requestId;
-    activeNodeCommentsNodeId.current = nodeId;
-
-    setNodeCommentsLoading(true);
-    setNodeCommentsError(null);
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${nodeId}/comments?limit=200`, {
-        credentials: "include",
-        signal: abortController.signal,
-      });
-      if (requestId !== activeNodeCommentsRequestId.current) return;
-      if (!response.ok) {
-        setNodeComments([]);
-        setNodeCommentsError("Unable to load comments for this node.");
-        return;
-      }
-      const data = (await response.json()) as NodeComment[];
-      if (requestId !== activeNodeCommentsRequestId.current) return;
-      setNodeComments(Array.isArray(data) ? data : []);
-      setNodeCommentsError(null);
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return;
-      }
-      if (requestId !== activeNodeCommentsRequestId.current) return;
-      setNodeComments([]);
-      setNodeCommentsError("Unable to load comments for this node.");
-    } finally {
-      if (requestId === activeNodeCommentsRequestId.current) {
-        setNodeCommentsLoading(false);
-        activeNodeCommentsNodeId.current = null;
-      }
-    }
-  };
-
-  const resetNodeCommentEditor = () => {
-    setNodeCommentEditingId(null);
-    setNodeCommentFormLanguage("en");
-    setNodeCommentFormText("");
-  };
-
-  const openCreateNodeCommentEditor = () => {
-    resetNodeCommentEditor();
-    setNodeCommentEditorOpen(true);
-    setNodeCommentMessage(null);
-  };
-
-  const openEditNodeCommentEditor = (entry: NodeComment) => {
-    setNodeCommentEditingId(entry.id);
-    setNodeCommentFormLanguage((entry.language_code || "en").trim().toLowerCase() || "en");
-    setNodeCommentFormText(entry.content_text || "");
-    setNodeCommentEditorOpen(true);
-    setNodeCommentMessage(null);
-  };
-
-  const handleSubmitNodeComment = async () => {
-    if (!selectedId) return;
-    const trimmedText = nodeCommentFormText.trim();
-    if (!trimmedText) {
-      setNodeCommentMessage("Comment text is required.");
-      return;
-    }
-
-    const trimmedLanguage = nodeCommentFormLanguage.trim().toLowerCase() || "en";
-
-    setNodeCommentSubmitting(true);
-    setNodeCommentMessage(null);
-    try {
-      const endpoint =
-        nodeCommentEditingId !== null
-          ? contentPath(`/nodes/${selectedId}/comments/${nodeCommentEditingId}`)
-          : contentPath(`/nodes/${selectedId}/comments`);
-      const payload =
-        nodeCommentEditingId !== null
-          ? {
-              content_text: trimmedText,
-              language_code: trimmedLanguage,
-            }
-          : {
-              node_id: selectedId,
-              content_text: trimmedText,
-              language_code: trimmedLanguage,
-            };
-
-      const response = await fetch(endpoint, {
-        method: nodeCommentEditingId !== null ? "PATCH" : "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(result?.detail || "Unable to save comment.");
-      }
-
-      await loadNodeComments(selectedId, true);
-      resetNodeCommentEditor();
-      setNodeCommentEditorOpen(false);
-      setNodeCommentMessage("Comment saved.");
-    } catch (err) {
-      setNodeCommentMessage(err instanceof Error ? err.message : "Unable to save comment.");
-    } finally {
-      setNodeCommentSubmitting(false);
-    }
-  };
-
-  const handleDeleteNodeComment = async (commentId: number) => {
-    if (!selectedId) return;
-    if (!window.confirm("Delete this comment?")) return;
-
-    setNodeCommentSubmitting(true);
-    setNodeCommentMessage(null);
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/comments/${commentId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(result?.detail || "Unable to delete comment.");
-      }
-
-      await loadNodeComments(selectedId, true);
-      if (nodeCommentEditingId === commentId) {
-        resetNodeCommentEditor();
-      }
-      setNodeCommentMessage("Comment deleted.");
-    } catch (err) {
-      setNodeCommentMessage(err instanceof Error ? err.message : "Unable to delete comment.");
-    } finally {
-      setNodeCommentSubmitting(false);
-    }
-  };
-
-  const resetCommentaryEditor = () => {
-    setCommentaryEditingId(null);
-    setCommentaryFormAuthor("");
-    setCommentaryFormWorkTitle("");
-    setCommentaryFormLanguage("en");
-    setCommentaryFormText("");
-  };
-
-  const openCreateCommentaryEditor = () => {
-    resetCommentaryEditor();
-    setCommentaryEditorOpen(true);
-    setCommentaryMessage(null);
-  };
-
-  const openEditCommentaryEditor = (entry: CommentaryEntry) => {
-    const metadata =
-      entry.metadata && typeof entry.metadata === "object"
-        ? (entry.metadata as Record<string, unknown>)
-        : {};
-    const author = typeof metadata.author === "string" ? metadata.author : "";
-    const workTitle = typeof metadata.work_title === "string" ? metadata.work_title : "";
-
-    setCommentaryEditingId(entry.id);
-    setCommentaryFormAuthor(author);
-    setCommentaryFormWorkTitle(workTitle);
-    setCommentaryFormLanguage((entry.language_code || "en").trim().toLowerCase() || "en");
-    setCommentaryFormText(entry.content_text || "");
-    setCommentaryEditorOpen(true);
-    setCommentaryMessage(null);
-  };
-
-  const handleSubmitCommentary = async () => {
-    if (!selectedId) return;
-    const trimmedText = commentaryFormText.trim();
-    if (!trimmedText) {
-      setCommentaryMessage("Commentary text is required.");
-      return;
-    }
-
-    const trimmedLanguage = commentaryFormLanguage.trim().toLowerCase() || "en";
-    const trimmedAuthor = commentaryFormAuthor.trim();
-    const trimmedWorkTitle = commentaryFormWorkTitle.trim();
-    const metadata: Record<string, unknown> = {};
-    if (trimmedAuthor) metadata.author = trimmedAuthor;
-    if (trimmedWorkTitle) metadata.work_title = trimmedWorkTitle;
-
-    setCommentarySubmitting(true);
-    setCommentaryMessage(null);
-    try {
-      const endpoint =
-        commentaryEditingId !== null
-          ? contentPath(`/nodes/${selectedId}/commentary/${commentaryEditingId}`)
-          : contentPath(`/nodes/${selectedId}/commentary`);
-      const payload =
-        commentaryEditingId !== null
-          ? {
-              content_text: trimmedText,
-              language_code: trimmedLanguage,
-              metadata,
-            }
-          : {
-              node_id: selectedId,
-              content_text: trimmedText,
-              language_code: trimmedLanguage,
-              metadata,
-            };
-
-      const response = await fetch(endpoint, {
-        method: commentaryEditingId !== null ? "PATCH" : "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(result?.detail || "Unable to save commentary.");
-      }
-
-      await loadNodeCommentary(selectedId, true);
-      resetCommentaryEditor();
-      setCommentaryEditorOpen(false);
-      setCommentaryMessage("Commentary saved.");
-    } catch (err) {
-      setCommentaryMessage(err instanceof Error ? err.message : "Unable to save commentary.");
-    } finally {
-      setCommentarySubmitting(false);
-    }
-  };
-
-  const handleDeleteCommentary = async (entryId: number) => {
-    if (!selectedId) return;
-    if (!window.confirm("Delete this commentary entry?")) return;
-
-    setCommentarySubmitting(true);
-    setCommentaryMessage(null);
-    try {
-      const response = await fetchContentWithSessionRecovery(`/nodes/${selectedId}/commentary/${entryId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const result = (await response.json().catch(() => null)) as { detail?: string } | null;
-      if (!response.ok) {
-        throw new Error(result?.detail || "Unable to delete commentary.");
-      }
-
-      await loadNodeCommentary(selectedId, true);
-      if (commentaryEditingId === entryId) {
-        resetCommentaryEditor();
-      }
-      setCommentaryMessage("Commentary deleted.");
-    } catch (err) {
-      setCommentaryMessage(err instanceof Error ? err.message : "Unable to delete commentary.");
-    } finally {
-      setCommentarySubmitting(false);
-    }
-  };
 
   const scrollToNode = (nodeId: number) => {
     if (typeof window === "undefined") return;
@@ -9294,6 +5114,7 @@ function ScripturesContent() {
       syncSelectionUrl(nodeId);
     }
   };
+  selectNodeRef.current = selectNode;
 
   const selectBookRoot = (syncUrl = true) => {
     if (selectedId !== BOOK_ROOT_NODE_ID && hasUnsavedInlineChanges()) {
@@ -9333,229 +5154,10 @@ function ScripturesContent() {
   const loadBooksRefresh = async () => {
     await browsingHook.loadBooksPage({ reset: true });
   };
-
-  const loadBookShares = async (targetBookId?: string) => {
-    const effectiveBookId = targetBookId ?? browsingHook.bookId;
-    if (!effectiveBookId) return;
-    setSharesLoading(true);
-    setSharesError(null);
-    try {
-      const response = await fetch(`/api/books/${effectiveBookId}/shares`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookShare[]
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        setBookShares([]);
-        setSharesError(
-          (payload as { detail?: string } | null)?.detail || "Failed to load shares"
-        );
-        return;
-      }
-      setBookShares(Array.isArray(payload) ? payload : []);
-    } catch {
-      setBookShares([]);
-      setSharesError("Failed to load shares");
-    } finally {
-      setSharesLoading(false);
-    }
-  };
-
-  const loadOwnedBooksForTransfer = async () => {
-    if (!isCurrentBookOwner) {
-      setOwnedBooksForTransfer([]);
-      setSelectedOwnedBookIds([]);
-      return;
-    }
-
-    setOwnedBooksForTransferLoading(true);
-    setOwnershipTransferError(null);
-    try {
-      const response = await fetch("/api/books/owned-by-me", {
-        credentials: "include",
-        cache: "no-store",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | OwnedBookSummary[]
-        | { detail?: string }
-        | null;
-
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Failed to load owned books");
-      }
-
-      const books = Array.isArray(payload) ? payload : [];
-      setOwnedBooksForTransfer(books);
-      setSelectedOwnedBookIds((prev) => {
-        if (prev.length > 0) {
-          const validIds = new Set(books.map((book) => book.id));
-          return prev.filter((id) => validIds.has(id));
-        }
-        const currentId = currentBook?.id;
-        if (typeof currentId === "number" && books.some((book) => book.id === currentId)) {
-          return [currentId];
-        }
-        return [];
-      });
-    } catch (err) {
-      setOwnedBooksForTransfer([]);
-      setSelectedOwnedBookIds([]);
-      setOwnershipTransferError(err instanceof Error ? err.message : "Failed to load owned books");
-    } finally {
-      setOwnedBooksForTransferLoading(false);
-    }
-  };
-
-  const handleTransferBookOwnership = async () => {
-    const targetEmail = ownershipTargetEmail.trim().toLowerCase();
-    if (!targetEmail) {
-      setOwnershipTransferError("Target email is required");
-      return;
-    }
-    if (selectedOwnedBookIds.length === 0) {
-      setOwnershipTransferError("Select at least one book");
-      return;
-    }
-
-    const selectedBookNames = ownedBooksForTransfer
-      .filter((book) => selectedOwnedBookIds.includes(book.id))
-      .map((book) => book.book_name);
-    const previewList = selectedBookNames.slice(0, 3).join(", ");
-    const plusMore = selectedBookNames.length > 3 ? ` +${selectedBookNames.length - 3} more` : "";
-    if (
-      !window.confirm(
-        `Transfer ownership of ${selectedOwnedBookIds.length} selected book(s) to ${targetEmail}? ${previewList}${plusMore}`
-      )
-    ) {
-      return;
-    }
-
-    setOwnershipTransferSubmitting(true);
-    setOwnershipTransferError(null);
-    setOwnershipTransferMessage(null);
-    try {
-      const response = await fetch("/api/books/transfer-ownership", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          target_email: targetEmail,
-          book_ids: selectedOwnedBookIds,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookOwnershipTransferResponse
-        | { detail?: string }
-        | null;
-
-      if (!response.ok) {
-        throw new Error((payload as { detail?: string } | null)?.detail || "Ownership transfer failed");
-      }
-
-      const result = payload as BookOwnershipTransferResponse;
-      const transferredIds = new Set(result.transferred_book_ids || []);
-      const patchOwnerMetadata = (metadata: BookMetadata | null | undefined): BookMetadata => ({
-        ...(metadata || {}),
-        owner_id: result.target_user_id,
-        owner_email: result.target_email,
-      });
-
-      setBooks((prev) =>
-        prev.map((book) =>
-          transferredIds.has(book.id)
-            ? {
-                ...book,
-                metadata_json: patchOwnerMetadata(book.metadata_json),
-                metadata: patchOwnerMetadata(book.metadata),
-              }
-            : book
-        )
-      );
-      if (currentBook && transferredIds.has(currentBook.id)) {
-        setCurrentBook({
-          ...currentBook,
-          metadata_json: patchOwnerMetadata(currentBook.metadata_json),
-          metadata: patchOwnerMetadata(currentBook.metadata),
-        });
-      }
-
-      setOwnershipTransferMessage(
-        `Transferred ${result.transferred_count} book(s) to ${result.target_email}.`
-      );
-      setShowOwnershipTransferDialog(false);
-      setSelectedOwnedBookIds([]);
-      setOwnershipTargetEmail("");
-      setOwnedBooksForTransfer([]);
-      await loadBooksRefresh();
-    } catch (err) {
-      setOwnershipTransferError(err instanceof Error ? err.message : "Ownership transfer failed");
-    } finally {
-      setOwnershipTransferSubmitting(false);
-    }
-  };
-
-  const openOwnershipTransferDialog = async () => {
-    if (!isCurrentBookOwner) return;
-    setOwnershipTransferError(null);
-    setOwnershipTransferMessage(null);
-    setOwnershipTargetEmail("");
-    setSelectedOwnedBookIds([]);
-    setShowOwnershipTransferDialog(true);
-    await loadOwnedBooksForTransfer();
-  };
-
-  const closeOwnershipTransferDialog = () => {
-    setShowOwnershipTransferDialog(false);
-    setOwnershipTransferError(null);
-    setOwnershipTargetEmail("");
-    setOwnedBooksForTransfer([]);
-    setSelectedOwnedBookIds([]);
-  };
-
-  const closeShareDialog = () => {
-    if (shareDialogCopyFeedbackTimerRef.current !== null && typeof window !== "undefined") {
-      window.clearTimeout(shareDialogCopyFeedbackTimerRef.current);
-      shareDialogCopyFeedbackTimerRef.current = null;
-    }
-    setShareDialogCopyFeedback(null);
-    setShowShareManager(false);
-    setSharesError(null);
-    setPublicShareRecipientEmail("");
-    setPublicShareEmailSending(false);
-    setShareDialogState(null);
-  };
+  loadBooksRefreshRef.current = loadBooksRefresh;
 
   const resolveBookVisibility = (value: unknown): "private" | "public" =>
     String(value || "").trim().toLowerCase() === "public" ? "public" : "private";
-
-  const openShareDialogForBook = async (nextDialogState: ShareDialogState) => {
-    const didSelect = handleSelectBook(nextDialogState.bookId, {
-      syncUrl: false,
-      preserveLayout: true,
-    });
-    if (!didSelect) return;
-    setSharesError(null);
-    setPublicShareRecipientEmail("");
-    setPublicShareEmailSending(false);
-    const effectivePrivateAccessPath =
-      nextDialogState.privateAccessPath ||
-      buildScripturesPreviewPath("book", nextDialogState.bookId);
-    setShareDialogState({
-      ...nextDialogState,
-      privateAccessPath: effectivePrivateAccessPath,
-      privateCopyTarget: nextDialogState.privateCopyTarget || "book",
-    });
-    setShowShareManager(true);
-    if (nextDialogState.visibility === "private" && nextDialogState.canManageShares) {
-      await loadBookShares(nextDialogState.bookId);
-      return;
-    }
-    setBookShares([]);
-    setSharesLoading(false);
-  };
 
   const buildScripturesBrowsePath = (targetBookId: string, targetNodeId?: number | null) => {
     const params = new URLSearchParams();
@@ -9598,103 +5200,6 @@ function ScripturesContent() {
     } catch {
       return false;
     }
-  };
-
-  const copyShareUrl = async (
-    absoluteUrl: string,
-    target: "book" | "node" | "leaf",
-    onDone?: () => void
-  ): Promise<boolean> => {
-    onDone?.();
-    const ok = await writeClipboardText(absoluteUrl);
-    if (ok) {
-      setAuthMessage("Link copied.");
-      setCopyTarget(target);
-      window.setTimeout(() => {
-        setAuthMessage(null);
-        setCopyTarget(null);
-      }, 2000);
-    } else {
-      setAuthMessage("Failed to copy link.");
-      setCopyTarget(target);
-      window.setTimeout(() => {
-        setAuthMessage(null);
-        setCopyTarget(null);
-      }, 2000);
-    }
-    return ok;
-  };
-
-  const showShareDialogCopyFeedback = (key: string, ok: boolean) => {
-    if (shareDialogCopyFeedbackTimerRef.current !== null && typeof window !== "undefined") {
-      window.clearTimeout(shareDialogCopyFeedbackTimerRef.current);
-      shareDialogCopyFeedbackTimerRef.current = null;
-    }
-    setShareDialogCopyFeedback({ key, ok });
-    if (typeof window !== "undefined") {
-      shareDialogCopyFeedbackTimerRef.current = window.setTimeout(() => {
-        setShareDialogCopyFeedback(null);
-        shareDialogCopyFeedbackTimerRef.current = null;
-      }, 1800);
-    }
-  };
-
-  const emailShareUrl = (
-    subjectText: string,
-    bodyText: string,
-    recipientEmail: string,
-    onDone?: () => void
-  ) => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const isValidEmailAddress = (value: string) =>
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-
-    const email = recipientEmail.trim();
-    if (!email) {
-      onDone?.();
-      return;
-    }
-
-    if (!isValidEmailAddress(email)) {
-      alert("Please enter a valid email address");
-      onDone?.();
-      return;
-    }
-
-    const sendEmail = async () => {
-      setPublicShareEmailSending(true);
-      try {
-        const response = await fetch("/api/email/send", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            to: email,
-            subject: subjectText,
-            body: bodyText,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          alert("Failed to send email: " + (errorData.detail || "Unknown error"));
-        } else {
-          alert("Email sent successfully!");
-        }
-      } catch (error) {
-        console.error("Error sending email:", error);
-        alert("Failed to send email. Please try again.");
-      } finally {
-        setPublicShareEmailSending(false);
-        onDone?.();
-      }
-    };
-
-    sendEmail();
   };
 
   const buildPreviewRequestKey = (
@@ -12332,126 +7837,6 @@ function ScripturesContent() {
     treeData,
   ]);
 
-  const handleCreateShare = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const effectiveBookId = shareDialogState?.bookId || bookId;
-    if (!effectiveBookId || !shareEmail.trim()) {
-      setSharesError("No active book selected for sharing");
-      return;
-    }
-
-    setSharesSubmitting(true);
-    setSharesError(null);
-    try {
-      const response = await fetch(`/api/books/${effectiveBookId}/shares`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: shareEmail.trim(),
-          permission: sharePermission,
-          send_email: sendEmailWithShare,
-          access_path: shareDialogState?.privateAccessPath,
-        }),
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | BookShare
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        setSharesError(
-          (payload as { detail?: string } | null)?.detail || "Failed to add share"
-        );
-        return;
-      }
-      setShareEmail("");
-      setSharePermission("viewer");
-      setSendEmailWithShare(true);
-      await loadBookShares(effectiveBookId);
-    } catch {
-      setSharesError("Failed to add share");
-    } finally {
-      setSharesSubmitting(false);
-    }
-  };
-
-  const handleUpdateSharePermission = async (
-    sharedUserId: number,
-    permission: SharePermission
-  ) => {
-    const effectiveBookId = shareDialogState?.bookId || bookId;
-    if (!effectiveBookId) {
-      setSharesError("No active book selected for sharing");
-      return;
-    }
-
-    setShareUpdatingUserId(sharedUserId);
-    setSharesError(null);
-    try {
-      const response = await fetch(
-        `/api/books/${effectiveBookId}/shares/${sharedUserId}`,
-        {
-          method: "PATCH",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ permission }),
-        }
-      );
-      const payload = (await response.json().catch(() => null)) as
-        | BookShare
-        | { detail?: string }
-        | null;
-      if (!response.ok) {
-        setSharesError(
-          (payload as { detail?: string } | null)?.detail || "Failed to update share"
-        );
-        return;
-      }
-      setBookShares((prev) =>
-        prev.map((share) =>
-          share.shared_with_user_id === sharedUserId
-            ? { ...share, permission }
-            : share
-        )
-      );
-    } catch {
-      setSharesError("Failed to update share");
-    } finally {
-      setShareUpdatingUserId(null);
-    }
-  };
-
-  const handleDeleteShare = async (sharedUserId: number) => {
-    const effectiveBookId = shareDialogState?.bookId || bookId;
-    if (!effectiveBookId) {
-      setSharesError("No active book selected for sharing");
-      return;
-    }
-
-    setShareRemovingUserId(sharedUserId);
-    setSharesError(null);
-    try {
-      const response = await fetch(`/api/books/${effectiveBookId}/shares/${sharedUserId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { message?: string; detail?: string }
-        | null;
-      if (!response.ok) {
-        setSharesError(payload?.detail || "Failed to remove share");
-        return;
-      }
-      setBookShares((prev) =>
-        prev.filter((share) => share.shared_with_user_id !== sharedUserId)
-      );
-    } catch {
-      setSharesError("Failed to remove share");
-    } finally {
-      setShareRemovingUserId(null);
-    }
-  };
-
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSchema) return;
@@ -12511,1059 +7896,6 @@ function ScripturesContent() {
     }
   };
 
-  const pollImportJob = useCallback(
-    async (
-      jobId: string,
-      options?: {
-        canonicalJsonUrl?: string | null;
-        showResumeMessage?: boolean;
-        bookName?: string | null;
-      }
-    ) => {
-      if (!jobId) {
-        return;
-      }
-
-      importPollingRunIdRef.current += 1;
-      const runId = importPollingRunIdRef.current;
-      activeImportJobIdRef.current = jobId;
-
-      const updateProgressState = (
-        status: ImportJobLifecycleStatus,
-        message: string | null,
-        current: number | null,
-        total: number | null
-      ) => {
-        if (importPollingRunIdRef.current !== runId) {
-          return false;
-        }
-
-        setImportSubmitting(status === "queued" || status === "running");
-        setImportProgressMessage(message);
-        setImportProgressCurrent(current);
-        setImportProgressTotal(total);
-        writePersistedImportJobState({
-          jobId,
-          status,
-          progressMessage: message,
-          progressCurrent: current,
-          progressTotal: total,
-          canonicalJsonUrl: options?.canonicalJsonUrl ?? null,
-        });
-        return true;
-      };
-
-      if (options?.showResumeMessage) {
-        updateProgressState("running", "Resuming import status...", null, null);
-      }
-
-      const pollIntervalMs = 2000;
-      const maxPollAttempts = 900;
-      let finalResult: ImportResult | null = null;
-      const resolvedBookName =
-        typeof options?.bookName === "string" && options.bookName.trim()
-          ? options.bookName.trim()
-          : "Book";
-
-      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
-        if (importPollingRunIdRef.current !== runId) {
-          return;
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-
-        if (importPollingRunIdRef.current !== runId) {
-          return;
-        }
-
-        const statusResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
-          method: "GET",
-          cache: "no-store",
-          credentials: "include",
-          headers: { Accept: "application/json" },
-        });
-
-        const statusRawText = await statusResponse.text();
-        let statusPayload: ImportJobStatus | null = null;
-        if (statusRawText) {
-          try {
-            const parsed = JSON.parse(statusRawText) as unknown;
-            if (parsed && typeof parsed === "object") {
-              statusPayload = parsed as ImportJobStatus;
-            }
-          } catch {
-            statusPayload = null;
-          }
-        }
-
-        if (!statusResponse.ok) {
-          clearPersistedImportJobState();
-          activeImportJobIdRef.current = null;
-          setImportSubmitting(false);
-          setImportProgressMessage(null);
-          setImportProgressCurrent(null);
-          setImportProgressTotal(null);
-          const fallbackDetail =
-            statusRawText.trim() || `Import status failed (${statusResponse.status} ${statusResponse.statusText})`;
-          setImportResultDialog({
-            bookName: resolvedBookName,
-            status: "error",
-            nodesCreated: null,
-            reason: statusPayload?.detail || statusPayload?.error || fallbackDetail,
-          });
-          return;
-        }
-
-        const nextStatus = statusPayload?.status || "running";
-        const nextMessage = statusPayload?.progress_message || nextStatus || "Importing...";
-        const nextCurrent =
-          typeof statusPayload?.progress_current === "number" ? statusPayload.progress_current : null;
-        const nextTotal =
-          typeof statusPayload?.progress_total === "number" ? statusPayload.progress_total : null;
-
-        if (!updateProgressState(nextStatus, nextMessage, nextCurrent, nextTotal)) {
-          return;
-        }
-
-        if (nextStatus === "queued" || nextStatus === "running") {
-          continue;
-        }
-
-        if (nextStatus === "failed") {
-          clearPersistedImportJobState();
-          activeImportJobIdRef.current = null;
-          setImportSubmitting(false);
-          setImportProgressMessage(null);
-          setImportProgressCurrent(null);
-          setImportProgressTotal(null);
-          setImportResultDialog({
-            bookName: resolvedBookName,
-            status: "error",
-            nodesCreated: null,
-            reason: statusPayload?.error || statusPayload?.result?.error || "Import job failed",
-          });
-          return;
-        }
-
-        finalResult = statusPayload?.result ?? null;
-        break;
-      }
-
-      if (importPollingRunIdRef.current !== runId) {
-        return;
-      }
-
-      if (!finalResult) {
-        setImportResultDialog({
-          bookName: resolvedBookName,
-          status: "error",
-          nodesCreated: null,
-          reason: "Import is still running. Please wait and try again in a minute.",
-        });
-        return;
-      }
-
-      if (finalResult.success === false) {
-        clearPersistedImportJobState();
-        activeImportJobIdRef.current = null;
-        setImportSubmitting(false);
-        setImportProgressMessage(null);
-        setImportProgressCurrent(null);
-        setImportProgressTotal(null);
-        setImportResultDialog({
-          bookName: resolvedBookName,
-          status: "error",
-          nodesCreated: null,
-          reason: finalResult.detail || finalResult.error || "Import failed",
-        });
-        return;
-      }
-
-      await loadBooksRefresh();
-
-      clearPersistedImportJobState();
-      activeImportJobIdRef.current = null;
-      setImportSubmitting(false);
-      setImportProgressMessage(null);
-      setImportProgressCurrent(null);
-      setImportProgressTotal(null);
-      setShowImportUrlInput(false);
-      setImportUrl("");
-      setImportResultDialog({
-        bookName: resolvedBookName,
-        status: "completed",
-        nodesCreated: typeof finalResult.nodes_created === "number" ? finalResult.nodes_created : null,
-        reason: "",
-      });
-    },
-    [loadBooksRefresh]
-  );
-
-  useEffect(() => {
-    return () => {
-      importPollingRunIdRef.current += 1;
-    };
-  }, []);
-
-  useEffect(() => {
-    const persistedJob = readPersistedImportJobState();
-    if (!persistedJob) {
-      return;
-    }
-
-    // Upload-phase sentinel: chunked upload was in progress when page was left — cannot resume
-    if (persistedJob.status === "uploading" || !persistedJob.jobId) {
-      clearPersistedImportJobState();
-      setImportSubmitting(false);
-      setImportProgressMessage("A previous file upload was interrupted. Please re-upload the file.");
-      return;
-    }
-
-    if (persistedJob.status === "succeeded" || persistedJob.status === "failed") {
-      clearPersistedImportJobState();
-      return;
-    }
-    if (activeImportJobIdRef.current === persistedJob.jobId) {
-      return;
-    }
-
-    // Only open the URL input panel if the user was actually using URL import
-    const wasUrlImport = Boolean(persistedJob.fromUrlInput);
-    setImportSubmitting(true);
-    setShowImportUrlInput(wasUrlImport);
-    if (wasUrlImport && typeof persistedJob.canonicalJsonUrl === "string" && persistedJob.canonicalJsonUrl) {
-      setImportUrl(persistedJob.canonicalJsonUrl);
-    }
-    setImportProgressMessage(persistedJob.progressMessage || "Resuming import status...");
-    setImportProgressCurrent(
-      typeof persistedJob.progressCurrent === "number" ? persistedJob.progressCurrent : null
-    );
-    setImportProgressTotal(
-      typeof persistedJob.progressTotal === "number" ? persistedJob.progressTotal : null
-    );
-
-    void pollImportJob(persistedJob.jobId, {
-      canonicalJsonUrl: persistedJob.canonicalJsonUrl ?? null,
-      showResumeMessage: true,
-      bookName:
-        persistedJob.canonicalJsonUrl
-          ?.split("?")[0]
-          .split("#")[0]
-          .split("/")
-          .filter(Boolean)
-          .pop()
-          ?.replace(/\.json$/i, "")
-          .replace(/[-_]+/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Book",
-    });
-  }, [pollImportJob]);
-
-  const startImportBookFile = async (
-    file: File,
-    allowExistingContent: boolean,
-    bookName: string
-  ) => {
-    if (!file || !canImport) return;
-
-    setImportSubmitting(true);
-    setImportProgressMessage("Preparing import...");
-    setImportProgressCurrent(null);
-    setImportProgressTotal(null);
-    clearPersistedImportJobState();
-    try {
-      const retryableStatuses = new Set([429, 500, 502, 503, 504]);
-      const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-      let initResponse: Response | null = null;
-      let initRaw = "";
-      for (let attempt = 0; attempt < 3; attempt++) {
-        initResponse = await fetch("/api/content/import/canonical-uploads/init", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
-        });
-        initRaw = await initResponse.text();
-        if (initResponse.ok || !retryableStatuses.has(initResponse.status) || attempt === 2) {
-          break;
-        }
-        setImportProgressMessage(`Preparing upload... retry ${attempt + 2}/3`);
-        await pause(400 * (attempt + 1));
-      }
-
-      let initResult: CanonicalUploadInit | null = null;
-      try {
-        initResult = JSON.parse(initRaw) as CanonicalUploadInit;
-      } catch {
-        initResult = null;
-      }
-
-      if (!initResponse || !initResponse.ok) {
-        const fallback = `Upload init failed (${initResponse?.status ?? 0})`;
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: initResult?.detail || initResult?.error || fallback,
-        });
-        return;
-      }
-
-      const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
-      if (!uploadId) {
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: "Upload init returned no upload ID",
-        });
-        return;
-      }
-
-      const chunkSizeBytes =
-        typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
-          ? initResult.chunk_size_bytes
-          : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
-      const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
-
-      setImportProgressMessage("Uploading chunks...");
-      setImportProgressCurrent(0);
-      setImportProgressTotal(totalChunks);
-      writePersistedImportJobState({
-        jobId: "",
-        status: "uploading",
-        progressMessage: "Uploading chunks...",
-        progressCurrent: 0,
-        progressTotal: totalChunks,
-        canonicalJsonUrl: null,
-        fromUrlInput: false,
-      });
-
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * chunkSizeBytes;
-        const end = Math.min(start + chunkSizeBytes, file.size);
-        const chunkBlob = file.slice(start, end);
-        const chunkForm = new FormData();
-        chunkForm.append("index", String(chunkIndex));
-        chunkForm.append("chunk", new File([chunkBlob], `${file.name}.part`, { type: "application/octet-stream" }));
-
-        let chunkResponse: Response | null = null;
-        let chunkRaw = "";
-        for (let attempt = 0; attempt < 3; attempt++) {
-          chunkResponse = await fetch(
-            `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
-            { method: "POST", credentials: "include", body: chunkForm }
-          );
-          chunkRaw = await chunkResponse.text();
-          if (chunkResponse.ok || !retryableStatuses.has(chunkResponse.status) || attempt === 2) {
-            break;
-          }
-          setImportProgressMessage(`Uploading chunks... retry ${attempt + 2}/3`);
-          setImportProgressCurrent(chunkIndex);
-          setImportProgressTotal(totalChunks);
-          await pause(300 * (attempt + 1));
-        }
-
-        let chunkResult: CanonicalUploadChunk | null = null;
-        try {
-          chunkResult = JSON.parse(chunkRaw) as CanonicalUploadChunk;
-        } catch {
-          chunkResult = null;
-        }
-
-        if (!chunkResponse || !chunkResponse.ok) {
-          const fallback = `Chunk upload failed (${chunkResponse?.status ?? 0})`;
-          setImportResultDialog({
-            bookName,
-            status: "error",
-            nodesCreated: null,
-            reason: chunkResult?.detail || chunkResult?.error || fallback,
-          });
-          return;
-        }
-
-        setImportProgressMessage("Uploading chunks...");
-        setImportProgressCurrent(chunkIndex + 1);
-        setImportProgressTotal(totalChunks);
-      }
-
-      setImportProgressMessage("Finalizing upload...");
-      setImportProgressCurrent(null);
-      setImportProgressTotal(null);
-
-      const completeResponse = await fetch(
-        `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
-        { method: "POST", credentials: "include" }
-      );
-      const completeRaw = await completeResponse.text();
-
-      let completeResult: CanonicalUploadComplete | null = null;
-      try {
-        completeResult = JSON.parse(completeRaw) as CanonicalUploadComplete;
-      } catch {
-        completeResult = null;
-      }
-
-      if (!completeResponse.ok) {
-        const fallback = `Upload completion failed (${completeResponse.status})`;
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: completeResult?.detail || completeResult?.error || fallback,
-        });
-        return;
-      }
-
-      const canonicalJsonUrl =
-        typeof completeResult?.canonical_json_url === "string"
-          ? completeResult.canonical_json_url.trim()
-          : "";
-      if (!canonicalJsonUrl) {
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: "Upload did not return a canonical URL",
-        });
-        return;
-      }
-
-      setImportProgressMessage("Starting import...");
-      const response = await fetch("/api/content/import/jobs", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          import_type: "json",
-          schema_version: "hsp-book-json-v1",
-          canonical_json_url: canonicalJsonUrl,
-          ...(allowExistingContent ? { allow_existing_content: true } : {}),
-        }),
-      });
-
-      const startResult = (await response.json().catch(() => null)) as
-        | {
-            job_id?: string;
-            status?: ImportJobLifecycleStatus;
-            error?: string;
-            detail?: string;
-          }
-        | null;
-
-      if (!response.ok) {
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: startResult?.detail || startResult?.error || "Failed to start import book job",
-        });
-        return;
-      }
-
-      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
-      if (!jobId) {
-        setImportResultDialog({
-          bookName,
-          status: "error",
-          nodesCreated: null,
-          reason: "Import job did not return a valid job ID",
-        });
-        return;
-      }
-
-      const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
-      setImportProgressMessage(queuedMessage);
-      setImportProgressCurrent(0);
-      setImportProgressTotal(null);
-      writePersistedImportJobState({
-        jobId,
-        status: startResult?.status || "queued",
-        progressMessage: queuedMessage,
-        progressCurrent: 0,
-        progressTotal: null,
-        canonicalJsonUrl,
-        fromUrlInput: false,
-      });
-
-      await pollImportJob(jobId, { canonicalJsonUrl, bookName });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to import JSON file";
-      setImportResultDialog({
-        bookName,
-        status: "error",
-        nodesCreated: null,
-        reason: message,
-      });
-    } finally {
-      if (activeImportJobIdRef.current === null) {
-        setImportSubmitting(false);
-        setImportProgressMessage(null);
-        setImportProgressCurrent(null);
-        setImportProgressTotal(null);
-      }
-    }
-  };
-
-  // Helper: update one entry in bulkFileResults by index
-  const updateBulkRow = (index: number, patch: Partial<BulkFileResult>) => {
-    setBulkFileResults((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], ...patch };
-      return next;
-    });
-  };
-
-  const runBulkImportFiles = async (files: File[]) => {
-    if (files.length === 0 || !canImport) return;
-    setBulkRunning(true);
-    setBulkFileResults(
-      files.map((f) => ({
-        name: f.name,
-        status: "pending",
-        message: "Waiting for previous files…",
-      }))
-    );
-
-    type BulkJobStatus = {
-      status?: string;
-      progress_message?: string;
-      progress_current?: number;
-      progress_total?: number;
-      error?: string;
-      detail?: string;
-      result?: { success?: boolean; error?: string; nodes_created?: number };
-    };
-    const retryableStatuses = new Set([429, 500, 502, 503, 504]);
-    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-    const pollBulkImportJobUntilDone = async (index: number, jobId: string, startedAt: number) => {
-      let hasPolledOnce = false;
-      while (true) {
-        if (hasPolledOnce) {
-          await pause(750);
-        }
-        hasPolledOnce = true;
-        try {
-          const pollResponse = await fetch(`/api/content/import/jobs/${encodeURIComponent(jobId)}`, {
-            method: "GET",
-            cache: "no-store",
-            credentials: "include",
-            headers: { Accept: "application/json" },
-          });
-          const pollRaw = await pollResponse.text();
-          let pollStatus: BulkJobStatus | null = null;
-          try {
-            pollStatus = JSON.parse(pollRaw) as BulkJobStatus;
-          } catch {
-            pollStatus = null;
-          }
-
-          if (!pollResponse.ok) {
-            // Keep retrying transient backend/proxy failures for long-running jobs.
-            if ([429, 500, 502, 503, 504].includes(pollResponse.status)) {
-              updateBulkRow(index, {
-                status: "uploading",
-                progressMessage: "Waiting for status…",
-                message: "Polling import status",
-              });
-              continue;
-            }
-            const msg =
-              pollStatus?.error ||
-              pollStatus?.detail ||
-              `Status poll failed (${pollResponse.status})`;
-            updateBulkRow(index, {
-              status: "error",
-              message: msg,
-              progressMessage: null,
-              progressCurrent: null,
-              progressTotal: null,
-              elapsedMs: Math.round(performance.now() - startedAt),
-            });
-            return;
-          }
-
-          const jobStatus = (pollStatus?.status || "running").toLowerCase();
-          const jobMsg = pollStatus?.progress_message || jobStatus || "Importing…";
-          const jobCurrent =
-            typeof pollStatus?.progress_current === "number"
-              ? pollStatus.progress_current
-              : null;
-          const jobTotal =
-            typeof pollStatus?.progress_total === "number"
-              ? pollStatus.progress_total
-              : null;
-          updateBulkRow(index, {
-            status: "uploading",
-            message: jobStatus === "queued" ? "Queued on server" : jobMsg,
-            progressMessage: jobMsg,
-            progressCurrent: jobCurrent,
-            progressTotal: jobTotal,
-          });
-
-          if (jobStatus === "queued" || jobStatus === "running") {
-            continue;
-          }
-
-          if (jobStatus === "failed") {
-            const msg = pollStatus?.error || pollStatus?.result?.error || "Import failed";
-            updateBulkRow(index, {
-              status: "error",
-              message: msg,
-              progressMessage: null,
-              progressCurrent: null,
-              progressTotal: null,
-              elapsedMs: Math.round(performance.now() - startedAt),
-            });
-            return;
-          }
-
-          const finalJobResult = pollStatus?.result ?? null;
-          if (finalJobResult?.success === false) {
-            const errorMsg = finalJobResult.error ?? "Import failed";
-            if (errorMsg.toLowerCase().includes("already")) {
-              updateBulkRow(index, {
-                status: "skipped",
-                message: "Already exists — skipped",
-                progressMessage: null,
-                progressCurrent: null,
-                progressTotal: null,
-                elapsedMs: Math.round(performance.now() - startedAt),
-              });
-            } else {
-              updateBulkRow(index, {
-                status: "error",
-                message: errorMsg,
-                progressMessage: null,
-                progressCurrent: null,
-                progressTotal: null,
-                elapsedMs: Math.round(performance.now() - startedAt),
-              });
-            }
-            return;
-          }
-
-          const nodes = finalJobResult?.nodes_created ?? 0;
-          updateBulkRow(index, {
-            status: "success",
-            message: `${nodes} node${nodes === 1 ? "" : "s"} imported`,
-            progressMessage: null,
-            progressCurrent: null,
-            progressTotal: null,
-            elapsedMs: Math.round(performance.now() - startedAt),
-          });
-          return;
-        } catch {
-          updateBulkRow(index, {
-            status: "uploading",
-            progressMessage: "Waiting for status…",
-            message: "Polling import status",
-          });
-        }
-      }
-    };
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
-      // Read only the first 16 KB to extract metadata — schema_version, book_name, book_code
-      // always appear near the top of an HSP JSON file. Avoids loading multi-MB files into memory.
-      const headerText = await file.slice(0, 16384).text();
-      const schemaMatch = /"schema_version"\s*:\s*"([^"]+)"/.exec(headerText);
-      if (!schemaMatch || schemaMatch[1] !== "hsp-book-json-v1") {
-        updateBulkRow(i, { status: "error", message: "Not an HSP book JSON (missing schema_version)" });
-        continue;
-      }
-      const bookNameMatch = /"book_name"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(headerText);
-      const bookCodeMatch = /"book_code"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(headerText);
-      const bookName = bookNameMatch ? bookNameMatch[1] : file.name;
-      const bookCode = bookCodeMatch ? bookCodeMatch[1] : null;
-
-      // Ask the API whether a book with this name/code already exists.
-      // Uses exact-match params — no fuzzy scoring, no false negatives.
-      updateBulkRow(i, { message: `Checking "${bookName}"…` });
-      try {
-        type BookCheck = { book_name?: string; book_code?: string };
-        // Check by book_code first (most precise), then fall back to book_name.
-        const checkByCode = bookCode
-          ? await fetch(`/api/content/books?book_code=${encodeURIComponent(bookCode)}`, { credentials: "include" })
-          : null;
-        const codeExists =
-          checkByCode?.ok &&
-          ((await checkByCode.json()) as BookCheck[]).length > 0;
-
-        if (!codeExists) {
-          const checkByName = await fetch(
-            `/api/content/books?book_name=${encodeURIComponent(bookName)}`,
-            { credentials: "include" }
-          );
-          const nameExists =
-            checkByName.ok && ((await checkByName.json()) as BookCheck[]).length > 0;
-          if (nameExists) {
-            updateBulkRow(i, { status: "skipped", message: "Already exists — skipped" });
-            continue;
-          }
-        } else {
-          updateBulkRow(i, { status: "skipped", message: "Already exists — skipped" });
-          continue;
-        }
-      } catch {
-        // Non-fatal — if the check fails just proceed with the upload
-      }
-
-      const t0 = performance.now();
-
-      try {
-        // ── Phase 1: init chunked upload ──────────────────────────────────────
-        updateBulkRow(i, {
-          status: "uploading",
-          message: `Uploading "${bookName}"…`,
-          progressMessage: "Preparing upload…",
-          progressCurrent: null,
-          progressTotal: null,
-        });
-
-        let initResponse: Response | null = null;
-        let initRaw = "";
-        for (let attempt = 0; attempt < 3; attempt++) {
-          initResponse = await fetch("/api/content/import/canonical-uploads/init", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
-          });
-          initRaw = await initResponse.text();
-          if (initResponse.ok || !retryableStatuses.has(initResponse.status) || attempt === 2) {
-            break;
-          }
-          updateBulkRow(i, {
-            progressMessage: `Preparing upload… retry ${attempt + 2}/3`,
-            progressCurrent: null,
-            progressTotal: null,
-          });
-          await pause(400 * (attempt + 1));
-        }
-        type BulkUploadInit = { upload_id?: string; chunk_size_bytes?: number; max_size_bytes?: number; detail?: string; error?: string };
-        let initResult: BulkUploadInit | null = null;
-        try { initResult = JSON.parse(initRaw) as BulkUploadInit; } catch { /* */ }
-
-        if (!initResponse || !initResponse.ok) {
-          const statusCode = initResponse?.status ?? 0;
-          const msg = initResult?.detail || initResult?.error || `Upload init failed (${statusCode})`;
-          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        const uploadId = typeof initResult?.upload_id === "string" ? initResult.upload_id : "";
-        if (!uploadId) {
-          updateBulkRow(i, { status: "error", message: "Upload init returned no upload ID", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        const chunkSizeBytes =
-          typeof initResult?.chunk_size_bytes === "number" && initResult.chunk_size_bytes > 0
-            ? initResult.chunk_size_bytes
-            : IMPORT_CANONICAL_CHUNK_FALLBACK_BYTES;
-        const totalChunks = Math.max(1, Math.ceil(file.size / chunkSizeBytes));
-
-        // ── Phase 2: upload chunks ───────────────────────────────────────────
-        updateBulkRow(i, { progressMessage: "Uploading chunks…", progressCurrent: 0, progressTotal: totalChunks });
-
-        let chunkFailed = false;
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-          const start = chunkIndex * chunkSizeBytes;
-          const end = Math.min(start + chunkSizeBytes, file.size);
-          const chunkBlob = file.slice(start, end);
-          const chunkForm = new FormData();
-          chunkForm.append("index", String(chunkIndex));
-          chunkForm.append("chunk", new File([chunkBlob], `${file.name}.part`, { type: "application/octet-stream" }));
-
-          let chunkResponse: Response | null = null;
-          let chunkRaw = "";
-          for (let attempt = 0; attempt < 3; attempt++) {
-            chunkResponse = await fetch(
-              `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/chunk`,
-              { method: "POST", credentials: "include", body: chunkForm }
-            );
-            chunkRaw = await chunkResponse.text();
-            if (chunkResponse.ok || !retryableStatuses.has(chunkResponse.status) || attempt === 2) {
-              break;
-            }
-            updateBulkRow(i, {
-              progressMessage: `Uploading chunks… retry ${attempt + 2}/3`,
-              progressCurrent: chunkIndex,
-              progressTotal: totalChunks,
-            });
-            await pause(300 * (attempt + 1));
-          }
-          type BulkUploadChunk = { detail?: string; error?: string };
-          let chunkResult: BulkUploadChunk | null = null;
-          try { chunkResult = JSON.parse(chunkRaw) as BulkUploadChunk; } catch { /* */ }
-
-          if (!chunkResponse || !chunkResponse.ok) {
-            const statusCode = chunkResponse?.status ?? 0;
-            const msg = chunkResult?.detail || chunkResult?.error || `Chunk upload failed (${statusCode})`;
-            updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-            chunkFailed = true;
-            break;
-          }
-
-          updateBulkRow(i, { progressMessage: "Uploading chunks…", progressCurrent: chunkIndex + 1 });
-        }
-        if (chunkFailed) continue;
-
-        // ── Phase 3: complete upload ─────────────────────────────────────────
-        updateBulkRow(i, { progressMessage: "Finalizing upload…", progressCurrent: null, progressTotal: null });
-
-        const completeResponse = await fetch(
-          `/api/content/import/canonical-uploads/${encodeURIComponent(uploadId)}/complete`,
-          { method: "POST", credentials: "include" }
-        );
-        const completeRaw = await completeResponse.text();
-        type BulkUploadComplete = { canonical_json_url?: string; detail?: string; error?: string };
-        let completeResult: BulkUploadComplete | null = null;
-        try { completeResult = JSON.parse(completeRaw) as BulkUploadComplete; } catch { /* */ }
-
-        if (!completeResponse.ok) {
-          const msg = completeResult?.detail || completeResult?.error || `Upload completion failed (${completeResponse.status})`;
-          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        const canonicalJsonUrl = typeof completeResult?.canonical_json_url === "string" ? completeResult.canonical_json_url.trim() : "";
-        if (!canonicalJsonUrl) {
-          updateBulkRow(i, { status: "error", message: "Upload did not return a canonical URL", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        // ── Phase 4: start import job ────────────────────────────────────────
-        updateBulkRow(i, { progressMessage: "Starting import…", progressCurrent: null, progressTotal: null });
-
-        const jobResponse = await fetch("/api/content/import/jobs", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ import_type: "json", schema_version: "hsp-book-json-v1", canonical_json_url: canonicalJsonUrl }),
-        });
-        const jobRaw = await jobResponse.text();
-        type BulkJobStart = { job_id?: string; status?: string; detail?: string; error?: string };
-        let jobResult: BulkJobStart | null = null;
-        try { jobResult = JSON.parse(jobRaw) as BulkJobStart; } catch { /* */ }
-
-        if (!jobResponse.ok) {
-          const msg = jobResult?.detail || jobResult?.error || `Import start failed (${jobResponse.status})`;
-          updateBulkRow(i, { status: "error", message: msg, progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        const jobId = typeof jobResult?.job_id === "string" ? jobResult.job_id : "";
-        if (!jobId) {
-          updateBulkRow(i, { status: "error", message: "Import job returned no job ID", progressMessage: null, progressCurrent: null, progressTotal: null, elapsedMs: Math.round(performance.now() - t0) });
-          continue;
-        }
-
-        updateBulkRow(i, {
-          status: "uploading",
-          message: "Queued on server",
-          progressMessage: "Queued",
-          progressCurrent: 0,
-          progressTotal: null,
-        });
-        await pollBulkImportJobUntilDone(i, jobId, t0);
-      } catch (err) {
-        updateBulkRow(i, {
-          status: "error",
-          message: err instanceof Error ? err.message : "Unknown error",
-          progressMessage: null,
-          progressCurrent: null,
-          progressTotal: null,
-          elapsedMs: Math.round(performance.now() - t0),
-        });
-      }
-    }
-
-    setBulkRunning(false);
-    void loadBooksRefresh();
-  };
-
-  const handleImportBookFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    // Snapshot into Array before clearing the input — clearing input.value invalidates the FileList in some browsers
-    const filesArray = Array.from(event.target.files ?? []);
-    event.currentTarget.value = "";
-    if (filesArray.length === 0 || !canImport) return;
-
-    // Multiple files → bulk import flow (no confirmation dialog)
-    if (filesArray.length > 1) {
-      void runBulkImportFiles(filesArray);
-      return;
-    }
-
-    const file = filesArray[0];
-
-    let detectedBookName: string | null = null;
-    let detectedBookCode: string | null = null;
-    try {
-      const parsed = JSON.parse(await file.text()) as {
-        book?: { book_name?: unknown; book_code?: unknown };
-      };
-      const rawBookName = parsed?.book?.book_name;
-      const rawBookCode = parsed?.book?.book_code;
-      if (typeof rawBookName === "string" && rawBookName.trim()) {
-        detectedBookName = rawBookName.trim();
-      }
-      if (typeof rawBookCode === "string" && rawBookCode.trim()) {
-        detectedBookCode = rawBookCode.trim();
-      }
-    } catch {
-      detectedBookName = null;
-      detectedBookCode = null;
-    }
-
-    setPendingImportFile(file);
-    setPendingImportBookName(detectedBookName);
-    setPendingImportBookCode(detectedBookCode);
-    setAppendImportToExisting(false);
-    setShowImportUploadConfirm(true);
-  };
-
-  const handleImportBookUrl = async () => {
-    if (!canImport) return;
-
-    const trimmedUrl = importUrl.trim();
-    const inferredBookName =
-      trimmedUrl
-        .split("?")[0]
-        .split("#")[0]
-        .split("/")
-        .filter(Boolean)
-        .pop()
-        ?.replace(/\.json$/i, "")
-        .replace(/[-_]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .replace(/\b\w/g, (ch) => ch.toUpperCase()) || "Book";
-
-    if (!trimmedUrl) {
-      setImportResultDialog({
-        bookName: inferredBookName,
-        status: "error",
-        nodesCreated: null,
-        reason: "Enter a public raw JSON URL",
-      });
-      return;
-    }
-
-    let canonicalJsonUrl = trimmedUrl;
-    let forceReimport = false;
-    let allowExistingContent = false;
-
-    try {
-      const parsedUrl = new URL(trimmedUrl);
-      const forceParam = parsedUrl.searchParams.get("force_reimport");
-      const allowParam = parsedUrl.searchParams.get("allow_existing_content");
-      forceReimport = forceParam === "true";
-      allowExistingContent = allowParam === "true";
-
-      if (forceParam !== null) {
-        parsedUrl.searchParams.delete("force_reimport");
-      }
-      if (allowParam !== null) {
-        parsedUrl.searchParams.delete("allow_existing_content");
-      }
-      canonicalJsonUrl = parsedUrl.toString();
-    } catch {
-      canonicalJsonUrl = trimmedUrl;
-    }
-
-    setImportSubmitting(true);
-    setImportProgressMessage("Starting import...");
-    setImportProgressCurrent(0);
-    setImportProgressTotal(null);
-    try {
-      const response = await fetch("/api/content/import/jobs", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          import_type: "json",
-          schema_version: "hsp-book-json-v1",
-          canonical_json_url: canonicalJsonUrl,
-          ...(forceReimport ? { force_reimport: true } : {}),
-          ...(allowExistingContent ? { allow_existing_content: true } : {}),
-        }),
-      });
-
-      const rawText = await response.text();
-
-      let startResult: ImportJobStart | null = null;
-      if (rawText) {
-        try {
-          const parsed = JSON.parse(rawText) as unknown;
-          if (parsed && typeof parsed === "object") {
-            startResult = parsed as ImportJobStart;
-          }
-        } catch {
-          startResult = null;
-        }
-      }
-
-      if (!response.ok) {
-        const fallbackDetail = rawText.trim() || `Import start failed (${response.status} ${response.statusText})`;
-        setImportResultDialog({
-          bookName: inferredBookName,
-          status: "error",
-          nodesCreated: null,
-          reason: startResult?.detail || startResult?.error || fallbackDetail,
-        });
-        return;
-      }
-
-      const jobId = typeof startResult?.job_id === "string" ? startResult.job_id : "";
-      if (!jobId) {
-        setImportResultDialog({
-          bookName: inferredBookName,
-          status: "error",
-          nodesCreated: null,
-          reason: "Import job did not return a valid job ID",
-        });
-        return;
-      }
-
-      const queuedMessage = startResult?.status === "queued" ? "Queued" : "Starting import...";
-      setImportProgressMessage(queuedMessage);
-      setImportProgressCurrent(null);
-      setImportProgressTotal(null);
-      writePersistedImportJobState({
-        jobId,
-        status: startResult?.status || "queued",
-        progressMessage: queuedMessage,
-        progressCurrent: 0,
-        progressTotal: null,
-        canonicalJsonUrl,
-        fromUrlInput: true,
-      });
-
-      await pollImportJob(jobId, { canonicalJsonUrl, bookName: inferredBookName });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to import JSON from URL";
-      setImportResultDialog({
-        bookName: inferredBookName,
-        status: "error",
-        nodesCreated: null,
-        reason: message,
-      });
-    } finally {
-      if (activeImportJobIdRef.current === null) {
-        setImportSubmitting(false);
-        setImportProgressMessage(null);
-        setImportProgressCurrent(null);
-        setImportProgressTotal(null);
-      }
-    }
-  };
 
   const handleExportBookJson = async (targetBookId: number, targetBookName?: string) => {
     if (!canImport) {
@@ -14573,6 +8905,62 @@ function ScripturesContent() {
 
     return levelName;
   };
+
+  const {
+    basketItems,
+    setBasketItems,
+    basketRangeStart,
+    setBasketRangeStart,
+    basketRangeEnd,
+    setBasketRangeEnd,
+    basketRangeSubmitting,
+    basketRangeMessage,
+    setBasketRangeMessage,
+    isReorderingBasket,
+    loadBasket,
+    addCurrentToBasket,
+    addSelectedRangeToBasket,
+    addPreviewBlockToBasket,
+    addPreviewRangeToBasket,
+    removeFromBasket,
+    removePreviewNodeFromBasket,
+    moveBasketItem,
+    clearBasket,
+  } = useBasket({
+    authEmail,
+    authResolved,
+    nodeContent,
+    treeData,
+    breadcrumb,
+    currentBook,
+    selectedId,
+    bookPreviewArtifact,
+    setPreviewBasketUiOverrides,
+    getNodeBreadcrumbLabel,
+    getSchemaMatchedLevelName,
+  });
+  setBasketItemsRef.current = setBasketItems;
+
+  useEffect(() => {
+    setPreviewBasketUiOverrides((prev) => {
+      const basketNodeIds = new Set(basketItems.map((item) => item.node_id));
+      let next: Record<number, boolean> | null = null;
+      for (const [rawNodeId, overrideValue] of Object.entries(prev)) {
+        const nodeId = Number(rawNodeId);
+        if (!Number.isFinite(nodeId)) {
+          continue;
+        }
+        const inBasket = basketNodeIds.has(nodeId);
+        if (inBasket === overrideValue) {
+          if (!next) {
+            next = { ...prev };
+          }
+          delete next[nodeId];
+        }
+      }
+      return next ?? prev;
+    });
+  }, [basketItems]);
 
   const canAddChild = (node: TreeNode): boolean => {
     if (!currentBook?.schema?.levels) {
@@ -16040,52 +10428,7 @@ function ScripturesContent() {
     );
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleSignOut = async () => {
-    setBasketItems([]);
-    invalidateMeCache();
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      router.push("/");
-    } catch {
-      router.push("/");
-    }
-  };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setAuthMessage(null);
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(async () => {
-          const text = await response.text().catch(() => "");
-          return text ? { detail: text } : null;
-        })) as { detail?: string; message?: string } | null;
-        const detail = payload?.detail || payload?.message || "Login failed";
-        throw new Error(`Login failed (${response.status}): ${detail}`);
-      }
-      setAuthMessage("Logged in.");
-      setEmail("");
-      setPassword("");
-      setShowLogin(false);
-      invalidateMeCache();
-      await loadAuth();
-      // Re-initialize from URL after successful login
-      setUrlInitialized(false);
-    } catch (err) {
-      setAuthMessage(err instanceof Error ? err.message : "Login failed");
-    }
-  };
 
   const selectedTreeNode = selectedId ? findNodeById(treeData, selectedId) : null;
   const isBookRootSelected = selectedId === BOOK_ROOT_NODE_ID;
@@ -18550,6 +12893,128 @@ function ScripturesContent() {
     }
     return true;
   };
+
+  const {
+    shareDialogCopyFeedback,
+    showShareManager,
+    setShowShareManager,
+    shareDialogState,
+    setShareDialogState,
+    bookShares,
+    setBookShares,
+    sharesLoading,
+    setSharesLoading,
+    sharesError,
+    setSharesError,
+    shareEmail,
+    setShareEmail,
+    sharePermission,
+    setSharePermission,
+    sharesSubmitting,
+    sendEmailWithShare,
+    setSendEmailWithShare,
+    publicShareRecipientEmail,
+    setPublicShareRecipientEmail,
+    publicShareEmailSending,
+    setPublicShareEmailSending,
+    shareUpdatingUserId,
+    shareRemovingUserId,
+    ownershipTargetEmail,
+    setOwnershipTargetEmail,
+    ownedBooksForTransfer,
+    ownedBooksForTransferLoading,
+    selectedOwnedBookIds,
+    setSelectedOwnedBookIds,
+    showOwnershipTransferDialog,
+    setShowOwnershipTransferDialog,
+    ownershipTransferSubmitting,
+    ownershipTransferError,
+    setOwnershipTransferError,
+    ownershipTransferMessage,
+    setOwnershipTransferMessage,
+    setOwnedBooksForTransfer,
+    loadBookShares,
+    closeShareDialog,
+    openShareDialogForBook,
+    showShareDialogCopyFeedback,
+    copyShareUrl,
+    emailShareUrl,
+    handleCreateShare,
+    handleUpdateSharePermission,
+    handleDeleteShare,
+    loadOwnedBooksForTransfer,
+    handleTransferBookOwnership,
+    openOwnershipTransferDialog,
+    closeOwnershipTransferDialog,
+  } = useShareDialog({
+    bookId,
+    handleSelectBook,
+    isCurrentBookOwner,
+    currentBook,
+    setBooks,
+    setCurrentBook,
+    loadBooksRefresh,
+    setAuthMessage,
+    setCopyTarget,
+  });
+
+  useEffect(() => {
+    const shouldLockBodyScroll =
+      showPropertiesModal ||
+      showOwnershipTransferDialog ||
+      showBookPreview ||
+      showPdfExportDialog ||
+      showShareManager ||
+      showCreateBook ||
+      showPreferencesDialog ||
+      Boolean(action && actionNode);
+
+    if (!shouldLockBodyScroll) {
+      return;
+    }
+
+    const { body, documentElement } = document;
+    const scrollY = window.scrollY;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyPosition = body.style.position;
+    const previousBodyTop = body.style.top;
+    const previousBodyWidth = body.style.width;
+    const previousBodyPaddingRight = body.style.paddingRight;
+    const previousBodyOverscrollBehavior = body.style.overscrollBehavior;
+    const previousHtmlOverscrollBehavior = documentElement.style.overscrollBehavior;
+    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overscrollBehavior = "none";
+    documentElement.style.overscrollBehavior = "none";
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      body.style.position = previousBodyPosition;
+      body.style.top = previousBodyTop;
+      body.style.width = previousBodyWidth;
+      body.style.paddingRight = previousBodyPaddingRight;
+      body.style.overscrollBehavior = previousBodyOverscrollBehavior;
+      documentElement.style.overscrollBehavior = previousHtmlOverscrollBehavior;
+      window.scrollTo(0, scrollY);
+    };
+  }, [
+    showPropertiesModal,
+    showOwnershipTransferDialog,
+    showBookPreview,
+    showPdfExportDialog,
+    showShareManager,
+    showCreateBook,
+    showPreferencesDialog,
+    action,
+    actionNode,
+  ]);
 
   const openCreateFirstLevelNode = () => {
     if (!bookId || !currentBook?.schema || !canContribute) {
