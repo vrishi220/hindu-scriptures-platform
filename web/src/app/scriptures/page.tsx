@@ -39,6 +39,12 @@ import PropertiesPanel from "./components/PropertiesPanel";
 import WordMeaningsEditor from "../../components/WordMeaningsEditor";
 import { useScripturesBrowse } from "./hooks/useScripturesBrowse";
 import { useImportPipeline, type BulkFileResult } from "./hooks/useImportPipeline";
+import ImportProgressPanel from "./ImportProgressPanel";
+import ImportResultDialog from "./ImportResultDialog";
+import NodeCommentaryPanel from "./NodeCommentaryPanel";
+import NodeEditorForm, { type NodeEditorFormData } from "./NodeEditorForm";
+import TreePanel from "./TreePanel";
+import BookPreviewOverlay from "./BookPreviewOverlay";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -419,7 +425,7 @@ function ScripturesContent() {
   const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "content">("tree");
   const [showExploreStructure, setShowExploreStructure] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<NodeEditorFormData>({
     levelName: "",
     titleSanskrit: "",
     titleTransliteration: "",
@@ -10061,373 +10067,6 @@ function ScripturesContent() {
     }
   };
 
-  const renderTree = (nodes: TreeNode[], depth = 0) => {
-    const canEditTreeOrder = treeEditMode && (canContribute || canEditCurrentBook);
-
-    const canonicalSorted = [...nodes].sort((a, b) => {
-      const seqA = parseSequenceNumber(a.sequence_number) ?? Infinity;
-      const seqB = parseSequenceNumber(b.sequence_number) ?? Infinity;
-      return seqA - seqB;
-    });
-
-    const parentIdForGroup =
-      canonicalSorted.length > 0
-        ? canonicalSorted[0].parent_node_id ?? BOOK_ROOT_NODE_ID
-        : BOOK_ROOT_NODE_ID;
-    const isReorderGroupActive =
-      canEditTreeOrder &&
-      treeReorderModeParentId !== null &&
-      treeReorderModeParentId === parentIdForGroup;
-
-    const canonicalSiblingIds = canonicalSorted.map((sibling) => sibling.id);
-    const hasValidDraftForGroup = (candidate: number[] | undefined) =>
-      Array.isArray(candidate) &&
-      candidate.length === canonicalSiblingIds.length &&
-      candidate.every((id) => canonicalSiblingIds.includes(id));
-
-    const ensureDraftForGroup = () => {
-      const currentDraft = treeReorderDraftByParentId[parentIdForGroup];
-      if (!hasValidDraftForGroup(currentDraft)) {
-        applyTreeReorderDraft(parentIdForGroup, canonicalSiblingIds);
-      }
-    };
-
-    const draftOrder = treeReorderDraftByParentId[parentIdForGroup];
-    const sorted =
-      isReorderGroupActive && Array.isArray(draftOrder) && draftOrder.length === canonicalSorted.length
-        ? (() => {
-            const byId = new Map(canonicalSorted.map((node) => [node.id, node]));
-            const reordered = draftOrder
-              .map((id) => byId.get(id))
-              .filter((node): node is TreeNode => Boolean(node));
-            if (reordered.length === canonicalSorted.length) {
-              return reordered;
-            }
-            return canonicalSorted;
-          })()
-        : canonicalSorted;
-
-    const lastNodeInGroup = sorted.length > 0 ? sorted[sorted.length - 1] : null;
-
-    return (
-      <>
-        {sorted.map((node, index) => (
-          <div
-            key={node.id}
-            className="relative mt-2"
-            onDragOver={(event) => {
-              if (!canEditTreeOrder) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-              const rect = event.currentTarget.getBoundingClientRect();
-              const nextPosition = event.clientY - rect.top < rect.height / 2 ? "before" : "after";
-              const nextTarget = {
-                parentId: parentIdForGroup,
-                nodeId: node.id,
-                position: nextPosition,
-              } as const;
-              const prev = treeReorderDropTargetRef.current;
-              if (
-                prev &&
-                prev.parentId === nextTarget.parentId &&
-                prev.nodeId === nextTarget.nodeId &&
-                prev.position === nextTarget.position
-              ) {
-                return;
-              }
-              setTreeReorderDropTargetSynced(nextTarget);
-            }}
-            onDrop={(event) => {
-              if (!canEditTreeOrder) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              const draggedIdRaw = event.dataTransfer.getData("text/plain");
-              const draggedId = Number.parseInt(draggedIdRaw, 10);
-              if (!Number.isFinite(draggedId)) {
-                return;
-              }
-              applyTreeDropAtIndicator(draggedId);
-            }}
-          >
-        <div
-          className={`flex flex-nowrap items-start gap-2 text-sm ${
-            isReorderGroupActive ? "rounded-md px-1 py-0.5" : ""
-          } ${
-            isReorderGroupActive && treeReorderDraggingNodeId === node.id
-              ? "opacity-60"
-              : ""
-          } ${canEditTreeOrder ? "select-none" : ""}`}
-          draggable={canEditTreeOrder}
-          onDragStart={(event) => {
-            if (!canEditTreeOrder) {
-              return;
-            }
-            const target = event.target as HTMLElement | null;
-            if (target?.closest('[data-no-row-drag="true"]')) {
-              event.preventDefault();
-              return;
-            }
-            ensureDraftForGroup();
-            setTreeReorderModeNodeId(node.id);
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", String(node.id));
-            setTreeReorderDraggingNodeId(node.id);
-          }}
-          onDragEnd={() => {
-            setTreeReorderDraggingNodeId(null);
-            setTreeReorderDropTargetSynced(null);
-          }}
-          style={canEditTreeOrder ? { cursor: "grab" } : undefined}
-        >
-          {canEditTreeOrder ? (
-            <span
-              className="flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded border border-black/10 bg-white/80 text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-              title="Drag to reorder"
-              aria-label="Drag to reorder"
-            >
-              <MoreVertical size={14} />
-            </span>
-          ) : null}
-          <span className="shrink-0">
-            {node.children && node.children.length > 0 ? (
-              <button
-                type="button"
-                data-no-row-drag="true"
-                onClick={() => browsingHook.toggleNode(node.id)}
-                className="h-6 w-6 rounded-full border border-black/10 bg-white/80 text-xs text-zinc-500 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-              >
-                {expandedIds.has(node.id) ? "-" : "+"}
-              </button>
-            ) : (
-              <span aria-hidden className="block h-6 w-6" />
-            )}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              if (!canEditTreeOrder) {
-                selectNode(node.id, true, false);
-                return;
-              }
-              ensureDraftForGroup();
-              setTreeReorderModeNodeId(node.id);
-            }}
-            title={`${formatValue(node.level_name) || "Level"} ${
-              formatSequenceDisplay(
-                node.sequence_number ?? node.id,
-                !node.children || node.children.length === 0
-              ) || node.id
-            }`}
-            id={`tree-node-${node.id}`}
-            className={`min-w-0 flex items-center gap-2 px-1 text-sm font-medium transition ${
-              selectedId === node.id
-                ? "text-[color:var(--accent)]"
-                : "text-[color:var(--deep)] hover:text-[color:var(--accent)]"
-            } ${canEditTreeOrder ? "select-none" : ""}`}
-          >
-            <span className="leading-snug truncate">
-              {(() => {
-                const isLeaf = !node.children || node.children.length === 0;
-                const displaySeq =
-                  formatSequenceDisplay(node.sequence_number ?? node.id, isLeaf) ||
-                  node.id.toString();
-                const titleText =
-                  formatValue(node.title_english) ||
-                  formatValue(node.title_sanskrit) ||
-                  formatValue(node.title_transliteration);
-                if (isLeaf) {
-                  return titleText
-                    ? `${displaySeq}. ${titleText}`
-                    : `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
-                }
-                if (titleText) {
-                  return `${displaySeq}. ${titleText}`;
-                }
-                if (node.children && node.children.length > 0) {
-                  return `${displaySeq}. ${formatValue(node.level_name) || "Untitled"}`;
-                }
-                return `${formatValue(node.level_name) || "Level"} ${displaySeq}`;
-              })()}
-            </span>
-          </button>
-          {canEditTreeOrder && (
-            <div className="flex items-center gap-1">
-              {isReorderGroupActive && treeReorderModeNodeId === node.id && (
-                <>
-                  <button
-                    type="button"
-                    data-no-row-drag="true"
-                    onClick={() => {
-                      if (index <= 0) {
-                        return;
-                      }
-                      const previousSibling = sorted[index - 1];
-                      if (!previousSibling) {
-                        return;
-                      }
-                      moveTreeReorderDraftNode(parentIdForGroup, node.id, previousSibling.id);
-                    }}
-                    title="Move up"
-                    aria-label="Move up"
-                    disabled={index === 0 || treeReorderSavingParentId !== null}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <ChevronUp size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    data-no-row-drag="true"
-                    onClick={() => {
-                      if (index >= sorted.length - 1) {
-                        return;
-                      }
-                      const nextSibling = sorted[index + 1];
-                      if (!nextSibling) {
-                        return;
-                      }
-                      moveTreeReorderDraftNode(parentIdForGroup, node.id, nextSibling.id);
-                    }}
-                    title="Move down"
-                    aria-label="Move down"
-                    disabled={index === sorted.length - 1 || treeReorderSavingParentId !== null}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-black/10 bg-white/80 text-zinc-600 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <ChevronDown size={14} />
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-          {treeEditMode && (canContribute || canEditCurrentBook) && canAddChild(node) && (
-            <button
-              type="button"
-              data-no-row-drag="true"
-              onClick={() => {
-                const nextLevel = getNextLevelName(node);
-                let insertAfterNodeId: number | null = null;
-
-                if (selectedId) {
-                  const selectedPath = findPath(treeData, selectedId);
-                  const selectedNode = findNodeById(treeData, selectedId);
-                  const selectedParentId =
-                    selectedPath && selectedPath.length > 1
-                      ? selectedPath[selectedPath.length - 2].id
-                      : null;
-                  const selectedLevelName = normalizeLevelName(
-                    getSchemaMatchedLevelName(
-                      selectedNode?.level_name || "",
-                      selectedNode?.level_order
-                    )
-                  );
-                  const nextLevelName = normalizeLevelName(
-                    getSchemaMatchedLevelName(nextLevel)
-                  );
-
-                  if (selectedParentId === node.id && selectedLevelName === nextLevelName) {
-                    insertAfterNodeId = selectedId;
-                  }
-                }
-
-                setActionNode(node);
-                setCreateParentNodeIdOverride(node.id);
-                setCreateInsertAfterNodeId(insertAfterNodeId);
-                setFormData({
-                  levelName: nextLevel,
-                  titleSanskrit: "",
-                  titleTransliteration: "",
-                  titleEnglish: "",
-                  sequenceNumber: "",
-                  hasContent: true,
-                  contentSanskrit: "",
-                  contentTransliteration: "",
-                  contentEnglish: "",
-                  tags: "",
-                  wordMeanings: [],
-                });
-                setModalTranslationDrafts(buildEditableTranslationDrafts({}));
-                setModalSelectedTranslationLanguages(
-                  normalizeSelectedEditableTranslationLanguages([], sourceLanguage)
-                );
-                setModalTranslationVariants([]);
-                setModalCommentaryVariants([]);
-                setAction("add");
-              }}
-              title={`Add ${getDisplayLevelName(getNextLevelName(node))}`}
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-green-500/30 bg-green-50 text-sm text-green-700 transition hover:border-green-500/60 hover:shadow-md"
-            >
-              +
-            </button>
-          )}
-        </div>
-        {canEditTreeOrder &&
-          treeReorderDropTarget?.parentId === parentIdForGroup &&
-          treeReorderDropTarget.nodeId === node.id &&
-          treeReorderDropTarget.position === "before" && (
-            <div className="pointer-events-none absolute -top-1 left-0 right-0 z-20 h-0.5 rounded bg-[color:var(--accent)]" />
-          )}
-        {canEditTreeOrder &&
-          treeReorderDropTarget?.parentId === parentIdForGroup &&
-          treeReorderDropTarget.nodeId === node.id &&
-          treeReorderDropTarget.position === "after" && (
-            <div className="pointer-events-none absolute -bottom-1 left-0 right-0 z-20 h-0.5 rounded bg-[color:var(--accent)]" />
-          )}
-            {node.children && node.children.length > 0 && expandedIds.has(node.id) && (
-              <div className="ml-3 border-l border-black/10 pl-3">
-                {renderTree(node.children, depth + 1)}
-              </div>
-            )}
-          </div>
-        ))}
-        {canEditTreeOrder && lastNodeInGroup && (
-          <div
-            className="relative mt-1 h-5 rounded-md"
-            onDragOver={(event) => {
-              if (treeReorderDraggingNodeId === null) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = "move";
-              const nextTarget = {
-                parentId: parentIdForGroup,
-                nodeId: lastNodeInGroup.id,
-                position: "after",
-              } as const;
-              const prev = treeReorderDropTargetRef.current;
-              if (
-                prev &&
-                prev.parentId === nextTarget.parentId &&
-                prev.nodeId === nextTarget.nodeId &&
-                prev.position === nextTarget.position
-              ) {
-                return;
-              }
-              setTreeReorderDropTargetSynced(nextTarget);
-            }}
-            onDrop={(event) => {
-              if (treeReorderDraggingNodeId === null) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              const draggedIdRaw = event.dataTransfer.getData("text/plain");
-              const draggedId = Number.parseInt(draggedIdRaw, 10);
-              if (!Number.isFinite(draggedId)) {
-                return;
-              }
-              applyTreeDropAtIndicator(draggedId);
-            }}
-          />
-        )}
-      </>
-    );
-  };
-
 
 
   const selectedTreeNode = selectedId ? findNodeById(treeData, selectedId) : null;
@@ -13776,260 +13415,32 @@ function ScripturesContent() {
               </div>
             )}
           </div>
-          {canImport && showImportUrlInput && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-black/10 bg-zinc-50 p-2">
-              <input
-                type="url"
-                value={importUrl}
-                onChange={(event) => setImportUrl(event.target.value)}
-                placeholder="Paste public raw JSON URL"
-                className="min-w-[16rem] flex-1 rounded-lg border border-black/10 bg-white px-3 py-2 text-sm text-zinc-700"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  void handleImportBookUrl();
-                }}
-                disabled={importSubmitting || !importUrl.trim()}
-                className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-zinc-900 px-3 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {importSubmitting ? "Importing..." : "Import URL"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowImportUrlInput(false);
-                  setImportUrl("");
-                }}
-                disabled={importSubmitting}
-                className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              {(importSubmitting || importProgressMessage) && (
-                <div className="basis-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium">{importProgressMessage || "Importing..."}</span>
-                    {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
-                      <span className="text-xs text-blue-800">
-                        {importProgressCurrent} / {importProgressTotal}
-                      </span>
-                    )}
-                  </div>
-                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
-                      <div
-                        className="h-full rounded-full bg-blue-600 transition-all"
-                        style={{
-                          width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {canImport && !showImportUrlInput && (importSubmitting || importProgressMessage) && (
-            <div className="mt-2 rounded-xl border border-black/10 bg-zinc-50 p-2">
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{importProgressMessage || "Importing..."}</span>
-                  {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
-                    <span className="text-xs text-blue-800">
-                      {importProgressCurrent} / {importProgressTotal}
-                    </span>
-                  )}
-                </div>
-                {typeof importProgressCurrent === "number" && typeof importProgressTotal === "number" && importProgressTotal > 0 && (
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
-                    <div
-                      className="h-full rounded-full bg-blue-600 transition-all"
-                      style={{
-                        width: `${Math.max(0, Math.min(100, (importProgressCurrent / importProgressTotal) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {canImport && bulkFileResults.length > 0 && (
-            <div className="mt-2 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-              <div className="border-b border-zinc-100 bg-zinc-50 px-3 py-2">
-                {(() => {
-                  const totalCount = bulkFileResults.length;
-                  const completedCount = bulkFileResults.filter(
-                    (r) => r.status === "success" || r.status === "skipped" || r.status === "error"
-                  ).length;
-                  const activeIndex = bulkFileResults.findIndex((r) => r.status === "uploading");
-                  const activeRow = activeIndex >= 0 ? bulkFileResults[activeIndex] : null;
-                  const summaryMessage = bulkRunning
-                    ? activeRow
-                      ? `Book ${activeIndex + 1} of ${totalCount}: ${activeRow.name}`
-                      : "Preparing bulk import..."
-                    : `${completedCount} of ${totalCount} books finished`;
-                  const summaryDetail = activeRow?.progressMessage || activeRow?.message || null;
-                  const summaryWidth = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-
-                  return (
-                    <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-zinc-700">
-                        <span>{summaryMessage}</span>
-                        <span className="text-zinc-500">{completedCount} / {totalCount}</span>
-                      </div>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
-                        <div
-                          className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                          style={{
-                            width: `${Math.max(
-                              bulkRunning && totalCount > 0 && completedCount === 0 ? 2 : 0,
-                              Math.min(100, summaryWidth)
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      {summaryDetail ? (
-                        <div className="mt-2 text-[11px] text-zinc-500">{summaryDetail}</div>
-                      ) : null}
-                    </>
-                  );
-                })()}
-              </div>
-              {!bulkRunning && (
-                <div className="flex gap-4 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-xs font-medium">
-                  <span className="text-emerald-600">✓ {bulkFileResults.filter((r) => r.status === "success").length} imported</span>
-                  <span className="text-zinc-400">⏭ {bulkFileResults.filter((r) => r.status === "skipped").length} skipped</span>
-                  <span className="text-red-500">✕ {bulkFileResults.filter((r) => r.status === "error").length} failed</span>
-                  <button
-                    type="button"
-                    onClick={() => setBulkFileResults([])}
-                    className="ml-auto text-zinc-400 hover:text-zinc-600"
-                    aria-label="Dismiss"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-              <ul className="max-h-64 divide-y divide-zinc-100 overflow-y-auto">
-                {bulkFileResults.map((r, idx) => {
-                  const icon = r.status === "success" ? "✅" : r.status === "skipped" ? "⏭" : r.status === "error" ? "❌" : "⏳";
-                  const elapsed = r.elapsedMs !== undefined ? (r.elapsedMs >= 1000 ? `${(r.elapsedMs / 1000).toFixed(1)}s` : `${r.elapsedMs}ms`) : null;
-                  const isActive = r.status === "uploading";
-                  const hasProgress = typeof r.progressCurrent === "number" && typeof r.progressTotal === "number" && r.progressTotal > 0;
-                  const isWaitingAtZero =
-                    !hasProgress &&
-                    (r.status === "pending" || (typeof r.progressCurrent === "number" && r.progressCurrent <= 0));
-                  return (
-                    <li key={idx} className="px-3 py-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="shrink-0">{icon}</span>
-                        <span className="min-w-0 flex-1 truncate font-medium text-zinc-800">{r.name}</span>
-                        {r.progressMessage ? (
-                          <span className="shrink-0 text-zinc-500">{r.progressMessage}</span>
-                        ) : (
-                          <span className="shrink-0 text-zinc-500">{r.message}</span>
-                        )}
-                        {hasProgress && (
-                          <span className="shrink-0 font-mono text-zinc-400">
-                            {r.progressCurrent} / {r.progressTotal}
-                          </span>
-                        )}
-                        {elapsed && (
-                          <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-zinc-400">{elapsed}</span>
-                        )}
-                      </div>
-                      {isActive && (
-                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-blue-100">
-                          {hasProgress ? (
-                            <div
-                              className="h-full rounded-full bg-blue-500 transition-all duration-300"
-                              style={{ width: `${Math.max(2, Math.min(100, ((r.progressCurrent ?? 0) / (r.progressTotal ?? 1)) * 100))}%` }}
-                            />
-                          ) : isWaitingAtZero ? (
-                            <div
-                              className="h-full rounded-full bg-blue-400/70 transition-all duration-300"
-                              style={{ width: "0%" }}
-                            />
-                          ) : null}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          {canImport && showImportUploadConfirm && pendingImportFile && (
-            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 px-4">
-              <div className="w-full max-w-md rounded-2xl border border-black/10 bg-white p-4 shadow-2xl">
-                <h3 className="text-sm font-semibold text-zinc-900">Confirm Upload Import</h3>
-                <p className="mt-1 text-sm text-zinc-600">
-                  Import file: <span className="font-medium text-zinc-800">{pendingImportFile.name}</span>
-                </p>
-                <div className="mt-2 rounded-lg border border-black/10 bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-                  <p>
-                    Book name: <span className="font-medium text-zinc-800">{pendingImportBookName || "Not detected"}</span>
-                  </p>
-                  <p className="mt-1">
-                    Book code: <span className="font-medium text-zinc-800">{pendingImportBookCode || "Not detected"}</span>
-                  </p>
-                </div>
-                <label className="mt-3 flex items-start gap-2 rounded-lg border border-black/10 bg-zinc-50 p-2 text-sm text-zinc-700">
-                  <input
-                    type="checkbox"
-                    checked={appendImportToExisting}
-                    onChange={(event) => setAppendImportToExisting(event.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    Append to existing book
-                    <span className="block text-xs text-zinc-500">
-                      Use when importing another part into the same book.
-                    </span>
-                  </span>
-                </label>
-                <div className="mt-4 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowImportUploadConfirm(false);
-                      setPendingImportFile(null);
-                      setPendingImportBookName(null);
-                      setPendingImportBookCode(null);
-                      setAppendImportToExisting(false);
-                    }}
-                    className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-white px-3 text-sm text-zinc-700 transition hover:bg-zinc-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const selectedFile = pendingImportFile;
-                      const selectedBookName =
-                        (pendingImportBookName && pendingImportBookName.trim()) ||
-                        selectedFile?.name.replace(/\.json$/i, "") ||
-                        "Book";
-                      const shouldAppend = appendImportToExisting;
-                      setShowImportUploadConfirm(false);
-                      setPendingImportFile(null);
-                      setPendingImportBookName(null);
-                      setPendingImportBookCode(null);
-                      setAppendImportToExisting(false);
-                      if (selectedFile) {
-                        void startImportBookFile(selectedFile, shouldAppend, selectedBookName);
-                      }
-                    }}
-                    className="inline-flex h-9 items-center rounded-lg border border-black/10 bg-zinc-900 px-3 text-sm font-medium text-white transition hover:bg-zinc-800"
-                  >
-                    Continue
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <ImportProgressPanel
+            canImport={canImport}
+            importSubmitting={importSubmitting}
+            importProgressMessage={importProgressMessage}
+            importProgressCurrent={importProgressCurrent}
+            importProgressTotal={importProgressTotal}
+            showImportUrlInput={showImportUrlInput}
+            setShowImportUrlInput={setShowImportUrlInput}
+            importUrl={importUrl}
+            setImportUrl={setImportUrl}
+            appendImportToExisting={appendImportToExisting}
+            setAppendImportToExisting={setAppendImportToExisting}
+            pendingImportFile={pendingImportFile}
+            setPendingImportFile={setPendingImportFile}
+            pendingImportBookName={pendingImportBookName}
+            setPendingImportBookName={setPendingImportBookName}
+            pendingImportBookCode={pendingImportBookCode}
+            setPendingImportBookCode={setPendingImportBookCode}
+            showImportUploadConfirm={showImportUploadConfirm}
+            setShowImportUploadConfirm={setShowImportUploadConfirm}
+            bulkFileResults={bulkFileResults}
+            setBulkFileResults={setBulkFileResults}
+            bulkRunning={bulkRunning}
+            handleImportBookUrl={handleImportBookUrl}
+            startImportBookFile={startImportBookFile}
+          />
 
           <div className="mt-2 flex min-h-0 flex-1 flex-col rounded-xl border border-black/10 bg-white">
             <div
@@ -14486,197 +13897,65 @@ function ScripturesContent() {
                 <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl overflow-hidden px-3 pb-4 pt-2 sm:px-4">
               <div className="flex h-full min-h-0 w-full flex-col gap-3 sm:gap-4 md:flex-row">
             {/* Tree Section */}
-            {isExploreVisible && (
-            <div
-              className={`min-h-0 h-full rounded-2xl border border-black/10 bg-white/90 p-3 flex flex-col md:w-[320px] md:flex-none ${
-                mobilePanel === "tree" ? "flex" : "hidden"
-              } md:flex`}
-              style={{ scrollbarGutter: "stable" }}
-            >
-              {(treeLoading || treeReorderingNodeId !== null || ((canContribute || canEditCurrentBook) && Boolean(bookId)) || (bookId && currentBook?.schema?.levels && currentBook.schema.levels.length > 1)) && (
-                <div className="sticky top-0 z-10 bg-white/90 pb-1">
-                  <div className="flex items-center justify-end gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    {treeLoading && <span>Loading</span>}
-                    {treeReorderingNodeId !== null && <span>Reordering</span>}
-                    {(canContribute || canEditCurrentBook) && bookId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTreeEditMode((prev) => {
-                            const next = !prev;
-                            if (!next) {
-                              setTreeReorderModeNodeId(null);
-                              setTreeReorderDraftByParentId({});
-                              setTreeReorderDraggingNodeId(null);
-                              setTreeReorderSavingParentId(null);
-                              setTreeReorderDropTargetSynced(null);
-                            }
-                            return next;
-                          });
-                        }}
-                        title={treeEditMode ? "Disable edit mode" : "Enable edit mode"}
-                        aria-label={treeEditMode ? "Disable edit mode" : "Enable edit mode"}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full border transition ${
-                          treeEditMode
-                            ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
-                            : "border-black/10 bg-white/80 text-zinc-700 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                        }`}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                    )}
-                    {treeEditMode &&
-                      (canContribute || canEditCurrentBook) &&
-                      bookId && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              void saveAllTreeReorderDrafts();
-                            }}
-                            title="Save sibling order"
-                            aria-label="Save sibling order"
-                            disabled={
-                              treeReorderingNodeId !== null ||
-                              treeReorderSavingParentId !== null ||
-                              !treeReorderHasPendingChanges
-                            }
-                            className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            {treeReorderSavingParentId !== null ? "Saving" : "Save"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => cancelAllTreeReorderDrafts()}
-                            title="Cancel reorder"
-                            aria-label="Cancel reorder"
-                            disabled={
-                              treeReorderingNodeId !== null ||
-                              treeReorderSavingParentId !== null ||
-                              Object.keys(treeReorderDraftByParentId).length === 0
-                            }
-                            className="rounded-lg border border-black/10 bg-white/85 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600 transition hover:border-black/20 hover:text-zinc-800 disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )}
-                    {bookId && treeData.length > 0 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedIds(new Set(treeData.map((node) => node.id)))
-                          }
-                          title="Expand all"
-                          aria-label="Expand all"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                        >
-                          <ChevronsDown size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedIds(new Set())}
-                          title="Collapse all"
-                          aria-label="Collapse all"
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-700 transition hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                        >
-                          <ChevronsUp size={14} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div
-                className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-                style={{ scrollbarGutter: "stable" }}
-              >
-                {treeEditMode &&
-                  (canContribute || canEditCurrentBook) &&
-                  treeReorderModeParentId === null &&
-                  !privateBookGate && (
-                    <p className="mb-2 text-[10px] uppercase tracking-[0.16em] text-zinc-500">
-                      Tap a row to show up/down. Drag and drop is enabled in edit mode.
-                    </p>
-                  )}
-                {privateBookGate ? (
-                  <div className="mx-2 mt-6 rounded-2xl border border-black/10 bg-white/80 p-5 text-center">
-                    <p className="text-sm font-medium text-zinc-700">🔒 Private book</p>
-                    <p className="mt-1 text-xs text-zinc-500">Sign in to view this book&apos;s contents.</p>
-                    <div className="mt-4 flex flex-col gap-2">
-                      <a
-                        href={signInFromShareHref}
-                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
-                      >
-                        Sign in
-                      </a>
-                      <a
-                        href={signUpFromShareHref}
-                        className="rounded-lg border border-black/10 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition hover:border-black/20"
-                      >
-                        Create account
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {treeError && (
-                      <p className="mt-3 text-sm text-[color:var(--accent)]">{treeError}</p>
-                    )}
-                    {!treeLoading && !treeError && treeData.length === 0 && bookId && (
-                      <p className="mt-3 text-sm text-zinc-600">No nodes yet.</p>
-                    )}
-                    {!treeLoading && !treeError && treeData.length > 0 && (
-                      <div
-                        className="mt-1 space-y-2"
-                        onDragOver={(event) => {
-                          if (!treeEditMode || !(canContribute || canEditCurrentBook)) {
-                            return;
-                          }
-                          if (treeReorderDraggingNodeId === null) {
-                            return;
-                          }
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                        }}
-                        onDrop={(event) => {
-                          if (!treeEditMode || !(canContribute || canEditCurrentBook)) {
-                            return;
-                          }
-                          if (treeReorderDraggingNodeId === null) {
-                            return;
-                          }
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const draggedIdRaw = event.dataTransfer.getData("text/plain");
-                          const draggedId = Number.parseInt(draggedIdRaw, 10);
-                          if (!Number.isFinite(draggedId)) {
-                            return;
-                          }
-                          applyTreeDropAtIndicator(draggedId);
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => selectBookRoot(true)}
-                          className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition ${
-                            isBookRootSelected
-                              ? "border-[color:var(--accent)] bg-[color:var(--sand)] text-[color:var(--accent)]"
-                              : "border-black/10 bg-white/80 text-zinc-700 hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]"
-                          }`}
-                        >
-                          {selectedBookOption?.book_name || "Book"}
-                        </button>
-                        {renderTree(treeData)}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-            )}
+            {isExploreVisible && <TreePanel
+              treeData={treeData}
+              treeLoading={treeLoading}
+              treeError={treeError}
+              bookId={bookId}
+              selectedId={selectedId}
+              expandedIds={expandedIds}
+              setExpandedIds={setExpandedIds}
+              selectedBookOption={selectedBookOption}
+              isBookRootSelected={isBookRootSelected}
+              currentBook={currentBook}
+              toggleNode={browsingHook.toggleNode}
+              selectNode={selectNode}
+              selectBookRoot={selectBookRoot}
+              treeEditMode={treeEditMode}
+              setTreeEditMode={setTreeEditMode}
+              canContribute={canContribute}
+              canEditCurrentBook={canEditCurrentBook}
+              treeReorderModeNodeId={treeReorderModeNodeId}
+              setTreeReorderModeNodeId={setTreeReorderModeNodeId}
+              treeReorderModeParentId={treeReorderModeParentId}
+              treeReorderingNodeId={treeReorderingNodeId}
+              treeReorderDraftByParentId={treeReorderDraftByParentId}
+              setTreeReorderDraftByParentId={setTreeReorderDraftByParentId}
+              treeReorderDraggingNodeId={treeReorderDraggingNodeId}
+              setTreeReorderDraggingNodeId={setTreeReorderDraggingNodeId}
+              treeReorderSavingParentId={treeReorderSavingParentId}
+              setTreeReorderSavingParentId={setTreeReorderSavingParentId}
+              treeReorderHasPendingChanges={treeReorderHasPendingChanges}
+              treeReorderDropTarget={treeReorderDropTarget}
+              treeReorderDropTargetRef={treeReorderDropTargetRef}
+              setTreeReorderDropTargetSynced={setTreeReorderDropTargetSynced}
+              applyTreeReorderDraft={applyTreeReorderDraft}
+              moveTreeReorderDraftNode={moveTreeReorderDraftNode}
+              applyTreeDropAtIndicator={applyTreeDropAtIndicator}
+              saveAllTreeReorderDrafts={saveAllTreeReorderDrafts}
+              cancelAllTreeReorderDrafts={cancelAllTreeReorderDrafts}
+              canAddChild={canAddChild}
+              getNextLevelName={getNextLevelName}
+              findPath={findPath}
+              findNodeById={findNodeById}
+              normalizeLevelName={normalizeLevelName}
+              getSchemaMatchedLevelName={getSchemaMatchedLevelName}
+              getDisplayLevelName={getDisplayLevelName}
+              privateBookGate={privateBookGate}
+              signInFromShareHref={signInFromShareHref}
+              signUpFromShareHref={signUpFromShareHref}
+              sourceLanguage={sourceLanguage}
+              setActionNode={setActionNode}
+              setCreateParentNodeIdOverride={setCreateParentNodeIdOverride}
+              setCreateInsertAfterNodeId={setCreateInsertAfterNodeId}
+              setFormData={setFormData}
+              setModalTranslationDrafts={setModalTranslationDrafts}
+              setModalSelectedTranslationLanguages={setModalSelectedTranslationLanguages}
+              setModalTranslationVariants={setModalTranslationVariants}
+              setModalCommentaryVariants={setModalCommentaryVariants}
+              setAction={setAction}
+              mobilePanel={mobilePanel}
+            />}
 
             {/* Content Section */}
             <div
@@ -16549,323 +15828,51 @@ function ScripturesContent() {
                           </div>
                         )}
 
-                        {showCommentary && (() => {
-                          const apiEntries: CommentaryDisplayItem[] = nodeCommentary
-                            .filter((entry) => typeof entry.content_text === "string" && entry.content_text.trim())
-                            .map((entry) => {
-                              const metadata =
-                                entry.metadata && typeof entry.metadata === "object"
-                                  ? entry.metadata
-                                  : null;
-                              const metadataAuthor =
-                                metadata && typeof metadata.author === "string" && metadata.author.trim()
-                                  ? metadata.author.trim()
-                                  : "";
-                              const metadataWork =
-                                metadata && typeof metadata.work_title === "string" && metadata.work_title.trim()
-                                  ? metadata.work_title.trim()
-                                  : "";
-                              const author = metadataAuthor || metadataWork || "Commentary";
-
-                              return {
-                                id: entry.id,
-                                author,
-                                text: entry.content_text,
-                              };
-                            });
-
-                          const metadata =
-                            (nodeContent.metadata_json && typeof nodeContent.metadata_json === "object"
-                              ? nodeContent.metadata_json
-                              : nodeContent.metadata && typeof nodeContent.metadata === "object"
-                                ? nodeContent.metadata
-                                : {}) as Record<string, unknown>;
-                          const metadataCommentary = metadata.commentary;
-                          const metadataEntries: CommentaryDisplayItem[] = Array.isArray(metadataCommentary)
-                            ? metadataCommentary
-                                .map((item, idx) => {
-                                  if (!item || typeof item !== "object") return null;
-                                  const entry = item as Record<string, unknown>;
-                                  const author = typeof entry.author === "string" ? entry.author : "Commentary";
-                                  const text = typeof entry.text === "string" ? entry.text : "";
-                                  if (!text.trim()) return null;
-                                  return { id: `metadata-${idx}`, author, text } as CommentaryDisplayItem;
-                                })
-                                .filter((item): item is CommentaryDisplayItem => Boolean(item))
-                            : [];
-
-                          const apiEditableEntries = nodeCommentary.filter(
-                            (entry) => typeof entry.content_text === "string" && entry.content_text.trim()
-                          );
-
-                          const displayEntries = apiEntries.length > 0 ? apiEntries : metadataEntries;
-                          if (!nodeCommentaryLoading && !nodeCommentaryError && displayEntries.length === 0) {
-                            return null;
-                          }
-
-                          return (
-                            <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                              <div className="mb-2 flex items-center justify-between gap-2">
-                                <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                  Commentary
-                                </div>
-                                {canEditCurrentBook && (
-                                  <button
-                                    type="button"
-                                    onClick={openCreateCommentaryEditor}
-                                    disabled={commentarySubmitting}
-                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Add
-                                  </button>
-                                )}
-                              </div>
-                              {nodeCommentaryLoading && (
-                                <p className="text-sm text-zinc-600">Loading commentary...</p>
-                              )}
-                              {!nodeCommentaryLoading && nodeCommentaryError && (
-                                <p className="text-sm text-red-600">{nodeCommentaryError}</p>
-                              )}
-                              {commentaryMessage && (
-                                <p className="mb-2 text-xs text-zinc-600">{commentaryMessage}</p>
-                              )}
-                              {canEditCurrentBook && commentaryEditorOpen && (
-                                <div className="mb-3 space-y-2 rounded-lg border border-black/10 bg-white p-3">
-                                  <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                                    <input
-                                      type="text"
-                                      value={commentaryFormAuthor}
-                                      onChange={(event) => setCommentaryFormAuthor(event.target.value)}
-                                      placeholder="Author"
-                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
-                                    />
-                                    <input
-                                      type="text"
-                                      value={commentaryFormWorkTitle}
-                                      onChange={(event) => setCommentaryFormWorkTitle(event.target.value)}
-                                      placeholder="Work"
-                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
-                                    />
-                                    <input
-                                      type="text"
-                                      value={commentaryFormLanguage}
-                                      onChange={(event) => setCommentaryFormLanguage(event.target.value)}
-                                      placeholder="Language code"
-                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
-                                    />
-                                  </div>
-                                  <textarea
-                                    rows={4}
-                                    value={commentaryFormText}
-                                    onChange={(event) => setCommentaryFormText(event.target.value)}
-                                    placeholder="Commentary text"
-                                    className="w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                                  />
-                                  <div className="flex items-center justify-end gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setCommentaryEditorOpen(false);
-                                        resetCommentaryEditor();
-                                      }}
-                                      disabled={commentarySubmitting}
-                                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        void handleSubmitCommentary();
-                                      }}
-                                      disabled={commentarySubmitting || !commentaryFormText.trim()}
-                                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      {commentarySubmitting
-                                        ? "Saving..."
-                                        : commentaryEditingId !== null
-                                          ? "Update"
-                                          : "Save"}
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                              {!nodeCommentaryLoading && !nodeCommentaryError && displayEntries.length > 0 && (
-                                <div className="space-y-3">
-                                  {apiEntries.length > 0
-                                    ? apiEditableEntries.map((entry) => {
-                                        const entryMetadata =
-                                          entry.metadata && typeof entry.metadata === "object"
-                                            ? (entry.metadata as Record<string, unknown>)
-                                            : {};
-                                        const author =
-                                          typeof entryMetadata.author === "string" && entryMetadata.author.trim()
-                                            ? entryMetadata.author.trim()
-                                            : typeof entryMetadata.work_title === "string" && entryMetadata.work_title.trim()
-                                              ? entryMetadata.work_title.trim()
-                                              : "Commentary";
-                                        return (
-                                          <div key={entry.id} className="rounded-lg border border-black/10 bg-white p-2.5">
-                                            <div className="flex items-center justify-between gap-2">
-                                              <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">{author}</div>
-                                              {canEditCurrentBook && (
-                                                <div className="flex items-center gap-1">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => openEditCommentaryEditor(entry)}
-                                                    disabled={commentarySubmitting}
-                                                    className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50"
-                                                  >
-                                                    Edit
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                      void handleDeleteCommentary(entry.id);
-                                                    }}
-                                                    disabled={commentarySubmitting}
-                                                    className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                                                  >
-                                                    Delete
-                                                  </button>
-                                                </div>
-                                              )}
-                                            </div>
-                                            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{entry.content_text}</p>
-                                          </div>
-                                        );
-                                      })
-                                    : displayEntries.map((entry) => (
-                                        <div key={entry.id}>
-                                          <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">{entry.author}</div>
-                                          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{entry.text}</p>
-                                        </div>
-                                      ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-
-                        {(nodeCommentsLoading || nodeCommentsError || nodeComments.length > 0 || Boolean(authEmail)) && (
-                          <div className="rounded-2xl border border-black/10 bg-white/90 p-4">
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                                Comments
-                              </div>
-                              {authEmail && (
-                                <button
-                                  type="button"
-                                  onClick={openCreateNodeCommentEditor}
-                                  disabled={nodeCommentSubmitting}
-                                  className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  Add
-                                </button>
-                              )}
-                            </div>
-                            {nodeCommentsLoading && (
-                              <p className="text-sm text-zinc-600">Loading comments...</p>
-                            )}
-                            {!nodeCommentsLoading && nodeCommentsError && (
-                              <p className="text-sm text-red-600">{nodeCommentsError}</p>
-                            )}
-                            {nodeCommentMessage && (
-                              <p className="mb-2 text-xs text-zinc-600">{nodeCommentMessage}</p>
-                            )}
-                            {authEmail && nodeCommentEditorOpen && (
-                              <div className="mb-3 space-y-2 rounded-lg border border-black/10 bg-white p-3">
-                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                                  <input
-                                    type="text"
-                                    value={nodeCommentFormLanguage}
-                                    onChange={(event) => setNodeCommentFormLanguage(event.target.value)}
-                                    placeholder="Language code"
-                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[color:var(--accent)]"
-                                  />
-                                </div>
-                                <textarea
-                                  rows={4}
-                                  value={nodeCommentFormText}
-                                  onChange={(event) => setNodeCommentFormText(event.target.value)}
-                                  placeholder="Comment text"
-                                  className="w-full rounded-lg border border-black/10 bg-white px-2.5 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                                />
-                                <div className="flex items-center justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setNodeCommentEditorOpen(false);
-                                      resetNodeCommentEditor();
-                                    }}
-                                    disabled={nodeCommentSubmitting}
-                                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      void handleSubmitNodeComment();
-                                    }}
-                                    disabled={nodeCommentSubmitting || !nodeCommentFormText.trim()}
-                                    className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-2.5 py-1 text-xs uppercase tracking-[0.14em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {nodeCommentSubmitting
-                                      ? "Saving..."
-                                      : nodeCommentEditingId !== null
-                                        ? "Update"
-                                        : "Save"}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                            {!nodeCommentsLoading && !nodeCommentsError && nodeComments.length > 0 && (
-                              <div className="space-y-3">
-                                {nodeComments.map((entry) => {
-                                  const canManageComment =
-                                    canEditCurrentBook ||
-                                    (authUserId !== null && entry.created_by === authUserId);
-
-                                  return (
-                                    <div key={entry.id} className="rounded-lg border border-black/10 bg-white p-2.5">
-                                      <div className="flex items-center justify-between gap-2">
-                                        <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">
-                                          {entry.created_by ? `User ${entry.created_by}` : "Comment"}
-                                        </div>
-                                        {canManageComment && (
-                                          <div className="flex items-center gap-1">
-                                            <button
-                                              type="button"
-                                              onClick={() => openEditNodeCommentEditor(entry)}
-                                              disabled={nodeCommentSubmitting}
-                                              className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-50"
-                                            >
-                                              Edit
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                void handleDeleteNodeComment(entry.id);
-                                              }}
-                                              disabled={nodeCommentSubmitting}
-                                              className="rounded border border-red-200 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-50"
-                                            >
-                                              Delete
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-                                      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
-                                        {entry.content_text}
-                                      </p>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <NodeCommentaryPanel
+                          showCommentary={showCommentary}
+                          canEditCurrentBook={canEditCurrentBook}
+                          authEmail={authEmail}
+                          authUserId={authUserId}
+                          nodeContent={nodeContent}
+                          nodeCommentary={nodeCommentary}
+                          nodeCommentaryLoading={nodeCommentaryLoading}
+                          nodeCommentaryError={nodeCommentaryError}
+                          nodeComments={nodeComments}
+                          nodeCommentsLoading={nodeCommentsLoading}
+                          nodeCommentsError={nodeCommentsError}
+                          nodeCommentEditorOpen={nodeCommentEditorOpen}
+                          setNodeCommentEditorOpen={setNodeCommentEditorOpen}
+                          nodeCommentEditingId={nodeCommentEditingId}
+                          nodeCommentFormLanguage={nodeCommentFormLanguage}
+                          setNodeCommentFormLanguage={setNodeCommentFormLanguage}
+                          nodeCommentFormText={nodeCommentFormText}
+                          setNodeCommentFormText={setNodeCommentFormText}
+                          nodeCommentSubmitting={nodeCommentSubmitting}
+                          nodeCommentMessage={nodeCommentMessage}
+                          commentaryEditorOpen={commentaryEditorOpen}
+                          setCommentaryEditorOpen={setCommentaryEditorOpen}
+                          commentaryEditingId={commentaryEditingId}
+                          commentaryFormAuthor={commentaryFormAuthor}
+                          setCommentaryFormAuthor={setCommentaryFormAuthor}
+                          commentaryFormWorkTitle={commentaryFormWorkTitle}
+                          setCommentaryFormWorkTitle={setCommentaryFormWorkTitle}
+                          commentaryFormLanguage={commentaryFormLanguage}
+                          setCommentaryFormLanguage={setCommentaryFormLanguage}
+                          commentaryFormText={commentaryFormText}
+                          setCommentaryFormText={setCommentaryFormText}
+                          commentarySubmitting={commentarySubmitting}
+                          commentaryMessage={commentaryMessage}
+                          openCreateCommentaryEditor={openCreateCommentaryEditor}
+                          openEditCommentaryEditor={openEditCommentaryEditor}
+                          handleSubmitCommentary={handleSubmitCommentary}
+                          handleDeleteCommentary={handleDeleteCommentary}
+                          resetCommentaryEditor={resetCommentaryEditor}
+                          openCreateNodeCommentEditor={openCreateNodeCommentEditor}
+                          openEditNodeCommentEditor={openEditNodeCommentEditor}
+                          handleSubmitNodeComment={handleSubmitNodeComment}
+                          handleDeleteNodeComment={handleDeleteNodeComment}
+                          resetNodeCommentEditor={resetNodeCommentEditor}
+                        />
 
                         {/* Tags */}
                         {nodeContent.tags && nodeContent.tags.length > 0 && (
@@ -18609,611 +17616,76 @@ function ScripturesContent() {
         )}
 
         {showBookPreview && bookPreviewArtifact && (
-          <div
-            ref={bookPreviewOverlayRef}
-            className="fixed inset-0 z-50 overflow-x-hidden bg-[color:var(--paper)]/98 backdrop-blur-[1px]"
-          >
-            <div className="flex h-[100svh] w-full min-w-0 flex-col overflow-x-hidden bg-[color:var(--paper)]">
-              <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                  <h2 className="font-[var(--font-display)] text-xl text-[color:var(--deep)] sm:text-2xl">
-                    {bookPreviewArtifact.preview_scope === "node"
-                      ? (() => {
-                          const hierarchicalPath = getPreviewHierarchicalPath(bookPreviewArtifact);
-                          return hierarchicalPath ? `Reader View (${hierarchicalPath})` : "Reader View";
-                        })()
-                      : "Book Preview"}
-                  </h2>
-                  <p className="text-xs text-zinc-600 sm:text-sm">
-                    {getPreviewBreadcrumbTitle(bookPreviewArtifact)}
-                  </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleClosePreview}
-                    disabled={showPreviewControls}
-                    title="Close preview"
-                    aria-label="Close preview"
-                    className="shrink-0 rounded-full p-1 text-zinc-400 transition hover:bg-black/5 hover:text-zinc-600 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <X className="h-6 w-6 sm:h-7 sm:w-7" />
-                  </button>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 sm:justify-end">
-                  {(() => {
-                    const previewScope = bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
-                    const targetNodeId =
-                      previewScope === "node" && typeof bookPreviewArtifact.root_node_id === "number"
-                        ? bookPreviewArtifact.root_node_id
-                        : previewScope === "node"
-                          ? selectedId
-                          : null;
-                    const previewPath = buildScripturesPreviewPath(previewScope, bookId, targetNodeId);
-                    const { previousSiblingId, nextSiblingId } = getPreviewSiblingNavigation(
-                      bookPreviewArtifact
-                    );
-                    return (
-                      <>
-                        {previewScope === "node" && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handlePreviewSiblingNavigation("previous");
-                              }}
-                              disabled={showPreviewControls || !previousSiblingId}
-                              title="Previous sibling"
-                              aria-label="Previous sibling"
-                              className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronLeft className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handlePreviewSiblingNavigation("next");
-                              }}
-                              disabled={showPreviewControls || !nextSiblingId}
-                              title="Next sibling"
-                              aria-label="Next sibling"
-                              className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              <ChevronRight className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
-                        <div ref={previewShareMenuRef} className="relative">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const visibility = resolveBookVisibility(currentBook?.visibility);
-                              const shareTarget: ShareDialogLinkOption["target"] = previewScope === "node"
-                                ? "node"
-                                : "book";
-                              const linkOptions: ShareDialogLinkOption[] = visibility === "public"
-                                ? [
-                                    {
-                                      key: "preview",
-                                      label: "Preview link",
-                                      url: toAbsoluteUrl(previewPath),
-                                      emailSubject: "Shared scripture preview link",
-                                      emailBody: `Here is the preview link:\n\n${toAbsoluteUrl(previewPath)}`,
-                                      target: shareTarget,
-                                    },
-                                  ]
-                                : [];
-                              void openShareDialogForBook({
-                                  bookId,
-                                  bookName: currentBook?.book_name || "Book",
-                                  visibility,
-                                  canManageShares: visibility === "private" && canEditCurrentBook,
-                                  description: visibility === "public"
-                                    ? "Copy or email a public link for this view."
-                                    : "Invite existing or new users to this private book. Invitees must finish registration before access is granted.",
-                                  linkOptions,
-                                  privateAccessPath:
-                                    previewScope === "node"
-                                      ? buildScripturesPreviewPath("node", bookId, targetNodeId)
-                                      : buildScripturesPreviewPath("book", bookId),
-                                  privateCopyTarget: shareTarget,
-                                });
-                              }}
-                            disabled={showPreviewControls}
-                            title="Share"
-                            aria-label="Share"
-                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <Share2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                        {canBrowseCurrentNode && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handleBrowseFromPreview(bookId, targetNodeId);
-                            }}
-                            disabled={showPreviewControls}
-                            title="Browse"
-                            aria-label="Browse"
-                            className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <BookOpen className="h-4 w-4" />
-                          </button>
-                        )}
-                      </>
-                    );
-                  })()}
-                  <button
-                    type="button"
-                    onClick={() => setShowPreviewControls((prev) => !prev)}
-                    title={showPreviewControls ? "Hide controls" : "Show controls"}
-                    aria-label={showPreviewControls ? "Hide controls" : "Show controls"}
-                    className={`rounded-full border p-2 transition ${
-                      showPreviewControls
-                        ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white shadow-sm"
-                        : "border-black/10 text-zinc-600 hover:border-black/20"
-                    }`}
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      openPdfExportDialog(bookPreviewArtifact.book_id, bookPreviewArtifact.book_name, {
-                        preferPreviewScope: true,
-                      });
-                    }}
-                    disabled={showPreviewControls}
-                    title="View PDF"
-                    aria-label="View PDF"
-                    className="rounded-full border border-black/10 p-2 text-zinc-600 transition hover:border-black/20 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <FileText className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {showPreviewControls && (
-                <div className="border-b border-black/10 bg-[color:var(--paper)] px-3 py-2 sm:px-4 sm:py-2.5">
-                  <div className="w-full rounded-lg border border-black/10 bg-white/90 p-2.5">
-                    <div className="mb-2 flex items-center gap-2 border-b border-black/10 pb-2">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewControlsTab("content")}
-                        className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] transition ${
-                          previewControlsTab === "content"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "border border-black/10 bg-white text-zinc-600 hover:border-black/20"
-                        }`}
-                      >
-                        Content
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewControlsTab("translations")}
-                        className={`rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.16em] transition ${
-                          previewControlsTab === "translations"
-                            ? "bg-[color:var(--accent)] text-white"
-                            : "border border-black/10 bg-white text-zinc-600 hover:border-black/20"
-                        }`}
-                      >
-                        Translations & Commentaries
-                      </button>
-                    </div>
-
-                    {/* Scrollable options area — capped on mobile so Apply is never buried */}
-                    <div className="max-h-[40vh] space-y-2 overflow-y-auto sm:max-h-none">
-                      {previewControlsTab === "content" && (
-                        <>
-                          <div>
-                            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Options</div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={showPreviewTitles}
-                                  onChange={(event) => setShowPreviewTitles(event.target.checked)}
-                                  disabled={bookPreviewLoading}
-                                />
-                                Show titles
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={showPreviewLabels}
-                                  onChange={(event) => setShowPreviewLabels(event.target.checked)}
-                                  disabled={bookPreviewLoading}
-                                />
-                                Show labels
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={showPreviewLevelNumbers}
-                                  onChange={(event) => setShowPreviewLevelNumbers(event.target.checked)}
-                                  disabled={bookPreviewLoading}
-                                />
-                                Show level numbers
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={showPreviewDetails}
-                                  onChange={(event) => setShowPreviewDetails(event.target.checked)}
-                                  disabled={bookPreviewLoading}
-                                />
-                                Show template details
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={showPreviewMedia}
-                                  onChange={(event) => setShowPreviewMedia(event.target.checked)}
-                                  disabled={bookPreviewLoading}
-                                />
-                                Show multimedia
-                              </label>
-                              {canEditCurrentBook && (
-                                <label className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={previewEditModeEnabled}
-                                    onChange={(event) => setPreviewEditModeEnabled(event.target.checked)}
-                                    disabled={bookPreviewLoading}
-                                  />
-                                  Edit Mode
-                                </label>
-                              )}
-                              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                                Word meanings
-                                <select
-                                  value={previewWordMeaningsDisplayMode}
-                                  onChange={(event) =>
-                                    setPreviewWordMeaningsDisplayMode(
-                                      normalizePreviewWordMeaningsDisplayMode(event.target.value)
-                                    )
-                                  }
-                                  disabled={bookPreviewLoading}
-                                  className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  <option value="hide">Hide</option>
-                                  <option value="inline">Inline</option>
-                                  <option value="table">Table</option>
-                                </select>
-                              </label>
-                            </div>
-                          </div>
-
-                          <div className="rounded-lg border border-black/10 bg-white/70 px-2 py-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs uppercase tracking-[0.14em] text-zinc-600">
-                                Reader Font Size
-                              </span>
-                              <span className="text-xs font-semibold text-zinc-700">{previewFontSizePercent}%</span>
-                            </div>
-                            <div className="mt-2 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setPreviewFontSizePercent((prev) =>
-                                    normalizePreviewFontSizePercent(prev - PREVIEW_FONT_SIZE_PERCENT_STEP)
-                                  )
-                                }
-                                disabled={bookPreviewLoading}
-                                className="min-h-9 min-w-9 rounded-lg border border-black/10 bg-white px-2 text-sm font-medium text-zinc-700 disabled:opacity-50"
-                                aria-label="Decrease reader font size"
-                              >
-                                A-
-                              </button>
-                              <input
-                                type="range"
-                                min={PREVIEW_FONT_SIZE_PERCENT_MIN}
-                                max={PREVIEW_FONT_SIZE_PERCENT_MAX}
-                                step={PREVIEW_FONT_SIZE_PERCENT_STEP}
-                                value={previewFontSizePercent}
-                                onChange={(event) =>
-                                  setPreviewFontSizePercent(
-                                    normalizePreviewFontSizePercent(event.target.value)
-                                  )
-                                }
-                                disabled={bookPreviewLoading}
-                                className="h-9 w-full"
-                                aria-label="Reader font size"
-                              />
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setPreviewFontSizePercent((prev) =>
-                                    normalizePreviewFontSizePercent(prev + PREVIEW_FONT_SIZE_PERCENT_STEP)
-                                  )
-                                }
-                                disabled={bookPreviewLoading}
-                                className="min-h-9 min-w-9 rounded-lg border border-black/10 bg-white px-2 text-sm font-medium text-zinc-700 disabled:opacity-50"
-                                aria-label="Increase reader font size"
-                              >
-                                A+
-                              </button>
-                            </div>
-                          </div>
-
-                          {availablePreviewLevels.length > 1 && (
-                            <div>
-                              <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Show Levels</div>
-                              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                                {availablePreviewLevels.map((level) => (
-                                  <label key={`preview-level-${level}`} className="flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={!hiddenPreviewLevels.has(level)}
-                                      onChange={(event) => {
-                                        setHiddenPreviewLevels((prev) => {
-                                          const next = new Set(prev);
-                                          if (event.target.checked) {
-                                            next.delete(level);
-                                          } else {
-                                            next.add(level);
-                                          }
-                                          return next;
-                                        });
-                                      }}
-                                      disabled={bookPreviewLoading}
-                                    />
-                                    {getDisplayLevelName(level)}
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {previewControlsTab === "translations" && (
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">Preview Languages</div>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-zinc-700">
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={bookPreviewLanguageSettings.show_sanskrit}
-                                onChange={(event) =>
-                                  setBookPreviewLanguageSettings((prev) => ({
-                                    ...prev,
-                                    show_sanskrit: event.target.checked,
-                                  }))
-                                }
-                                disabled={bookPreviewLoading}
-                              />
-                              Sanskrit
-                            </label>
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={bookPreviewLanguageSettings.show_transliteration}
-                                onChange={(event) =>
-                                  setBookPreviewLanguageSettings((prev) => ({
-                                    ...prev,
-                                    show_transliteration: event.target.checked,
-                                  }))
-                                }
-                                disabled={bookPreviewLoading}
-                              />
-                              Transliteration
-                            </label>
-                            <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-zinc-500">
-                              Script
-                              <select
-                                value={previewTransliterationScript}
-                                onChange={(event) =>
-                                  setBookPreviewTransliterationScript(
-                                    normalizeTransliterationScript(event.target.value)
-                                  )
-                                }
-                                disabled={bookPreviewLoading || !bookPreviewLanguageSettings.show_transliteration}
-                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs normal-case tracking-normal text-zinc-700 outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {TRANSLITERATION_SCRIPT_OPTIONS.map((scriptOption) => (
-                                  <option key={scriptOption} value={scriptOption}>
-                                    {transliterationScriptLabel(scriptOption)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={bookPreviewLanguageSettings.show_english}
-                                onChange={(event) =>
-                                  setBookPreviewLanguageSettings((prev) => ({
-                                    ...prev,
-                                    show_english: event.target.checked,
-                                  }))
-                                }
-                                disabled={bookPreviewLoading}
-                              />
-                              Translations
-                            </label>
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={bookPreviewLanguageSettings.show_commentary}
-                                onChange={(event) =>
-                                  setBookPreviewLanguageSettings((prev) => ({
-                                    ...prev,
-                                    show_commentary: event.target.checked,
-                                  }))
-                                }
-                                disabled={bookPreviewLoading}
-                              />
-                              Commentaries
-                            </label>
-                            <details className="rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
-                              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.14em] text-zinc-600">
-                                Languages ({previewTranslationLanguages.length} selected)
-                              </summary>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-zinc-700 sm:grid-cols-3">
-                                {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                  <label key={`preview-translation-${language}`} className="flex items-center gap-1.5">
-                                    <input
-                                      type="checkbox"
-                                      checked={previewTranslationLanguages.includes(language)}
-                                      onChange={(event) => {
-                                        const nextValues = event.target.checked
-                                          ? [...previewTranslationLanguages, language]
-                                          : previewTranslationLanguages.filter((value) => value !== language);
-                                        setPreviewTranslationLanguages(
-                                          normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
-                                        );
-                                      }}
-                                      disabled={bookPreviewLoading}
-                                    />
-                                    {translationLanguageLabel(language)}
-                                  </label>
-                                ))}
-                              </div>
-                            </details>
-                            {availableVariantAuthors.size > 0 && (
-                              <details className="rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
-                                <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.14em] text-zinc-600">
-                                  Authors ({previewVariantAuthorSlugs.length === 0 ? "all" : `${previewVariantAuthorSlugs.length} selected`})
-                                </summary>
-                                <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-zinc-700">
-                                  {Array.from(availableVariantAuthors.entries()).map(([slug, name]) => {
-                                    const allSlugs = Array.from(availableVariantAuthors.keys());
-                                    const isChecked = previewVariantAuthorSlugs.length === 0 || previewVariantAuthorSlugs.includes(slug);
-                                    return (
-                                      <label key={`author-filter-${slug}`} className="flex items-center gap-1.5">
-                                        <input
-                                          type="checkbox"
-                                          checked={isChecked}
-                                          onChange={(event) => {
-                                            setPreviewVariantAuthorSlugs((prev) => {
-                                              const currentSet = new Set(prev.length === 0 ? allSlugs : prev);
-                                              if (event.target.checked) {
-                                                currentSet.add(slug);
-                                              } else {
-                                                currentSet.delete(slug);
-                                              }
-                                              // Empty array means "all selected"
-                                              if (currentSet.size >= allSlugs.length) return [];
-                                              return Array.from(currentSet);
-                                            });
-                                          }}
-                                          disabled={bookPreviewLoading}
-                                        />
-                                        {name}
-                                        <span className="text-zinc-400">({slug})</span>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </details>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {/* Apply button — always visible outside the scrollable area */}
-                    <div className="mt-2.5 flex justify-end border-t border-black/[0.06] pt-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const currentScope =
-                            bookPreviewArtifact.preview_scope === "node" ? "node" : "book";
-                          void handlePreviewBook(currentScope);
-                        }}
-                        disabled={
-                          bookPreviewLoading || !anyPreviewLanguageVisible || !hasPendingPreviewSettingChanges
-                        }
-                        className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-1.5 text-xs font-medium uppercase tracking-[0.18em] text-white transition disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {bookPreviewLoading ? "Applying..." : "Apply"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div
-                ref={bookPreviewScrollContainerRef}
-                onScroll={handleBookPreviewScroll}
-                className="flex-1 w-full overflow-y-auto overflow-x-hidden px-2.5 pb-1.5 pt-0.5 sm:px-3"
-              >
-                {previewLinkMessage && (
-                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-xs text-zinc-700">
-                    {previewLinkMessage}
-                  </div>
-                )}
-                {bookPreviewLoading && (
-                  <div className="mb-1.5 flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-1.5 text-sm text-zinc-700">
-                    <span
-                      aria-hidden
-                      className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-700"
-                    />
-                    <span>{previewLoadingMessageWithElapsed}</span>
-                  </div>
-                )}
-
-                {bookPreviewArtifact.warnings && bookPreviewArtifact.warnings.length > 0 && (
-                  <div className="mb-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-700">
-                    {bookPreviewArtifact.warnings.join(" ")}
-                  </div>
-                )}
-
-                {appliedShowPreviewDetails && bookPreviewArtifact.book_template && (
-                  <div className="mb-1.5 rounded-lg border border-black/10 bg-white/90 p-2">
-                    <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      {bookPreviewArtifact.preview_scope === "node" ? "Level Template" : "Book Template"}
-                    </div>
-                    <div className="mt-0.5 text-sm font-semibold text-[color:var(--deep)]">
-                      {bookPreviewArtifact.book_template.template_key}
-                    </div>
-                    <div className="mt-0.5 text-xs text-zinc-500">
-                      Children rendered: {bookPreviewArtifact.book_template.child_count}
-                    </div>
-                    <p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-zinc-700" style={previewBodyTextStyle}>
-                      {bookPreviewArtifact.book_template.rendered_text ||
-                        (bookPreviewArtifact.preview_scope === "node"
-                          ? "No rendered level summary."
-                          : "No rendered book-level summary.")}
-                    </p>
-                  </div>
-                )}
-
-                {bookPreviewArtifact.preview_scope === "book" && appliedShowPreviewMedia && (bookPreviewArtifact.book_media_items || []).length > 0 && (
-                  <div className="mb-1.5 flex flex-col gap-2">
-                    {(bookPreviewArtifact.book_media_items || []).map((media, index) => {
-                      const label = getBookMediaLabel(media);
-                      const mediaType = (media.media_type || "link").trim().toLowerCase();
-                      return (
-                        <div key={`${mediaType}:${media.url}:${media.asset_id || index}`} className="contents">
-                          {renderInlineMediaPreview(mediaType, media.url, label)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <div className="space-y-1.5 [&_input]:text-base [&_textarea]:text-base [&_select]:text-base sm:[&_input]:text-sm sm:[&_textarea]:text-sm sm:[&_select]:text-sm">
-                  {previewBodyBlockElements.length === 0 ? (
-                    <p className="rounded-lg border border-black/10 bg-white/70 px-3 py-1.5 text-sm text-zinc-500">
-                      {bookPreviewArtifact.preview_scope === "node"
-                        ? "No previewable content found under this level."
-                        : "No previewable content found for this book."}
-                    </p>
-                  ) : (
-                    previewBodyBlockElements
-                  )}
-
-                  {(bookPreviewLoadingMore || (bookPreviewArtifact.preview_scope === "book" && bookPreviewArtifact.has_more)) && (
-                    <div className="py-1.5 text-center text-xs text-zinc-500">
-                      {bookPreviewLoadingMore ? "Loading more…" : "Scroll to load more"}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <BookPreviewOverlay
+            bookPreviewArtifact={bookPreviewArtifact}
+            bookPreviewOverlayRef={bookPreviewOverlayRef}
+            bookPreviewScrollContainerRef={bookPreviewScrollContainerRef}
+            previewShareMenuRef={previewShareMenuRef}
+            bookPreviewLoading={bookPreviewLoading}
+            bookPreviewLoadingMore={bookPreviewLoadingMore}
+            previewLoadingMessageWithElapsed={previewLoadingMessageWithElapsed}
+            previewLinkMessage={previewLinkMessage}
+            showPreviewControls={showPreviewControls}
+            setShowPreviewControls={setShowPreviewControls}
+            previewControlsTab={previewControlsTab}
+            setPreviewControlsTab={setPreviewControlsTab}
+            showPreviewTitles={showPreviewTitles}
+            setShowPreviewTitles={setShowPreviewTitles}
+            showPreviewLabels={showPreviewLabels}
+            setShowPreviewLabels={setShowPreviewLabels}
+            showPreviewLevelNumbers={showPreviewLevelNumbers}
+            setShowPreviewLevelNumbers={setShowPreviewLevelNumbers}
+            showPreviewDetails={showPreviewDetails}
+            setShowPreviewDetails={setShowPreviewDetails}
+            showPreviewMedia={showPreviewMedia}
+            setShowPreviewMedia={setShowPreviewMedia}
+            previewEditModeEnabled={previewEditModeEnabled}
+            setPreviewEditModeEnabled={setPreviewEditModeEnabled}
+            previewWordMeaningsDisplayMode={previewWordMeaningsDisplayMode}
+            setPreviewWordMeaningsDisplayMode={setPreviewWordMeaningsDisplayMode}
+            previewFontSizePercent={previewFontSizePercent}
+            setPreviewFontSizePercent={setPreviewFontSizePercent}
+            hiddenPreviewLevels={hiddenPreviewLevels}
+            setHiddenPreviewLevels={setHiddenPreviewLevels}
+            bookPreviewLanguageSettings={bookPreviewLanguageSettings}
+            setBookPreviewLanguageSettings={setBookPreviewLanguageSettings}
+            previewTransliterationScript={previewTransliterationScript}
+            setBookPreviewTransliterationScript={setBookPreviewTransliterationScript}
+            previewTranslationLanguages={previewTranslationLanguages}
+            setPreviewTranslationLanguages={setPreviewTranslationLanguages}
+            previewVariantAuthorSlugs={previewVariantAuthorSlugs}
+            setPreviewVariantAuthorSlugs={setPreviewVariantAuthorSlugs}
+            anyPreviewLanguageVisible={anyPreviewLanguageVisible}
+            hasPendingPreviewSettingChanges={hasPendingPreviewSettingChanges}
+            availablePreviewLevels={availablePreviewLevels}
+            availableVariantAuthors={availableVariantAuthors}
+            appliedShowPreviewDetails={appliedShowPreviewDetails}
+            appliedShowPreviewMedia={appliedShowPreviewMedia}
+            previewBodyTextStyle={previewBodyTextStyle}
+            previewBodyBlockElements={previewBodyBlockElements}
+            selectedId={selectedId}
+            bookId={bookId}
+            currentBook={currentBook}
+            canEditCurrentBook={canEditCurrentBook}
+            canBrowseCurrentNode={canBrowseCurrentNode}
+            sourceLanguage={sourceLanguage}
+            handleClosePreview={handleClosePreview}
+            handlePreviewBook={handlePreviewBook}
+            handlePreviewSiblingNavigation={handlePreviewSiblingNavigation}
+            handleBrowseFromPreview={handleBrowseFromPreview}
+            openShareDialogForBook={openShareDialogForBook}
+            openPdfExportDialog={openPdfExportDialog}
+            handleBookPreviewScroll={handleBookPreviewScroll}
+            getBookMediaLabel={getBookMediaLabel}
+            getPreviewBreadcrumbTitle={getPreviewBreadcrumbTitle}
+            getPreviewHierarchicalPath={getPreviewHierarchicalPath}
+            getPreviewSiblingNavigation={getPreviewSiblingNavigation}
+            getDisplayLevelName={getDisplayLevelName}
+            resolveBookVisibility={resolveBookVisibility}
+            buildScripturesPreviewPath={buildScripturesPreviewPath}
+            toAbsoluteUrl={toAbsoluteUrl}
+            renderInlineMediaPreview={renderInlineMediaPreview}
+          />
         )}
 
         {showPdfExportDialog && pdfExportTarget && (
@@ -19857,574 +18329,49 @@ function ScripturesContent() {
         )}
 
         {/* Action Modal */}
-        {action && actionNode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-3 overflow-y-auto">
-            <div className="my-6 flex max-h-[calc(100svh-3rem)] w-full max-w-2xl flex-col rounded-3xl bg-[color:var(--paper)] shadow-2xl">
-              <div className="flex-shrink-0 border-b border-black/10 p-4 pb-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-                    {action === "add" 
-                      ? `Add ${getDisplayLevelName(formData.levelName) || "New Node"}` 
-                      : `Edit ${getDisplayLevelName(formatValue(formData.levelName || actionNode?.level_name)) || "Node"}`}
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (editorOpenedFromPreviewRef.current) {
-                        suppressNextAutoPreviewRef.current = true;
-                      }
-                      editorOpenedFromPreviewRef.current = false;
-                      setAction(null);
-                      setActionNode(null);
-                      setCreateParentNodeIdOverride(null);
-                      setCreateInsertAfterNodeId(null);
-                      setActionMessage(null);
-                    }}
-                    className="rounded-md border border-black/10 px-2.5 py-1 text-sm text-zinc-700"
-                  >
-                    X
-                  </button>
-                </div>
-              </div>
-
-              <form onSubmit={handleModalSubmit} className="flex min-h-0 flex-1 flex-col">
-                <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Level Name
-                      {action === "add" && <span className="ml-1 text-[10px]">(from schema)</span>}
-                    </label>
-                    {action === "add" ? (
-                      <input
-                        type="text"
-                        value={getDisplayLevelName(formData.levelName)}
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed outline-none"
-                        placeholder="e.g., Kanda, Sarga, Shloka"
-                        required
-                        readOnly
-                      />
-                    ) : (
-                      <select
-                        value={formData.levelName}
-                        onChange={(e) =>
-                          setFormData({ ...formData, levelName: e.target.value })
-                        }
-                        className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                        required
-                      >
-                        <option value="">Select level</option>
-                        {currentBook?.schema?.levels?.map((level) => (
-                          <option key={level} value={level}>
-                            {getDisplayLevelName(level)}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Sequence Number
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.sequenceNumber}
-                      onChange={(e) =>
-                        setFormData({ ...formData, sequenceNumber: e.target.value })
-                      }
-                      className="mt-1 w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder="Auto-calculated if empty"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                    Title (English)
-                  </label>
-                  <div className="group relative mt-1">
-                    <input
-                      type="text"
-                      value={formData.titleEnglish}
-                      onChange={(e) =>
-                        setFormData({ ...formData, titleEnglish: e.target.value })
-                      }
-                      className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                      placeholder="English title"
-                    />
-                    <InlineClearButton
-                      visible={Boolean(formData.titleEnglish)}
-                      onClear={() => setFormData((prev) => ({ ...prev, titleEnglish: "" }))}
-                      ariaLabel="Clear title English"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Title (Sanskrit)
-                    </label>
-                    <div className="group relative mt-1">
-                      <input
-                        type="text"
-                        value={formData.titleSanskrit}
-                        onChange={(e) =>
-                          setFormData({ ...formData, titleSanskrit: e.target.value })
-                        }
-                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="Sanskrit title"
-                      />
-                      <InlineClearButton
-                        visible={Boolean(formData.titleSanskrit)}
-                        onClear={() => setFormData((prev) => ({ ...prev, titleSanskrit: "" }))}
-                        ariaLabel="Clear title Sanskrit"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                      Title (Transliteration)
-                    </label>
-                    <div className="group relative mt-1">
-                      <input
-                        type="text"
-                        value={transliterationDisplayValue(formData.titleTransliteration)}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            titleTransliteration: transliterationInputToIast(e.target.value),
-                          })
-                        }
-                        className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                        placeholder="Transliteration"
-                      />
-                      <InlineClearButton
-                        visible={Boolean(formData.titleTransliteration)}
-                        onClear={() =>
-                          setFormData((prev) => ({ ...prev, titleTransliteration: "" }))
-                        }
-                        ariaLabel="Clear title transliteration"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={formData.hasContent}
-                      onChange={(e) =>
-                        setFormData({ ...formData, hasContent: e.target.checked })
-                      }
-                      className="rounded border-black/10"
-                    />
-                    <span className="text-sm text-zinc-600">Add content now</span>
-                  </label>
-                </div>
-
-                {formData.hasContent && (
-                  <div className="flex flex-col gap-3 rounded-lg border border-black/10 bg-blue-50/30 p-3">
-                    <div>
-                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        {contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
-                      </label>
-                      <div className="group relative mt-1">
-                        <textarea
-                          value={formData.contentSanskrit}
-                          onChange={(e) =>
-                            setFormData({ ...formData, contentSanskrit: e.target.value })
-                          }
-                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                          placeholder={contentFieldLabels.sanskrit || DEFAULT_CONTENT_FIELD_LABELS.sanskrit}
-                          rows={3}
-                        />
-                        <InlineClearButton
-                          visible={Boolean(formData.contentSanskrit)}
-                          onClear={() => setFormData((prev) => ({ ...prev, contentSanskrit: "" }))}
-                          ariaLabel="Clear content Sanskrit"
-                          position="top"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        {contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
-                      </label>
-                      <div className="group relative mt-1">
-                        <textarea
-                          value={transliterationDisplayValue(formData.contentTransliteration)}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              contentTransliteration: transliterationInputToIast(e.target.value),
-                            })
-                          }
-                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                          placeholder={contentFieldLabels.transliteration || DEFAULT_CONTENT_FIELD_LABELS.transliteration}
-                          rows={3}
-                        />
-                        <InlineClearButton
-                          visible={Boolean(formData.contentTransliteration)}
-                          onClear={() =>
-                            setFormData((prev) => ({ ...prev, contentTransliteration: "" }))
-                          }
-                          ariaLabel="Clear content transliteration"
-                          position="top"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">Translations</label>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-1.5">
-                        {EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                          <label key={`modal-translation-select-${language}`} className="flex items-center gap-1.5 text-xs text-zinc-700">
-                            <input
-                              type="checkbox"
-                              checked={modalSelectedTranslationLanguages.includes(language)}
-                              onChange={(event) => {
-                                const nextValues = event.target.checked
-                                  ? [...modalSelectedTranslationLanguages, language]
-                                  : modalSelectedTranslationLanguages.filter((value) => value !== language);
-                                setModalSelectedTranslationLanguages(
-                                  normalizeSelectedEditableTranslationLanguages(nextValues, sourceLanguage)
-                                );
-                              }}
-                            />
-                            {translationLanguageLabel(language)}
-                          </label>
-                        ))}
-                      </div>
-                      <div className="mt-2 flex flex-col gap-2">
-                        {modalSelectedTranslationLanguages.map((language) => (
-                          <div key={`modal-translation-input-${language}`}>
-                            <label className="text-xs uppercase tracking-[0.18em] text-zinc-500">
-                              {translationLanguageLabel(language)} Translation
-                            </label>
-                            <div className="group relative mt-1">
-                              <textarea
-                                value={modalTranslationDrafts[language] || ""}
-                                onChange={(e) =>
-                                  setModalTranslationDrafts((prev) => ({
-                                    ...prev,
-                                    [language]: e.target.value,
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                                rows={3}
-                              />
-                              <InlineClearButton
-                                visible={Boolean((modalTranslationDrafts[language] || "").trim())}
-                                onClear={() =>
-                                  setModalTranslationDrafts((prev) => ({
-                                    ...prev,
-                                    [language]: "",
-                                  }))
-                                }
-                                ariaLabel={`Clear ${translationLanguageLabel(language)} translation`}
-                                position="top"
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
-                        <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
-                          Translation Variants By Author ({modalTranslationVariants.length})
-                        </summary>
-                        <div className="mt-2 flex flex-col gap-2">
-                          {modalTranslationVariants.map((entry, index) => (
-                            <div key={`modal-translation-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
-                              <label className="mb-2 flex flex-col gap-1">
-                                <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
-                                <select
-                                  value={entry.author_slug}
-                                  onChange={(event) =>
-                                    setModalTranslationVariants((prev) =>
-                                      prev.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? applyVariantAuthorSelection(item, event.target.value, currentBook)
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                                >
-                                  <option value="">
-                                    {getVariantAuthorOptions(currentBook, entry).length > 0
-                                      ? "Select author"
-                                      : "No authors in registry"}
-                                  </option>
-                                  {getVariantAuthorOptions(currentBook, entry).map((option) => (
-                                    <option key={option.slug} value={option.slug}>{option.name}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <div>
-                                <label className="flex flex-col gap-1">
-                                  <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
-                                  <select
-                                    value={entry.language}
-                                    onChange={(event) =>
-                                      setModalTranslationVariants((prev) =>
-                                        prev.map((item, itemIndex) =>
-                                          itemIndex === index
-                                            ? applyVariantLanguageSelection(item, event.target.value, "translation")
-                                            : item
-                                        )
-                                      )
-                                    }
-                                    className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                  >
-                                    <option value="">Select language</option>
-                                    {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                      <option key={language} value={language}>{translationLanguageLabel(language)}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                              </div>
-                              <textarea
-                                value={entry.text}
-                                onChange={(event) =>
-                                  setModalTranslationVariants((prev) =>
-                                    prev.map((item, itemIndex) =>
-                                      itemIndex === index
-                                        ? { ...item, text: event.target.value }
-                                        : item
-                                    )
-                                  )
-                                }
-                                placeholder="Variant translation text"
-                                rows={3}
-                                className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                              />
-                              <div className="mt-2 flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setModalTranslationVariants((prev) =>
-                                      prev.filter((_, itemIndex) => itemIndex !== index)
-                                    )
-                                  }
-                                  className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setModalTranslationVariants((prev) => [
-                                ...prev,
-                                buildEmptyAuthorVariantDraft(),
-                              ])
-                            }
-                            className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
-                          >
-                            Add Translation Variant
-                          </button>
-                        </div>
-                      </details>
-
-                      <details className="mt-2 rounded-lg border border-black/10 bg-white/70 p-2">
-                        <summary className="cursor-pointer text-xs uppercase tracking-[0.16em] text-zinc-600">
-                          Commentary Variants By Author ({modalCommentaryVariants.length})
-                        </summary>
-                        <div className="mt-2 flex flex-col gap-2">
-                          {modalCommentaryVariants.map((entry, index) => (
-                            <div key={`modal-commentary-variant-${index}`} className="rounded-lg border border-black/10 bg-white p-2">
-                              <label className="mb-2 flex flex-col gap-1">
-                                <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Author</span>
-                                <select
-                                  value={entry.author_slug}
-                                  onChange={(event) =>
-                                    setModalCommentaryVariants((prev) =>
-                                      prev.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? applyVariantAuthorSelection(item, event.target.value, currentBook)
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  disabled={getVariantAuthorOptions(currentBook, entry).length === 0}
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)] disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
-                                >
-                                  <option value="">
-                                    {getVariantAuthorOptions(currentBook, entry).length > 0
-                                      ? "Select author"
-                                      : "No authors in registry"}
-                                  </option>
-                                  {getVariantAuthorOptions(currentBook, entry).map((option) => (
-                                    <option key={option.slug} value={option.slug}>{option.name}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <div>
-                                <label className="flex flex-col gap-1">
-                                  <span className="text-xs uppercase tracking-[0.16em] text-zinc-500">Language</span>
-                                  <select
-                                    value={entry.language}
-                                    onChange={(event) =>
-                                      setModalCommentaryVariants((prev) =>
-                                        prev.map((item, itemIndex) =>
-                                          itemIndex === index
-                                            ? applyVariantLanguageSelection(item, event.target.value, "commentary")
-                                            : item
-                                        )
-                                      )
-                                    }
-                                    className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                                  >
-                                    <option value="">Select language</option>
-                                    {SORTED_EDITABLE_TRANSLATION_LANGUAGES.map((language) => (
-                                      <option key={language} value={language}>{translationLanguageLabel(language)}</option>
-                                    ))}
-                                  </select>
-                                </label>
-                              </div>
-                              <textarea
-                                value={entry.text}
-                                onChange={(event) =>
-                                  setModalCommentaryVariants((prev) =>
-                                    prev.map((item, itemIndex) =>
-                                      itemIndex === index
-                                        ? { ...item, text: event.target.value }
-                                        : item
-                                    )
-                                  )
-                                }
-                                placeholder="Variant commentary text"
-                                rows={3}
-                                className="mt-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-sm outline-none focus:border-[color:var(--accent)]"
-                              />
-                              <div className="mt-2 flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setModalCommentaryVariants((prev) =>
-                                      prev.filter((_, itemIndex) => itemIndex !== index)
-                                    )
-                                  }
-                                  className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-xs uppercase tracking-[0.14em] text-red-700"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setModalCommentaryVariants((prev) => [
-                                ...prev,
-                                buildEmptyAuthorVariantDraft(),
-                              ])
-                            }
-                            className="self-start rounded-lg border border-black/10 bg-white px-2 py-1 text-xs uppercase tracking-[0.14em] text-zinc-700"
-                          >
-                            Add Commentary Variant
-                          </button>
-                        </div>
-                      </details>
-                    </div>
-                    <div>
-                      <label className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-                        Tags (comma-separated)
-                      </label>
-                      <div className="group relative mt-1">
-                        <input
-                          type="text"
-                          value={formData.tags}
-                          onChange={(e) =>
-                            setFormData({ ...formData, tags: e.target.value })
-                          }
-                          className="w-full rounded-lg border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                          placeholder="tag1, tag2, tag3"
-                        />
-                        <InlineClearButton
-                          visible={Boolean(formData.tags)}
-                          onClear={() => setFormData((prev) => ({ ...prev, tags: "" }))}
-                          ariaLabel="Clear tags"
-                        />
-                      </div>
-                    </div>
-
-                    {modalWordMeaningsEnabled && (
-                      <WordMeaningsEditor
-                        rows={formData.wordMeanings}
-                        validationErrors={modalWordMeaningValidationErrors}
-                        missingRequired={modalWordMeaningsMissingRequired}
-                        requiredLanguage={WORD_MEANINGS_REQUIRED_LANGUAGE}
-                        allowedMeaningLanguages={WORD_MEANINGS_ALLOWED_MEANING_LANGUAGES}
-                        sourceDisplayScript={transliterationScript}
-                        onAddRow={handleAddModalWordMeaningRow}
-                        onReplaceRows={updateModalWordMeaningRows}
-                        onMoveRow={handleMoveModalWordMeaningRow}
-                        onRemoveRow={handleRemoveModalWordMeaningRow}
-                        onSourceFieldChange={handleModalWordMeaningChange}
-                        onSelectMeaningLanguage={handleSelectModalMeaningLanguage}
-                        onMeaningTextChange={handleModalMeaningTextChange}
-                      />
-                    )}
-                  </div>
-                )}
-                </div>
-
-                <div className="sticky bottom-0 z-10 flex-shrink-0 border-t border-black/10 bg-[color:var(--paper)] p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
-                  {actionMessage && (
-                    <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                      {actionMessage}
-                    </div>
-                  )}
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    {action === "add" ? (
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={createNextOnSubmit}
-                          onChange={(e) => setCreateNextOnSubmit(e.target.checked)}
-                          className="rounded border-black/10"
-                        />
-                        <span className="text-sm text-zinc-600">Create next after save</span>
-                      </label>
-                    ) : null}
-                    <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (editorOpenedFromPreviewRef.current) {
-                          suppressNextAutoPreviewRef.current = true;
-                        }
-                        editorOpenedFromPreviewRef.current = false;
-                        setAction(null);
-                        setActionNode(null);
-                        setCreateParentNodeIdOverride(null);
-                        setCreateInsertAfterNodeId(null);
-                        setActionMessage(null);
-                      }}
-                      className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-sm text-zinc-600 transition hover:border-black/20"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting || modalWordMeaningValidationErrors.length > 0}
-                      className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 font-medium text-white transition disabled:opacity-50"
-                    >
-                      {submitting ? "Submitting..." : action === "add" ? "Create" : "Save"}
-                    </button>
-                    </div>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
+        <NodeEditorForm
+          action={action}
+          actionNode={actionNode}
+          editorOpenedFromPreviewRef={editorOpenedFromPreviewRef}
+          suppressNextAutoPreviewRef={suppressNextAutoPreviewRef}
+          setAction={setAction}
+          setActionNode={setActionNode}
+          setCreateParentNodeIdOverride={setCreateParentNodeIdOverride}
+          setCreateInsertAfterNodeId={setCreateInsertAfterNodeId}
+          setActionMessage={setActionMessage}
+          formData={formData}
+          setFormData={setFormData}
+          handleModalSubmit={handleModalSubmit}
+          currentBook={currentBook}
+          contentFieldLabels={contentFieldLabels}
+          getDisplayLevelName={getDisplayLevelName}
+          modalSelectedTranslationLanguages={modalSelectedTranslationLanguages}
+          setModalSelectedTranslationLanguages={setModalSelectedTranslationLanguages}
+          sourceLanguage={sourceLanguage}
+          modalTranslationDrafts={modalTranslationDrafts}
+          setModalTranslationDrafts={setModalTranslationDrafts}
+          modalTranslationVariants={modalTranslationVariants}
+          setModalTranslationVariants={setModalTranslationVariants}
+          modalCommentaryVariants={modalCommentaryVariants}
+          setModalCommentaryVariants={setModalCommentaryVariants}
+          modalWordMeaningsEnabled={modalWordMeaningsEnabled}
+          modalWordMeaningValidationErrors={modalWordMeaningValidationErrors}
+          modalWordMeaningsMissingRequired={modalWordMeaningsMissingRequired}
+          transliterationScript={transliterationScript}
+          transliterationDisplayValue={transliterationDisplayValue}
+          transliterationInputToIast={transliterationInputToIast}
+          handleAddModalWordMeaningRow={handleAddModalWordMeaningRow}
+          updateModalWordMeaningRows={updateModalWordMeaningRows}
+          handleMoveModalWordMeaningRow={handleMoveModalWordMeaningRow}
+          handleRemoveModalWordMeaningRow={handleRemoveModalWordMeaningRow}
+          handleModalWordMeaningChange={handleModalWordMeaningChange}
+          handleSelectModalMeaningLanguage={handleSelectModalMeaningLanguage}
+          handleModalMeaningTextChange={handleModalMeaningTextChange}
+          actionMessage={actionMessage}
+          createNextOnSubmit={createNextOnSubmit}
+          setCreateNextOnSubmit={setCreateNextOnSubmit}
+          submitting={submitting}
+        />
       </main>
 
       {/* Floating Basket Panel */}
@@ -20443,57 +18390,10 @@ function ScripturesContent() {
         />
       ) : null}
 
-      {importResultDialog && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm rounded-2xl border border-black/10 bg-[color:var(--paper)] p-6 shadow-xl">
-            <button
-              type="button"
-              onClick={() => setImportResultDialog(null)}
-              aria-label="Close"
-              className="absolute right-3 top-3 text-lg leading-none text-zinc-400 transition hover:text-zinc-600"
-            >
-              ✕
-            </button>
-            <p className="mt-2 text-sm font-semibold text-zinc-800">
-              <em className="italic">{importResultDialog.bookName}</em> upload
-            </p>
-            <div className="mt-3 rounded-lg border border-black/10 bg-white/70 p-3 text-sm text-zinc-700">
-              <p>
-                Status:{" "}
-                <span
-                  className={
-                    importResultDialog.status === "completed"
-                      ? "font-semibold text-emerald-700"
-                      : "font-semibold text-red-700"
-                  }
-                >
-                  {importResultDialog.status === "completed" ? "Completed" : "Error"}
-                </span>
-              </p>
-              <p className="mt-1">
-                Node count:{" "}
-                <span className="font-medium text-zinc-900">
-                  {importResultDialog.nodesCreated === null
-                    ? ""
-                    : importResultDialog.nodesCreated.toLocaleString()}
-                </span>
-              </p>
-              {importResultDialog.status !== "completed" && importResultDialog.reason.trim() ? (
-                <p className="mt-1">
-                  Reason: <span className="font-medium text-zinc-900">{importResultDialog.reason}</span>
-                </p>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              onClick={() => setImportResultDialog(null)}
-              className="mt-5 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-4 py-2 text-xs font-medium text-white transition hover:shadow-md"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
+      <ImportResultDialog
+        importResultDialog={importResultDialog}
+        setImportResultDialog={setImportResultDialog}
+      />
     </div>
   );
 }
