@@ -13,6 +13,34 @@
   --ui-surface: rgba(255, 255, 255, 0.9);
   --ui-surface-muted: rgba(255, 255, 255, 0.8);
   --ui-border: rgba(0, 0, 0, 0.1);
+
+  /* Scriptle redesign palette — additive tokens consumed by /library and /read/* routes only.
+     Existing pages continue to use --paper / --accent / --deep / --sand / --font-sans above. */
+  --color-bg: #FAFAF7;
+  --color-surface: #F4F0E8;
+  --color-border: #E7E5E0;
+  --color-border-soft: #EFECE5;
+  --color-text: #1C1917;
+  --color-text-muted: #78716C;
+  --color-text-faint: #A8A29E;
+  --color-accent: #92400E;
+  --color-sanskrit: #1C3A2E;
+
+  --lang-en: #97C459;
+  --lang-te: #EF9F27;
+  --lang-hi: #85B7EB;
+  --lang-ta: #ED93B1;
+  --lang-sa: #1C3A2E;
+
+  --font-scriptle-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-scriptle-serif: var(--font-lora), Georgia, serif;
+  --font-scriptle-devanagari: var(--font-devanagari), "Noto Serif Devanagari", serif;
+  --font-scriptle-telugu: var(--font-telugu), "Noto Serif Telugu", serif;
+  --font-scriptle-tamil: var(--font-tamil), "Noto Serif Tamil", serif;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
 }
 
 @theme inline {

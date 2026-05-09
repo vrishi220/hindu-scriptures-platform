@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
-import { Playfair_Display, Space_Grotesk, Noto_Serif, Noto_Serif_Devanagari } from "next/font/google";
+import {
+  Inter,
+  Lora,
+  Noto_Serif,
+  Noto_Serif_Devanagari,
+  Noto_Serif_Tamil,
+  Noto_Serif_Telugu,
+  Playfair_Display,
+  Space_Grotesk,
+} from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
@@ -29,6 +38,30 @@ const scriptureLatinFont = Noto_Serif({
   weight: ["400", "600"],
 });
 
+// Scriptle redesign fonts — loaded for use by /library and /read/* routes.
+// Existing pages continue to use Space_Grotesk / Playfair_Display above.
+const interFont = Inter({
+  variable: "--font-inter",
+  subsets: ["latin", "latin-ext"],
+});
+
+const loraFont = Lora({
+  variable: "--font-lora",
+  subsets: ["latin", "latin-ext"],
+});
+
+const teluguFont = Noto_Serif_Telugu({
+  variable: "--font-telugu",
+  subsets: ["telugu"],
+  weight: ["400", "600"],
+});
+
+const tamilFont = Noto_Serif_Tamil({
+  variable: "--font-tamil",
+  subsets: ["tamil"],
+  weight: ["400", "600"],
+});
+
 export const metadata: Metadata = {
   title: "Hindu Scriptures Platform",
   description:
@@ -44,7 +77,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} ${scriptureLatinFont.variable} antialiased min-h-screen flex flex-col`}>
+      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} ${scriptureLatinFont.variable} ${interFont.variable} ${loraFont.variable} ${teluguFont.variable} ${tamilFont.variable} antialiased min-h-screen flex flex-col`}>
         {gaMeasurementId ? (
           <Suspense fallback={null}>
             <GoogleAnalytics measurementId={gaMeasurementId} />
