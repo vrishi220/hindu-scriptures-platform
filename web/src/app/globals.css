@@ -58,6 +58,15 @@ body {
   font-family: var(--font-sans), var(--font-devanagari), "Noto Serif Devanagari", sans-serif;
 }
 
+/* Scriptle redesign root — opt-in wrapper for /library and /read/* routes.
+   Existing pages (no data-scriptle attribute) inherit the body defaults above. */
+[data-scriptle="true"] {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-scriptle-sans);
+  font-feature-settings: "ss01", "cv01";
+}
+
 .scripture-devanagari {
   font-family: var(--font-devanagari), "Noto Serif Devanagari", "Kohinoor Devanagari", serif;
 }

@@ -377,6 +377,16 @@ export default function NavBar() {
             Home
           </Link>
           <a
+            href="/library"
+            className={`hover:text-[color:var(--accent)] ${
+              isActive("/library")
+                ? "font-semibold text-[color:var(--deep)]"
+                : ""
+            }`}
+          >
+            Library
+          </a>
+          <a
             href="/scriptures"
             className={`hover:text-[color:var(--accent)] ${
               isActive("/scriptures")
@@ -525,6 +535,17 @@ export default function NavBar() {
             >
               Home
             </Link>
+            <a
+              href="/library"
+              onClick={() => setMobileMenuOpen(false)}
+              className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
+                isActive("/library")
+                  ? "font-semibold text-[color:var(--deep)]"
+                  : "text-zinc-600 hover:text-[color:var(--accent)]"
+              }`}
+            >
+              Library
+            </a>
             <a
               href="/scriptures"
               onClick={() => setMobileMenuOpen(false)}
