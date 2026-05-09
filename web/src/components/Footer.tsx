@@ -1,6 +1,16 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export default function Footer() {
+  const pathname = usePathname();
+  const isScriptleRoute =
+    pathname === "/" ||
+    pathname === "/library" ||
+    pathname?.startsWith("/read/");
+  if (isScriptleRoute) return null;
+
   return (
     <footer className="flex flex-col items-center justify-between gap-2 border-t border-black/10 py-3 text-xs text-zinc-500 sm:flex-row px-6 mt-0 bg-white">
       <p>Hindu Scriptures Platform · Open knowledge, shared carefully.</p>

@@ -329,6 +329,13 @@ export default function NavBar() {
   const isActive = (href: string) => pathname === href;
   const isAdminActive = pathname?.startsWith("/admin");
 
+  // Scriptle redesigned routes own their own nav — hide the global one.
+  const isScriptleRoute =
+    pathname === "/" ||
+    pathname === "/library" ||
+    pathname?.startsWith("/read/");
+  if (isScriptleRoute) return null;
+
   return (
     <nav className="border-b border-black/10 bg-white/80 sticky top-0 z-40">
       <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-6 py-2 sm:py-2.5">
