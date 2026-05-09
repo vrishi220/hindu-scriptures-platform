@@ -386,16 +386,6 @@ export default function NavBar() {
           >
             Library
           </a>
-          <a
-            href="/scriptures"
-            className={`hover:text-[color:var(--accent)] ${
-              isActive("/scriptures")
-                ? "font-semibold text-[color:var(--deep)]"
-                : ""
-            }`}
-          >
-            Scriptures
-          </a>
           {authUser && (
             <a
               href="/compilations"
@@ -545,17 +535,6 @@ export default function NavBar() {
               }`}
             >
               Library
-            </a>
-            <a
-              href="/scriptures"
-              onClick={() => setMobileMenuOpen(false)}
-              className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                isActive("/scriptures")
-                  ? "font-semibold text-[color:var(--deep)]"
-                  : "text-zinc-600 hover:text-[color:var(--accent)]"
-              }`}
-            >
-              Scriptures
             </a>
             {authUser && (
               <a

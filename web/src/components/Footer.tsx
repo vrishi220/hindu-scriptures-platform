@@ -17,9 +17,6 @@ export default function Footer() {
         <Link href="/about" className="hover:text-[color:var(--accent)]">
           Licensing
         </Link>
-        <Link href="/home-classic" className="hover:text-[color:var(--accent)]">
-          Classic home
-        </Link>
       </div>
     </footer>
   );
