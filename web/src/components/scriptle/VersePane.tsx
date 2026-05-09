@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, type ReactNode } from "react";
 import {
   hasDevanagariLetters,
   normalizeTransliterationScript,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/indicScript";
 import AuthoredCard from "./AuthoredCard";
 import WordForWordFlow from "./WordForWordFlow";
+import { EyebrowLabel, ProseBody, SectionHeading } from "./typography";
 import {
   LANGUAGE_NAMES,
   type ScriptleLanguageCode,
@@ -22,11 +24,7 @@ export type VerseNode = {
   title_english?: string | null;
   title_sanskrit?: string | null;
   content_data?: {
-    basic?: {
-      sanskrit?: string;
-      transliteration?: string;
-      text?: string;
-    };
+    basic?: { sanskrit?: string; transliteration?: string; text?: string };
     translations?: Record<string, string>;
     translation_variants?: Array<{
       slug?: string;
@@ -50,7 +48,7 @@ type VersePaneProps = {
   src: ScriptleLanguageCode;
   trg: ScriptleLanguageCode;
   onResetFields: () => void;
-  footer?: React.ReactNode;
+  footer?: ReactNode;
 };
 
 const TRG_KEY: Record<ScriptleLanguageCode, string> = {
@@ -61,7 +59,7 @@ const TRG_KEY: Record<ScriptleLanguageCode, string> = {
   ta: "tamil",
 };
 
-const SRC_TO_TARGET_SCRIPT: Record<
+const SRC_TO_SCRIPT: Record<
   ScriptleLanguageCode,
   TransliterationScriptOption | null
 > = {
@@ -72,25 +70,13 @@ const SRC_TO_TARGET_SCRIPT: Record<
   ta: "tamil",
 };
 
-function pickTranslation(
-  node: VerseNode,
-  trg: ScriptleLanguageCode
-): string | null {
-  const key = TRG_KEY[trg];
-  const direct = node.content_data?.translations?.[key];
-  return direct?.trim() ? direct : null;
-}
-
-function scriptFontVar(code: ScriptleLanguageCode): string {
-  switch (code) {
-    case "te":
-      return "var(--font-scriptle-telugu)";
-    case "ta":
-      return "var(--font-scriptle-tamil)";
-    default:
-      return "var(--font-scriptle-devanagari)";
-  }
-}
+const SCRIPT_FONT_VAR: Record<ScriptleLanguageCode, string> = {
+  sa: "var(--font-scriptle-devanagari)",
+  en: "var(--font-scriptle-serif)",
+  hi: "var(--font-scriptle-devanagari)",
+  te: "var(--font-scriptle-telugu)",
+  ta: "var(--font-scriptle-tamil)",
+};
 
 export default function VersePane({
   node,
@@ -101,6 +87,26 @@ export default function VersePane({
   footer,
 }: VersePaneProps) {
   const allHidden = Object.values(fields).every((v) => !v);
+
+  const sanskrit = node.content_data?.basic?.sanskrit ?? "";
+  const transliteration = node.content_data?.basic?.transliteration ?? "";
+  const wordMeanings = node.content_data?.word_meanings ?? [];
+  const translationVariants = node.content_data?.translation_variants ?? [];
+  const commentaryVariants = node.content_data?.commentary_variants ?? [];
+  const directTranslation =
+    node.content_data?.translations?.[TRG_KEY[trg]]?.trim() || null;
+
+  const targetScript = SRC_TO_SCRIPT[src];
+  const showSourceScript =
+    fields.srcScript && targetScript !== null && targetScript !== "devanagari";
+
+  const sourceScriptText = useMemo(() => {
+    if (!showSourceScript || !sanskrit || !targetScript) return "";
+    const normalized = normalizeTransliterationScript(targetScript);
+    return hasDevanagariLetters(sanskrit)
+      ? transliterateFromDevanagari(sanskrit, normalized)
+      : transliterateFromIast(sanskrit, normalized);
+  }, [showSourceScript, sanskrit, targetScript]);
 
   if (allHidden) {
     return (
@@ -131,43 +137,13 @@ export default function VersePane({
     );
   }
 
-  const sanskrit = node.content_data?.basic?.sanskrit ?? "";
-  const transliteration = node.content_data?.basic?.transliteration ?? "";
-  const wordMeanings = node.content_data?.word_meanings ?? [];
-  const translationVariants =
-    node.content_data?.translation_variants ?? [];
-  const commentaryVariants =
-    node.content_data?.commentary_variants ?? [];
-  const directTranslation = pickTranslation(node, trg);
-
-  const targetScript = SRC_TO_TARGET_SCRIPT[src];
-  const showSourceScript =
-    fields.srcScript && targetScript !== null && targetScript !== "devanagari";
-  const sourceScriptText = (() => {
-    if (!showSourceScript || !sanskrit || !targetScript) return "";
-    const normalized = normalizeTransliterationScript(targetScript);
-    return hasDevanagariLetters(sanskrit)
-      ? transliterateFromDevanagari(sanskrit, normalized)
-      : transliterateFromIast(sanskrit, normalized);
-  })();
-
   const verseLabel = `${node.level_name}${
     node.sequence_number != null ? ` ${node.sequence_number}` : ""
   }`;
 
   return (
     <article className="flex flex-col gap-6 py-6">
-      <header
-        style={{
-          fontFamily: "var(--font-scriptle-sans)",
-          fontSize: "11px",
-          letterSpacing: "0.12em",
-          color: "var(--color-text-muted)",
-          textTransform: "uppercase",
-        }}
-      >
-        {verseLabel}
-      </header>
+      <EyebrowLabel tracking="wide">{verseLabel}</EyebrowLabel>
 
       {fields.original && sanskrit ? (
         <p
@@ -199,21 +175,10 @@ export default function VersePane({
       ) : null}
 
       {showSourceScript && sourceScriptText ? (
-        <section className="flex flex-col gap-2">
-          <h3
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "10px",
-              letterSpacing: "0.16em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
-            Source script · {LANGUAGE_NAMES[src]}
-          </h3>
+        <Section heading={`Source script · ${LANGUAGE_NAMES[src]}`}>
           <p
             style={{
-              fontFamily: scriptFontVar(src),
+              fontFamily: SCRIPT_FONT_VAR[src],
               color: "var(--color-sanskrit)",
               fontSize: "19px",
               lineHeight: 1.85,
@@ -222,22 +187,11 @@ export default function VersePane({
           >
             {sourceScriptText}
           </p>
-        </section>
+        </Section>
       ) : null}
 
       {fields.w2w && wordMeanings.length > 0 ? (
-        <section className="flex flex-col gap-2">
-          <h3
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "10px",
-              letterSpacing: "0.16em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
-            Word for word
-          </h3>
+        <Section heading="Word for word">
           <AuthoredCard
             authorName="HSP AI"
             isAi
@@ -245,22 +199,11 @@ export default function VersePane({
           >
             <WordForWordFlow pairs={wordMeanings} />
           </AuthoredCard>
-        </section>
+        </Section>
       ) : null}
 
       {fields.translation ? (
-        <section className="flex flex-col gap-2">
-          <h3
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "10px",
-              letterSpacing: "0.16em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
-            Translation
-          </h3>
+        <Section heading="Translation">
           {translationVariants.length > 0 ? (
             translationVariants.map((variant, idx) => (
               <AuthoredCard
@@ -268,13 +211,12 @@ export default function VersePane({
                 authorName={variant.author_name || "Unknown"}
                 rightLabel={
                   variant.language
-                    ? LANGUAGE_NAMES[
-                        variant.language as ScriptleLanguageCode
-                      ] ?? variant.language
+                    ? (LANGUAGE_NAMES[variant.language as ScriptleLanguageCode] ??
+                      variant.language)
                     : LANGUAGE_NAMES[trg]
                 }
               >
-                <ProsePara text={variant.text ?? ""} />
+                <ProseBody>{variant.text ?? ""}</ProseBody>
               </AuthoredCard>
             ))
           ) : directTranslation ? (
@@ -283,7 +225,7 @@ export default function VersePane({
               isAi
               rightLabel={LANGUAGE_NAMES[trg]}
             >
-              <ProsePara text={directTranslation} />
+              <ProseBody>{directTranslation}</ProseBody>
             </AuthoredCard>
           ) : (
             <p
@@ -296,38 +238,26 @@ export default function VersePane({
               No translation available in {LANGUAGE_NAMES[trg]}.
             </p>
           )}
-        </section>
+        </Section>
       ) : null}
 
       {fields.commentary && commentaryVariants.length > 0 ? (
-        <section className="flex flex-col gap-2">
-          <h3
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "10px",
-              letterSpacing: "0.16em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
-            Commentary
-          </h3>
+        <Section heading="Commentary">
           {commentaryVariants.map((variant, idx) => (
             <AuthoredCard
               key={`${variant.slug ?? "c"}-${idx}`}
               authorName={variant.author_name || "Unknown"}
               rightLabel={
                 variant.language
-                  ? LANGUAGE_NAMES[
-                      variant.language as ScriptleLanguageCode
-                    ] ?? variant.language
+                  ? (LANGUAGE_NAMES[variant.language as ScriptleLanguageCode] ??
+                    variant.language)
                   : undefined
               }
             >
-              <ProsePara text={variant.text ?? ""} />
+              <ProseBody>{variant.text ?? ""}</ProseBody>
             </AuthoredCard>
           ))}
-        </section>
+        </Section>
       ) : null}
 
       {footer}
@@ -335,18 +265,17 @@ export default function VersePane({
   );
 }
 
-function ProsePara({ text }: { text: string }) {
+function Section({
+  heading,
+  children,
+}: {
+  heading: string;
+  children: ReactNode;
+}) {
   return (
-    <p
-      style={{
-        fontFamily: "var(--font-scriptle-serif)",
-        fontSize: "14px",
-        lineHeight: 1.85,
-        color: "var(--color-text)",
-        whiteSpace: "pre-line",
-      }}
-    >
-      {text}
-    </p>
+    <section className="flex flex-col gap-2">
+      <SectionHeading>{heading}</SectionHeading>
+      {children}
+    </section>
   );
 }

@@ -15,12 +15,14 @@ export type TocNode = {
 type VerseTOCProps = {
   nodes: TocNode[];
   selectedNodeId: number | null;
+  ancestorSet: Set<number>;
   onSelect: (node: TocNode) => void;
 };
 
 export default function VerseTOC({
   nodes,
   selectedNodeId,
+  ancestorSet,
   onSelect,
 }: VerseTOCProps) {
   return (
@@ -31,6 +33,7 @@ export default function VerseTOC({
           node={node}
           depth={0}
           selectedNodeId={selectedNodeId}
+          ancestorSet={ancestorSet}
           onSelect={onSelect}
         />
       ))}
@@ -38,28 +41,30 @@ export default function VerseTOC({
   );
 }
 
+const labelOf = (node: TocNode): string =>
+  node.title_english ||
+  node.title_sanskrit ||
+  node.title_transliteration ||
+  `${node.level_name} ${node.sequence_number ?? ""}`.trim();
+
 function TocItem({
   node,
   depth,
   selectedNodeId,
+  ancestorSet,
   onSelect,
 }: {
   node: TocNode;
   depth: number;
   selectedNodeId: number | null;
+  ancestorSet: Set<number>;
   onSelect: (node: TocNode) => void;
 }) {
   const hasChildren = (node.children?.length ?? 0) > 0;
-  const containsSelected =
-    selectedNodeId !== null ? nodeContainsId(node, selectedNodeId) : false;
-  const [expanded, setExpanded] = useState(containsSelected || depth === 0);
+  const onPath = ancestorSet.has(node.id);
+  const [expanded, setExpanded] = useState(onPath || depth === 0);
 
   const isSelected = selectedNodeId === node.id;
-  const label =
-    node.title_english ||
-    node.title_sanskrit ||
-    node.title_transliteration ||
-    `${node.level_name} ${node.sequence_number ?? ""}`.trim();
 
   return (
     <li className="flex flex-col gap-0.5">
@@ -105,7 +110,7 @@ function TocItem({
             fontWeight: isSelected ? 600 : 400,
           }}
         >
-          {label}
+          {labelOf(node)}
         </button>
       </div>
       {hasChildren && expanded ? (
@@ -116,6 +121,7 @@ function TocItem({
               node={child}
               depth={depth + 1}
               selectedNodeId={selectedNodeId}
+              ancestorSet={ancestorSet}
               onSelect={onSelect}
             />
           ))}
@@ -123,10 +129,4 @@ function TocItem({
       ) : null}
     </li>
   );
-}
-
-function nodeContainsId(node: TocNode, id: number): boolean {
-  if (node.id === id) return true;
-  if (!node.children) return false;
-  return node.children.some((child) => nodeContainsId(child, id));
 }

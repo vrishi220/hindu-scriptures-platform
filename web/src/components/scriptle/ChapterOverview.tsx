@@ -1,5 +1,6 @@
 "use client";
 
+import { EyebrowLabel, ProseBody } from "./typography";
 import type { TocNode } from "./VerseTOC";
 
 type ChapterOverviewProps = {
@@ -10,6 +11,12 @@ type ChapterOverviewProps = {
   onBeginReading?: (leaf: TocNode) => void;
 };
 
+const labelOf = (node: TocNode): string =>
+  node.title_english ||
+  node.title_sanskrit ||
+  node.title_transliteration ||
+  `${node.level_name} ${node.sequence_number ?? ""}`.trim();
+
 export default function ChapterOverview({
   node,
   summary,
@@ -17,27 +24,13 @@ export default function ChapterOverview({
   firstLeaf,
   onBeginReading,
 }: ChapterOverviewProps) {
-  const title =
-    node.title_english ||
-    node.title_sanskrit ||
-    node.title_transliteration ||
-    `${node.level_name} ${node.sequence_number ?? ""}`.trim();
-
   return (
     <article className="flex flex-col gap-6 py-6">
       <header className="flex flex-col gap-1">
-        <p
-          style={{
-            fontFamily: "var(--font-scriptle-sans)",
-            fontSize: "11px",
-            letterSpacing: "0.12em",
-            color: "var(--color-text-muted)",
-            textTransform: "uppercase",
-          }}
-        >
+        <EyebrowLabel tracking="wide">
           {node.level_name}
           {node.sequence_number != null ? ` ${node.sequence_number}` : ""}
-        </p>
+        </EyebrowLabel>
         <h2
           style={{
             fontFamily: "var(--font-scriptle-serif)",
@@ -46,7 +39,7 @@ export default function ChapterOverview({
             letterSpacing: "-0.01em",
           }}
         >
-          {title}
+          {labelOf(node)}
         </h2>
         {node.title_sanskrit ? (
           <p
@@ -61,19 +54,7 @@ export default function ChapterOverview({
         ) : null}
       </header>
 
-      {summary ? (
-        <p
-          style={{
-            fontFamily: "var(--font-scriptle-serif)",
-            fontSize: "14px",
-            lineHeight: 1.8,
-            color: "var(--color-text)",
-            whiteSpace: "pre-line",
-          }}
-        >
-          {summary}
-        </p>
-      ) : null}
+      {summary ? <ProseBody>{summary}</ProseBody> : null}
 
       {firstLeaf && onBeginReading ? (
         <div
@@ -84,17 +65,9 @@ export default function ChapterOverview({
             padding: "16px 18px",
           }}
         >
-          <div
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "10px",
-              letterSpacing: "0.18em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
+          <EyebrowLabel size="xs" tracking="widest">
             Begin reading
-          </div>
+          </EyebrowLabel>
           <div
             className="mt-2"
             style={{
@@ -103,9 +76,7 @@ export default function ChapterOverview({
               color: "var(--color-text)",
             }}
           >
-            {firstLeaf.title_english ||
-              firstLeaf.title_sanskrit ||
-              `${firstLeaf.level_name} ${firstLeaf.sequence_number ?? ""}`.trim()}
+            {labelOf(firstLeaf)}
           </div>
           <button
             type="button"
@@ -123,17 +94,9 @@ export default function ChapterOverview({
         </div>
       ) : null}
 
-      <div
-        style={{
-          fontFamily: "var(--font-scriptle-sans)",
-          fontSize: "11px",
-          letterSpacing: "0.06em",
-          color: "var(--color-text-faint)",
-          textTransform: "uppercase",
-        }}
-      >
+      <EyebrowLabel tone="faint" tracking="tight">
         {verseCount} verse{verseCount === 1 ? "" : "s"}
-      </div>
+      </EyebrowLabel>
     </article>
   );
 }

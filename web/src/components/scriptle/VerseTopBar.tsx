@@ -2,8 +2,10 @@
 
 import LanguagePair from "./LanguagePair";
 import FieldVisibilityPopover from "./FieldVisibilityPopover";
+import { EyebrowLabel } from "./typography";
 import type { ScriptleLanguageCode } from "@/lib/scriptle/languages";
-import type { FieldKey } from "@/lib/useFieldVisibility";
+import type { LanguagePairState } from "@/lib/useLanguagePair";
+import type { FieldVisibility } from "@/lib/useFieldVisibility";
 
 export type VerseViewMode = "verse" | "scroll";
 
@@ -16,76 +18,25 @@ type VerseTopBarProps = {
   crumbs: Crumb[];
   mode: VerseViewMode;
   onModeChange: (mode: VerseViewMode) => void;
-  src: ScriptleLanguageCode;
-  trg: ScriptleLanguageCode;
-  onSrcChange: (next: ScriptleLanguageCode) => void;
-  onTrgChange: (next: ScriptleLanguageCode) => void;
+  langPair: LanguagePairState;
+  fieldVis: FieldVisibility;
   availableTrgLanguages: ScriptleLanguageCode[];
-  fields: Record<FieldKey, boolean>;
-  hiddenCount: number;
-  toggleField: (field: FieldKey) => void;
-  resetFields: () => void;
 };
 
 export default function VerseTopBar({
   crumbs,
   mode,
   onModeChange,
-  src,
-  trg,
-  onSrcChange,
-  onTrgChange,
+  langPair,
+  fieldVis,
   availableTrgLanguages,
-  fields,
-  hiddenCount,
-  toggleField,
-  resetFields,
 }: VerseTopBarProps) {
   return (
     <div
       className="flex flex-col gap-3 border-b py-3"
       style={{ borderColor: "var(--color-border-soft)" }}
     >
-      <nav
-        aria-label="Breadcrumb"
-        className="flex flex-wrap items-center gap-1.5"
-        style={{
-          fontFamily: "var(--font-scriptle-sans)",
-          fontSize: "11px",
-          letterSpacing: "0.06em",
-          color: "var(--color-text-muted)",
-          textTransform: "uppercase",
-        }}
-      >
-        {crumbs.map((crumb, idx) => {
-          const isLast = idx === crumbs.length - 1;
-          return (
-            <span
-              key={`${crumb.label}-${idx}`}
-              className="flex items-center gap-1.5"
-            >
-              {idx > 0 ? (
-                <span aria-hidden style={{ color: "var(--color-text-faint)" }}>
-                  ›
-                </span>
-              ) : null}
-              {crumb.onClick && !isLast ? (
-                <button
-                  type="button"
-                  onClick={crumb.onClick}
-                  className="hover:underline"
-                >
-                  {crumb.label}
-                </button>
-              ) : (
-                <span style={isLast ? { color: "var(--color-text)" } : undefined}>
-                  {crumb.label}
-                </span>
-              )}
-            </span>
-          );
-        })}
-      </nav>
+      <Breadcrumb crumbs={crumbs} />
 
       <div className="flex flex-wrap items-center gap-2">
         <ModeTab
@@ -100,20 +51,60 @@ export default function VerseTopBar({
         />
         <span aria-hidden className="flex-1" />
         <LanguagePair
-          src={src}
-          trg={trg}
-          onSrcChange={onSrcChange}
-          onTrgChange={onTrgChange}
+          src={langPair.src}
+          trg={langPair.trg}
+          onSrcChange={langPair.setSrcLang}
+          onTrgChange={langPair.setTrgLang}
           availableTrgLanguages={availableTrgLanguages}
         />
         <FieldVisibilityPopover
-          fields={fields}
-          hiddenCount={hiddenCount}
-          toggle={toggleField}
-          reset={resetFields}
+          fields={fieldVis.fields}
+          hiddenCount={fieldVis.hiddenCount}
+          toggle={fieldVis.toggle}
+          reset={fieldVis.reset}
         />
       </div>
     </div>
+  );
+}
+
+function Breadcrumb({ crumbs }: { crumbs: Crumb[] }) {
+  return (
+    <nav
+      aria-label="Breadcrumb"
+      className="flex flex-wrap items-center gap-1.5"
+    >
+      {crumbs.map((crumb, idx) => {
+        const isLast = idx === crumbs.length - 1;
+        return (
+          <span
+            key={`${crumb.label}-${idx}`}
+            className="flex items-center gap-1.5"
+          >
+            {idx > 0 ? (
+              <EyebrowLabel tone="faint" tracking="tight">
+                ›
+              </EyebrowLabel>
+            ) : null}
+            {crumb.onClick && !isLast ? (
+              <button type="button" onClick={crumb.onClick}>
+                <EyebrowLabel tracking="tight" className="hover:underline">
+                  {crumb.label}
+                </EyebrowLabel>
+              </button>
+            ) : (
+              <EyebrowLabel
+                tone={isLast ? "muted" : "muted"}
+                tracking="tight"
+                className={isLast ? "" : ""}
+              >
+                {crumb.label}
+              </EyebrowLabel>
+            )}
+          </span>
+        );
+      })}
+    </nav>
   );
 }
 

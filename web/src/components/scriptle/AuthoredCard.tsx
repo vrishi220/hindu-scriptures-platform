@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EyebrowLabel } from "./typography";
 
 type AuthoredCardProps = {
   authorName: string;
@@ -26,31 +27,32 @@ export default function AuthoredCard({
         style={{
           borderBottom: "0.5px solid var(--color-border)",
           background: "var(--color-surface)",
-          fontFamily: "var(--font-scriptle-sans)",
-          fontSize: "10px",
-          letterSpacing: "0.12em",
-          color: "var(--color-text-muted)",
-          textTransform: "uppercase",
         }}
       >
-        <span className="flex items-center gap-1.5">
-          <span>{authorName}</span>
-          {isAi ? (
-            <span
-              style={{
-                background: "var(--color-accent)",
-                color: "white",
-                padding: "1px 5px",
-                borderRadius: "3px",
-                fontSize: "9px",
-                letterSpacing: "0.08em",
-              }}
-            >
-              AI
-            </span>
-          ) : null}
-        </span>
-        {rightLabel ? <span>{rightLabel}</span> : null}
+        <EyebrowLabel size="xs" tracking="wide">
+          <span className="inline-flex items-center gap-1.5">
+            <span>{authorName}</span>
+            {isAi ? (
+              <span
+                style={{
+                  background: "var(--color-accent)",
+                  color: "white",
+                  padding: "1px 5px",
+                  borderRadius: "3px",
+                  fontSize: "9px",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                AI
+              </span>
+            ) : null}
+          </span>
+        </EyebrowLabel>
+        {rightLabel ? (
+          <EyebrowLabel size="xs" tracking="wide">
+            {rightLabel}
+          </EyebrowLabel>
+        ) : null}
       </div>
       <div className="px-4 py-3.5">{children}</div>
     </div>

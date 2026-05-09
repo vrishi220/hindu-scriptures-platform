@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getMe } from "./authClient";
+import { readJson, writeJson } from "./safeLocalStorage";
 
 export type FieldKey =
   | "original"
@@ -38,70 +39,52 @@ export const FIELD_ORDER: FieldKey[] = [
   "commentary",
 ];
 
-function readStored(
-  key: string
-): Partial<Record<FieldKey, boolean>> | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Partial<Record<FieldKey, boolean>>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function persist(key: string, value: Record<FieldKey, boolean>): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // ignore storage failures (private mode, quota, etc.)
-  }
-}
+const keyFor = (userId: string | null) =>
+  `scriptle.fields.${userId ?? "guest"}`;
 
 export function useFieldVisibility() {
   const [userId, setUserId] = useState<string | null>(null);
   const [fields, setFields] =
     useState<Record<FieldKey, boolean>>(DEFAULT_FIELDS);
-  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const me = await getMe().catch(() => null);
-      if (cancelled) return;
-      const id = me?.id != null ? String(me.id) : null;
-      setUserId(id);
-      const stored = readStored(`scriptle.fields.${id ?? "guest"}`);
-      if (stored) {
-        setFields({ ...DEFAULT_FIELDS, ...stored });
-      }
-      setHydrated(true);
-    })();
+    getMe()
+      .catch(() => null)
+      .then((me) => {
+        if (cancelled) return;
+        const id = me?.id != null ? String(me.id) : null;
+        setUserId(id);
+        const stored = readJson<Partial<Record<FieldKey, boolean>>>(keyFor(id));
+        if (stored) setFields({ ...DEFAULT_FIELDS, ...stored });
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const storageKey = useMemo(
-    () => `scriptle.fields.${userId ?? "guest"}`,
-    [userId]
-  );
+  const storageKey = useMemo(() => keyFor(userId), [userId]);
 
   const toggle = (field: FieldKey) => {
     setFields((prev) => {
       const next = { ...prev, [field]: !prev[field] };
-      persist(storageKey, next);
+      writeJson(storageKey, next);
       return next;
     });
   };
 
   const reset = () => {
     setFields(DEFAULT_FIELDS);
-    persist(storageKey, DEFAULT_FIELDS);
+    writeJson(storageKey, DEFAULT_FIELDS);
   };
 
-  const hiddenCount = Object.values(fields).filter((v) => !v).length;
+  const hiddenCount = useMemo(
+    () => Object.values(fields).filter((v) => !v).length,
+    [fields]
+  );
+  const allHidden = hiddenCount === FIELD_ORDER.length;
 
-  return { fields, toggle, reset, hiddenCount, hydrated };
+  return { fields, toggle, reset, hiddenCount, allHidden };
 }
+
+export type FieldVisibility = ReturnType<typeof useFieldVisibility>;

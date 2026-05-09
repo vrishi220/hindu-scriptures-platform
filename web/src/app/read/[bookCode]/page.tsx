@@ -9,148 +9,131 @@ import VerseTopBar, {
 import VersePane, { type VerseNode } from "@/components/scriptle/VersePane";
 import ChapterOverview from "@/components/scriptle/ChapterOverview";
 import type { TocNode } from "@/components/scriptle/VerseTOC";
+import { MutedNote } from "@/components/scriptle/typography";
+import { resolveBook, type RawBook, type ResolvedBook } from "@/lib/scriptle/bookAdapter";
 import {
-  ALL_LANGUAGE_CODES,
-  type ScriptleLanguageCode,
-} from "@/lib/scriptle/languages";
+  buildTreeIndex,
+  getAncestorSet,
+  getPath,
+  type TreeIndex,
+  type TreeIndexEntry,
+} from "@/lib/scriptle/treeIndex";
 import { useFieldVisibility } from "@/lib/useFieldVisibility";
 import { useLanguagePair } from "@/lib/useLanguagePair";
 
-type RawBook = {
-  id: number;
-  book_name: string;
-  book_code?: string | null;
-  language_primary?: string | null;
-  visibility?: string | null;
-  metadata?: Record<string, unknown> | null;
-  metadata_json?: Record<string, unknown> | null;
-};
+function useResolvedBook(bookCode: string): {
+  book: ResolvedBook | null;
+  error: string | null;
+} {
+  const [book, setBook] = useState<ResolvedBook | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-type ResolvedBook = {
-  id: number;
-  bookCode: string;
-  titleEnglish: string;
-  titleSanskrit: string | null;
-  languages: ScriptleLanguageCode[];
-  coverImageUrl: string | null;
-  primaryLanguage: ScriptleLanguageCode;
-};
+  useEffect(() => {
+    if (!bookCode) return;
+    let cancelled = false;
+    fetch("/api/books", { credentials: "include" })
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not load library");
+        return r.json() as Promise<RawBook[]>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const match = data.find((b) => b.book_code === bookCode);
+        if (!match) setError(`No book with code "${bookCode}".`);
+        else setBook(resolveBook(match));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not load book");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookCode]);
 
-function readMetadataValue(book: RawBook, key: string): unknown {
-  if (book.metadata && typeof book.metadata === "object" && key in book.metadata) {
-    return book.metadata[key];
-  }
-  if (
-    book.metadata_json &&
-    typeof book.metadata_json === "object" &&
-    key in book.metadata_json
-  ) {
-    return book.metadata_json[key];
-  }
-  return undefined;
+  return { book, error };
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
+function useBookTree(bookId: number | null): {
+  tree: TocNode[];
+  loading: boolean;
+  error: string | null;
+} {
+  const [tree, setTree] = useState<TocNode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (bookId === null) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true);
+    });
+    fetch(`/api/books/${bookId}/tree`, { credentials: "include" })
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not load tree");
+        return r.json() as Promise<TocNode[]>;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setTree(data);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoading(false);
+          setError(err instanceof Error ? err.message : "Could not load tree");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId]);
+
+  return { tree, loading, error };
 }
 
-function asLanguageList(value: unknown): ScriptleLanguageCode[] | null {
-  if (!Array.isArray(value)) return null;
-  const filtered = value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.toLowerCase().slice(0, 2))
-    .filter((code): code is ScriptleLanguageCode =>
-      ALL_LANGUAGE_CODES.includes(code as ScriptleLanguageCode)
-    );
-  return filtered.length > 0 ? Array.from(new Set(filtered)) : null;
-}
+function useNodeContent(
+  nodeId: number | null,
+  enabled: boolean
+): { content: VerseNode | null; loading: boolean } {
+  const [content, setContent] = useState<VerseNode | null>(null);
+  const [loading, setLoading] = useState(false);
 
-function asLanguageCode(value: string | null | undefined): ScriptleLanguageCode {
-  if (!value) return "sa";
-  const lower = value.toLowerCase().slice(0, 2);
-  return ALL_LANGUAGE_CODES.includes(lower as ScriptleLanguageCode)
-    ? (lower as ScriptleLanguageCode)
-    : "sa";
-}
-
-function resolveBook(raw: RawBook): ResolvedBook {
-  return {
-    id: raw.id,
-    bookCode: raw.book_code ?? String(raw.id),
-    titleEnglish:
-      asString(readMetadataValue(raw, "title_english")) ??
-      raw.book_name ??
-      "Untitled",
-    titleSanskrit: asString(readMetadataValue(raw, "title_sanskrit")),
-    languages:
-      asLanguageList(readMetadataValue(raw, "languages_available")) ??
-      ["sa", "en"],
-    coverImageUrl:
-      asString(readMetadataValue(raw, "cover_image_url")) ??
-      asString(readMetadataValue(raw, "thumbnail_url")),
-    primaryLanguage: asLanguageCode(raw.language_primary),
-  };
-}
-
-function flattenLeaves(nodes: TocNode[], out: TocNode[] = []): TocNode[] {
-  for (const node of nodes) {
-    if (!node.children || node.children.length === 0) {
-      out.push(node);
-    } else {
-      flattenLeaves(node.children, out);
+  useEffect(() => {
+    if (!nodeId || !enabled) {
+      queueMicrotask(() => setContent(null));
+      return;
     }
-  }
-  return out;
-}
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setLoading(true);
+    });
+    fetch(`/api/content/nodes/${nodeId}`, { credentials: "include" })
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not load verse");
+        return r.json() as Promise<VerseNode>;
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setContent(data);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setContent(null);
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeId, enabled]);
 
-function findFirstLeaf(node: TocNode): TocNode | null {
-  if (!node.children || node.children.length === 0) return node;
-  for (const child of node.children) {
-    const leaf = findFirstLeaf(child);
-    if (leaf) return leaf;
-  }
-  return null;
-}
-
-function findNode(nodes: TocNode[], id: number): TocNode | null {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    if (node.children) {
-      const result = findNode(node.children, id);
-      if (result) return result;
-    }
-  }
-  return null;
-}
-
-function buildPath(
-  nodes: TocNode[],
-  id: number,
-  current: TocNode[] = []
-): TocNode[] | null {
-  for (const node of nodes) {
-    const next = [...current, node];
-    if (node.id === id) return next;
-    if (node.children) {
-      const result = buildPath(node.children, id, next);
-      if (result) return result;
-    }
-  }
-  return null;
-}
-
-function countLeaves(nodes: TocNode[]): number {
-  let count = 0;
-  const stack = [...nodes];
-  while (stack.length) {
-    const next = stack.pop()!;
-    if (!next.children || next.children.length === 0) {
-      count += 1;
-    } else {
-      stack.push(...next.children);
-    }
-  }
-  return count;
+  return { content, loading };
 }
 
 function ReadBookContent() {
@@ -158,21 +141,22 @@ function ReadBookContent() {
   const bookCode = decodeURIComponent(params?.bookCode ?? "");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nodeQueryParam = searchParams.get("node");
-  const modeQueryParam = searchParams.get("mode");
 
-  const [book, setBook] = useState<ResolvedBook | null>(null);
-  const [bookError, setBookError] = useState<string | null>(null);
-  const [tree, setTree] = useState<TocNode[]>([]);
-  const [treeError, setTreeError] = useState<string | null>(null);
-  const [treeLoading, setTreeLoading] = useState(true);
+  const { book, error: bookError } = useResolvedBook(bookCode);
+  const {
+    tree,
+    loading: treeLoading,
+    error: treeError,
+  } = useBookTree(book?.id ?? null);
+
+  const treeIndex = useMemo<TreeIndex<TocNode> | null>(
+    () => (tree.length > 0 ? buildTreeIndex(tree) : null),
+    [tree]
+  );
 
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
-  const [nodeContent, setNodeContent] = useState<VerseNode | null>(null);
-  const [nodeContentLoading, setNodeContentLoading] = useState(false);
-
   const [mode, setMode] = useState<VerseViewMode>(
-    modeQueryParam === "scroll" ? "scroll" : "verse"
+    searchParams.get("mode") === "scroll" ? "scroll" : "verse"
   );
 
   const fieldVis = useFieldVisibility();
@@ -182,112 +166,43 @@ function ReadBookContent() {
     "en"
   );
 
-  // Resolve book by code via /api/books, then load tree
+  // Pick a default selection once the index is ready.
   useEffect(() => {
-    if (!bookCode) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        setTreeLoading(true);
-        const booksRes = await fetch("/api/books", { credentials: "include" });
-        if (!booksRes.ok) throw new Error("Could not load library");
-        const booksData = (await booksRes.json()) as RawBook[];
-        const match = booksData.find((b) => b.book_code === bookCode);
-        if (cancelled) return;
-        if (!match) {
-          setBookError(`No book with code "${bookCode}".`);
-          setTreeLoading(false);
-          return;
-        }
-        const resolved = resolveBook(match);
-        setBook(resolved);
-
-        const treeRes = await fetch(`/api/books/${match.id}/tree`, {
-          credentials: "include",
-        });
-        if (!treeRes.ok) throw new Error("Could not load tree");
-        const treeData = (await treeRes.json()) as TocNode[];
-        if (cancelled) return;
-        setTree(treeData);
-      } catch (err) {
-        if (cancelled) return;
-        const message =
-          err instanceof Error ? err.message : "Could not load book";
-        if (!book) setBookError(message);
-        else setTreeError(message);
-      } finally {
-        if (!cancelled) setTreeLoading(false);
+    if (!treeIndex || selectedNodeId !== null) return;
+    queueMicrotask(() => {
+      const fromUrl = Number(searchParams.get("node"));
+      if (Number.isFinite(fromUrl) && treeIndex.entries.has(fromUrl)) {
+        setSelectedNodeId(fromUrl);
+      } else if (treeIndex.leaves.length > 0) {
+        setSelectedNodeId(treeIndex.leaves[0].id);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookCode]);
+    });
+  }, [treeIndex, selectedNodeId, searchParams]);
 
-  // Pick a default selected node once tree loads and URL had no override.
-  useEffect(() => {
-    if (tree.length === 0) return;
-    if (selectedNodeId !== null) return;
-    if (nodeQueryParam) {
-      const parsed = Number(nodeQueryParam);
-      if (Number.isFinite(parsed) && findNode(tree, parsed)) {
-        setSelectedNodeId(parsed);
-        return;
-      }
-    }
-    const firstLeaf = tree
-      .map((n) => findFirstLeaf(n))
-      .find((n): n is TocNode => Boolean(n));
-    if (firstLeaf) {
-      setSelectedNodeId(firstLeaf.id);
-    }
-  }, [tree, nodeQueryParam, selectedNodeId]);
-
-  const selectedNode = useMemo(
+  const selectedEntry = useMemo(
     () =>
-      selectedNodeId !== null && tree.length > 0
-        ? findNode(tree, selectedNodeId)
+      selectedNodeId !== null && treeIndex
+        ? treeIndex.entries.get(selectedNodeId)
         : null,
-    [tree, selectedNodeId]
+    [treeIndex, selectedNodeId]
   );
 
-  const isLeaf = selectedNode
-    ? !selectedNode.children || selectedNode.children.length === 0
-    : false;
+  const isLeaf = selectedEntry?.isLeaf ?? false;
 
-  // Load full node content for leaf selections
-  useEffect(() => {
-    if (!selectedNodeId || !isLeaf) {
-      setNodeContent(null);
-      return;
-    }
-    let cancelled = false;
-    setNodeContentLoading(true);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/content/nodes/${selectedNodeId}`, {
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error("Could not load verse");
-        const data = (await res.json()) as VerseNode;
-        if (cancelled) return;
-        setNodeContent(data);
-      } catch {
-        if (cancelled) return;
-        setNodeContent(null);
-      } finally {
-        if (!cancelled) setNodeContentLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedNodeId, isLeaf]);
+  const { content: nodeContent, loading: nodeContentLoading } = useNodeContent(
+    selectedNodeId,
+    isLeaf
+  );
 
-  // Sync selected node + mode to URL (replace, not push, to avoid history spam)
+  // Sync selection + mode to the URL. Skip the replace when nothing changed.
   useEffect(() => {
     if (selectedNodeId === null) return;
+    const currentNode = searchParams.get("node");
+    const currentMode = searchParams.get("mode") ?? "verse";
+    const desiredMode = mode === "scroll" ? "scroll" : "verse";
+    if (currentNode === String(selectedNodeId) && currentMode === desiredMode) {
+      return;
+    }
     const next = new URLSearchParams(searchParams.toString());
     next.set("node", String(selectedNodeId));
     if (mode === "scroll") next.set("mode", "scroll");
@@ -297,51 +212,43 @@ function ReadBookContent() {
       `/read/${encodeURIComponent(bookCode)}${search ? `?${search}` : ""}`,
       { scroll: false }
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNodeId, mode]);
+  }, [selectedNodeId, mode, searchParams, router, bookCode]);
 
-  const leaves = useMemo(() => flattenLeaves(tree), [tree]);
-  const leafIndex = useMemo(
-    () =>
-      selectedNodeId !== null
-        ? leaves.findIndex((leaf) => leaf.id === selectedNodeId)
-        : -1,
-    [leaves, selectedNodeId]
+  const ancestorSet = useMemo(
+    () => (treeIndex ? getAncestorSet(treeIndex, selectedNodeId) : new Set<number>()),
+    [treeIndex, selectedNodeId]
   );
-  const prevLeaf = leafIndex > 0 ? leaves[leafIndex - 1] : null;
-  const nextLeaf =
-    leafIndex >= 0 && leafIndex < leaves.length - 1
-      ? leaves[leafIndex + 1]
-      : null;
 
   const breadcrumbs = useMemo(() => {
-    if (!book) return [];
-    const path =
-      selectedNodeId !== null ? buildPath(tree, selectedNodeId) ?? [] : [];
+    if (!book || !treeIndex) return [];
+    const path = selectedNodeId !== null ? getPath(treeIndex, selectedNodeId) : [];
     const crumbs: { label: string; onClick?: () => void }[] = [
       {
         label: book.titleEnglish,
         onClick: () => {
-          const firstLeaf = tree
-            .map((n) => findFirstLeaf(n))
-            .find((n): n is TocNode => Boolean(n));
-          if (firstLeaf) setSelectedNodeId(firstLeaf.id);
+          if (treeIndex.leaves.length > 0) {
+            setSelectedNodeId(treeIndex.leaves[0].id);
+          }
         },
       },
     ];
     for (const node of path) {
-      const label =
-        node.title_english ||
-        node.title_sanskrit ||
-        node.title_transliteration ||
-        `${node.level_name} ${node.sequence_number ?? ""}`.trim();
       crumbs.push({
-        label,
+        label: labelOf(node),
         onClick: () => setSelectedNodeId(node.id),
       });
     }
     return crumbs;
-  }, [book, tree, selectedNodeId]);
+  }, [book, treeIndex, selectedNodeId]);
+
+  const leafCount = treeIndex?.leaves.length ?? 0;
+  const leafIndex = selectedEntry?.leafIndex ?? -1;
+  const prevLeaf =
+    leafIndex > 0 && treeIndex ? treeIndex.leaves[leafIndex - 1] : null;
+  const nextLeaf =
+    leafIndex >= 0 && treeIndex && leafIndex < leafCount - 1
+      ? treeIndex.leaves[leafIndex + 1]
+      : null;
 
   if (bookError) {
     return (
@@ -349,15 +256,7 @@ function ReadBookContent() {
         data-scriptle="true"
         className="flex min-h-[calc(100vh-3rem)] items-center justify-center px-6 text-center"
       >
-        <p
-          style={{
-            fontFamily: "var(--font-scriptle-sans)",
-            color: "var(--color-text-muted)",
-            fontSize: "14px",
-          }}
-        >
-          {bookError}
-        </p>
+        <MutedNote>{bookError}</MutedNote>
       </div>
     );
   }
@@ -368,15 +267,7 @@ function ReadBookContent() {
         data-scriptle="true"
         className="flex min-h-[calc(100vh-3rem)] items-center justify-center"
       >
-        <p
-          style={{
-            fontFamily: "var(--font-scriptle-sans)",
-            color: "var(--color-text-muted)",
-            fontSize: "13px",
-          }}
-        >
-          Loading…
-        </p>
+        <MutedNote>Loading…</MutedNote>
       </div>
     );
   }
@@ -391,149 +282,208 @@ function ReadBookContent() {
           bookCode={book.bookCode}
           bookTitleEnglish={book.titleEnglish}
           bookTitleSanskrit={book.titleSanskrit}
-          totalVerseCount={leaves.length}
+          totalVerseCount={leafCount}
           languages={book.languages}
           coverImageUrl={book.coverImageUrl}
           toc={tree}
           selectedNodeId={selectedNodeId}
+          ancestorSet={ancestorSet}
           onSelectNode={(node) => setSelectedNodeId(node.id)}
         >
           <VerseTopBar
             crumbs={breadcrumbs}
             mode={mode}
             onModeChange={setMode}
-            src={langPair.src}
-            trg={langPair.trg}
-            onSrcChange={langPair.setSrcLang}
-            onTrgChange={langPair.setTrgLang}
+            langPair={langPair}
+            fieldVis={fieldVis}
             availableTrgLanguages={book.languages.filter((c) => c !== "sa")}
-            fields={fieldVis.fields}
-            hiddenCount={fieldVis.hiddenCount}
-            toggleField={fieldVis.toggle}
-            resetFields={fieldVis.reset}
           />
 
-          {treeLoading ? (
-            <p
-              className="py-8"
-              style={{
-                fontFamily: "var(--font-scriptle-sans)",
-                color: "var(--color-text-muted)",
-                fontSize: "13px",
-              }}
-            >
-              Loading the table of contents…
-            </p>
-          ) : treeError ? (
-            <p
-              className="py-8"
-              style={{
-                fontFamily: "var(--font-scriptle-sans)",
-                color: "var(--color-text-muted)",
-                fontSize: "13px",
-              }}
-            >
-              {treeError}
-            </p>
-          ) : mode === "scroll" ? (
-            <div className="py-12">
-              <p
-                style={{
-                  fontFamily: "var(--font-scriptle-sans)",
-                  color: "var(--color-text-muted)",
-                  fontSize: "13px",
-                }}
-              >
-                Scroll mode is coming in the next step. Switch back to Verse
-                mode to keep reading.
-              </p>
-            </div>
-          ) : !selectedNode ? (
-            <p
-              className="py-8"
-              style={{
-                fontFamily: "var(--font-scriptle-sans)",
-                color: "var(--color-text-muted)",
-                fontSize: "13px",
-              }}
-            >
-              Select a node from the table of contents to begin.
-            </p>
-          ) : isLeaf ? (
-            <>
-              {nodeContentLoading && !nodeContent ? (
-                <p
-                  className="py-8"
-                  style={{
-                    fontFamily: "var(--font-scriptle-sans)",
-                    color: "var(--color-text-muted)",
-                    fontSize: "13px",
-                  }}
-                >
-                  Loading verse…
-                </p>
-              ) : nodeContent ? (
-                <VersePane
-                  node={nodeContent}
-                  fields={fieldVis.fields}
-                  src={langPair.src}
-                  trg={langPair.trg}
-                  onResetFields={fieldVis.reset}
-                />
-              ) : (
-                <p
-                  className="py-8"
-                  style={{
-                    fontFamily: "var(--font-scriptle-sans)",
-                    color: "var(--color-text-muted)",
-                    fontSize: "13px",
-                  }}
-                >
-                  Could not load this verse.
-                </p>
-              )}
-
-              <div
-                className="mt-8 flex items-center justify-between border-t pt-4"
-                style={{ borderColor: "var(--color-border-soft)" }}
-              >
-                <NavButton
-                  label="Previous"
-                  disabled={!prevLeaf}
-                  onClick={() => prevLeaf && setSelectedNodeId(prevLeaf.id)}
-                />
-                <span
-                  style={{
-                    fontFamily: "var(--font-scriptle-sans)",
-                    fontSize: "11px",
-                    letterSpacing: "0.08em",
-                    color: "var(--color-text-faint)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {leafIndex >= 0
-                    ? `${leafIndex + 1} of ${leaves.length}`
-                    : `${leaves.length} verses`}
-                </span>
-                <NavButton
-                  label="Next"
-                  disabled={!nextLeaf}
-                  onClick={() => nextLeaf && setSelectedNodeId(nextLeaf.id)}
-                  rightAligned
-                />
-              </div>
-            </>
-          ) : (
-            <ChapterOverview
-              node={selectedNode}
-              summary={null}
-              verseCount={countLeaves(selectedNode.children ?? [])}
-              firstLeaf={findFirstLeaf(selectedNode)}
-              onBeginReading={(leaf) => setSelectedNodeId(leaf.id)}
-            />
-          )}
+          <ReadBody
+            mode={mode}
+            treeLoading={treeLoading}
+            treeError={treeError}
+            treeIndex={treeIndex}
+            selectedEntry={selectedEntry ?? null}
+            isLeaf={isLeaf}
+            nodeContent={nodeContent}
+            nodeContentLoading={nodeContentLoading}
+            fieldVis={fieldVis}
+            langPair={langPair}
+            leafIndex={leafIndex}
+            leafCount={leafCount}
+            prevLeaf={prevLeaf}
+            nextLeaf={nextLeaf}
+            onSelectNode={setSelectedNodeId}
+          />
         </VerseViewerLayout>
       </div>
+    </div>
+  );
+}
+
+const labelOf = (node: TocNode): string =>
+  node.title_english ||
+  node.title_sanskrit ||
+  node.title_transliteration ||
+  `${node.level_name} ${node.sequence_number ?? ""}`.trim();
+
+type ReadBodyProps = {
+  mode: VerseViewMode;
+  treeLoading: boolean;
+  treeError: string | null;
+  treeIndex: TreeIndex<TocNode> | null;
+  selectedEntry: TreeIndexEntry<TocNode> | null;
+  isLeaf: boolean;
+  nodeContent: VerseNode | null;
+  nodeContentLoading: boolean;
+  fieldVis: ReturnType<typeof useFieldVisibility>;
+  langPair: ReturnType<typeof useLanguagePair>;
+  leafIndex: number;
+  leafCount: number;
+  prevLeaf: TocNode | null;
+  nextLeaf: TocNode | null;
+  onSelectNode: (id: number) => void;
+};
+
+function ReadBody({
+  mode,
+  treeLoading,
+  treeError,
+  treeIndex,
+  selectedEntry,
+  isLeaf,
+  nodeContent,
+  nodeContentLoading,
+  fieldVis,
+  langPair,
+  leafIndex,
+  leafCount,
+  prevLeaf,
+  nextLeaf,
+  onSelectNode,
+}: ReadBodyProps) {
+  if (treeLoading) {
+    return (
+      <div className="py-8">
+        <MutedNote>Loading the table of contents…</MutedNote>
+      </div>
+    );
+  }
+  if (treeError) {
+    return (
+      <div className="py-8">
+        <MutedNote>{treeError}</MutedNote>
+      </div>
+    );
+  }
+  if (mode === "scroll") {
+    return (
+      <div className="py-12">
+        <MutedNote>
+          Scroll mode is coming in the next step. Switch back to Verse mode to
+          keep reading.
+        </MutedNote>
+      </div>
+    );
+  }
+  if (!selectedEntry) {
+    return (
+      <div className="py-8">
+        <MutedNote>Select a node from the table of contents to begin.</MutedNote>
+      </div>
+    );
+  }
+  if (!isLeaf) {
+    const node = selectedEntry.node;
+    const firstLeaf =
+      treeIndex?.entries.get(selectedEntry.firstLeafId)?.node ?? null;
+    return (
+      <ChapterOverview
+        node={node}
+        summary={null}
+        verseCount={selectedEntry.leafCount}
+        firstLeaf={firstLeaf}
+        onBeginReading={(leaf) => onSelectNode(leaf.id)}
+      />
+    );
+  }
+  if (nodeContentLoading && !nodeContent) {
+    return (
+      <div className="py-8">
+        <MutedNote>Loading verse…</MutedNote>
+      </div>
+    );
+  }
+  if (!nodeContent) {
+    return (
+      <div className="py-8">
+        <MutedNote>Could not load this verse.</MutedNote>
+      </div>
+    );
+  }
+  return (
+    <>
+      <VersePane
+        node={nodeContent}
+        fields={fieldVis.fields}
+        src={langPair.src}
+        trg={langPair.trg}
+        onResetFields={fieldVis.reset}
+      />
+      <LeafNav
+        leafIndex={leafIndex}
+        leafCount={leafCount}
+        prevLeaf={prevLeaf}
+        nextLeaf={nextLeaf}
+        onSelectNode={onSelectNode}
+      />
+    </>
+  );
+}
+
+function LeafNav({
+  leafIndex,
+  leafCount,
+  prevLeaf,
+  nextLeaf,
+  onSelectNode,
+}: {
+  leafIndex: number;
+  leafCount: number;
+  prevLeaf: TocNode | null;
+  nextLeaf: TocNode | null;
+  onSelectNode: (id: number) => void;
+}) {
+  return (
+    <div
+      className="mt-8 flex items-center justify-between border-t pt-4"
+      style={{ borderColor: "var(--color-border-soft)" }}
+    >
+      <NavButton
+        label="Previous"
+        disabled={!prevLeaf}
+        onClick={() => prevLeaf && onSelectNode(prevLeaf.id)}
+      />
+      <span
+        style={{
+          fontFamily: "var(--font-scriptle-sans)",
+          fontSize: "11px",
+          letterSpacing: "0.08em",
+          color: "var(--color-text-faint)",
+          textTransform: "uppercase",
+        }}
+      >
+        {leafIndex >= 0
+          ? `${leafIndex + 1} of ${leafCount}`
+          : `${leafCount} verses`}
+      </span>
+      <NavButton
+        label="Next"
+        disabled={!nextLeaf}
+        onClick={() => nextLeaf && onSelectNode(nextLeaf.id)}
+        rightAligned
+      />
     </div>
   );
 }
@@ -576,15 +526,7 @@ export default function ReadBookPage() {
           data-scriptle="true"
           className="flex min-h-[calc(100vh-3rem)] items-center justify-center"
         >
-          <p
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              color: "var(--color-text-muted)",
-              fontSize: "13px",
-            }}
-          >
-            Loading…
-          </p>
+          <MutedNote>Loading…</MutedNote>
         </div>
       }
     >

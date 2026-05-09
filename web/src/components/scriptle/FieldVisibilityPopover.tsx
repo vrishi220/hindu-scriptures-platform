@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Eye } from "lucide-react";
 import {
   FIELD_LABELS,
   FIELD_ORDER,
   type FieldKey,
 } from "@/lib/useFieldVisibility";
+import { EyebrowLabel } from "./typography";
 
 type FieldVisibilityPopoverProps = {
   fields: Record<FieldKey, boolean>;
@@ -49,18 +51,7 @@ export default function FieldVisibilityPopover({
           color: "var(--color-text)",
         }}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden
-        >
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
+        <Eye size={14} aria-hidden />
         <span>Fields</span>
         {hiddenCount > 0 ? (
           <span
@@ -87,27 +78,13 @@ export default function FieldVisibilityPopover({
         >
           <div
             className="flex items-center justify-between px-3 py-2"
-            style={{
-              borderBottom: "0.5px solid var(--color-border)",
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "11px",
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--color-text-muted)",
-            }}
+            style={{ borderBottom: "0.5px solid var(--color-border)" }}
           >
-            <span>Show / hide</span>
-            <button
-              type="button"
-              onClick={reset}
-              style={{
-                color: "var(--color-accent)",
-                fontSize: "11px",
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-              }}
-            >
-              Show all
+            <EyebrowLabel tracking="normal">Show / hide</EyebrowLabel>
+            <button type="button" onClick={reset}>
+              <EyebrowLabel tone="accent" tracking="normal">
+                Show all
+              </EyebrowLabel>
             </button>
           </div>
           <div className="flex flex-col">

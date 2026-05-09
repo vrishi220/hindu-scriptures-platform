@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { Lock } from "lucide-react";
 import {
   ALL_LANGUAGE_CODES,
   LANGUAGE_DOT_VAR,
@@ -40,9 +41,7 @@ export default function BookCover({
         backgroundSize: "cover",
         backgroundPosition: "center",
       }
-    : {
-        backgroundImage: coverGradientForBook(bookCode),
-      };
+    : { backgroundImage: coverGradientForBook(bookCode) };
 
   return (
     <div
@@ -139,21 +138,7 @@ export default function BookCover({
           title="Private"
           aria-label="Private"
         >
-          <svg
-            width="9"
-            height="11"
-            viewBox="0 0 9 11"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path
-              d="M2 5V3.5C2 2.12 3.12 1 4.5 1S7 2.12 7 3.5V5"
-              stroke="currentColor"
-              strokeWidth="0.8"
-              strokeLinecap="round"
-            />
-            <rect x="1" y="5" width="7" height="5" rx="1" fill="currentColor" />
-          </svg>
+          <Lock size={10} strokeWidth={1.6} />
         </div>
       ) : null}
     </div>

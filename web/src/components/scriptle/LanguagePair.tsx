@@ -7,6 +7,7 @@ import {
   LANGUAGE_NAMES,
   type ScriptleLanguageCode,
 } from "@/lib/scriptle/languages";
+import { EyebrowLabel } from "./typography";
 
 type LanguagePairProps = {
   src: ScriptleLanguageCode;
@@ -100,6 +101,8 @@ function Slot({
       <button
         type="button"
         onClick={onToggle}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className="flex items-center gap-1.5 rounded-md border px-2 py-1 transition"
         style={{
           background: "white",
@@ -108,24 +111,15 @@ function Slot({
           fontSize: "12px",
           color: "var(--color-text)",
         }}
-        aria-haspopup="listbox"
-        aria-expanded={open}
       >
         <span
           aria-hidden
           className="block h-[6px] w-[6px] rounded-full"
           style={{ background: LANGUAGE_DOT_VAR[value] }}
         />
-        <span
-          style={{
-            color: "var(--color-text-muted)",
-            fontSize: "10px",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-          }}
-        >
+        <EyebrowLabel size="xs" tracking="tight">
           {label}:
-        </span>
+        </EyebrowLabel>
         <span>{LANGUAGE_NAMES[value]}</span>
         <span
           aria-hidden
@@ -172,14 +166,9 @@ function Slot({
                 />
                 <span className="flex-1">{LANGUAGE_NAMES[code]}</span>
                 {!available ? (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      color: "var(--color-text-faint)",
-                    }}
-                  >
+                  <EyebrowLabel size="xs" tone="faint" tracking="tight">
                     not generated
-                  </span>
+                  </EyebrowLabel>
                 ) : null}
               </button>
             );

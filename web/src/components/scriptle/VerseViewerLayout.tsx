@@ -15,6 +15,7 @@ type VerseViewerLayoutProps = {
   coverImageUrl?: string | null;
   toc: TocNode[];
   selectedNodeId: number | null;
+  ancestorSet: Set<number>;
   onSelectNode: (node: TocNode) => void;
   children: ReactNode;
 };
@@ -28,6 +29,7 @@ export default function VerseViewerLayout({
   coverImageUrl,
   toc,
   selectedNodeId,
+  ancestorSet,
   onSelectNode,
   children,
 }: VerseViewerLayoutProps) {
@@ -94,6 +96,7 @@ export default function VerseViewerLayout({
           <VerseTOC
             nodes={toc}
             selectedNodeId={selectedNodeId}
+            ancestorSet={ancestorSet}
             onSelect={onSelectNode}
           />
         </nav>

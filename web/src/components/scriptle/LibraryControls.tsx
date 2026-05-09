@@ -5,6 +5,7 @@ import {
   CATEGORY_ORDER,
   type ScriptleCategory,
 } from "@/lib/scriptle/categories";
+import { EyebrowLabel } from "./typography";
 
 export type RoleContext = "guest" | "viewer" | "contributor" | "editor" | "admin";
 
@@ -15,7 +16,6 @@ type LibraryControlsProps = {
   onCategoryChange: (next: ScriptleCategory | null) => void;
   bookCount: number;
   role: RoleContext;
-  onAddScripture?: () => void;
 };
 
 const ROLE_LABEL: Record<RoleContext, string> = {
@@ -41,10 +41,7 @@ export default function LibraryControls({
   onCategoryChange,
   bookCount,
   role,
-  onAddScripture,
 }: LibraryControlsProps) {
-  const showAdd = role === "admin";
-
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
@@ -69,39 +66,20 @@ export default function LibraryControls({
         </p>
       </header>
 
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search books"
-          aria-label="Search the library"
-          className="h-10 w-full rounded-[8px] border bg-white px-3 outline-none transition focus:ring-2 md:max-w-md"
-          style={{
-            borderColor: "var(--color-border)",
-            color: "var(--color-text)",
-            fontFamily: "var(--font-scriptle-sans)",
-            fontSize: "14px",
-          }}
-        />
-
-        {showAdd && onAddScripture ? (
-          <button
-            type="button"
-            onClick={onAddScripture}
-            className="self-start rounded-[8px] px-4 py-2 text-white transition hover:opacity-90 md:self-auto"
-            style={{
-              background: "var(--color-accent)",
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "12px",
-              fontWeight: 500,
-              letterSpacing: "0.04em",
-            }}
-          >
-            Add scripture
-          </button>
-        ) : null}
-      </div>
+      <input
+        type="search"
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        placeholder="Search books"
+        aria-label="Search the library"
+        className="h-10 w-full rounded-[8px] border bg-white px-3 outline-none transition focus:ring-2 md:max-w-md"
+        style={{
+          borderColor: "var(--color-border)",
+          color: "var(--color-text)",
+          fontFamily: "var(--font-scriptle-sans)",
+          fontSize: "14px",
+        }}
+      />
 
       <div className="flex flex-wrap items-center gap-1.5">
         <CategoryChip
@@ -121,19 +99,14 @@ export default function LibraryControls({
 
       <div
         className="flex items-center justify-between border-t pt-3"
-        style={{
-          borderColor: "var(--color-border-soft)",
-          fontFamily: "var(--font-scriptle-sans)",
-          fontSize: "11px",
-          letterSpacing: "0.06em",
-          color: "var(--color-text-faint)",
-          textTransform: "uppercase",
-        }}
+        style={{ borderColor: "var(--color-border-soft)" }}
       >
-        <span>
+        <EyebrowLabel tone="faint" tracking="tight">
           {bookCount} scripture{bookCount === 1 ? "" : "s"}
-        </span>
-        <span>{ROLE_LABEL[role]}</span>
+        </EyebrowLabel>
+        <EyebrowLabel tone="faint" tracking="tight">
+          {ROLE_LABEL[role]}
+        </EyebrowLabel>
       </div>
     </div>
   );

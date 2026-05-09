@@ -1,27 +1,18 @@
 import Link from "next/link";
 import BookCover from "./BookCover";
+import { EyebrowLabel } from "./typography";
 import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
   categoryForBook,
   type ScriptleCategory,
 } from "@/lib/scriptle/categories";
-import type { ScriptleLanguageCode } from "@/lib/scriptle/languages";
+import type { LibraryBookView } from "@/lib/scriptle/bookAdapter";
 
-export type LibraryBook = {
-  id: number;
-  bookCode: string | null;
-  titleEnglish: string;
-  titleSanskrit: string | null;
-  verseCount: number | null;
-  languages: ScriptleLanguageCode[];
-  coverImageUrl: string | null;
-  isAiGenerated: boolean;
-  isPrivate: boolean;
-};
+export type LibraryBook = LibraryBookView;
 
 type BookGridProps = {
-  books: LibraryBook[];
+  books: LibraryBookView[];
   activeCategory: ScriptleCategory | null;
 };
 
@@ -37,13 +28,10 @@ export default function BookGrid({ books, activeCategory }: BookGridProps) {
     );
   }
 
-  const grouped = new Map<ScriptleCategory, LibraryBook[]>();
-  for (const category of CATEGORY_ORDER) {
-    grouped.set(category, []);
-  }
+  const grouped = new Map<ScriptleCategory, LibraryBookView[]>();
+  for (const category of CATEGORY_ORDER) grouped.set(category, []);
   for (const book of books) {
-    const category = categoryForBook(book.bookCode);
-    grouped.get(category)!.push(book);
+    grouped.get(categoryForBook(book.bookCode))!.push(book);
   }
 
   return (
@@ -68,11 +56,11 @@ function Shelf({
   books,
 }: {
   label: string | null;
-  books: LibraryBook[];
+  books: LibraryBookView[];
 }) {
   if (books.length === 0) {
     return (
-      <div
+      <p
         className="text-sm"
         style={{
           color: "var(--color-text-muted)",
@@ -80,7 +68,7 @@ function Shelf({
         }}
       >
         No scriptures in this category yet.
-      </div>
+      </p>
     );
   }
 
@@ -88,32 +76,13 @@ function Shelf({
     <section className="flex flex-col gap-4">
       {label ? (
         <div className="flex items-center gap-3">
-          <span
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "11px",
-              letterSpacing: "0.18em",
-              color: "var(--color-text-muted)",
-              textTransform: "uppercase",
-            }}
-          >
-            {label}
-          </span>
+          <EyebrowLabel tracking="widest">{label}</EyebrowLabel>
           <span
             aria-hidden
             className="flex-1"
             style={{ borderTop: "0.5px solid var(--color-border)" }}
           />
-          <span
-            aria-hidden
-            style={{
-              fontFamily: "var(--font-scriptle-sans)",
-              fontSize: "11px",
-              color: "var(--color-text-faint)",
-            }}
-          >
-            →
-          </span>
+          <EyebrowLabel tone="faint">→</EyebrowLabel>
         </div>
       ) : null}
 
