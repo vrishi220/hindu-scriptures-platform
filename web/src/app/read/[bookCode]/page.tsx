@@ -10,6 +10,7 @@ import VersePane, { type VerseNode } from "@/components/scriptle/VersePane";
 import ChapterOverview from "@/components/scriptle/ChapterOverview";
 import type { TocNode } from "@/components/scriptle/VerseTOC";
 import { MutedNote } from "@/components/scriptle/typography";
+import PdfExportModal from "@/components/scriptle/PdfExportModal";
 import { resolveBook, type RawBook, type ResolvedBook } from "@/lib/scriptle/bookAdapter";
 import {
   buildTreeIndex,
@@ -158,6 +159,7 @@ function ReadBookContent() {
   const [mode, setMode] = useState<VerseViewMode>(
     searchParams.get("mode") === "scroll" ? "scroll" : "verse"
   );
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
 
   const fieldVis = useFieldVisibility();
   const langPair = useLanguagePair(
@@ -297,6 +299,7 @@ function ReadBookContent() {
             langPair={langPair}
             fieldVis={fieldVis}
             availableTrgLanguages={book.languages.filter((c) => c !== "sa")}
+            onExportPdf={() => setPdfModalOpen(true)}
           />
 
           <ReadBody
@@ -318,6 +321,22 @@ function ReadBookContent() {
           />
         </VerseViewerLayout>
       </div>
+      <PdfExportModal
+        open={pdfModalOpen}
+        bookId={book.id}
+        bookName={book.titleEnglish}
+        chapterScope={
+          selectedEntry && !selectedEntry.isLeaf
+            ? {
+                nodeId: selectedEntry.node.id,
+                label: labelOf(selectedEntry.node),
+              }
+            : null
+        }
+        availableTranslationLanguages={book.languages.filter((c) => c !== "sa")}
+        defaultTranslation={langPair.trg}
+        onClose={() => setPdfModalOpen(false)}
+      />
     </div>
   );
 }

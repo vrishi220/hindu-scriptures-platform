@@ -1,5 +1,6 @@
 "use client";
 
+import { Download } from "lucide-react";
 import LanguagePair from "./LanguagePair";
 import FieldVisibilityPopover from "./FieldVisibilityPopover";
 import { EyebrowLabel } from "./typography";
@@ -21,6 +22,7 @@ type VerseTopBarProps = {
   langPair: LanguagePairState;
   fieldVis: FieldVisibility;
   availableTrgLanguages: ScriptleLanguageCode[];
+  onExportPdf?: () => void;
 };
 
 export default function VerseTopBar({
@@ -30,6 +32,7 @@ export default function VerseTopBar({
   langPair,
   fieldVis,
   availableTrgLanguages,
+  onExportPdf,
 }: VerseTopBarProps) {
   return (
     <div
@@ -63,6 +66,25 @@ export default function VerseTopBar({
           toggle={fieldVis.toggle}
           reset={fieldVis.reset}
         />
+        {onExportPdf ? (
+          <button
+            type="button"
+            onClick={onExportPdf}
+            aria-label="Export PDF"
+            title="Export PDF"
+            className="flex items-center gap-1.5 rounded-md border px-2 py-1 transition"
+            style={{
+              background: "white",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text)",
+              fontFamily: "var(--font-scriptle-sans)",
+              fontSize: "12px",
+            }}
+          >
+            <Download size={14} aria-hidden />
+            <span className="hidden sm:inline">PDF</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );
