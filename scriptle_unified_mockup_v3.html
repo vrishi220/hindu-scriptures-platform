@@ -1,0 +1,3116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FAFAF7">
+<title>Scriptle — Unified UI Mockup v3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&family=Noto+Serif+Devanagari:wght@400;500&family=Noto+Serif+Telugu:wght@400;500&family=Noto+Serif+Tamil:wght@400;500&family=Noto+Serif+Bengali:wght@400;500&family=Noto+Serif+Gujarati:wght@400;500&family=Noto+Serif+Malayalam:wght@400;500&family=Noto+Serif+Kannada:wght@400;500&family=Noto+Sans+Devanagari:wght@500&family=Noto+Sans+Telugu:wght@500&family=Noto+Sans+Tamil:wght@500&family=Noto+Sans+Bengali:wght@500&family=Noto+Sans+Gujarati:wght@500&family=Noto+Sans+Malayalam:wght@500&family=Noto+Sans+Kannada:wght@500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   SCRIPTLE — DESIGN TOKENS
+   ============================================================ */
+:root {
+  --color-bg: #FAFAF7;
+  --color-surface: #F4F0E8;
+  --color-border: #E7E5E0;
+  --color-border-soft: #EFECE5;
+  --color-text: #1C1917;
+  --color-text-muted: #78716C;
+  --color-text-faint: #A8A29E;
+  --color-accent: #92400E;
+  --color-accent-soft: #FAEEDA;
+  --color-sanskrit: #1C3A2E;
+  --color-semantic: #3B6D11;
+
+  --lang-en: #97C459;
+  --lang-te: #EF9F27;
+  --lang-hi: #85B7EB;
+  --lang-ta: #ED93B1;
+  --lang-sa: #1C3A2E;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: 'Lora', Georgia, serif;
+  --font-devanagari: 'Noto Serif Devanagari', serif;
+  --font-telugu: 'Noto Serif Telugu', serif;
+  --font-tamil: 'Noto Serif Tamil', serif;
+  --font-bengali: 'Noto Serif Bengali', serif;
+  --font-gujarati: 'Noto Serif Gujarati', serif;
+  --font-malayalam: 'Noto Serif Malayalam', serif;
+  --font-kannada: 'Noto Serif Kannada', serif;
+  /* Sans-serif Indic variants — used by the hero wordmark to match the banner's Inter feel. */
+  --font-devanagari-sans: 'Noto Sans Devanagari', var(--font-sans);
+  --font-telugu-sans: 'Noto Sans Telugu', var(--font-sans);
+  --font-tamil-sans: 'Noto Sans Tamil', var(--font-sans);
+  --font-bengali-sans: 'Noto Sans Bengali', var(--font-sans);
+  --font-gujarati-sans: 'Noto Sans Gujarati', var(--font-sans);
+  --font-malayalam-sans: 'Noto Sans Malayalam', var(--font-sans);
+  --font-kannada-sans: 'Noto Sans Kannada', var(--font-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --shadow-cover: 2px 3px 8px rgba(0,0,0,.18), -1px 0 0 rgba(0,0,0,.08);
+  --shadow-pop: 0 4px 16px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.04);
+
+  --dur-fast: .12s;
+  --dur-base: .2s;
+  --dur-slow: .35s;
+
+  --ease-out: cubic-bezier(.2,.6,.2,1);
+
+  --focus-ring: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+}
+
+/* ============================================================
+   RESET + BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01', 'cv01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  min-height: 100dvh;
+  text-rendering: optimizeLegibility;
+  display: flex;
+  flex-direction: column;
+}
+
+main#main-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Global app banner sits above the active page in flex flow. */
+.app-banner {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-bg);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: inherit;
+}
+a { color: inherit; text-decoration: none; }
+input, select, textarea { font: inherit; color: inherit; }
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 8px 14px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 0 0 var(--r-md) 0;
+  transform: translateY(-100%);
+  transition: transform var(--dur-base) var(--ease-out);
+  z-index: 1000;
+}
+.skip-link:focus-visible { transform: translateY(0); outline-offset: -2px; }
+
+/* ============================================================
+   DEMO CHROME (page nav + role toggle, mockup-only)
+   Hidden in production via ?demo=0
+   ============================================================ */
+.demo-chrome { position: fixed; z-index: 100; }
+.role-toggle {
+  bottom: 14px; right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 4px 6px 4px 10px;
+  font-size: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
+.role-toggle .label {
+  color: var(--color-text-muted);
+  margin-right: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+  font-size: 9px;
+}
+.role-toggle button {
+  padding: 4px 9px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  border-radius: var(--r-sm);
+}
+.role-toggle button[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: white;
+}
+@media (max-width: 640px) {
+  .role-toggle { font-size: 10px; padding: 3px; }
+  .role-toggle .label { display: none; }
+}
+
+/* ============================================================
+   PAGE FRAMEWORK
+   ============================================================ */
+.page { display: none; min-height: 0; flex: 1; }
+.page[data-active="true"] { display: block; }
+.page[data-page="viewer"][data-active="true"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ============================================================
+   PAGE 1 — UNIFIED SEARCH
+   ============================================================ */
+.sr-hero {
+  padding: clamp(48px, 9vw, 88px) 24px 28px;
+  text-align: center;
+}
+/* Hero wordmark — large version of the banner's "Scriptle" mark.
+   Same Inter sans / 500 / uppercase / letter-spaced styling, just
+   scaled up. The word cycles through 8 scripts via one shared keyframe
+   + staggered animation-delay per <span>. inline-grid stacks all
+   variants in one cell so the container sizes to the widest script
+   and shorter ones simply center inside it. Pure CSS — no JS. */
+.sr-hero-mark {
+  display: inline-grid;
+  margin: 0 auto 32px;
+  font-family: var(--font-sans);
+  font-size: clamp(26px, 4.4vw, 36px);
+  line-height: 1.15;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.sr-hero-mark > span {
+  grid-area: 1 / 1;
+  justify-self: center;
+  white-space: nowrap;
+  opacity: 0;
+  animation: sr-hero-cycle 24s linear infinite both;
+  will-change: opacity, transform;
+}
+/* English: full uppercase + the banner's letter-spacing.
+   Indic scripts: zero letter-spacing (preserves the शिरोरेखा headline
+   bar in Devanagari/Bengali/Gujarati and natural connectivity in
+   Tamil/Telugu/Malayalam/Kannada). */
+.sr-hero-mark .s-en { animation-delay:  0s; font-family: var(--font-sans);            letter-spacing: 0.14em; }
+.sr-hero-mark .s-hi { animation-delay:  3s; font-family: var(--font-devanagari-sans); }
+.sr-hero-mark .s-bn { animation-delay:  6s; font-family: var(--font-bengali-sans); }
+.sr-hero-mark .s-gu { animation-delay:  9s; font-family: var(--font-gujarati-sans); }
+.sr-hero-mark .s-ta { animation-delay: 12s; font-family: var(--font-tamil-sans); }
+.sr-hero-mark .s-te { animation-delay: 15s; font-family: var(--font-telugu-sans); }
+.sr-hero-mark .s-ml { animation-delay: 18s; font-family: var(--font-malayalam-sans); }
+.sr-hero-mark .s-kn { animation-delay: 21s; font-family: var(--font-kannada-sans); }
+
+/* Per-span timeline (24s cycle, ~3s visible window per script with cross-fade) */
+@keyframes sr-hero-cycle {
+  0%      { opacity: 0; transform: translateY(2px); }
+  1.67%   { opacity: 1; transform: translateY(0); }
+  10.83%  { opacity: 1; transform: translateY(0); }
+  12.5%   { opacity: 0; transform: translateY(-2px); }
+  100%    { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-hero-mark > span { animation: none; opacity: 0; }
+  .sr-hero-mark > span.s-en { opacity: 1; }
+}
+.sr-form {
+  max-width: 520px;
+  margin: 0 auto;
+  position: relative;
+}
+.sr-search-wrap {
+  display: flex;
+  align-items: center;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+  transition: border-color var(--dur-base);
+}
+.sr-search-wrap:focus-within { border-color: var(--color-accent); }
+.sr-search-icon {
+  padding: 0 14px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+}
+.sr-input {
+  flex: 1;
+  padding: 15px 0;
+  font-size: 15px;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--font-serif);
+  caret-color: var(--color-accent);
+  min-width: 0;
+}
+.sr-input::-webkit-search-cancel-button { display: none; }
+.sr-placeholder {
+  position: absolute;
+  left: 46px;
+  right: 60px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity var(--dur-base);
+}
+.sr-placeholder[data-hidden="true"] { opacity: 0; }
+.sr-placeholder.swap { animation: sr-swap 3.5s var(--ease-out); }
+@keyframes sr-swap {
+  0%   { opacity: 0; transform: translate(0,-50%) translateY(4px); }
+  12%  { opacity: 0.45; transform: translate(0,-50%); }
+  88%  { opacity: 0.45; transform: translate(0,-50%); }
+  100% { opacity: 0; transform: translate(0,-50%) translateY(-4px); }
+}
+.sr-enter-hint {
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.55;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.sr-stats {
+  display: flex;
+  gap: 22px;
+  justify-content: center;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+.sr-stat { font-size: 11px; color: var(--color-text-muted); }
+.sr-stat strong { color: var(--color-text); font-weight: 500; }
+
+.sr-body {
+  padding: 0 24px 60px;
+  max-width: 564px;
+  margin: 0 auto;
+}
+.sr-divider { height: 0.5px; background: var(--color-border-soft); margin: 6px 0 18px; }
+.sr-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 18px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.sr-tabs::-webkit-scrollbar { display: none; }
+.sr-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color var(--dur-fast);
+  flex-shrink: 0;
+}
+.sr-tab:hover { color: var(--color-text); }
+.sr-tab[aria-selected="true"] { color: var(--color-text); font-weight: 500; }
+.sr-tab[data-mode="keyword"][aria-selected="true"]  { border-bottom-color: var(--color-text-muted); }
+.sr-tab[data-mode="semantic"][aria-selected="true"] { border-bottom-color: var(--color-semantic); }
+.sr-tab[data-mode="ask"][aria-selected="true"]      { border-bottom-color: var(--color-accent); }
+.sr-tab-count {
+  font-size: 10px;
+  background: var(--color-surface);
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  min-width: 18px;
+  text-align: center;
+}
+.sr-panel { display: none; }
+.sr-panel[data-active="true"] { display: block; }
+
+.sr-row {
+  padding: 11px 0;
+  border-top: 0.5px solid var(--color-border-soft);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  transition: background var(--dur-fast);
+  border-radius: var(--r-sm);
+}
+.sr-row:hover { background: rgba(0,0,0,.02); }
+.sr-row:hover .sr-tr { color: var(--color-accent); }
+.sr-ref {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  padding-top: 3px;
+  min-width: 78px;
+  line-height: 1.5;
+  font-feature-settings: 'tnum';
+}
+.sr-vbody { flex: 1; min-width: 0; }
+.sr-sk {
+  font-family: var(--font-devanagari);
+  font-size: 14px;
+  color: var(--color-sanskrit);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sr-tr {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color var(--dur-fast);
+}
+.sr-sim-row { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+.sr-simbar { width: 40px; height: 2px; background: var(--color-border); border-radius: 1px; overflow: hidden; }
+.sr-simfill { height: 100%; background: var(--color-semantic); border-radius: 1px; }
+.sr-simval { font-size: 10px; color: var(--color-text-muted); font-feature-settings: 'tnum'; }
+
+.sr-ask-card {
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 18px;
+  background: var(--color-bg);
+}
+.sr-ask-ans {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text);
+  margin-bottom: 14px;
+}
+.sr-ask-ans em { color: var(--color-sanskrit); font-style: normal; font-weight: 500; }
+.sr-cites-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.sr-cites { display: flex; flex-wrap: wrap; gap: 5px; }
+.sr-cite {
+  font-size: 11px;
+  padding: 3px 9px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  transition: border-color var(--dur-fast), color var(--dur-fast);
+  font-feature-settings: 'tnum';
+}
+.sr-cite:hover, .sr-cite:focus-visible { border-color: var(--color-accent); color: var(--color-accent); }
+
+.sr-empty {
+  text-align: center;
+  padding: 24px 16px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  border: 0.5px dashed var(--color-border);
+  border-radius: var(--r-md);
+}
+.sr-empty .sr-empty-eg {
+  display: inline-block;
+  margin-top: 4px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--color-text-faint);
+}
+.sr-empty .sr-empty-eg code {
+  background: var(--color-surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   PAGE 2 — LIBRARY
+   ============================================================ */
+.lb-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 24px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  gap: 14px;
+}
+.lb-logo {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+.lb-logo .lb-om { color: var(--color-accent); font-size: 17px; line-height: 1; font-family: var(--font-devanagari); letter-spacing: 0; }
+.lb-nav-links { display: flex; gap: 18px; }
+.lb-nav-link {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding-bottom: 1px;
+  border-bottom: 1.5px solid transparent;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.lb-nav-link[aria-current="page"], .lb-nav-link:hover {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+.lb-add {
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--color-accent);
+  color: white;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: filter var(--dur-fast);
+}
+.lb-add:hover { filter: brightness(1.08); }
+.lb-add svg { width: 12px; height: 12px; }
+
+.lb-header {
+  padding: 22px 24px 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.lb-title {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 400;
+}
+.lb-sub { font-size: 12px; color: var(--color-text-muted); margin-top: 4px; }
+
+.lb-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 14px 24px 0;
+}
+.lb-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  background: var(--color-bg);
+  flex: 1;
+  min-width: 160px;
+  max-width: 240px;
+  transition: border-color var(--dur-fast);
+}
+.lb-search:focus-within { border-color: var(--color-accent); }
+.lb-search input {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+}
+.lb-search input::placeholder { color: var(--color-text-muted); }
+.lb-search-clear {
+  font-size: 12px;
+  color: var(--color-text-faint);
+  padding: 0 2px;
+  line-height: 1;
+}
+.lb-search-clear:hover { color: var(--color-text-muted); }
+
+.lb-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.lb-chip {
+  font-size: 11px;
+  padding: 5px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.lb-chip:hover { color: var(--color-text); }
+.lb-chip[aria-pressed="true"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+  font-weight: 500;
+}
+
+.lb-section { padding: 18px 24px 0; }
+.lb-cat-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lb-cat-desc {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  opacity: 0.7;
+}
+.lb-cat-line { flex: 1; height: 0.5px; background: var(--color-border-soft); }
+.lb-cat-count { font-size: 10px; opacity: 0.7; }
+
+.lb-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.lb-book {
+  width: 100%;
+  max-width: 116px;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.lb-book:hover { transform: translateY(-3px); }
+.lb-book:hover .lb-book-info { opacity: 1; }
+.lb-cover {
+  width: 96px;
+  height: 136px;
+  border-radius: 3px 6px 6px 3px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-cover);
+}
+.lb-cover-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 8px;
+  background: rgba(0,0,0,.18);
+}
+.lb-cover-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px 8px 8px 12px;
+}
+.lb-cover-sk {
+  font-family: var(--font-devanagari);
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255,255,255,.85);
+  text-shadow: 0 1px 2px rgba(0,0,0,.3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lb-cover-foot { display: flex; flex-direction: column; gap: 1px; }
+.lb-cover-title {
+  font-family: var(--font-serif);
+  font-size: 10px;
+  font-weight: 500;
+  color: white;
+  line-height: 1.3;
+  text-shadow: 0 1px 3px rgba(0,0,0,.4);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lb-cover-verses {
+  font-size: 9px;
+  color: rgba(255,255,255,.65);
+}
+.lb-cover-badge {
+  position: absolute;
+  top: 6px; right: 6px;
+  font-size: 8px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  background: rgba(255,255,255,.2);
+  color: rgba(255,255,255,.9);
+  border: 0.5px solid rgba(255,255,255,.3);
+  letter-spacing: 0.04em;
+}
+.lb-cover-lock {
+  position: absolute;
+  bottom: 7px; right: 7px;
+  font-size: 11px;
+  color: rgba(255,255,255,.55);
+  display: inline-flex;
+  align-items: center;
+}
+.lb-cover-langs {
+  position: absolute;
+  bottom: 8px; left: 12px;
+  display: flex;
+  gap: 3px;
+}
+.lb-lang-dot { width: 5px; height: 5px; border-radius: 50%; }
+.l-en { background: var(--lang-en); }
+.l-te { background: var(--lang-te); }
+.l-hi { background: var(--lang-hi); }
+.l-ta { background: var(--lang-ta); }
+.lb-book-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-top: 8px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lb-book-info {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast);
+  font-feature-settings: 'tnum';
+}
+
+.lb-empty {
+  text-align: center;
+  padding: 60px 24px;
+  color: var(--color-text-muted);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.lb-footer {
+  padding: 14px 24px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  border-top: 0.5px solid var(--color-border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 24px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ============================================================
+   PAGE 3 — VERSE VIEWER
+   ============================================================ */
+.vv {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  flex: 1;
+  min-height: 0;
+  background: var(--color-bg);
+}
+.vv-sb {
+  border-right: 0.5px solid var(--color-border-soft);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.vv-sbh {
+  padding: 13px 14px 11px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+}
+.vv-back {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+  transition: color var(--dur-fast);
+}
+.vv-back:hover, .vv-back:focus-visible { color: var(--color-accent); }
+.vv-bkrow { display: flex; gap: 10px; align-items: center; }
+.vv-cv {
+  width: 46px;
+  height: 65px;
+  border-radius: 2px 4px 4px 2px;
+  background: linear-gradient(160deg, #1C3A2E, #3B7A5A);
+  position: relative;
+  box-shadow: 1px 2px 5px rgba(0,0,0,.2), -1px 0 0 rgba(0,0,0,.1);
+  flex-shrink: 0;
+}
+.vv-cv-sp { position: absolute; inset: 0 auto 0 0; width: 5px; background: rgba(0,0,0,.18); }
+.vv-cv-sk {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  right: 3px;
+  font-family: var(--font-devanagari);
+  font-size: 7px;
+  color: rgba(255,255,255,.8);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vv-bkt {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.vv-bkm { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
+
+.vv-toc {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.vv-toc::-webkit-scrollbar { width: 3px; }
+.vv-toc::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+
+.vv-node + .vv-node { border-top: 0.5px solid var(--color-border-soft); }
+.vv-nh {
+  width: 100%;
+  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  gap: 6px;
+  transition: background var(--dur-fast);
+}
+.vv-nh:hover, .vv-nh[aria-expanded="true"], .vv-nh[data-active="true"] {
+  background: var(--color-surface);
+}
+.vv-nh[data-active="true"] .vv-nn { color: var(--color-accent); }
+.vv-nl { display: flex; flex-direction: column; min-width: 0; }
+.vv-nm {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.vv-nn {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vv-nc {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-feature-settings: 'tnum';
+}
+.vv-nc svg { transition: transform var(--dur-fast); }
+.vv-nh[aria-expanded="true"] .vv-nc svg { transform: rotate(180deg); }
+.vv-vlist {
+  background: var(--color-surface);
+  display: none;
+}
+.vv-vlist[data-open="true"] { display: block; }
+.vv-vrow {
+  width: 100%;
+  padding: 5px 14px 5px 22px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--dur-fast);
+}
+.vv-vrow:hover { color: var(--color-text); }
+.vv-vrow[aria-current="true"] { color: var(--color-accent); font-weight: 500; }
+.vv-vrow[aria-current="true"]::before {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+.vv-vrow.is-more {
+  font-style: italic;
+  opacity: 0.55;
+}
+
+/* MAIN */
+.vv-main { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.vv-tb {
+  padding: 9px 18px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  background: var(--color-bg);
+  z-index: 5;
+  backdrop-filter: blur(8px);
+}
+.vv-bc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.vv-bc-link { transition: color var(--dur-fast); }
+.vv-bc-link:hover { color: var(--color-accent); }
+.vv-bc-sep { opacity: 0.4; flex-shrink: 0; }
+.vv-bc-current { color: var(--color-text); }
+.vv-tr-r { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.vv-tabs {
+  display: flex;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.vv-tab {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background var(--dur-fast), color var(--dur-fast);
+  border-right: 0.5px solid var(--color-border-soft);
+}
+.vv-tab:last-child { border-right: none; }
+.vv-tab:hover { background: var(--color-surface); }
+.vv-tab[aria-selected="true"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* LANG PAIR */
+.vv-lpair {
+  display: flex;
+  align-items: stretch;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  background: var(--color-bg);
+}
+.vv-lp-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  position: relative;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.vv-lp-side:hover { background: var(--color-surface); color: var(--color-text); }
+.vv-lp-tag {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  line-height: 1;
+  margin-bottom: 2px;
+  font-weight: 500;
+}
+.vv-lp-name { font-size: 11px; font-weight: 500; line-height: 1.2; }
+.vv-lp-arrow {
+  font-size: 11px;
+  opacity: 0.5;
+  color: var(--color-accent);
+  align-self: center;
+  padding: 0 2px;
+}
+.vv-lp-side .vv-ldot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.vv-lp-info { display: flex; flex-direction: column; align-items: flex-start; }
+
+.vv-ld {
+  position: absolute;
+  top: calc(100% + 6px);
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  z-index: 30;
+  min-width: 180px;
+  display: none;
+  overflow: hidden;
+  box-shadow: var(--shadow-pop);
+}
+.vv-ld[data-open="true"] { display: block; }
+.vv-ld[data-align="left"] { left: 0; }
+.vv-ld[data-align="right"] { right: 0; }
+.vv-ld-h {
+  padding: 8px 12px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  background: var(--color-surface);
+  font-weight: 500;
+}
+.vv-lo {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.vv-lo:hover { background: var(--color-surface); color: var(--color-text); }
+.vv-lo[aria-selected="true"] { color: var(--color-text); }
+.vv-lo[aria-disabled="true"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.vv-lck {
+  font-size: 11px;
+  color: var(--color-accent);
+  margin-left: auto;
+  opacity: 0;
+}
+.vv-lo[aria-selected="true"] .vv-lck { opacity: 1; }
+.vv-lo-na {
+  font-size: 9px;
+  margin-left: auto;
+  opacity: 0.7;
+  font-style: italic;
+}
+.vv-ldot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.vv-ldb { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; flex: 1; }
+.vv-lnat { font-size: 10px; opacity: 0.55; margin-top: 1px; }
+.vv-ldiv { height: 0.5px; background: var(--color-border-soft); }
+
+/* FIELD VISIBILITY POPOVER */
+.vv-fv-wrap { position: relative; }
+.vv-fv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  transition: border-color var(--dur-fast), color var(--dur-fast);
+}
+.vv-fv-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-fv-btn[data-has-hidden="true"] { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-fv-count {
+  font-size: 9px;
+  background: var(--color-accent);
+  color: white;
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-feature-settings: 'tnum';
+}
+.vv-fv-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  z-index: 30;
+  width: 248px;
+  display: none;
+  overflow: hidden;
+  box-shadow: var(--shadow-pop);
+}
+.vv-fv-pop[data-open="true"] { display: block; }
+.vv-fv-h {
+  padding: 9px 12px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-surface);
+  font-weight: 500;
+}
+.vv-fv-reset {
+  font-size: 11px;
+  color: var(--color-accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.vv-fv-reset:hover { text-decoration: underline; }
+.vv-fv-row {
+  width: 100%;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  transition: background var(--dur-fast);
+}
+.vv-fv-row:last-child { border-bottom: none; }
+.vv-fv-row:hover { background: var(--color-surface); }
+.vv-fv-toggle {
+  width: 26px;
+  height: 14px;
+  border-radius: 8px;
+  background: var(--color-border);
+  position: relative;
+  flex-shrink: 0;
+  transition: background var(--dur-base);
+}
+.vv-fv-toggle::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: white;
+  transition: left var(--dur-base);
+  box-shadow: 0 1px 2px rgba(0,0,0,.15);
+}
+.vv-fv-row[aria-checked="true"] .vv-fv-toggle { background: var(--color-accent); }
+.vv-fv-row[aria-checked="true"] .vv-fv-toggle::after { left: 13px; }
+.vv-fv-icon {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  transition: color var(--dur-fast);
+  font-family: var(--font-devanagari);
+  line-height: 1;
+}
+.vv-fv-row[aria-checked="true"] .vv-fv-icon { color: var(--color-sanskrit); }
+.vv-fv-info { flex: 1; min-width: 0; text-align: left; }
+.vv-fv-name {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  line-height: 1.2;
+  transition: color var(--dur-fast);
+}
+.vv-fv-row[aria-checked="true"] .vv-fv-name { color: var(--color-text); }
+.vv-fv-desc { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; opacity: 0.75; }
+
+/* PANELS */
+.vv-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.vv-panel[data-active="true"] { display: flex; }
+.vv-vbody { padding: 28px 30px 24px; overflow-y: auto; flex: 1; overscroll-behavior: contain; }
+.vv-vbody::-webkit-scrollbar { width: 3px; }
+.vv-vbody::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+.vv-vno {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+  margin-bottom: 18px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.vv-orig { margin-bottom: 18px; }
+.vv-sk-main {
+  font-family: var(--font-devanagari);
+  font-size: 21px;
+  line-height: 1.9;
+  color: var(--color-sanskrit);
+  margin-bottom: 8px;
+  white-space: pre-line;
+}
+.vv-ia {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.vv-sec { margin-top: 22px; animation: vv-fade-in var(--dur-base) var(--ease-out); }
+@keyframes vv-fade-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.vv-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vv-sec-lbl {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.vv-sec-tag {
+  font-size: 9px;
+  padding: 2px 6px;
+  background: var(--color-surface);
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.vv-st { font-size: 18px; line-height: 1.85; color: var(--color-sanskrit); white-space: pre-line; }
+.vv-st.script-te { font-family: var(--font-telugu); }
+.vv-st.script-hi, .vv-st.script-sa { font-family: var(--font-devanagari); }
+.vv-st.script-ta { font-family: var(--font-tamil); }
+
+/* AUTHORED CARDS */
+.vv-ac {
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.vv-ac + .vv-ac { margin-top: 8px; }
+.vv-ac-h {
+  padding: 9px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  background: var(--color-surface);
+}
+.vv-ac-auth {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.vv-aibadge, .vv-vbadge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.vv-aibadge {
+  background: var(--color-accent-soft);
+  color: #633806;
+  border: 0.5px solid var(--lang-te);
+}
+.vv-vbadge {
+  background: #EAF3DE;
+  color: #27500A;
+  border: 0.5px solid var(--lang-en);
+}
+.vv-ac-tag { font-size: 9px; color: var(--color-text-muted); opacity: 0.75; }
+.vv-ac-b { padding: 14px; }
+
+.vv-tr-text {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text);
+  white-space: pre-line;
+}
+.vv-tr-text.script-te { font-family: var(--font-telugu); }
+.vv-tr-text.script-hi { font-family: var(--font-devanagari); }
+.vv-tr-text.script-ta { font-family: var(--font-tamil); }
+
+/* INLINE FLOW W2W */
+.vv-flow { font-size: 13px; line-height: 2.1; }
+.vv-flow-tok {
+  display: inline-block;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+.vv-flow-src { color: var(--color-sanskrit); font-weight: 500; }
+.vv-flow-src.script-sa, .vv-flow-src.script-hi { font-family: var(--font-devanagari); }
+.vv-flow-src.script-te { font-family: var(--font-telugu); }
+.vv-flow-src.script-ta { font-family: var(--font-tamil); }
+.vv-flow-sep { color: var(--color-text-muted); opacity: 0.4; margin: 0 1px; }
+.vv-flow-mn { color: var(--color-text-muted); font-family: var(--font-serif); font-style: italic; }
+.vv-flow-mn.script-te { font-family: var(--font-telugu); font-style: normal; }
+.vv-flow-mn.script-hi { font-family: var(--font-devanagari); font-style: normal; }
+.vv-flow-mn.script-ta { font-family: var(--font-tamil); font-style: normal; }
+
+.vv-empty {
+  padding: 32px 20px;
+  text-align: center;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  border: 0.5px dashed var(--color-border);
+  border-radius: var(--r-md);
+  margin-top: 18px;
+}
+.vv-empty-a {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--color-accent);
+  font-style: normal;
+  font-size: 11px;
+}
+.vv-empty-a:hover { text-decoration: underline; }
+
+/* BOTTOM NAV */
+.vv-nav {
+  padding: 12px 30px;
+  border-top: 0.5px solid var(--color-border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--color-bg);
+}
+.vv-nb {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color var(--dur-fast);
+}
+.vv-nb:hover, .vv-nb:focus-visible { color: var(--color-accent); }
+.vv-nb[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.vv-npos {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-feature-settings: 'tnum';
+}
+.vv-bk {
+  font-size: 11px;
+  padding: 5px 11px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+}
+.vv-bk:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-bk[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+/* SCROLL VIEW */
+.vv-scroll {
+  overflow-y: auto;
+  flex: 1;
+  overscroll-behavior: contain;
+}
+.vv-scroll::-webkit-scrollbar { width: 3px; }
+.vv-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+.vv-cdiv {
+  padding: 18px 30px 12px;
+  position: sticky;
+  top: 0;
+  background: rgba(250,250,247,.92);
+  border-bottom: 0.5px solid var(--color-border-soft);
+  z-index: 2;
+  backdrop-filter: blur(10px);
+}
+.vv-cdmt {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+.vv-cdsk {
+  font-family: var(--font-devanagari);
+  font-size: 13px;
+  color: var(--color-sanskrit);
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+.vv-cdn {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 500;
+}
+.vv-cds { font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
+.vv-srow {
+  width: 100%;
+  text-align: left;
+  padding: 18px 30px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  transition: background var(--dur-fast);
+}
+.vv-srow:hover { background: var(--color-surface); }
+.vv-srow[aria-expanded="true"] { background: var(--color-surface); }
+.vv-srn {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.vv-srsk {
+  font-family: var(--font-devanagari);
+  font-size: 16px;
+  color: var(--color-sanskrit);
+  line-height: 1.7;
+  margin-bottom: 5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vv-sria {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vv-srx { display: none; margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--color-border-soft); }
+.vv-srow[aria-expanded="true"] .vv-srx { display: block; animation: vv-fade-in var(--dur-base) var(--ease-out); }
+.vv-srx-sec { margin-bottom: 14px; }
+.vv-srx-sec:last-child { margin-bottom: 0; }
+.vv-srx-sec-lbl {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 7px;
+}
+.vv-sracts {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--color-border-soft);
+}
+.vv-srbtn {
+  font-size: 11px;
+  padding: 5px 11px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+}
+.vv-srbtn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-srbtn[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+.vv-lmore {
+  padding: 14px 30px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+/* CHAPTER OVERVIEW */
+.vv-overview { padding: 32px 30px; flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.vv-overview::-webkit-scrollbar { width: 3px; }
+.vv-overview::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+.vv-ov-meta {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.vv-ov-sk {
+  font-family: var(--font-devanagari);
+  font-size: 24px;
+  color: var(--color-sanskrit);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.vv-ov-name {
+  font-family: var(--font-serif);
+  font-size: 24px;
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+.vv-ov-sub { font-size: 12px; color: var(--color-text-muted); margin-bottom: 24px; }
+.vv-ov-divider { height: 0.5px; background: var(--color-border-soft); margin: 22px 0; }
+.vv-ov-summary-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+.vv-ov-summary {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  margin-bottom: 22px;
+  white-space: pre-line;
+}
+.vv-ov-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.vv-ov-stat { font-size: 11px; color: var(--color-text-muted); }
+.vv-ov-stat strong {
+  display: block;
+  font-weight: 500;
+  font-size: 18px;
+  font-family: var(--font-serif);
+  margin-bottom: 2px;
+  color: var(--color-text);
+  font-feature-settings: 'tnum';
+}
+.vv-ov-firstv {
+  margin-top: 18px;
+  padding: 16px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  display: block;
+  width: 100%;
+  text-align: left;
+  transition: border-color var(--dur-fast);
+}
+.vv-ov-firstv:hover { border-color: var(--color-accent); }
+.vv-ov-firstv-lbl {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.vv-ov-firstv-sk {
+  font-family: var(--font-devanagari);
+  font-size: 14px;
+  color: var(--color-sanskrit);
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+.vv-ov-firstv-tr {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* MOBILE SIDEBAR DRAWER */
+.vv-sb-toggle {
+  display: none;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+}
+.vv-sb-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.32);
+  z-index: 40;
+}
+.vv-sb-backdrop[data-open="true"] { display: block; }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 900px) {
+  .vv { grid-template-columns: 1fr; }
+  .vv-sb {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 280px;
+    max-width: 86vw;
+    background: var(--color-bg);
+    border-right: 0.5px solid var(--color-border);
+    transform: translateX(-100%);
+    transition: transform var(--dur-base) var(--ease-out);
+    z-index: 50;
+    box-shadow: 0 0 32px rgba(0,0,0,.06);
+  }
+  .vv-sb[data-open="true"] { transform: translateX(0); }
+  .vv-sb-toggle { display: inline-flex; }
+  .vv-tb { padding: 9px 14px; }
+  .vv-vbody, .vv-overview { padding: 22px 20px; }
+  .vv-srow, .vv-cdiv { padding-left: 20px; padding-right: 20px; }
+  .vv-nav { padding: 10px 18px; }
+}
+@media (max-width: 540px) {
+  .lb-nav { padding: 11px 16px; }
+  .lb-header, .lb-controls, .lb-section, .lb-footer { padding-left: 16px; padding-right: 16px; }
+  .lb-shelf { gap: 12px; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+  .sr-hero { padding-left: 16px; padding-right: 16px; padding-top: 56px; }
+  .sr-body { padding-left: 16px; padding-right: 16px; }
+}
+
+/* ============================================================
+   PRINT
+   ============================================================ */
+@media print {
+  .demo-chrome, .vv-sb-toggle, .vv-sb-backdrop, .vv-tb, .vv-nav, .lb-nav, .lb-controls, .lb-footer { display: none !important; }
+  body { background: white; }
+  .vv { grid-template-columns: 1fr; }
+  .vv-sb { display: none; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main-content">Skip to content</a>
+
+<!-- ============================================================
+     DEMO CHROME (mockup-only — production removes these)
+     ============================================================ -->
+<!-- Role toggle is admin-only chrome. It's hidden whenever the simulated role
+     isn't admin, mirroring production where non-admins never see this UI.
+     Reload (or clear ?role= param) to reset to admin and reveal the toggle. -->
+<div class="demo-chrome role-toggle" role="group" aria-label="Demo role toggle" id="role-toggle">
+  <span class="label">Role</span>
+  <button type="button" data-role="guest" aria-pressed="false">Guest</button>
+  <button type="button" data-role="contributor" aria-pressed="false">Contributor</button>
+  <button type="button" data-role="researcher" aria-pressed="false">Researcher</button>
+  <button type="button" data-role="admin" aria-pressed="true">Admin</button>
+</div>
+
+<main id="main-content">
+
+<!-- ============================================================
+     GLOBAL BANNER (visible on every page)
+     ============================================================ -->
+<header class="lb-nav app-banner">
+  <a href="#search" class="lb-logo" data-link-page="search" aria-label="Scriptle home"><span class="lb-om" aria-hidden="true">ॐ</span> Scriptle</a>
+  <nav class="lb-nav-links" aria-label="Primary">
+    <a href="#search" class="lb-nav-link" data-link-page="search">Search</a>
+    <a href="#library" class="lb-nav-link" data-link-page="library">Library</a>
+  </nav>
+  <button type="button" class="lb-add" id="lb-add" hidden>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    Add scripture
+  </button>
+</header>
+
+<!-- ============================================================
+     PAGE 1 — UNIFIED SEARCH ( / )
+     ============================================================ -->
+<section class="page" data-page="search" data-active="true" aria-labelledby="sr-title">
+  <h1 id="sr-title" class="sr-only">Search the scriptures</h1>
+  <div class="sr-hero">
+    <div class="sr-hero-mark" role="img" aria-label="Scriptle">
+      <span class="s-en" lang="en" aria-hidden="true">Scriptle</span>
+      <span class="s-hi" lang="hi" aria-hidden="true">स्क्रिप्टल</span>
+      <span class="s-bn" lang="bn" aria-hidden="true">স্ক্রিপ্টল</span>
+      <span class="s-gu" lang="gu" aria-hidden="true">સ્ક્રિપ્ટલ</span>
+      <span class="s-ta" lang="ta" aria-hidden="true">ஸ்கிரிப்டில்</span>
+      <span class="s-te" lang="te" aria-hidden="true">స్క్రిప్టిల్</span>
+      <span class="s-ml" lang="ml" aria-hidden="true">സ്ക്രിപ്റ്റിൽ</span>
+      <span class="s-kn" lang="kn" aria-hidden="true">ಸ್ಕ್ರಿಪ್ಟಿಲ್</span>
+    </div>
+    <form class="sr-form" id="sr-form" autocomplete="off" role="search" aria-label="Search the scriptures">
+      <div class="sr-search-wrap">
+        <span class="sr-search-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </span>
+        <label class="sr-only" for="sr-input">Search the scriptures</label>
+        <input class="sr-input" id="sr-input" type="search" spellcheck="false" enterkeyhint="search" aria-controls="sr-body">
+        <span class="sr-placeholder" id="sr-placeholder" aria-hidden="true"></span>
+        <span class="sr-enter-hint" id="sr-enter-hint" aria-hidden="true" hidden>↵ ask</span>
+      </div>
+    </form>
+    <div class="sr-stats" id="sr-stats" aria-hidden="false">
+      <span class="sr-stat"><strong>29</strong> texts</span>
+      <span class="sr-stat"><strong>159K</strong> verses</span>
+      <span class="sr-stat"><strong>4</strong> languages</span>
+    </div>
+  </div>
+  <div class="sr-body" id="sr-body" hidden>
+    <div class="sr-divider"></div>
+    <div class="sr-tabs" role="tablist" id="sr-tabs" aria-label="Search modes"></div>
+    <div class="sr-panel" id="sr-panel-keyword"  role="tabpanel" aria-labelledby="sr-tab-keyword"  tabindex="0"></div>
+    <div class="sr-panel" id="sr-panel-semantic" role="tabpanel" aria-labelledby="sr-tab-semantic" tabindex="0"></div>
+    <div class="sr-panel" id="sr-panel-ask"      role="tabpanel" aria-labelledby="sr-tab-ask"      tabindex="0"></div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PAGE 2 — LIBRARY ( /library )
+     ============================================================ -->
+<section class="page" data-page="library" aria-labelledby="lb-title">
+  <div class="lb-header">
+    <div>
+      <h1 id="lb-title" class="lb-title">The Library</h1>
+      <p class="lb-sub" id="lb-sub">29 public scriptures</p>
+    </div>
+  </div>
+  <div class="lb-controls">
+    <div class="lb-search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <label class="sr-only" for="lb-search-input">Filter scriptures</label>
+      <input id="lb-search-input" type="search" placeholder="Filter…" enterkeyhint="search">
+      <button type="button" class="lb-search-clear" id="lb-search-clear" aria-label="Clear filter" hidden>×</button>
+    </div>
+    <div class="lb-chips" role="radiogroup" aria-label="Category filter">
+      <button type="button" class="lb-chip" role="radio" data-cat="all" aria-checked="true">All</button>
+      <button type="button" class="lb-chip" role="radio" data-cat="gita" aria-checked="false">Gitas</button>
+      <button type="button" class="lb-chip" role="radio" data-cat="veda" aria-checked="false">Vedas</button>
+      <button type="button" class="lb-chip" role="radio" data-cat="purana" aria-checked="false">Puranas</button>
+      <button type="button" class="lb-chip" role="radio" data-cat="stotra" aria-checked="false">Stotras</button>
+      <button type="button" class="lb-chip" role="radio" data-cat="upanishad" aria-checked="false">Upanishads</button>
+    </div>
+  </div>
+  <div id="lb-books-area" aria-live="polite"></div>
+  <footer class="lb-footer">
+    <span id="lb-count">29 scriptures</span>
+    <span id="lb-perm">Read only</span>
+  </footer>
+</section>
+
+<!-- ============================================================
+     PAGE 3 — VERSE VIEWER ( /read/[bookCode] )
+     ============================================================ -->
+<section class="page" data-page="viewer" aria-labelledby="vv-title">
+  <h1 id="vv-title" class="sr-only">Bhagavad Gita</h1>
+  <div class="vv-sb-backdrop" id="vv-sb-backdrop" aria-hidden="true"></div>
+  <div class="vv">
+    <aside class="vv-sb" id="vv-sb" aria-label="Table of contents">
+      <div class="vv-sbh">
+        <a href="#library" class="vv-back" data-link-page="library">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          Library
+        </a>
+        <div class="vv-bkrow">
+          <div class="vv-cv" aria-hidden="true">
+            <div class="vv-cv-sp"></div>
+            <div class="vv-cv-sk" lang="sa">भगवद्गीता</div>
+          </div>
+          <div>
+            <div class="vv-bkt">Bhagavad Gita</div>
+            <div class="vv-bkm">700 verses · 18 ch</div>
+          </div>
+        </div>
+      </div>
+      <nav class="vv-toc" id="vv-toc" aria-label="Chapters"></nav>
+    </aside>
+    <div class="vv-main">
+      <div class="vv-tb">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; min-width:0;">
+          <button type="button" class="vv-sb-toggle" id="vv-sb-toggle" aria-controls="vv-sb" aria-expanded="false" aria-label="Open table of contents">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            <span>TOC</span>
+          </button>
+          <nav class="vv-bc" id="vv-bc" aria-label="Breadcrumb"></nav>
+        </div>
+        <div class="vv-tr-r">
+          <div class="vv-tabs" role="tablist" aria-label="View mode">
+            <button type="button" class="vv-tab" id="vv-tab-v" role="tab" aria-selected="true" aria-controls="vv-panel-v" data-mode="v">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              Verse
+            </button>
+            <button type="button" class="vv-tab" id="vv-tab-s" role="tab" aria-selected="false" aria-controls="vv-panel-s" data-mode="s" tabindex="-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              Scroll
+            </button>
+          </div>
+          <div class="vv-lpair">
+            <button type="button" class="vv-lp-side" id="vv-lp-src-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="vv-ld-src">
+              <span class="vv-ldot" id="vv-src-dot" aria-hidden="true" style="background:#1C3A2E"></span>
+              <div class="vv-lp-info">
+                <span class="vv-lp-tag">Source</span>
+                <span class="vv-lp-name" id="vv-src-name">Sanskrit</span>
+              </div>
+            </button>
+            <span class="vv-lp-arrow" aria-hidden="true">→</span>
+            <button type="button" class="vv-lp-side" id="vv-lp-trg-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="vv-ld-trg">
+              <span class="vv-ldot" id="vv-trg-dot" aria-hidden="true" style="background:#97C459"></span>
+              <div class="vv-lp-info">
+                <span class="vv-lp-tag">Translation</span>
+                <span class="vv-lp-name" id="vv-trg-name">English</span>
+              </div>
+            </button>
+            <div class="vv-ld" data-align="left" id="vv-ld-src" role="listbox" aria-label="Source script">
+              <div class="vv-ld-h">Source script</div>
+              <button type="button" class="vv-lo" role="option" aria-selected="true" data-side="src" data-lang="sa"><span class="vv-ldot" style="background:#1C3A2E"></span><div class="vv-ldb"><span>Sanskrit</span><span class="vv-lnat" lang="sa">देवनागरी</span></div><span class="vv-lck">✓</span></button>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" data-side="src" data-lang="te"><span class="vv-ldot" style="background:#EF9F27"></span><div class="vv-ldb"><span>Telugu</span><span class="vv-lnat" lang="te">తెలుగు</span></div><span class="vv-lck">✓</span></button>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" data-side="src" data-lang="hi"><span class="vv-ldot" style="background:#85B7EB"></span><div class="vv-ldb"><span>Hindi</span><span class="vv-lnat" lang="hi">हिन्दी</span></div><span class="vv-lck">✓</span></button>
+              <div class="vv-ldiv"></div>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" aria-disabled="true" data-side="src" data-lang="ta"><span class="vv-ldot" style="background:#ED93B1"></span><div class="vv-ldb"><span>Tamil</span><span class="vv-lnat" lang="ta">தமிழ்</span></div><span class="vv-lo-na">no script</span></button>
+            </div>
+            <div class="vv-ld" data-align="right" id="vv-ld-trg" role="listbox" aria-label="Translation language">
+              <div class="vv-ld-h">Translation</div>
+              <button type="button" class="vv-lo" role="option" aria-selected="true" data-side="trg" data-lang="en"><span class="vv-ldot" style="background:#97C459"></span><div class="vv-ldb"><span>English</span></div><span class="vv-lck">✓</span></button>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" data-side="trg" data-lang="te"><span class="vv-ldot" style="background:#EF9F27"></span><div class="vv-ldb"><span>Telugu</span><span class="vv-lnat" lang="te">తెలుగు</span></div><span class="vv-lck">✓</span></button>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" data-side="trg" data-lang="hi"><span class="vv-ldot" style="background:#85B7EB"></span><div class="vv-ldb"><span>Hindi</span><span class="vv-lnat" lang="hi">हिन्दी</span></div><span class="vv-lck">✓</span></button>
+              <div class="vv-ldiv"></div>
+              <button type="button" class="vv-lo" role="option" aria-selected="false" aria-disabled="true" data-side="trg" data-lang="ta"><span class="vv-ldot" style="background:#ED93B1"></span><div class="vv-ldb"><span>Tamil</span><span class="vv-lnat" lang="ta">தமிழ்</span></div><span class="vv-lo-na">not generated</span></button>
+            </div>
+          </div>
+          <div class="vv-fv-wrap">
+            <button type="button" class="vv-fv-btn" id="vv-fv-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="vv-fv-pop">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              Fields
+              <span class="vv-fv-count" id="vv-fv-count" hidden></span>
+            </button>
+            <div class="vv-fv-pop" id="vv-fv-pop" role="dialog" aria-label="Show fields">
+              <div class="vv-fv-h">
+                <span>Show fields</span>
+                <button type="button" class="vv-fv-reset" id="vv-fv-reset">Show all</button>
+              </div>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="original">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">ॐ</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">Original text</span><span class="vv-fv-desc">Sanskrit in Devanagari</span></span>
+              </button>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="iast">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">Aa</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">IAST</span><span class="vv-fv-desc">Roman transliteration</span></span>
+              </button>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="srcScript">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">अ</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">Source script</span><span class="vv-fv-desc">Sanskrit in Telugu / Hindi</span></span>
+              </button>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="w2w">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">≡</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">Word for word</span><span class="vv-fv-desc">Token-by-token meanings</span></span>
+              </button>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="translation">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">¶</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">Translation</span><span class="vv-fv-desc">Multiple authors available</span></span>
+              </button>
+              <button type="button" class="vv-fv-row" role="switch" aria-checked="true" data-field="commentary">
+                <span class="vv-fv-toggle" aria-hidden="true"></span>
+                <span class="vv-fv-icon" aria-hidden="true">"</span>
+                <span class="vv-fv-info"><span class="vv-fv-name">Commentary</span><span class="vv-fv-desc">Scholarly interpretations</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="vv-panel" id="vv-panel-v" role="tabpanel" aria-labelledby="vv-tab-v" data-active="true" tabindex="0"></div>
+      <div class="vv-panel" id="vv-panel-s" role="tabpanel" aria-labelledby="vv-tab-s" tabindex="0"></div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+'use strict';
+
+/* ============================================================
+   SHARED — UTILITIES, STATE, ROUTER, ROLE
+   ============================================================ */
+
+const App = (() => {
+  const $  = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  function on(el, ev, handler, opts) { if (el) el.addEventListener(ev, handler, opts); }
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Storage with safe fallback
+  const store = {
+    get(key, def) {
+      try { const v = localStorage.getItem(key); return v == null ? def : JSON.parse(v); }
+      catch { return def; }
+    },
+    set(key, val) {
+      try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+    },
+  };
+
+  // Demo state. Role defaults to 'admin' on every fresh load so the role-toggle
+  // (admin-only chrome) is visible. We deliberately don't persist the role —
+  // a reload always restores admin, so the toggle can be re-summoned after a
+  // user has clicked themselves into a non-admin role.
+  const state = {
+    role: 'admin',
+    page: 'search',
+  };
+
+  const roleToggleEl = document.getElementById('role-toggle');
+  function syncRoleToggleVisibility() {
+    if (!roleToggleEl) return;
+    if (state.role === 'admin') roleToggleEl.removeAttribute('hidden');
+    else roleToggleEl.setAttribute('hidden', '');
+  }
+
+  function setRole(role) {
+    state.role = role;
+    $$('.role-toggle button[data-role]').forEach(b => {
+      b.setAttribute('aria-pressed', b.dataset.role === role ? 'true' : 'false');
+    });
+    syncRoleToggleVisibility();
+    LibraryPage.applyRole(role);
+    SearchPage.applyRole(role);
+  }
+
+  function navigate(page, { fromHash = false } = {}) {
+    if (!page || page === state.page) {
+      // ensure DOM reflects desired state on initial boot
+    }
+    state.page = page;
+    $$('.page').forEach(p => p.setAttribute('data-active', p.dataset.page === page ? 'true' : 'false'));
+    // Sync the global banner's nav links — viewer treats Library as the parent route.
+    const bannerActive = page === 'viewer' ? 'library' : page;
+    $$('.app-banner .lb-nav-link[data-link-page]').forEach(l => {
+      if (l.dataset.linkPage === bannerActive) l.setAttribute('aria-current', 'page');
+      else l.removeAttribute('aria-current');
+    });
+    if (!fromHash && location.hash !== '#' + page) {
+      history.replaceState(null, '', '#' + page);
+    }
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+  }
+
+  // Role toggle buttons
+  $$('.role-toggle button[data-role]').forEach(b => on(b, 'click', () => setRole(b.dataset.role)));
+
+  // Hash routing (deep link support)
+  function readHash() {
+    const h = (location.hash || '#search').replace(/^#/, '');
+    return ['search', 'library', 'viewer'].includes(h) ? h : 'search';
+  }
+  on(window, 'hashchange', () => navigate(readHash(), { fromHash: true }));
+
+  // Internal "links" using data-link-page (for in-mockup nav)
+  document.addEventListener('click', e => {
+    const link = e.target.closest('[data-link-page]');
+    if (!link) return;
+    e.preventDefault();
+    navigate(link.dataset.linkPage);
+  });
+
+  // Global Escape handler — close any open popovers
+  on(document, 'keydown', e => {
+    if (e.key === 'Escape') {
+      // Lang pickers
+      $$('.vv-ld[data-open="true"]').forEach(d => d.removeAttribute('data-open'));
+      $$('.vv-lp-side[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      // Field popover
+      const fv = $('#vv-fv-pop');
+      if (fv && fv.getAttribute('data-open') === 'true') {
+        fv.removeAttribute('data-open');
+        $('#vv-fv-btn').setAttribute('aria-expanded', 'false');
+      }
+      // Mobile sidebar
+      const sb = $('#vv-sb');
+      if (sb && sb.getAttribute('data-open') === 'true') {
+        sb.removeAttribute('data-open');
+        $('#vv-sb-backdrop').removeAttribute('data-open');
+        $('#vv-sb-toggle').setAttribute('aria-expanded', 'false');
+      }
+    }
+    // "/" focuses the search input from anywhere on the search page
+    if (e.key === '/' && state.page === 'search' && document.activeElement !== $('#sr-input')) {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      $('#sr-input').focus();
+    }
+  });
+
+  return { $, $$, on, escapeHTML, state, setRole, navigate, readHash };
+})();
+
+/* ============================================================
+   PAGE 1 — UNIFIED SEARCH
+   ============================================================ */
+
+const SearchPage = (() => {
+  const { $, $$, on, escapeHTML, state } = App;
+
+  const SUGGESTIONS = [
+    'What is the nature of the Self?',
+    'liberation from suffering',
+    'कर्म yoga',
+    'How to attain moksha?',
+    'surrender to God',
+    'मोक्ष',
+    'nature of Brahman',
+    'What did Krishna say about death?',
+    'path of devotion',
+  ];
+
+  const DATA = {
+    keyword: {
+      dharma: [
+        { ref: 'Gita · 3.35',     sk: 'श्रेयान्स्वधर्मो विगुणः',           tr: "Better is one's own dharma, imperfectly performed, than another's well performed." },
+        { ref: 'Gita · 18.47',    sk: 'श्रेयान्स्वधर्मो विगुणः परधर्मात्',  tr: "Better to perform one's own duty deficiently than another's perfectly." },
+        { ref: 'Ramayana · 1.1',  sk: 'धर्मात्मा सत्यसन्धश्च',             tr: 'Rama, son of Dasharatha, embodiment of dharma, always truthful.' },
+      ],
+      karma: [
+        { ref: 'Gita · 2.47',  sk: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन',     tr: 'You have a right to your duties, but never to the fruits of action.' },
+        { ref: 'Gita · 3.19',  sk: 'तस्मादसक्तः सततं कार्यं कर्म समाचर',    tr: 'Therefore without attachment, perform the work that must be done.' },
+        { ref: 'Gita · 4.18',  sk: 'कर्मण्यकर्म यः पश्येद्',               tr: 'One who sees inaction in action and action in inaction is wise.' },
+      ],
+      moksha: [
+        { ref: 'AshtG · 1.3',   sk: 'मुक्तिमिच्छसि चेत्तात',                 tr: 'If you seek liberation, shun sense objects as poison.' },
+        { ref: 'Gita · 18.66',  sk: 'सर्वधर्मान्परित्यज्य',                 tr: 'Abandon all dharmas and surrender to Me alone.' },
+      ],
+      self: [
+        { ref: 'Gita · 13.30',  sk: 'यदा भूतपृथग्भावम्',                    tr: 'One who sees the self as non-doer actually sees.' },
+        { ref: 'VSN · 84',      sk: 'आत्मवान् — Self in all',               tr: 'The Lord dwelling in all beings as their innermost reality.' },
+      ],
+      default: [
+        { ref: 'Gita · 2.47',   sk: 'कर्मण्येवाधिकारस्ते',                  tr: 'You have a right to your duties, but never to the fruits.' },
+        { ref: 'Gita · 13.30',  sk: 'यदा भूतपृथग्भावम्',                    tr: 'One who sees the self as non-doer actually sees.' },
+        { ref: 'VSN · 84',      sk: 'आत्मवान्',                             tr: 'The Self present in all beings as their innermost reality.' },
+      ],
+    },
+    semantic: {
+      dharma: [
+        { ref: 'Gita · 4.7',      sk: 'यदा यदा हि धर्मस्य',     tr: 'Whenever there is decline of righteousness, I manifest myself.', sim: 0.88 },
+        { ref: 'Ramayana · 3.37', sk: 'धर्म एव हतो हन्ति',     tr: 'Dharma destroyed destroys; dharma protected protects.',          sim: 0.82 },
+      ],
+      karma: [
+        { ref: 'Gita · 6.1',  sk: 'अनाश्रितः कर्मफलं',    tr: 'One who acts without attachment to fruits is both renunciant and yogi.', sim: 0.91 },
+        { ref: 'Gita · 4.20', sk: 'त्यक्त्वा कर्मफलासङ्गं', tr: 'Abandoning attachment to fruits, he does nothing at all.',              sim: 0.85 },
+      ],
+      moksha: [
+        { ref: 'Gita · 18.55',   sk: 'भक्त्या मामभिजानाति',     tr: 'Only through devotion can one truly know Me and enter the Supreme.', sim: 0.87 },
+        { ref: 'Katha · 1.2.20', sk: 'अणोरणीयान्महतो महीयान्', tr: 'Smaller than the smallest, greater than the greatest.',              sim: 0.81 },
+      ],
+      self: [
+        { ref: 'VSN · 518',      sk: 'अनन्तात्मा — Infinite Self',          tr: 'Unlimited consciousness beyond all finite determinations.', sim: 0.89 },
+        { ref: 'Mandukya · 7',   sk: 'नान्तःप्रज्ञं न बहिष्प्रज्ञं',         tr: 'The Self is neither inward nor outward — pure consciousness, the fourth.', sim: 0.78 },
+      ],
+      default: [
+        { ref: 'VSN · 84',     sk: 'आत्मवान्',                tr: 'The Self present in all beings.',                            sim: 0.79 },
+        { ref: 'Gita · 13.30', sk: 'यदा भूतपृथग्भावम्',       tr: 'One who sees the self as non-doer actually sees.',           sim: 0.72 },
+      ],
+    },
+    ask: {
+      dharma: 'The scriptures present dharma as the cosmic order upholding all existence. Krishna declares he descends whenever <em>dharma</em> declines — suggesting it is not a human invention but the very grain of reality. The Ramayana shows it lived: every choice Rama makes is dharma enacted, even when it costs him everything.',
+      karma:  "Karma Yoga is the art of total action without attachment to results. The Gita's central teaching is that the right to act is yours, but never the fruits. By offering all actions to the <em>Divine</em> and surrendering outcomes, the cycle of karma dissolves. The yogi acts completely yet remains untouched.",
+      moksha: "Moksha is not a destination but a recognition — the realisation that the <em>Ātman</em> was never bound. The Ashtavakra Gita declares freedom to be the natural state; bondage is only the belief in bondage. The Gita's final word: know Me truly, and you shall not be born again.",
+      self:   "The scriptures describe the Self as eternal, self-luminous, untouched by action. The <em>Vishnu Sahasranama</em> calls the Lord <em>Ātmavān</em> — the Self in all beings. The Bhagavad Gita: one who sees the self as non-doer \"actually sees.\" Pure consciousness — the fourth state beyond waking, dream, and sleep.",
+      default: 'The scriptures address this across all traditions. The Bhagavad Gita offers the philosophical framework, the Vishnu Sahasranama approaches it through the names of the Divine, and the Upanishads through direct inquiry. All point toward a single underlying reality.',
+    },
+    askCites: {
+      dharma:  ['Gita · 4.7', 'Gita · 3.35', 'Ramayana · 3.37'],
+      karma:   ['Gita · 2.47', 'Gita · 6.1', 'Gita · 4.20'],
+      moksha:  ['Gita · 18.66', 'AshtG · 1.3', 'Katha · 1.2.20'],
+      self:    ['VSN · 84', 'VSN · 518', 'Gita · 13.30', 'Mandukya · 7'],
+      default: ['Gita · 2.47', 'VSN · 84', 'AshtG · 1.3'],
+    },
+  };
+
+  const els = {};
+  let phIdx = 0, phTimer = null, searchTimer = null, currentTab = 'keyword';
+
+  function init() {
+    els.input    = $('#sr-input');
+    els.ph       = $('#sr-placeholder');
+    els.body     = $('#sr-body');
+    els.stats    = $('#sr-stats');
+    els.enter    = $('#sr-enter-hint');
+    els.tabs     = $('#sr-tabs');
+    els.form     = $('#sr-form');
+    els.panels   = {
+      keyword:  $('#sr-panel-keyword'),
+      semantic: $('#sr-panel-semantic'),
+      ask:      $('#sr-panel-ask'),
+    };
+
+    on(els.input, 'input', onInput);
+    on(els.input, 'focus', onFocus);
+    on(els.input, 'blur', onBlur);
+    on(els.form, 'submit', onSubmit);
+    on(els.tabs, 'keydown', onTabsKey);
+
+    cyclePlaceholder();
+  }
+
+  function isQuestion(q) {
+    const t = q.trim();
+    return /^(what|how|why|when|who|does|is|are|can|should|did|where|which)\b/i.test(t) || t.endsWith('?');
+  }
+  function getKey(q) {
+    const lc = q.toLowerCase();
+    if (lc.includes('dharma'))                                     return 'dharma';
+    if (lc.includes('karma') || lc.includes('कर्म'))                return 'karma';
+    if (lc.includes('moksha') || lc.includes('liberation') || lc.includes('मोक्ष')) return 'moksha';
+    if (lc.includes('self') || lc.includes('atman') || lc.includes('आत्म')) return 'self';
+    return 'default';
+  }
+  function showAsk() { return state.role === 'researcher' || state.role === 'admin'; }
+
+  function cyclePlaceholder() {
+    if (els.input.value || document.activeElement === els.input) return;
+    els.ph.textContent = SUGGESTIONS[phIdx % SUGGESTIONS.length];
+    els.ph.classList.remove('swap');
+    void els.ph.offsetWidth;
+    els.ph.classList.add('swap');
+    phIdx++;
+    clearTimeout(phTimer);
+    phTimer = setTimeout(cyclePlaceholder, 3500);
+  }
+
+  function onFocus() { els.ph.setAttribute('data-hidden', 'true'); clearTimeout(phTimer); }
+  function onBlur()  {
+    if (!els.input.value) {
+      els.ph.removeAttribute('data-hidden');
+      cyclePlaceholder();
+    }
+  }
+
+  function onInput() {
+    const q = els.input.value.trim();
+    clearTimeout(searchTimer);
+    if (!q) {
+      els.body.hidden = true;
+      els.stats.removeAttribute('hidden');
+      els.enter.hidden = true;
+      return;
+    }
+    els.stats.setAttribute('hidden', '');
+    if (isQuestion(q) && showAsk()) els.enter.hidden = false; else els.enter.hidden = true;
+    searchTimer = setTimeout(() => search(q), 320);
+  }
+
+  function onSubmit(e) {
+    e.preventDefault();
+    clearTimeout(searchTimer);
+    const q = els.input.value.trim();
+    if (!q) return;
+    search(q, { fromSubmit: true });
+  }
+
+  function search(q, { fromSubmit = false } = {}) {
+    const key = getKey(q);
+    const isQ = isQuestion(q);
+    const ask = showAsk();
+    const defaultTab = (isQ && ask) ? 'ask' : 'keyword';
+    const targetTab = fromSubmit && ask ? 'ask' : defaultTab;
+
+    els.body.hidden = false;
+    els.stats.setAttribute('hidden', '');
+
+    renderTabs(key, targetTab, ask);
+    renderKeywordPanel(key);
+    renderSemanticPanel(key);
+    renderAskPanel(q, key, isQ, ask);
+    switchTab(targetTab);
+  }
+
+  function renderTabs(key, active, ask) {
+    const tabs = [
+      { mode: 'keyword',  label: 'Keyword',  count: DATA.keyword[key].length },
+      { mode: 'semantic', label: 'Semantic', count: DATA.semantic[key].length },
+    ];
+    if (ask) tabs.push({ mode: 'ask', label: 'Ask', count: 1 });
+
+    els.tabs.innerHTML = tabs.map(t => `
+      <button type="button" class="sr-tab"
+              role="tab"
+              id="sr-tab-${t.mode}"
+              data-mode="${t.mode}"
+              aria-selected="${t.mode === active ? 'true' : 'false'}"
+              aria-controls="sr-panel-${t.mode}"
+              tabindex="${t.mode === active ? '0' : '-1'}">
+        ${t.label}<span class="sr-tab-count">${t.count}</span>
+      </button>
+    `).join('');
+    $$('#sr-tabs .sr-tab').forEach(b =>
+      b.addEventListener('click', () => switchTab(b.dataset.mode))
+    );
+  }
+
+  function renderKeywordPanel(key) {
+    els.panels.keyword.innerHTML = DATA.keyword[key].map(v => rowKeyword(v)).join('') ||
+      `<div class="sr-empty">No matches found.</div>`;
+  }
+  function renderSemanticPanel(key) {
+    els.panels.semantic.innerHTML = DATA.semantic[key].map(v => rowSemantic(v)).join('') ||
+      `<div class="sr-empty">No related verses found.</div>`;
+  }
+  function renderAskPanel(q, key, isQ, ask) {
+    if (!ask) {
+      els.panels.ask.innerHTML = '';
+      return;
+    }
+    if (!isQ) {
+      els.panels.ask.innerHTML = `
+        <div class="sr-empty">
+          Rephrase as a question to get a synthesised answer.
+          <div class="sr-empty-eg">e.g. <code>What do the scriptures say about ${escapeHTML(q)}?</code></div>
+        </div>`;
+      return;
+    }
+    const ans = DATA.ask[key];
+    const cites = DATA.askCites[key];
+    els.panels.ask.innerHTML = `
+      <article class="sr-ask-card" aria-live="polite">
+        <div class="sr-ask-ans">${ans}</div>
+        <div class="sr-cites-label">Cited verses</div>
+        <div class="sr-cites">${cites.map(c => `<button type="button" class="sr-cite">${escapeHTML(c)}</button>`).join('')}</div>
+      </article>`;
+  }
+
+  function rowKeyword(v) {
+    return `<button type="button" class="sr-row">
+      <span class="sr-ref">${escapeHTML(v.ref)}</span>
+      <span class="sr-vbody">
+        <span class="sr-sk" lang="sa">${v.sk}</span>
+        <span class="sr-tr">${escapeHTML(v.tr)}</span>
+      </span>
+    </button>`;
+  }
+  function rowSemantic(v) {
+    return `<button type="button" class="sr-row">
+      <span class="sr-ref">${escapeHTML(v.ref)}
+        <span class="sr-sim-row">
+          <span class="sr-simbar"><span class="sr-simfill" style="width:${Math.round(v.sim*100)}%"></span></span>
+          <span class="sr-simval">${v.sim.toFixed(2)}</span>
+        </span>
+      </span>
+      <span class="sr-vbody">
+        <span class="sr-sk" lang="sa">${v.sk}</span>
+        <span class="sr-tr">${escapeHTML(v.tr)}</span>
+      </span>
+    </button>`;
+  }
+
+  function switchTab(mode) {
+    currentTab = mode;
+    $$('#sr-tabs .sr-tab').forEach(b => {
+      const sel = b.dataset.mode === mode;
+      b.setAttribute('aria-selected', sel ? 'true' : 'false');
+      b.tabIndex = sel ? 0 : -1;
+    });
+    Object.entries(els.panels).forEach(([k, p]) => {
+      p.setAttribute('data-active', k === mode ? 'true' : 'false');
+    });
+  }
+
+  function onTabsKey(e) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const tabs = $$('#sr-tabs .sr-tab');
+    if (tabs.length === 0) return;
+    const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+    let next = idx;
+    if (e.key === 'ArrowLeft')  next = idx === 0 ? tabs.length - 1 : idx - 1;
+    if (e.key === 'ArrowRight') next = idx === tabs.length - 1 ? 0 : idx + 1;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End')  next = tabs.length - 1;
+    e.preventDefault();
+    tabs[next].focus();
+    switchTab(tabs[next].dataset.mode);
+  }
+
+  function applyRole() {
+    const q = els.input.value.trim();
+    if (q) search(q);
+    if (q && isQuestion(q) && showAsk()) els.enter.hidden = false;
+    else els.enter.hidden = true;
+  }
+
+  return { init, applyRole };
+})();
+
+/* ============================================================
+   PAGE 2 — LIBRARY
+   ============================================================ */
+
+const LibraryPage = (() => {
+  const { $, $$, on, escapeHTML, state } = App;
+
+  const BOOKS = [
+    { name: 'Bhagavad Gita',         sk: 'भगवद्गीता',         verses: '700',    cat: 'gita',      langs: ['en','te','hi'], ai: true,  pub: true,  bg: 'linear-gradient(160deg,#1C3A2E,#3B7A5A)' },
+    { name: 'Ashtavakra Gita',       sk: 'अष्टावक्र गीता',      verses: '298',    cat: 'gita',      langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#3B2A1A,#8B6A3A)' },
+    { name: 'Avadhuta Gita',         sk: 'अवधूत गीता',         verses: '144',    cat: 'gita',      langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A2A3B,#3A6A8B)' },
+    { name: 'Ribhu Gita',            sk: 'रिभु गीता',          verses: '2,591',  cat: 'gita',      langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#3B1A2A,#8B3A6A)' },
+    { name: 'Valmiki Ramayana',      sk: 'वाल्मीकि रामायण',   verses: '20,617', cat: 'purana',    langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#2A1A0A,#8B5A2A)' },
+    { name: 'Bhagavata Purana',      sk: 'भागवत पुराण',       verses: '15,304', cat: 'purana',    langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A1A3B,#3A3A8B)' },
+    { name: 'Yoga Vasishtha',        sk: 'योग वासिष्ठ',        verses: '32,000', cat: 'purana',    langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#0A2A1A,#2A7A5A)' },
+    { name: 'Mahabharata',           sk: 'महाभारत',           verses: '75,834', cat: 'purana',    langs: [],                ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A0A0A,#6A2A2A)' },
+    { name: 'Rigveda',               sk: 'ऋग्वेद',             verses: '10,552', cat: 'veda',      langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A2A1A,#5A7A3A)' },
+    { name: 'Purusha Suktam',        sk: 'पुरुष सूक्तम्',       verses: '16',     cat: 'veda',      langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#2A2A0A,#7A7A2A)' },
+    { name: 'Nasadiya Suktam',       sk: 'नासदीय सूक्तम्',     verses: '7',      cat: 'veda',      langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A1A2A,#5A5A7A)' },
+    { name: 'Vishnu Sahasranama',    sk: 'विष्णु सहस्रनाम',     verses: '1,000',  cat: 'stotra',    langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#0A1A2A,#2A5A7A)' },
+    { name: 'Lalita Sahasranama',    sk: 'ललिता सहस्रनाम',     verses: '1,000',  cat: 'stotra',    langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#2A0A1A,#7A2A5A)' },
+    { name: 'Nirvana Shatkam',       sk: 'निर्वाण षट्कम्',     verses: '6',      cat: 'stotra',    langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A1A1A,#5A5A5A)' },
+    { name: 'Bhaja Govindam',        sk: 'भज गोविन्दम्',       verses: '31',     cat: 'stotra',    langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#1A2A0A,#5A7A2A)' },
+    { name: 'Dasa Sloki',            sk: 'दश श्लोकी',         verses: '10',     cat: 'stotra',    langs: ['en'],            ai: true,  pub: true,  bg: 'linear-gradient(160deg,#2A1A0A,#7A5A2A)' },
+    { name: 'Krishnashtakam',        sk: 'कृष्णाष्टकम्',        verses: '8',      cat: 'stotra',    langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#0A1A2A,#2A5A7A)' },
+    { name: 'Tattva Bodha',          sk: 'तत्त्व बोध',         verses: '40',     cat: 'upanishad', langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A1A2A,#5A3A7A)' },
+    { name: 'Mandukya Upanishad',    sk: 'माण्डूक्य उपनिषद्', verses: '12',     cat: 'upanishad', langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#0A2A2A,#2A7A7A)' },
+    { name: 'Vivekachudamani',       sk: 'विवेकचूडामणि',      verses: '580',    cat: 'upanishad', langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#2A1A1A,#7A5A3A)' },
+    { name: 'Kena Upanishad',        sk: 'केन उपनिषद्',        verses: '35',     cat: 'upanishad', langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A2A1A,#5A7A3A)' },
+    { name: 'Vedanta Ekashloki',     sk: 'वेदान्त एकश्लोकी',  verses: '1',      cat: 'upanishad', langs: ['en'],            ai: false, pub: true,  bg: 'linear-gradient(160deg,#1A2A2A,#3A7A7A)' },
+    { name: 'Yoga Sutras',           sk: 'योगसूत्र',           verses: '196',    cat: 'upanishad', langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#1A1A1A,#3A3A3A)' },
+    { name: 'Brahma Sutras',         sk: 'ब्रह्मसूत्र',         verses: '555',    cat: 'upanishad', langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#1A1A1A,#3A3A3A)' },
+    { name: 'Soundarya Lahari',     sk: 'सौन्दर्य लहरी',      verses: '100',    cat: 'stotra',    langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#2A0A1A,#6A2A5A)' },
+    { name: 'Devi Mahatmyam',        sk: 'देवी माहात्म्यम्',  verses: '700',    cat: 'purana',    langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#2A0A0A,#7A2A2A)' },
+    { name: 'Shiva Sahasranama',     sk: 'शिव सहस्रनाम',       verses: '1,000',  cat: 'stotra',    langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#0A1A1A,#2A5A5A)' },
+    { name: 'Narada Bhakti Sutras',  sk: 'नारद भक्ति सूत्र',  verses: '84',     cat: 'upanishad', langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#1A2A2A,#3A6A6A)' },
+    { name: 'Aitareya Upanishad',    sk: 'ऐतरेय उपनिषद्',     verses: '33',     cat: 'upanishad', langs: [],                ai: false, pub: false, bg: 'linear-gradient(160deg,#2A2A1A,#6A6A3A)' },
+  ];
+
+  const CATS = [
+    { key: 'gita',      label: 'Gitas',                  desc: 'Philosophical dialogues' },
+    { key: 'veda',      label: 'Vedas & Suktams',        desc: 'Vedic hymns' },
+    { key: 'purana',    label: 'Puranas & Itihasas',     desc: 'Epic narratives' },
+    { key: 'stotra',    label: 'Stotras & Sahasranamas', desc: 'Devotional hymns' },
+    { key: 'upanishad', label: 'Upanishads & Sutras',    desc: 'Philosophical treatises' },
+  ];
+
+  const LANG_CLASS = { en: 'l-en', te: 'l-te', hi: 'l-hi', ta: 'l-ta' };
+
+  let filter = 'all', searchQ = '';
+  const els = {};
+
+  function init() {
+    els.add        = $('#lb-add');
+    els.sub        = $('#lb-sub');
+    els.perm       = $('#lb-perm');
+    els.count      = $('#lb-count');
+    els.area       = $('#lb-books-area');
+    els.searchIn   = $('#lb-search-input');
+    els.searchClr  = $('#lb-search-clear');
+
+    $$('.lb-chip').forEach(c => {
+      on(c, 'click', () => setFilter(c.dataset.cat));
+      on(c, 'keydown', onChipKey);
+    });
+    on(els.searchIn, 'input', () => {
+      searchQ = els.searchIn.value.toLowerCase();
+      els.searchClr.hidden = !searchQ;
+      render();
+    });
+    on(els.searchClr, 'click', () => {
+      els.searchIn.value = '';
+      searchQ = '';
+      els.searchClr.hidden = true;
+      els.searchIn.focus();
+      render();
+    });
+
+    on(els.add, 'click', () => alert('Add scripture flow (admin only)'));
+
+    applyRole(state.role);
+    render();
+  }
+
+  function setFilter(f) {
+    filter = f;
+    $$('.lb-chip').forEach(c => c.setAttribute('aria-checked', c.dataset.cat === f ? 'true' : 'false'));
+    render();
+  }
+
+  function onChipKey(e) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const chips = $$('.lb-chip');
+    const idx = chips.indexOf(e.currentTarget);
+    let next = idx;
+    if (e.key === 'ArrowLeft')  next = idx === 0 ? chips.length - 1 : idx - 1;
+    if (e.key === 'ArrowRight') next = idx === chips.length - 1 ? 0 : idx + 1;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End')  next = chips.length - 1;
+    e.preventDefault();
+    chips[next].focus();
+    setFilter(chips[next].dataset.cat);
+  }
+
+  function visible() {
+    return BOOKS.filter(b => {
+      if (state.role !== 'admin' && !b.pub) return false;
+      if (filter !== 'all' && b.cat !== filter) return false;
+      if (searchQ && !b.name.toLowerCase().includes(searchQ) && !b.sk.includes(searchQ)) return false;
+      return true;
+    });
+  }
+
+  function cover(b) {
+    const langDots = b.langs.map(l => `<span class="lb-lang-dot ${LANG_CLASS[l] || ''}"></span>`).join('');
+    const badge = b.ai ? `<span class="lb-cover-badge">AI</span>` : '';
+    const lock  = (!b.pub && state.role === 'admin') ? `<span class="lb-cover-lock" aria-label="Private">🔒</span>` : '';
+    return `<a class="lb-book" href="#viewer" data-link-page="viewer" aria-label="Read ${escapeHTML(b.name)}">
+      <div class="lb-cover" style="background:${b.bg}" aria-hidden="true">
+        <div class="lb-cover-spine"></div>
+        <div class="lb-cover-content">
+          <div class="lb-cover-sk" lang="sa">${b.sk}</div>
+          <div class="lb-cover-foot">
+            <div class="lb-cover-title">${escapeHTML(b.name)}</div>
+            <div class="lb-cover-verses">${b.verses} verses</div>
+          </div>
+        </div>
+        ${badge}${lock}
+        <div class="lb-cover-langs">${langDots}</div>
+      </div>
+      <div class="lb-book-name">${escapeHTML(b.name)}</div>
+      <div class="lb-book-info">${b.verses} verses</div>
+    </a>`;
+  }
+
+  function render() {
+    const books = visible();
+    els.count.textContent = `${books.length} scripture${books.length === 1 ? '' : 's'}`;
+    if (!books.length) {
+      els.area.innerHTML = `<div class="lb-empty">No scriptures found${searchQ ? ` for "${escapeHTML(searchQ)}"` : ''}</div>`;
+      return;
+    }
+    if (filter !== 'all') {
+      els.area.innerHTML = `<div class="lb-section"><div class="lb-shelf">${books.map(cover).join('')}</div></div>`;
+      return;
+    }
+    let html = '';
+    CATS.forEach(cat => {
+      const cb = books.filter(b => b.cat === cat.key);
+      if (!cb.length) return;
+      html += `<div class="lb-section">
+        <div class="lb-cat-label">
+          <span>${escapeHTML(cat.label)}</span>
+          <span class="lb-cat-desc">${escapeHTML(cat.desc)}</span>
+          <span class="lb-cat-line"></span>
+          <span class="lb-cat-count">${cb.length}</span>
+        </div>
+        <div class="lb-shelf">${cb.map(cover).join('')}</div>
+      </div>`;
+    });
+    els.area.innerHTML = html;
+  }
+
+  function applyRole(role) {
+    if (!els.add) return; // not yet inited
+    if (role === 'admin')          { els.add.hidden = false; els.sub.textContent = 'All scriptures · full access'; els.perm.textContent = 'Admin'; }
+    else if (role === 'contributor') { els.add.hidden = true;  els.sub.textContent = '29 public scriptures · contributor access'; els.perm.textContent = 'Contributor'; }
+    else if (role === 'researcher')  { els.add.hidden = true;  els.sub.textContent = '29 public scriptures · researcher access';  els.perm.textContent = 'Researcher'; }
+    else                              { els.add.hidden = true;  els.sub.textContent = '29 public scriptures'; els.perm.textContent = 'Read only'; }
+    render();
+  }
+
+  return { init, applyRole };
+})();
+
+/* ============================================================
+   PAGE 3 — VERSE VIEWER
+   ============================================================ */
+
+const ViewerPage = (() => {
+  const { $, $$, on, escapeHTML } = App;
+
+  const CHAPTERS = [
+    { n: 1, name: 'Arjuna Vishada Yoga', sk: 'अर्जुन विषाद योग', label: 'Chapter', vv: 47, summary: "Arjuna surveys the battlefield of Kurukshetra and is overcome with grief at the sight of his kinsmen ready to fight. His will collapses; he refuses to fight and seeks Krishna's counsel. This chapter sets the existential stage for the entire Gita." },
+    { n: 2, name: 'Sankhya Yoga',        sk: 'सांख्य योग',       label: 'Chapter', vv: 72, summary: "Krishna begins his teaching with the central truth: the Self (Ātman) is eternal and indestructible. Death is only the shedding of a body. He introduces karma yoga — action without attachment to results — as the path to inner stability." },
+    { n: 3, name: 'Karma Yoga',          sk: 'कर्म योग',         label: 'Chapter', vv: 43, summary: "Krishna develops the doctrine of selfless action. No one can avoid action; the question is how to act. By performing one's prescribed duty without personal attachment to outcomes, the cycle of karma is dissolved." },
+  ];
+
+  const VERSES = {
+    '2.20': {
+      sk: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।\nअजो नित्यः शाश्वतोऽयं पुराणो\nन हन्यते हन्यमाने शरीरे ॥',
+      ia: 'na jāyate mriyate vā kadācin\nnāyaṃ bhūtvā bhavitā vā na bhūyaḥ\najo nityaḥ śāśvato \'yaṃ purāṇo\nna hanyate hanyamāne śarīre',
+      srcScript: { sa: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।', te: 'న జాయతే మ్రియతే వా కదాచిన్\nనాయం భూత్వా భవితా వా న భూయః ।', hi: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।' },
+      w2w: [{ auth: 'HSP AI', ai: true, items: [
+        { sa: 'न जायते',  te_src: 'న జాయతే',  hi_src: 'न जायते',  en: 'is not born', te: 'జన్మించదు',     hi: 'जन्म नहीं' },
+        { sa: 'म्रियते',  te_src: 'మ్రియతే',  hi_src: 'म्रियते',  en: 'dies',        te: 'మరణిస్తుంది',  hi: 'मरता है' },
+        { sa: 'अजः',      te_src: 'అజః',      hi_src: 'अजः',      en: 'unborn',      te: 'అజన్మ',         hi: 'अजन्मा' },
+        { sa: 'नित्यः',    te_src: 'నిత్యః',   hi_src: 'नित्यः',   en: 'eternal',     te: 'నిత్యం',         hi: 'नित्य' },
+        { sa: 'शाश्वतः',   te_src: 'శాశ్వతః',  hi_src: 'शाश्वतः',  en: 'permanent',  te: 'శాశ్వతం',       hi: 'शाश्वत' },
+      ]}],
+      tr: [{ auth: 'HSP AI', ai: true, en: 'The soul is never born nor dies. It is unborn, eternal, ever-existing, and primeval. It is not slain when the body is slain.', te: 'ఆత్మ ఎన్నడూ జన్మించదు, చావదు. అది అజన్మ, నిత్యం, శాశ్వతం, పురాతనం. శరీరం నశించినా ఆత్మ నశించదు.', hi: 'आत्मा कभी जन्म नहीं लेती और न मरती है। यह अजन्मा, नित्य, शाश्वत और पुरातन है।' }],
+      cm: [{ auth: 'HSP AI', ai: true, en: 'The central declaration of the Gita on the Self. The Ātman is beyond time — never born, cannot die. What appears as death is only the shedding of a body. The one who knows this is freed from grief.', te: 'ఆత్మ స్వభావంపై కేంద్ర ప్రకటన. ఆత్మ కాలానికి అతీతం.', hi: 'आत्मा की प्रकृति पर केंद्रीय घोषणा।' }],
+    },
+    '2.47': {
+      sk: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ॥',
+      ia: 'karmaṇy evādhikāras te mā phaleṣu kadācana\nmā karma-phala-hetur bhūr mā te saṅgo \'stv akarmaṇi',
+      srcScript: { sa: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ॥', te: 'కర్మణ్యేవాధికారస్తే మా ఫలేషు కదాచన ।\nమా కర్మఫలహేతుర్భూర్మా తే సఙ్గోऽస్త్వకర్మణి ॥', hi: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।' },
+      w2w: [{ auth: 'HSP AI', ai: true, items: [
+        { sa: 'कर्मणि',     te_src: 'కర్మణి',    hi_src: 'कर्मणि',    en: 'in action',   te: 'కర్మలో',         hi: 'कर्म में' },
+        { sa: 'एव',         te_src: 'ఏవ',        hi_src: 'एव',         en: 'only',        te: 'మాత్రమే',       hi: 'ही' },
+        { sa: 'अधिकारः',    te_src: 'అధికారః',   hi_src: 'अधिकारः',   en: 'right',       te: 'హక్కు',           hi: 'अधिकार' },
+        { sa: 'ते',         te_src: 'తే',        hi_src: 'ते',          en: 'your',        te: 'నీకు',           hi: 'तुम्हारा' },
+        { sa: 'फलेषु',      te_src: 'ఫలేషు',     hi_src: 'फलेषु',      en: 'in fruits',   te: 'ఫలాలలో',         hi: 'फलों में' },
+        { sa: 'सङ्गः',       te_src: 'సఙ్గః',      hi_src: 'सङ्गः',       en: 'attachment',  te: 'ఆసక్తి',          hi: 'आसक्ति' },
+        { sa: 'अकर्मणि',    te_src: 'అకర్మణి',    hi_src: 'अकर्मणि',    en: 'in inaction', te: 'కర్మరాహిత్యంలో', hi: 'अकर्म में' },
+      ]}],
+      tr: [
+        { auth: 'HSP AI',       ai: true, en: 'You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. Never consider yourself the cause of the results, nor be attached to inaction.', te: 'కర్తవ్యాన్ని చేసే హక్కు మీకు ఉంది, కానీ ఫలితాలపై హక్కు లేదు.', hi: 'कर्म करने का अधिकार तुम्हें है, फल की इच्छा मत करो।' },
+        { auth: 'Sri Aurobindo', v: true, en: 'Thou hast a right to action, but only to action, never to its fruits.', te: '', hi: '' },
+      ],
+      cm: [{ auth: 'HSP AI', ai: true, en: 'This verse encapsulates Karma Yoga. The Ātman is the eternal witness, never the doer. Acting without attachment purifies the mind and reveals the witness-consciousness that was always free.', te: 'ఈ శ్లోకం కర్మ యోగసారాన్ని చెప్తుంది. ఆత్మ శాశ్వత సాక్షి, కర్త కాదు.', hi: 'यह श्लोक कर्म योग का सार है।' }],
+    },
+    '2.48': {
+      sk: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।\nसिद्ध्यसिद्ध्योः समो भूत्वा समत्वं योग उच्यते ॥',
+      ia: 'yoga-sthaḥ kuru karmāṇi saṅgaṃ tyaktvā dhanañjaya',
+      srcScript: { sa: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।', te: 'యోగస్థః కురు కర్మాణి సఙ్గం త్యక్త్వా ధనఞ్జయ ।', hi: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।' },
+      w2w: [{ auth: 'HSP AI', ai: true, items: [
+        { sa: 'योगस्थः', te_src: 'యోగస్థః', hi_src: 'योगस्थः', en: 'fixed in yoga', te: 'యోగంలో నిలిచి', hi: 'योग में स्थित' },
+        { sa: 'कुरु',     te_src: 'కురు',     hi_src: 'कुरु',     en: 'perform',      te: 'చేయు',           hi: 'करो' },
+        { sa: 'समत्वं',   te_src: 'సమత్వం',  hi_src: 'समत्वं',  en: 'equanimity',   te: 'సమత్వం',         hi: 'समत्व' },
+      ]}],
+      tr: [{ auth: 'HSP AI', ai: true, en: 'Perform your duty equipoised, abandoning attachment to success or failure. Such equanimity is yoga.', te: 'జయాపజయాలపట్ల సమత్వంతో కర్తవ్యాన్ని నిర్వర్తించు.', hi: 'समभाव से कर्म करो। यही योग है।' }],
+      cm: [{ auth: 'HSP AI', ai: true, en: 'Krishna defines yoga as equanimity — inner steadiness unchanged by success or failure.', te: 'కృష్ణుడు యోగాన్ని సమత్వంగా నిర్వచిస్తున్నాడు.', hi: 'कृष्ण योग को समत्व के रूप में परिभाषित करते हैं।' }],
+    },
+    '3.27': {
+      sk: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।\nअहङ्कारविमूढात्मा कर्ताहमिति मन्यते ॥',
+      ia: 'prakṛteḥ kriyamāṇāni guṇaiḥ karmāṇi sarvaśaḥ\nahaṅkāra-vimūḍhātmā kartāham iti manyate',
+      srcScript: { sa: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।', te: 'ప్రకృతేః క్రియమాణాని గుణైః కర్మాణి సర్వశః ।', hi: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।' },
+      w2w: [{ auth: 'HSP AI', ai: true, items: [
+        { sa: 'प्रकृतेः',    te_src: 'ప్రకృతేః',  hi_src: 'प्रकृतेः',    en: 'of nature',     te: 'ప్రకృతి',  hi: 'प्रकृति की' },
+        { sa: 'गुणैः',       te_src: 'గుణైః',     hi_src: 'गुणैः',       en: 'by the modes', te: 'గుణాల',     hi: 'गुणों द्वारा' },
+        { sa: 'अहङ्कार',     te_src: 'అహఙ్కార',  hi_src: 'अहङ्कार',     en: 'false ego',     te: 'అహంకారం',  hi: 'अहंकार' },
+      ]}],
+      tr: [{ auth: 'HSP AI', ai: true, en: 'The soul bewildered by false ego thinks himself the doer of activities actually carried out by the three modes of material nature.', te: 'అహంకారంతో మోహపడిన ఆత్మ, ప్రకృతి గుణాలు చేసే కర్మలను తాను చేస్తున్నట్లు భావిస్తుంది.', hi: 'झूठे अहंकार से मोहित आत्मा।' }],
+      cm: [{ auth: 'HSP AI', ai: true, en: 'The great illusion — doership. When the Self forgets its nature and identifies with the mind-body, it assumes agency. The Self is always the silent witness.', te: 'గొప్ప భ్రమ — కర్తృత్వం.', hi: 'महान भ्रम — कर्तापन।' }],
+    },
+  };
+
+  // Order for the scroll-mode list
+  const SCROLL_ORDER = [
+    { type: 'ch', n: 2 },
+    { type: 'v', id: '2.20' },
+    { type: 'v', id: '2.47' },
+    { type: 'v', id: '2.48' },
+    { type: 'ch', n: 3 },
+    { type: 'v', id: '3.27' },
+  ];
+
+  const LANG_NAME  = { sa: 'Sanskrit', en: 'English', te: 'Telugu', hi: 'Hindi', ta: 'Tamil' };
+  const LANG_COLOR = { sa: '#1C3A2E', en: '#97C459', te: '#EF9F27', hi: '#85B7EB', ta: '#ED93B1' };
+
+  // State
+  const s = {
+    currentVerse: '2.47',
+    openChapter: 2,
+    activeChapter: null,            // when in chapter overview mode
+    viewMode: 'verse',              // 'verse' | 'chapter-overview'
+    src: 'sa', trg: 'en',
+    tab: 'v',                       // 'v' | 's'
+    expanded: null,                 // scroll mode expanded id
+    basket: {},
+    fields: { original: true, iast: true, srcScript: true, w2w: true, translation: true, commentary: true },
+  };
+
+  const els = {};
+
+  function init() {
+    els.toc       = $('#vv-toc');
+    els.bc        = $('#vv-bc');
+    els.panelV    = $('#vv-panel-v');
+    els.panelS    = $('#vv-panel-s');
+    els.tabV      = $('#vv-tab-v');
+    els.tabS      = $('#vv-tab-s');
+    els.fvBtn     = $('#vv-fv-btn');
+    els.fvCount   = $('#vv-fv-count');
+    els.fvPop     = $('#vv-fv-pop');
+    els.fvReset   = $('#vv-fv-reset');
+    els.lpSrcBtn  = $('#vv-lp-src-btn');
+    els.lpTrgBtn  = $('#vv-lp-trg-btn');
+    els.ldSrc     = $('#vv-ld-src');
+    els.ldTrg     = $('#vv-ld-trg');
+    els.srcDot    = $('#vv-src-dot');
+    els.srcName   = $('#vv-src-name');
+    els.trgDot    = $('#vv-trg-dot');
+    els.trgName   = $('#vv-trg-name');
+    els.sb        = $('#vv-sb');
+    els.sbToggle  = $('#vv-sb-toggle');
+    els.sbBackdrop= $('#vv-sb-backdrop');
+
+    // Tabs
+    on(els.tabV, 'click', () => switchTab('v'));
+    on(els.tabS, 'click', () => switchTab('s'));
+    on(els.tabV, 'keydown', tabsKey);
+    on(els.tabS, 'keydown', tabsKey);
+
+    // Fields popover
+    on(els.fvBtn, 'click', toggleFv);
+    on(els.fvReset, 'click', resetFields);
+    $$('.vv-fv-row').forEach(r => {
+      on(r, 'click', () => toggleField(r.dataset.field));
+      on(r, 'keydown', e => {
+        if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleField(r.dataset.field); }
+      });
+    });
+
+    // Lang pair
+    on(els.lpSrcBtn, 'click', e => { e.stopPropagation(); toggleLD('src'); });
+    on(els.lpTrgBtn, 'click', e => { e.stopPropagation(); toggleLD('trg'); });
+    $$('.vv-lo').forEach(o => {
+      on(o, 'click', () => {
+        if (o.getAttribute('aria-disabled') === 'true') return;
+        setLang(o.dataset.side, o.dataset.lang);
+      });
+    });
+
+    // Mobile sidebar toggle
+    on(els.sbToggle, 'click', () => toggleSidebar(true));
+    on(els.sbBackdrop, 'click', () => toggleSidebar(false));
+
+    // Click-outside for popovers
+    on(document, 'click', e => {
+      if (!e.target.closest('.vv-fv-wrap')) closeFv();
+      if (!e.target.closest('.vv-lpair'))  closeLDs();
+    });
+
+    // Keyboard nav: arrows when in main panel
+    on(document, 'keydown', e => {
+      if (App.state.page !== 'viewer') return;
+      if (e.key === 'ArrowLeft' && (e.metaKey || e.altKey))  { navVerse(-1); }
+      if (e.key === 'ArrowRight' && (e.metaKey || e.altKey)) { navVerse(1); }
+    });
+
+    buildToc();
+    renderVerse();
+    buildScroll();
+  }
+
+  function toggleSidebar(open) {
+    if (open) {
+      els.sb.setAttribute('data-open', 'true');
+      els.sbBackdrop.setAttribute('data-open', 'true');
+      els.sbToggle.setAttribute('aria-expanded', 'true');
+    } else {
+      els.sb.removeAttribute('data-open');
+      els.sbBackdrop.removeAttribute('data-open');
+      els.sbToggle.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function toggleFv() {
+    const open = els.fvPop.getAttribute('data-open') === 'true';
+    if (open) closeFv();
+    else { els.fvPop.setAttribute('data-open', 'true'); els.fvBtn.setAttribute('aria-expanded', 'true'); }
+  }
+  function closeFv() { els.fvPop.removeAttribute('data-open'); els.fvBtn.setAttribute('aria-expanded', 'false'); }
+  function toggleLD(side) {
+    const target = side === 'src' ? els.ldSrc : els.ldTrg;
+    const other  = side === 'src' ? els.ldTrg : els.ldSrc;
+    const btn    = side === 'src' ? els.lpSrcBtn : els.lpTrgBtn;
+    const otherBtn = side === 'src' ? els.lpTrgBtn : els.lpSrcBtn;
+    const open = target.getAttribute('data-open') === 'true';
+    other.removeAttribute('data-open');
+    otherBtn.setAttribute('aria-expanded', 'false');
+    if (open) { target.removeAttribute('data-open'); btn.setAttribute('aria-expanded', 'false'); }
+    else { target.setAttribute('data-open', 'true'); btn.setAttribute('aria-expanded', 'true'); }
+  }
+  function closeLDs() {
+    [els.ldSrc, els.ldTrg].forEach(d => d.removeAttribute('data-open'));
+    [els.lpSrcBtn, els.lpTrgBtn].forEach(b => b.setAttribute('aria-expanded', 'false'));
+  }
+  function setLang(side, lang) {
+    if (side === 'src') {
+      s.src = lang;
+      els.srcDot.style.background = LANG_COLOR[lang];
+      els.srcName.textContent = LANG_NAME[lang];
+      $$('#vv-ld-src .vv-lo').forEach(o => o.setAttribute('aria-selected', o.dataset.lang === lang ? 'true' : 'false'));
+    } else {
+      s.trg = lang;
+      els.trgDot.style.background = LANG_COLOR[lang];
+      els.trgName.textContent = LANG_NAME[lang];
+      $$('#vv-ld-trg .vv-lo').forEach(o => o.setAttribute('aria-selected', o.dataset.lang === lang ? 'true' : 'false'));
+    }
+    closeLDs();
+    renderVerse();
+    buildScroll();
+  }
+
+  function toggleField(f) {
+    s.fields[f] = !s.fields[f];
+    const row = $(`.vv-fv-row[data-field="${f}"]`);
+    if (row) row.setAttribute('aria-checked', s.fields[f] ? 'true' : 'false');
+    updateFvCount();
+    renderVerse();
+    buildScroll();
+  }
+  function resetFields() {
+    Object.keys(s.fields).forEach(k => { s.fields[k] = true; });
+    $$('.vv-fv-row').forEach(r => r.setAttribute('aria-checked', 'true'));
+    updateFvCount();
+    renderVerse();
+    buildScroll();
+  }
+  function updateFvCount() {
+    const hidden = Object.values(s.fields).filter(v => !v).length;
+    if (hidden > 0) {
+      els.fvBtn.setAttribute('data-has-hidden', 'true');
+      els.fvCount.hidden = false;
+      els.fvCount.textContent = `${hidden} hidden`;
+    } else {
+      els.fvBtn.removeAttribute('data-has-hidden');
+      els.fvCount.hidden = true;
+    }
+  }
+
+  function switchTab(t) {
+    s.tab = t;
+    els.tabV.setAttribute('aria-selected', t === 'v' ? 'true' : 'false');
+    els.tabS.setAttribute('aria-selected', t === 's' ? 'true' : 'false');
+    els.tabV.tabIndex = t === 'v' ? 0 : -1;
+    els.tabS.tabIndex = t === 's' ? 0 : -1;
+    els.panelV.setAttribute('data-active', t === 'v' ? 'true' : 'false');
+    els.panelS.setAttribute('data-active', t === 's' ? 'true' : 'false');
+  }
+  function tabsKey(e) {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+    const tabs = [els.tabV, els.tabS];
+    const idx = tabs.findIndex(t => t.getAttribute('aria-selected') === 'true');
+    let next = idx;
+    if (e.key === 'ArrowLeft')  next = idx === 0 ? tabs.length - 1 : idx - 1;
+    if (e.key === 'ArrowRight') next = idx === tabs.length - 1 ? 0 : idx + 1;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End')  next = tabs.length - 1;
+    e.preventDefault();
+    tabs[next].focus();
+    switchTab(tabs[next].dataset.mode);
+  }
+
+  function buildToc() {
+    els.toc.innerHTML = CHAPTERS.map(ch => {
+      const open = ch.n === s.openChapter;
+      const isChActive = s.viewMode === 'chapter-overview' && s.activeChapter === ch.n;
+      const verses = open
+        ? Array.from({ length: Math.min(ch.vv, 6) }, (_, i) => {
+            const k = `${ch.n}.${i + 1}`;
+            const cur = s.viewMode === 'verse' && s.currentVerse === k;
+            return `<button type="button" class="vv-vrow" data-verse="${k}" data-chapter="${ch.n}" aria-current="${cur ? 'true' : 'false'}">${k}</button>`;
+          }).join('') + (ch.vv > 6 ? `<button type="button" class="vv-vrow is-more" disabled>+${ch.vv - 6} more</button>` : '')
+        : '';
+      const shortName = ch.name.split(' ').slice(0, 2).join(' ');
+      return `<div class="vv-node">
+        <button type="button" class="vv-nh"
+                aria-expanded="${open ? 'true' : 'false'}"
+                data-active="${isChActive ? 'true' : 'false'}"
+                data-chapter="${ch.n}">
+          <span class="vv-nl">
+            <span class="vv-nm">${ch.label} ${ch.n}</span>
+            <span class="vv-nn">${escapeHTML(shortName)}</span>
+          </span>
+          <span class="vv-nc">
+            ${ch.vv}v
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </span>
+        </button>
+        <div class="vv-vlist" data-open="${open ? 'true' : 'false'}">${verses}</div>
+      </div>`;
+    }).join('');
+
+    $$('.vv-nh').forEach(b => on(b, 'click', () => onChapterClick(parseInt(b.dataset.chapter, 10))));
+    $$('.vv-vrow[data-verse]').forEach(b => on(b, 'click', () => onVerseClick(b.dataset.verse, parseInt(b.dataset.chapter, 10))));
+  }
+
+  function onChapterClick(n) {
+    if (s.openChapter === n && s.viewMode === 'chapter-overview') {
+      // Collapse and clear chapter overview
+      s.openChapter = null;
+      s.viewMode = 'verse';
+      s.activeChapter = null;
+    } else {
+      s.openChapter = n;
+      s.viewMode = 'chapter-overview';
+      s.activeChapter = n;
+    }
+    buildToc();
+    renderVerse();
+  }
+  function onVerseClick(k, ch) {
+    s.currentVerse = k;
+    s.openChapter = ch;
+    s.viewMode = 'verse';
+    s.activeChapter = null;
+    buildToc();
+    renderVerse();
+    if (s.tab === 's') switchTab('v');
+    // close mobile sidebar after selection
+    if (window.matchMedia('(max-width: 900px)').matches) toggleSidebar(false);
+  }
+
+  function navVerse(d) {
+    const [ch, v] = s.currentVerse.split('.').map(Number);
+    const c = CHAPTERS.find(x => x.n === ch);
+    if (!c) return;
+    let nc = ch, nv = v;
+    if (d === 1) {
+      if (v < c.vv) nv++;
+      else if (ch < CHAPTERS.length) { nc++; nv = 1; }
+      else return;
+    } else {
+      if (v > 1) nv--;
+      else if (ch > 1) { nc--; nv = CHAPTERS.find(x => x.n === ch - 1)?.vv || 1; }
+      else return;
+    }
+    s.currentVerse = `${nc}.${nv}`;
+    s.openChapter = nc;
+    s.viewMode = 'verse';
+    s.activeChapter = null;
+    buildToc();
+    renderVerse();
+  }
+
+  function buildBreadcrumb() {
+    if (s.viewMode === 'chapter-overview') {
+      const ch = CHAPTERS.find(x => x.n === s.activeChapter);
+      els.bc.innerHTML = `<button type="button" class="vv-bc-link">Gita</button><span class="vv-bc-sep" aria-hidden="true">›</span><span class="vv-bc-current">${ch.label} ${ch.n}</span>`;
+    } else {
+      const [ch] = s.currentVerse.split('.');
+      els.bc.innerHTML = `<button type="button" class="vv-bc-link" data-jump-chapter="${ch}">Gita</button><span class="vv-bc-sep" aria-hidden="true">›</span><button type="button" class="vv-bc-link" data-jump-chapter="${ch}">Ch ${ch}</button><span class="vv-bc-sep" aria-hidden="true">›</span><span class="vv-bc-current">${s.currentVerse}</span>`;
+      $$('[data-jump-chapter]').forEach(b => on(b, 'click', () => onChapterClick(parseInt(b.dataset.jumpChapter, 10))));
+    }
+  }
+
+  function renderVerse() {
+    buildBreadcrumb();
+
+    if (s.viewMode === 'chapter-overview') {
+      const ch = CHAPTERS.find(x => x.n === s.activeChapter);
+      const firstK = Object.keys(VERSES).find(k => k.startsWith(ch.n + '.'));
+      const fv = firstK ? VERSES[firstK] : null;
+      const fvTr = fv ? (fv.tr[0][s.trg] || fv.tr[0].en) : '';
+      els.panelV.innerHTML = `
+        <article class="vv-overview">
+          <div class="vv-ov-meta">${ch.label} ${ch.n}</div>
+          <div class="vv-ov-sk" lang="sa">${ch.sk}</div>
+          <h2 class="vv-ov-name">${escapeHTML(ch.name)}</h2>
+          <p class="vv-ov-sub">${ch.vv} verses</p>
+          <div class="vv-ov-stats">
+            <div class="vv-ov-stat"><strong>${ch.vv}</strong>verses</div>
+            <div class="vv-ov-stat"><strong>${ch.label}</strong>type</div>
+          </div>
+          <div class="vv-ov-divider"></div>
+          <div class="vv-ov-summary-label">About this chapter</div>
+          <p class="vv-ov-summary">${escapeHTML(ch.summary)}</p>
+          ${fv && firstK ? `<button type="button" class="vv-ov-firstv" data-jump-verse="${firstK}" data-jump-chapter="${ch.n}">
+            <div class="vv-ov-firstv-lbl">Begin reading · Verse ${firstK}</div>
+            <div class="vv-ov-firstv-sk" lang="sa">${fv.sk.split('\\n')[0]}</div>
+            <div class="vv-ov-firstv-tr">${escapeHTML(fvTr.length > 120 ? fvTr.slice(0, 120) + '…' : fvTr)}</div>
+          </button>` : ''}
+        </article>`;
+      const jumpBtn = $('#vv-panel-v [data-jump-verse]');
+      if (jumpBtn) on(jumpBtn, 'click', () => onVerseClick(jumpBtn.dataset.jumpVerse, parseInt(jumpBtn.dataset.jumpChapter, 10)));
+      return;
+    }
+
+    const d = VERSES[s.currentVerse];
+    if (!d) {
+      els.panelV.innerHTML = `<div class="vv-vbody"><div class="vv-empty">Verse data unavailable.</div></div>`;
+      return;
+    }
+
+    const allHidden = Object.values(s.fields).every(v => !v);
+    const sk = d.sk.split('\n').join('<br>');
+    const ia = d.ia ? d.ia.split('\n').join('<br>') : '';
+    const srcText = d.srcScript[s.src] ? d.srcScript[s.src].split('\n').join('<br>') : '';
+
+    if (allHidden) {
+      els.panelV.innerHTML = `
+        <div class="vv-vbody">
+          <div class="vv-vno">Bhagavad Gita · ${s.currentVerse}</div>
+          <div class="vv-empty">All fields are hidden.<br><button type="button" class="vv-empty-a" id="vv-show-all">Show all fields</button></div>
+        </div>
+        <nav class="vv-nav" aria-label="Verse navigation">
+          <button type="button" class="vv-nb" data-nav="-1"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Prev</button>
+          <span class="vv-npos">${s.currentVerse} of 700</span>
+          <button type="button" class="vv-nb" data-nav="1">Next<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+        </nav>`;
+      on($('#vv-show-all'), 'click', resetFields);
+      bindNav();
+      return;
+    }
+
+    let html = `<article class="vv-vbody"><h2 class="vv-vno">Bhagavad Gita · ${s.currentVerse}</h2>`;
+    if (s.fields.original || s.fields.iast) {
+      html += `<div class="vv-orig">`;
+      if (s.fields.original) html += `<p class="vv-sk-main" lang="sa">${sk}</p>`;
+      if (s.fields.iast && ia) html += `<p class="vv-ia">${ia}</p>`;
+      html += `</div>`;
+    }
+    if (s.fields.srcScript && srcText && s.src !== 'sa') {
+      html += `<section class="vv-sec">
+        <header class="vv-sec-h"><div class="vv-sec-lbl">Source script <span class="vv-sec-tag">${LANG_NAME[s.src]}</span></div></header>
+        <p class="vv-st script-${s.src}" lang="${s.src}">${srcText}</p>
+      </section>`;
+    }
+    if (s.fields.w2w) {
+      const w2wHTML = d.w2w.map(grp => {
+        const tokens = grp.items.map(it => {
+          const srcKey = s.src === 'sa' ? 'sa' : (s.src + '_src');
+          const srcWord = it[srcKey] || it.sa;
+          const trgWord = it[s.trg] || it.en;
+          return `<span class="vv-flow-tok"><span class="vv-flow-src script-${s.src}" lang="${s.src}">${srcWord}</span><span class="vv-flow-sep">·</span><span class="vv-flow-mn script-${s.trg}" lang="${s.trg}">${escapeHTML(trgWord)}</span></span>`;
+        }).join('');
+        return `<div class="vv-ac">
+          <header class="vv-ac-h">
+            <div class="vv-ac-auth">${escapeHTML(grp.auth)}${grp.ai ? '<span class="vv-aibadge">AI</span>' : ''}</div>
+            <div class="vv-ac-tag">${grp.items.length} words</div>
+          </header>
+          <div class="vv-ac-b"><div class="vv-flow">${tokens}</div></div>
+        </div>`;
+      }).join('');
+      html += `<section class="vv-sec"><header class="vv-sec-h"><div class="vv-sec-lbl">Word for word</div><div class="vv-sec-tag">${d.w2w.length} ${d.w2w.length === 1 ? 'author' : 'authors'}</div></header>${w2wHTML}</section>`;
+    }
+    if (s.fields.translation) {
+      const trShow = d.tr.filter(t => t[s.trg] && t[s.trg].trim());
+      const items = trShow.length > 0 ? trShow : [d.tr[0]];
+      const trHTML = items.map(t => {
+        const text = t[s.trg] || t.en || '';
+        const langTag = t[s.trg] ? s.trg : 'en';
+        return `<div class="vv-ac">
+          <header class="vv-ac-h">
+            <div class="vv-ac-auth">${escapeHTML(t.auth)}${t.ai ? '<span class="vv-aibadge">AI</span>' : t.v ? '<span class="vv-vbadge">Verified</span>' : ''}</div>
+            <div class="vv-ac-tag">${LANG_NAME[langTag]}</div>
+          </header>
+          <div class="vv-ac-b"><div class="vv-tr-text script-${langTag}" lang="${langTag}">${escapeHTML(text)}</div></div>
+        </div>`;
+      }).join('');
+      html += `<section class="vv-sec"><header class="vv-sec-h"><div class="vv-sec-lbl">Translation</div><div class="vv-sec-tag">${items.length} ${items.length === 1 ? 'author' : 'authors'}</div></header>${trHTML}</section>`;
+    }
+    if (s.fields.commentary) {
+      const cmShow = d.cm.filter(c => c[s.trg] && c[s.trg].trim());
+      const items = cmShow.length > 0 ? cmShow : [d.cm[0]];
+      const cmHTML = items.map(c => {
+        const text = c[s.trg] || c.en || '';
+        const langTag = c[s.trg] ? s.trg : 'en';
+        return `<div class="vv-ac">
+          <header class="vv-ac-h">
+            <div class="vv-ac-auth">${escapeHTML(c.auth)}${c.ai ? '<span class="vv-aibadge">AI</span>' : ''}</div>
+            <div class="vv-ac-tag">${LANG_NAME[langTag]}</div>
+          </header>
+          <div class="vv-ac-b"><div class="vv-tr-text script-${langTag}" lang="${langTag}">${escapeHTML(text)}</div></div>
+        </div>`;
+      }).join('');
+      html += `<section class="vv-sec"><header class="vv-sec-h"><div class="vv-sec-lbl">Commentary</div><div class="vv-sec-tag">${items.length} ${items.length === 1 ? 'author' : 'authors'}</div></header>${cmHTML}</section>`;
+    }
+    html += `<div style="margin-top:22px;padding-top:14px;border-top:0.5px solid var(--color-border-soft);display:flex;justify-content:flex-end;">
+      <button type="button" class="vv-bk" id="vv-basket-btn" aria-pressed="${s.basket[s.currentVerse] ? 'true' : 'false'}">⊕ ${s.basket[s.currentVerse] ? 'In basket' : 'Add to basket'}</button>
+    </div></article>`;
+
+    const [ch, v] = s.currentVerse.split('.').map(Number);
+    const isFirst = ch === 1 && v === 1;
+    const lastCh = CHAPTERS[CHAPTERS.length - 1];
+    const isLast = ch === lastCh.n && v === lastCh.vv;
+
+    html += `<nav class="vv-nav" aria-label="Verse navigation">
+      <button type="button" class="vv-nb" data-nav="-1" ${isFirst ? 'disabled' : ''}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>Prev
+      </button>
+      <span class="vv-npos">${s.currentVerse} of 700</span>
+      <button type="button" class="vv-nb" data-nav="1" ${isLast ? 'disabled' : ''}>
+        Next<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+      </button>
+    </nav>`;
+
+    els.panelV.innerHTML = html;
+    bindNav();
+    on($('#vv-basket-btn'), 'click', () => { s.basket[s.currentVerse] = !s.basket[s.currentVerse]; renderVerse(); });
+  }
+
+  function bindNav() {
+    $$('#vv-panel-v .vv-nb[data-nav]').forEach(b => on(b, 'click', () => navVerse(parseInt(b.dataset.nav, 10))));
+  }
+
+  function buildScroll() {
+    els.panelS.innerHTML = `<div class="vv-scroll" id="vv-scroll-area"></div><div class="vv-lmore">Loading more verses…</div>`;
+    const area = $('#vv-scroll-area');
+    area.innerHTML = SCROLL_ORDER.map(item => {
+      if (item.type === 'ch') {
+        const ch = CHAPTERS.find(x => x.n === item.n);
+        return `<div class="vv-cdiv">
+          <div class="vv-cdmt">${ch.label} ${ch.n}</div>
+          <div class="vv-cdsk" lang="sa">${ch.sk}</div>
+          <div class="vv-cdn">${escapeHTML(ch.name)}</div>
+          <div class="vv-cds">${ch.vv} verses</div>
+        </div>`;
+      }
+      const d = VERSES[item.id];
+      if (!d) return '';
+      const isE = s.expanded === item.id;
+      const sk = d.sk.split('\n').slice(0, 2).join('<br>');
+      const ia = d.ia ? d.ia.split('\n').slice(0, 2).join('<br>') : '';
+      const ib = !!s.basket[item.id];
+
+      let exContent = '';
+      if (isE) {
+        const srcText = d.srcScript[s.src] ? d.srcScript[s.src].split('\n').join('<br>') : '';
+        const trText = d.tr[0][s.trg] || d.tr[0].en;
+        const cmText = d.cm[0][s.trg] || d.cm[0].en;
+        const w2wTokens = d.w2w[0].items.map(it => {
+          const srcKey = s.src === 'sa' ? 'sa' : (s.src + '_src');
+          return `<span class="vv-flow-tok"><span class="vv-flow-src script-${s.src}" lang="${s.src}">${it[srcKey] || it.sa}</span><span class="vv-flow-sep">·</span><span class="vv-flow-mn script-${s.trg}" lang="${s.trg}">${escapeHTML(it[s.trg] || it.en)}</span></span>`;
+        }).join('');
+        let secs = '';
+        if (s.fields.srcScript && srcText && s.src !== 'sa') secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Source · ${LANG_NAME[s.src]}</div><p class="vv-st script-${s.src}" lang="${s.src}" style="font-size:15px">${srcText}</p></div>`;
+        if (s.fields.w2w)         secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Word for word · ${escapeHTML(d.w2w[0].auth)}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-flow">${w2wTokens}</div></div></div></div>`;
+        if (s.fields.translation) secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Translation · ${escapeHTML(d.tr[0].auth)}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-tr-text script-${s.trg}" lang="${s.trg}" style="font-size:13px">${escapeHTML(trText)}</div></div></div></div>`;
+        if (s.fields.commentary)  secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Commentary · ${escapeHTML(d.cm[0].auth)}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-tr-text script-${s.trg}" lang="${s.trg}" style="font-size:13px">${escapeHTML(cmText)}</div></div></div></div>`;
+        if (!secs) secs = `<div class="vv-empty" style="margin:0">All supporting fields are hidden.</div>`;
+        exContent = `<div class="vv-srx">${secs}<div class="vv-sracts">
+          <button type="button" class="vv-srbtn" data-basket="${item.id}" aria-pressed="${ib ? 'true' : 'false'}">⊕ ${ib ? 'In basket' : 'Basket'}</button>
+          <button type="button" class="vv-srbtn" data-open-full="${item.id}">Full view →</button>
+        </div></div>`;
+      }
+      return `<button type="button" class="vv-srow" data-toggle="${item.id}" aria-expanded="${isE ? 'true' : 'false'}">
+        <div class="vv-srn">Bhagavad Gita · ${item.id}</div>
+        ${s.fields.original ? `<div class="vv-srsk" lang="sa">${sk}</div>` : ''}
+        ${s.fields.iast && ia ? `<div class="vv-sria">${ia}</div>` : ''}
+        ${exContent}
+      </button>`;
+    }).join('');
+
+    $$('[data-toggle]').forEach(b => on(b, 'click', e => {
+      // ignore clicks on action buttons inside expansion
+      if (e.target.closest('[data-basket],[data-open-full]')) return;
+      const id = b.dataset.toggle;
+      s.expanded = s.expanded === id ? null : id;
+      buildScroll();
+    }));
+    $$('[data-basket]').forEach(b => on(b, 'click', e => {
+      e.stopPropagation();
+      const id = b.dataset.basket;
+      s.basket[id] = !s.basket[id];
+      buildScroll();
+    }));
+    $$('[data-open-full]').forEach(b => on(b, 'click', e => {
+      e.stopPropagation();
+      const id = b.dataset.openFull;
+      const ch = parseInt(id.split('.')[0], 10);
+      onVerseClick(id, ch);
+      switchTab('v');
+    }));
+  }
+
+  return { init };
+})();
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+  SearchPage.init();
+  LibraryPage.init();
+  ViewerPage.init();
+  // Initial role from storage
+  App.setRole(App.state.role);
+  // Initial route
+  App.navigate(App.readHash(), { fromHash: true });
+});
+</script>
+</body>
+</html>

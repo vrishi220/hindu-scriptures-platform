@@ -557,6 +557,7 @@ class BookBase(NodeBase):
     metadata: dict | None = Field(default=None, alias="metadata_json")
     level_name_overrides: dict[str, str] = Field(default_factory=dict)
     variant_authors: dict[str, str] = Field(default_factory=dict)
+    category: str | None = None
     status: Literal["draft", "published"] = "draft"
     visibility: Literal["private", "public"] = "private"
 
@@ -829,6 +830,41 @@ class ContentNodeTreeItem(BaseModel):
 
 class ContentNodeTree(ContentNodePublic):
     children: list["ContentNodeTree"] = Field(default_factory=list)
+
+
+class VerseSummary(BaseModel):
+    """Lightweight payload used by the redesign Scroll mode. Surfaces just
+    enough to render a list row; full content is fetched lazily via
+    /api/content/nodes/{id} when the row expands."""
+
+    id: int
+    level_name: str
+    sequence_number: str | None = None
+    title_english: str | None = None
+    title_sanskrit: str | None = None
+    sanskrit: str | None = None
+    transliteration: str | None = None
+    translation: str | None = None
+
+
+class BulkVersesResponse(BaseModel):
+    verses: list[VerseSummary]
+    total: int
+    has_more: bool
+
+
+class NodeOverview(BaseModel):
+    """Chapter / parent-node overview consumed by the redesign verse viewer
+    when the user selects a non-leaf node."""
+
+    node_id: int
+    level_name: str
+    sequence_number: str | None = None
+    title_english: str | None = None
+    title_sanskrit: str | None = None
+    summary: str | None = None
+    leaf_count: int
+    first_leaf_id: int | None = None
 
 
 class TreeNodeImportItem(BaseModel):

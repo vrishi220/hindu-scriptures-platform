@@ -260,8 +260,10 @@ CREATE TABLE IF NOT EXISTS books (
   metadata JSONB DEFAULT '{}'::jsonb,
   level_name_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
   variant_authors JSONB NOT NULL DEFAULT '{}'::jsonb,
+  category VARCHAR(50),
   created_at TIMESTAMP DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_books_category ON books(category);
 
 CREATE TABLE IF NOT EXISTS book_shares (
   id SERIAL PRIMARY KEY,

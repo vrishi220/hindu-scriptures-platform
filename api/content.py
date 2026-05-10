@@ -45,12 +45,15 @@ from models.schemas import (
     BookSharePublic,
     BookShareUpdate,
     BookUpdate,
+    BulkVersesResponse,
     ContentNodeCreate,
     ContentNodeCommentaryPatch,
     ContentNodeFieldPatch,
     ContentNodePublic,
     ContentNodeTree,
     ContentNodeTreeItem,
+    NodeOverview,
+    VerseSummary,
     ContentNodeTranslationPatch,
     ContentNodeWordMeaningsTokenPatch,
     ContentNodeUpdate,
@@ -1807,6 +1810,141 @@ def list_book_tree(
         payload["level_name"] = _display_level_name_for_book(book, payload.get("level_name"))
         payloads.append(ContentNodeTreeItem.model_validate(payload))
     return payloads
+
+
+def _verse_summary_payload(node: ContentNode, trg_lang_key: str) -> VerseSummary:
+    content = node.content_data if isinstance(node.content_data, dict) else {}
+    basic = content.get("basic") if isinstance(content.get("basic"), dict) else {}
+    translations = (
+        content.get("translations")
+        if isinstance(content.get("translations"), dict)
+        else {}
+    )
+    return VerseSummary(
+        id=node.id,
+        level_name=node.level_name,
+        sequence_number=node.sequence_number,
+        title_english=node.title_english,
+        title_sanskrit=node.title_sanskrit,
+        sanskrit=basic.get("sanskrit") if isinstance(basic, dict) else None,
+        transliteration=basic.get("transliteration") if isinstance(basic, dict) else None,
+        translation=translations.get(trg_lang_key) if isinstance(translations, dict) else None,
+    )
+
+
+_TRG_LANG_TO_KEY = {
+    "en": "english",
+    "hi": "hindi",
+    "te": "telugu",
+    "ta": "tamil",
+    "sa": "sanskrit",
+}
+
+
+@router.get("/books/{book_id}/verses", response_model=BulkVersesResponse)
+def list_book_verses(
+    book_id: int,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    trg_lang: str = Query("en"),
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> BulkVersesResponse:
+    """Bulk fetch leaf verses for a book in a single SQL pair (count + page)
+    so the redesign Scroll mode doesn't need N round-trips. Returns just the
+    fields needed to render a list row; expansion fetches the full payload
+    via /api/content/nodes/{id}."""
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, book, current_user)
+
+    base = db.query(ContentNode).filter(
+        ContentNode.book_id == book_id,
+        ContentNode.has_content.is_(True),
+    )
+    total = base.with_entities(func.count(ContentNode.id)).scalar() or 0
+    nodes = (
+        base.order_by(
+            ContentNode.level_order,
+            ContentNode.sequence_number,
+            ContentNode.id,
+        )
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    trg_key = _TRG_LANG_TO_KEY.get(trg_lang.lower(), "english")
+    verses = [_verse_summary_payload(n, trg_key) for n in nodes]
+    return BulkVersesResponse(
+        verses=verses,
+        total=int(total),
+        has_more=offset + len(verses) < int(total),
+    )
+
+
+@router.get("/nodes/{node_id}/overview", response_model=NodeOverview)
+def get_node_overview(
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(require_view_permission),
+) -> NodeOverview:
+    """Aggregate stats for a non-leaf node — child verse count + first leaf
+    id + summary text — computed in one recursive CTE."""
+    node = db.query(ContentNode).filter(ContentNode.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    book = db.query(Book).filter(Book.id == node.book_id).first()
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _ensure_book_view_access(db, book, current_user)
+
+    cte_sql = text(
+        """
+        WITH RECURSIVE descendants AS (
+            SELECT id, parent_node_id, has_content, level_order,
+                   sequence_number
+            FROM content_nodes
+            WHERE id = :root_id
+            UNION ALL
+            SELECT c.id, c.parent_node_id, c.has_content, c.level_order,
+                   c.sequence_number
+            FROM content_nodes c
+            INNER JOIN descendants d ON c.parent_node_id = d.id
+        )
+        SELECT
+            COUNT(*) FILTER (WHERE has_content) AS leaf_count,
+            (
+                SELECT id FROM descendants
+                WHERE has_content
+                ORDER BY level_order, sequence_number, id
+                LIMIT 1
+            ) AS first_leaf_id
+        FROM descendants
+        """
+    )
+    row = db.execute(cte_sql, {"root_id": node.id}).first()
+    leaf_count = int(row.leaf_count or 0) if row else 0
+    first_leaf_id = int(row.first_leaf_id) if row and row.first_leaf_id else None
+
+    summary: str | None = None
+    for source in (node.content_data, node.summary_data):
+        if isinstance(source, dict):
+            value = source.get("summary")
+            if isinstance(value, str) and value.strip():
+                summary = value
+                break
+
+    return NodeOverview(
+        node_id=node.id,
+        level_name=node.level_name,
+        sequence_number=node.sequence_number,
+        title_english=node.title_english,
+        title_sanskrit=node.title_sanskrit,
+        summary=summary,
+        leaf_count=leaf_count,
+        first_leaf_id=first_leaf_id,
+    )
 
 
 def _node_sequence_sort_key(node: ContentNode):

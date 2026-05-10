@@ -1,119 +1,69 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.API_BASE_URL || "http://localhost:8000/api";
-
-async function buildAuthHeader(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const accessToken = cookieStore.get("access_token")?.value;
-  return accessToken ? `Bearer ${accessToken}` : null;
-}
-
-async function refreshAccessToken(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const refreshToken = cookieStore.get("refresh_token")?.value;
-  if (!refreshToken) return null;
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) return null;
-
-    const data = await response.json();
-    const newAccessToken = data.access_token;
-
-    // Update cookie
-    cookieStore.set("access_token", newAccessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 60 * 15, // 15 minutes
-    });
-
-    return newAccessToken;
-  } catch {
-    return null;
-  }
-}
+import {
+  ACCESS_TOKEN_COOKIE,
+  API_BASE_URL,
+  REFRESH_TOKEN_COOKIE,
+  buildAuthHeader,
+  refreshAccessToken,
+  setAuthCookies,
+} from "@/lib/apiProxy";
 
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  let authHeader = await buildAuthHeader();
+  const target = `${API_BASE_URL}/api/compilations/${id}/publish-as-book`;
+  const store = await cookies();
+  const accessToken = store.get(ACCESS_TOKEN_COOKIE)?.value;
+  const refreshToken = store.get(REFRESH_TOKEN_COOKIE)?.value;
 
-  if (!authHeader) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+  let body: unknown;
   try {
-    const body = await request.json();
-    
-    const response = await fetch(
-      `${API_BASE_URL}/compilations/${id}/publish-as-book`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: authHeader,
-        },
-        body: JSON.stringify(body),
-      }
-    );
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ detail: "Invalid request body" }, { status: 400 });
+  }
 
-    // If access token expired, try to refresh
-    if (response.status === 401) {
-      const newToken = await refreshAccessToken();
-      if (newToken) {
-        authHeader = `Bearer ${newToken}`;
-        const retryResponse = await fetch(
-          `${API_BASE_URL}/compilations/${id}/publish-as-book`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: authHeader,
-            },
-            body: JSON.stringify(body),
-          }
-        );
-        
-        if (retryResponse.ok) {
-          const data = await retryResponse.json();
-          return NextResponse.json(data);
-        }
-        
-        return NextResponse.json(
-          { error: "Failed to publish compilation" },
-          { status: retryResponse.status }
-        );
-      }
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const send = (token?: string) =>
+    fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...buildAuthHeader(token) },
+      body: JSON.stringify(body),
+    });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json(
-        { error: errorText || "Failed to publish compilation" },
-        { status: response.status }
-      );
-    }
-
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error("Error publishing compilation:", error);
+  let response: Response;
+  try {
+    response = await send(accessToken);
+  } catch {
     return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
+      { detail: "Compilations service unavailable" },
+      { status: 503 }
     );
   }
+
+  if (response.status === 401 && refreshToken) {
+    const refreshed = await refreshAccessToken(refreshToken);
+    if (refreshed?.access_token) {
+      try {
+        response = await send(refreshed.access_token);
+      } catch {
+        return NextResponse.json(
+          { detail: "Compilations service unavailable" },
+          { status: 503 }
+        );
+      }
+      await setAuthCookies(refreshed.access_token, refreshed.refresh_token);
+    }
+  }
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    return NextResponse.json(
+      payload || { detail: "Failed to publish compilation" },
+      { status: response.status }
+    );
+  }
+  return NextResponse.json(payload, { status: response.status });
 }

@@ -329,6 +329,13 @@ export default function NavBar() {
   const isActive = (href: string) => pathname === href;
   const isAdminActive = pathname?.startsWith("/admin");
 
+  // Scriptle redesigned routes own their own nav — hide the global one.
+  const isScriptleRoute =
+    pathname === "/" ||
+    pathname === "/library" ||
+    pathname?.startsWith("/read/");
+  if (isScriptleRoute) return null;
+
   return (
     <nav className="border-b border-black/10 bg-white/80 sticky top-0 z-40">
       <div className="mx-auto flex w-full items-center justify-between px-4 sm:px-6 py-2 sm:py-2.5">
@@ -377,14 +384,14 @@ export default function NavBar() {
             Home
           </Link>
           <a
-            href="/scriptures"
+            href="/library"
             className={`hover:text-[color:var(--accent)] ${
-              isActive("/scriptures")
+              isActive("/library")
                 ? "font-semibold text-[color:var(--deep)]"
                 : ""
             }`}
           >
-            Scriptures
+            Library
           </a>
           {authUser && (
             <a
@@ -526,15 +533,15 @@ export default function NavBar() {
               Home
             </Link>
             <a
-              href="/scriptures"
+              href="/library"
               onClick={() => setMobileMenuOpen(false)}
               className={`rounded-lg px-3 py-2 text-sm hover:bg-black/5 ${
-                isActive("/scriptures")
+                isActive("/library")
                   ? "font-semibold text-[color:var(--deep)]"
                   : "text-zinc-600 hover:text-[color:var(--accent)]"
               }`}
             >
-              Scriptures
+              Library
             </a>
             {authUser && (
               <a
