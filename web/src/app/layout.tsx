@@ -2,8 +2,19 @@ import type { Metadata } from "next";
 import {
   Inter,
   Lora,
+  Noto_Sans_Bengali,
+  Noto_Sans_Devanagari,
+  Noto_Sans_Gujarati,
+  Noto_Sans_Kannada,
+  Noto_Sans_Malayalam,
+  Noto_Sans_Tamil,
+  Noto_Sans_Telugu,
   Noto_Serif,
+  Noto_Serif_Bengali,
   Noto_Serif_Devanagari,
+  Noto_Serif_Gujarati,
+  Noto_Serif_Kannada,
+  Noto_Serif_Malayalam,
   Noto_Serif_Tamil,
   Noto_Serif_Telugu,
   Playfair_Display,
@@ -62,6 +73,66 @@ const tamilFont = Noto_Serif_Tamil({
   weight: ["400", "600"],
 });
 
+// Additional Indic serifs for verse rendering when those scripts are imported.
+const bengaliFont = Noto_Serif_Bengali({
+  variable: "--font-bengali",
+  subsets: ["bengali"],
+  weight: ["400", "500"],
+});
+const gujaratiFont = Noto_Serif_Gujarati({
+  variable: "--font-gujarati",
+  subsets: ["gujarati"],
+  weight: ["400", "500"],
+});
+const malayalamFont = Noto_Serif_Malayalam({
+  variable: "--font-malayalam",
+  subsets: ["malayalam"],
+  weight: ["400", "500"],
+});
+const kannadaFont = Noto_Serif_Kannada({
+  variable: "--font-kannada",
+  subsets: ["kannada"],
+  weight: ["400", "500"],
+});
+
+// Sans-serif Indic variants — used by the hero wordmark's 8-script cycle and
+// the language-pair dropdowns. Weight 500 only (the only weight we render).
+const devanagariSansFont = Noto_Sans_Devanagari({
+  variable: "--font-devanagari-sans-loaded",
+  subsets: ["devanagari"],
+  weight: ["500"],
+});
+const teluguSansFont = Noto_Sans_Telugu({
+  variable: "--font-telugu-sans-loaded",
+  subsets: ["telugu"],
+  weight: ["500"],
+});
+const tamilSansFont = Noto_Sans_Tamil({
+  variable: "--font-tamil-sans-loaded",
+  subsets: ["tamil"],
+  weight: ["500"],
+});
+const bengaliSansFont = Noto_Sans_Bengali({
+  variable: "--font-bengali-sans-loaded",
+  subsets: ["bengali"],
+  weight: ["500"],
+});
+const gujaratiSansFont = Noto_Sans_Gujarati({
+  variable: "--font-gujarati-sans-loaded",
+  subsets: ["gujarati"],
+  weight: ["500"],
+});
+const malayalamSansFont = Noto_Sans_Malayalam({
+  variable: "--font-malayalam-sans-loaded",
+  subsets: ["malayalam"],
+  weight: ["500"],
+});
+const kannadaSansFont = Noto_Sans_Kannada({
+  variable: "--font-kannada-sans-loaded",
+  subsets: ["kannada"],
+  weight: ["500"],
+});
+
 export const metadata: Metadata = {
   title: "Hindu Scriptures Platform",
   description:
@@ -77,7 +148,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} ${scriptureLatinFont.variable} ${interFont.variable} ${loraFont.variable} ${teluguFont.variable} ${tamilFont.variable} antialiased min-h-screen flex flex-col`}>
+      <body className={`${displayFont.variable} ${sansFont.variable} ${devanagariFont.variable} ${scriptureLatinFont.variable} ${interFont.variable} ${loraFont.variable} ${teluguFont.variable} ${tamilFont.variable} ${bengaliFont.variable} ${gujaratiFont.variable} ${malayalamFont.variable} ${kannadaFont.variable} ${devanagariSansFont.variable} ${teluguSansFont.variable} ${tamilSansFont.variable} ${bengaliSansFont.variable} ${gujaratiSansFont.variable} ${malayalamSansFont.variable} ${kannadaSansFont.variable} antialiased min-h-screen flex flex-col`}>
         {gaMeasurementId ? (
           <Suspense fallback={null}>
             <GoogleAnalytics measurementId={gaMeasurementId} />

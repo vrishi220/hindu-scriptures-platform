@@ -18,6 +18,7 @@ import {
   type LibraryBookView,
 } from "@/lib/scriptle/bookAdapter";
 import { getBooks } from "@/lib/booksClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 
 type RoleContext = "guest" | "viewer" | "contributor" | "researcher" | "editor" | "admin";
 
@@ -132,36 +133,7 @@ export default function LibraryPage() {
 
   return (
     <div data-scriptle="true">
-      <nav className="lb-nav">
-        <Link href="/" className="lb-logo">
-          <span className="lb-om">ॐ</span> Scriptle
-        </Link>
-        <div className="lb-nav-links">
-          <Link href="/" className="lb-nav-link">
-            Search
-          </Link>
-          <Link href="/library" className="lb-nav-link active">
-            Library
-          </Link>
-        </div>
-        {showAddBtn ? (
-          <Link href="/scriptures?action=create" className="lb-add">
-            <svg
-              width={12}
-              height={12}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Add scripture
-          </Link>
-        ) : (
-          <span style={{ width: 1 }} />
-        )}
-      </nav>
+      <AppBanner active="library" showAddScripture={showAddBtn} />
 
       <div className="lb-header">
         <div>

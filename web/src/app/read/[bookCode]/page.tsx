@@ -18,6 +18,8 @@ import {
   type TransliterationScriptOption,
 } from "@/lib/indicScript";
 import { getBookByCode } from "@/lib/booksClient";
+import { getMe } from "@/lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 import {
   resolveBook,
   type ResolvedBook,
@@ -255,6 +257,22 @@ function ReadBookContent() {
   const [mode, setMode] = useState<ViewMode>(
     searchParams.get("mode") === "scroll" ? "scroll" : "verse"
   );
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Banner shows the "Add scripture" button for admins; cheap getMe() lookup
+  // (the authClient cache makes this free after first call).
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then((me) => {
+        if (cancelled || !me) return;
+        setIsAdmin(me.role === "admin" || (me.permissions?.can_admin ?? false));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fieldVis = useFieldVisibility();
   const langPair = useLanguagePair(
@@ -388,6 +406,7 @@ function ReadBookContent() {
 
   return (
     <div data-scriptle="true">
+      <AppBanner active="library" showAddScripture={isAdmin} />
       <div className="vv">
         <Sidebar
           book={book}

@@ -68,6 +68,14 @@ body {
 [data-scriptle="true"] {
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
   --font-serif: var(--font-lora), Georgia, serif;
+  /* Sans Indic — used by the hero wordmark cycle and lang-pair dropdowns. */
+  --font-devanagari-sans: var(--font-devanagari-sans-loaded), var(--font-sans);
+  --font-telugu-sans: var(--font-telugu-sans-loaded), var(--font-sans);
+  --font-tamil-sans: var(--font-tamil-sans-loaded), var(--font-sans);
+  --font-bengali-sans: var(--font-bengali-sans-loaded), var(--font-sans);
+  --font-gujarati-sans: var(--font-gujarati-sans-loaded), var(--font-sans);
+  --font-malayalam-sans: var(--font-malayalam-sans-loaded), var(--font-sans);
+  --font-kannada-sans: var(--font-kannada-sans-loaded), var(--font-sans);
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -76,6 +84,62 @@ body {
   min-height: 100vh;
 }
 [data-scriptle="true"] * { box-sizing: border-box; }
+
+/* Global sticky banner used by Search, Library, and Viewer. The class
+   piggybacks on the existing .lb-nav styles for its visuals. */
+.app-banner {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+/* Hero wordmark above the search input on /. The "Scriptle" name cycles
+   through 8 scripts via one shared keyframe + staggered animation-delay on
+   inline-grid-stacked spans (each variant lives in the same grid cell, so
+   the container sizes to the longest and shorter ones center inside).
+   Pure CSS — no JS required. */
+.sr-hero-mark {
+  display: inline-grid;
+  margin: 0 auto 32px;
+  font-family: var(--font-sans);
+  font-size: clamp(26px, 4.4vw, 36px);
+  line-height: 1.15;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.sr-hero-mark > span {
+  grid-area: 1 / 1;
+  justify-self: center;
+  white-space: nowrap;
+  opacity: 0;
+  animation: sr-hero-cycle 24s linear infinite both;
+  will-change: opacity, transform;
+}
+.sr-hero-mark .s-en { animation-delay:  0s; font-family: var(--font-sans);            letter-spacing: 0.14em; }
+.sr-hero-mark .s-hi { animation-delay:  3s; font-family: var(--font-devanagari-sans); }
+.sr-hero-mark .s-bn { animation-delay:  6s; font-family: var(--font-bengali-sans); }
+.sr-hero-mark .s-gu { animation-delay:  9s; font-family: var(--font-gujarati-sans); }
+.sr-hero-mark .s-ta { animation-delay: 12s; font-family: var(--font-tamil-sans); }
+.sr-hero-mark .s-te { animation-delay: 15s; font-family: var(--font-telugu-sans); }
+.sr-hero-mark .s-ml { animation-delay: 18s; font-family: var(--font-malayalam-sans); }
+.sr-hero-mark .s-kn { animation-delay: 21s; font-family: var(--font-kannada-sans); }
+
+@keyframes sr-hero-cycle {
+  0%      { opacity: 0; transform: translateY(2px); }
+  1.67%   { opacity: 1; transform: translateY(0); }
+  10.83%  { opacity: 1; transform: translateY(0); }
+  12.5%   { opacity: 0; transform: translateY(-2px); }
+  100%    { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-hero-mark > span { animation: none; opacity: 0; }
+  .sr-hero-mark > span.s-en { opacity: 1; }
+}
 
 /* ============================================================
    PAGE 1: UNIFIED SEARCH ( / )

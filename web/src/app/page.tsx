@@ -9,6 +9,8 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
+import AppBanner from "@/components/scriptle/AppBanner";
+import HeroWordmark from "@/components/scriptle/HeroWordmark";
 import { useDebounced } from "@/lib/useDebounced";
 import { hasDevanagariLetters } from "@/lib/indicScript";
 import { getMe } from "@/lib/authClient";
@@ -97,6 +99,7 @@ function HomeContent() {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounced(query, 320);
   const [askAvailable, setAskAvailable] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
 
   const [keywordResults, setKeywordResults] = useState<KeywordResult[]>([]);
@@ -122,6 +125,7 @@ function HomeContent() {
         const role = me.role;
         const canAdmin = me.permissions?.can_admin ?? false;
         setAskAvailable(role === "researcher" || role === "admin" || canAdmin);
+        setIsAdmin(role === "admin" || canAdmin);
       }
       if (statsResp) setStats(statsResp);
     });
@@ -223,11 +227,10 @@ function HomeContent() {
 
   return (
     <div data-scriptle="true">
+      <AppBanner active="search" showAddScripture={isAdmin} />
       <div className="sr-hero">
-        <div className="sr-wordmark">
-          <span className="sr-om">ॐ</span> Scriptle
-        </div>
-        <form className="sr-search-outer" onSubmit={onSubmit}>
+        <HeroWordmark />
+        <form className="sr-form" onSubmit={onSubmit}>
           <div className="sr-search-wrap">
             <SearchIcon />
             <input
@@ -697,9 +700,10 @@ export default function Home() {
   return (
     <Suspense
       fallback={
-        <div data-scriptle="true" className="sr-hero">
-          <div className="sr-wordmark">
-            <span className="sr-om">ॐ</span> Scriptle
+        <div data-scriptle="true">
+          <AppBanner active="search" />
+          <div className="sr-hero">
+            <HeroWordmark />
           </div>
         </div>
       }
