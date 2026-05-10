@@ -1,0 +1,2219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scriptle — Unified UI Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&family=Noto+Serif+Devanagari:wght@400;500&family=Noto+Serif+Telugu:wght@400;500&family=Noto+Serif+Tamil:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   SCRIPTLE — DESIGN TOKENS
+   Add to globals.css. All three pages share these.
+   ============================================================ */
+:root {
+  --color-bg: #FAFAF7;
+  --color-surface: #F4F0E8;
+  --color-border: #E7E5E0;
+  --color-border-soft: #EFECE5;
+  --color-text: #1C1917;
+  --color-text-muted: #78716C;
+  --color-text-faint: #A8A29E;
+  --color-accent: #92400E;
+  --color-sanskrit: #1C3A2E;
+  --lang-en: #97C459;
+  --lang-te: #EF9F27;
+  --lang-hi: #85B7EB;
+  --lang-ta: #ED93B1;
+  --lang-sa: #1C3A2E;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'Lora', Georgia, serif;
+  --font-devanagari: 'Noto Serif Devanagari', serif;
+  --font-telugu: 'Noto Serif Telugu', serif;
+  --font-tamil: 'Noto Serif Tamil', serif;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   PAGE NAVIGATION (mockup-only — production will use Next.js routes)
+   ============================================================ */
+.page-nav {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 4px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
+.page-nav button {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: var(--font-sans);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  border-radius: var(--r-sm);
+  transition: all .15s;
+}
+.page-nav button:hover { color: var(--color-text); }
+.page-nav button.active { background: var(--color-accent); color: white; }
+.role-toggle {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  gap: 4px;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 5px;
+  z-index: 100;
+  font-size: 10px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
+.role-toggle .label { color: var(--color-text-muted); padding: 0 6px; }
+.role-toggle button {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: var(--font-sans);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  border-radius: var(--r-sm);
+}
+.role-toggle button.active { background: var(--color-accent); color: white; }
+
+.page { display: none; min-height: 100vh; }
+.page.active { display: block; }
+
+/* ============================================================
+   PAGE 1: UNIFIED SEARCH
+   ============================================================ */
+.sr-hero { padding: 64px 32px 32px; text-align: center; }
+.sr-wordmark {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.sr-om { color: var(--color-accent); font-size: 20px; letter-spacing: 0; }
+.sr-search-outer { max-width: 520px; margin: 0 auto; position: relative; }
+.sr-search-wrap {
+  display: flex;
+  align-items: center;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.sr-search-wrap:focus-within { border-color: var(--color-accent); }
+.sr-search-icon {
+  padding: 0 14px;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+.sr-input {
+  flex: 1;
+  padding: 15px 0;
+  font-size: 15px;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  outline: none;
+  font-family: var(--font-serif);
+  caret-color: var(--color-accent);
+}
+.sr-placeholder {
+  position: absolute;
+  left: 46px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.4s;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 380px;
+}
+.sr-placeholder.hidden { opacity: 0; }
+.sr-enter-hint {
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+}
+.sr-stats { display: flex; gap: 20px; justify-content: center; margin-top: 20px; }
+.sr-stat { font-size: 11px; color: var(--color-text-muted); }
+.sr-stat strong { color: var(--color-text); font-weight: 500; }
+
+.sr-body { padding: 0 32px; max-width: 564px; margin: 0 auto; display: none; }
+.sr-divider { height: 0.5px; background: var(--color-border-soft); margin: 6px 0 18px; }
+.sr-tabs { display: flex; gap: 0; margin-bottom: 18px; border-bottom: 0.5px solid var(--color-border-soft); }
+.sr-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -0.5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.1s;
+  font-family: var(--font-sans);
+}
+.sr-tab:hover { color: var(--color-text); }
+.sr-tab.active { color: var(--color-text); font-weight: 500; }
+.sr-tab.t-keyword.active { border-bottom-color: var(--color-text-muted); }
+.sr-tab.t-semantic.active { border-bottom-color: #3B6D11; }
+.sr-tab.t-ask.active { border-bottom-color: var(--color-accent); }
+.sr-tab-count {
+  font-size: 10px;
+  background: var(--color-surface);
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+}
+.sr-panel { display: none; }
+.sr-panel.active { display: block; }
+
+.sr-verse-row {
+  padding: 9px 0;
+  border-top: 0.5px solid var(--color-border-soft);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.sr-verse-row:hover .sr-tr { color: var(--color-accent); }
+.sr-ref {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  padding-top: 3px;
+  min-width: 72px;
+  line-height: 1.5;
+}
+.sr-vbody { flex: 1; min-width: 0; }
+.sr-sk {
+  font-family: var(--font-devanagari);
+  font-size: 14px;
+  color: var(--color-sanskrit);
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sr-tr {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.1s;
+}
+.sr-sim-row { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
+.sr-simbar { width: 40px; height: 2px; background: var(--color-border); border-radius: 1px; }
+.sr-simfill { height: 2px; background: #3B6D11; border-radius: 1px; }
+.sr-simval { font-size: 10px; color: var(--color-text-muted); }
+
+.sr-ask-card {
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 16px 18px;
+  background: var(--color-bg);
+}
+.sr-ask-ans {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text);
+  margin-bottom: 14px;
+}
+.sr-ask-ans em { color: var(--color-sanskrit); font-style: normal; font-weight: 500; }
+.sr-cites-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+.sr-cites { display: flex; flex-wrap: wrap; gap: 5px; }
+.sr-cite {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: var(--color-surface);
+}
+.sr-cite:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+.sr-ask-gated {
+  text-align: center;
+  padding: 32px 16px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  border: 0.5px dashed var(--color-border);
+  border-radius: var(--r-md);
+}
+
+@keyframes fadeSwap {
+  0% { opacity: 0; transform: translateY(4px); }
+  15% { opacity: 0.45; transform: translateY(0); }
+  85% { opacity: 0.45; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+.sr-placeholder.animating { animation: fadeSwap 3.5s ease-in-out; }
+
+/* ============================================================
+   PAGE 2: LIBRARY
+   ============================================================ */
+.lb-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 24px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+}
+.lb-logo {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.lb-om { color: var(--color-accent); font-size: 17px; }
+.lb-nav-links { display: flex; gap: 18px; }
+.lb-nav-link {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding-bottom: 1px;
+  border-bottom: 1.5px solid transparent;
+}
+.lb-nav-link.active, .lb-nav-link:hover { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+.lb-add {
+  font-size: 12px;
+  padding: 5px 12px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.lb-add svg { width: 12px; height: 12px; }
+
+.lb-header {
+  padding: 20px 24px 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.lb-title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--color-text);
+}
+.lb-sub {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+.lb-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 24px 0;
+}
+.lb-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  background: var(--color-bg);
+  flex: 1;
+  max-width: 220px;
+}
+.lb-search input {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--color-text);
+  outline: none;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+.lb-search input::placeholder { color: var(--color-text-muted); }
+.lb-chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.lb-chip {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+}
+.lb-chip.active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.lb-section { padding: 16px 24px 0; }
+.lb-cat-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lb-cat-line { flex: 1; height: 0.5px; background: var(--color-border-soft); }
+.lb-shelf { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+
+.lb-book { width: 96px; cursor: pointer; flex-shrink: 0; transition: transform 0.15s; }
+.lb-book:hover { transform: translateY(-3px); }
+.lb-book:hover .lb-book-info { opacity: 1; }
+.lb-cover {
+  width: 96px;
+  height: 136px;
+  border-radius: 3px 6px 6px 3px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 2px 3px 8px rgba(0,0,0,.18), -1px 0 0 rgba(0,0,0,.08);
+}
+.lb-cover-spine {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: rgba(0,0,0,.18);
+}
+.lb-cover-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px 8px 8px 12px;
+}
+.lb-cover-sk {
+  font-family: var(--font-devanagari);
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255,255,255,.85);
+  text-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+.lb-cover-title {
+  font-family: var(--font-serif);
+  font-size: 10px;
+  font-weight: 500;
+  color: white;
+  line-height: 1.3;
+  text-shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+.lb-cover-verses {
+  font-size: 9px;
+  color: rgba(255,255,255,.65);
+  margin-top: 2px;
+}
+.lb-cover-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 8px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-weight: 500;
+  background: rgba(255,255,255,.2);
+  color: rgba(255,255,255,.9);
+  border: 0.5px solid rgba(255,255,255,.3);
+}
+.lb-cover-lock {
+  position: absolute;
+  bottom: 7px;
+  right: 7px;
+  font-size: 12px;
+  color: rgba(255,255,255,.5);
+}
+.lb-cover-langs {
+  position: absolute;
+  bottom: 7px;
+  left: 12px;
+  display: flex;
+  gap: 3px;
+}
+.lb-lang-dot { width: 5px; height: 5px; border-radius: 50%; }
+.l-en { background: var(--lang-en); }
+.l-te { background: var(--lang-te); }
+.l-hi { background: var(--lang-hi); }
+.l-ta { background: var(--lang-ta); }
+.lb-book-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-top: 7px;
+  line-height: 1.3;
+  width: 96px;
+}
+.lb-book-info {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.lb-footer {
+  padding: 12px 24px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  border-top: 0.5px solid var(--color-border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+
+/* ============================================================
+   PAGE 3: VERSE VIEWER
+   ============================================================ */
+.vv {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+/* SIDEBAR */
+.vv-sb { border-right: 0.5px solid var(--color-border-soft); display: flex; flex-direction: column; }
+.vv-sbh { padding: 13px 14px 11px; border-bottom: 0.5px solid var(--color-border-soft); }
+.vv-back {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.vv-back:hover { color: var(--color-accent); }
+.vv-bkrow { display: flex; gap: 9px; align-items: center; }
+.vv-cv {
+  width: 46px;
+  height: 65px;
+  border-radius: 2px 4px 4px 2px;
+  background: linear-gradient(160deg, #1C3A2E, #3B7A5A);
+  position: relative;
+  box-shadow: 1px 2px 5px rgba(0,0,0,.2), -1px 0 0 rgba(0,0,0,.1);
+  flex-shrink: 0;
+}
+.vv-cv-sp { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: rgba(0,0,0,.18); }
+.vv-cv-sk {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  right: 3px;
+  font-family: var(--font-devanagari);
+  font-size: 7px;
+  color: rgba(255,255,255,.8);
+  line-height: 1.4;
+}
+.vv-bkt {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+.vv-bkm { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
+.vv-toc { flex: 1; overflow-y: auto; }
+.vv-toc::-webkit-scrollbar { width: 2px; }
+.vv-toc::-webkit-scrollbar-thumb { background: var(--color-border); }
+.vv-node { border-bottom: 0.5px solid var(--color-border-soft); }
+.vv-nh {
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 11px;
+  gap: 6px;
+}
+.vv-nh:hover, .vv-nh.open, .vv-nh.active-node { background: var(--color-surface); }
+.vv-nh.active-node .vv-nn { color: var(--color-accent); }
+.vv-nl { display: flex; flex-direction: column; min-width: 0; }
+.vv-nn {
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vv-nm {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.vv-nc {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.vv-vlist { display: none; background: var(--color-surface); }
+.vv-vlist.open { display: block; }
+.vv-vrow {
+  padding: 4px 14px 4px 22px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vv-vrow:hover { color: var(--color-text); }
+.vv-vrow.active { color: var(--color-accent); font-weight: 500; }
+.vv-vrow.active::before {
+  content: '';
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+/* MAIN */
+.vv-main { display: flex; flex-direction: column; overflow: hidden; }
+.vv-tb {
+  padding: 9px 18px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vv-bc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.vv-bc span { cursor: pointer; }
+.vv-bc span:hover { color: var(--color-accent); }
+.vv-tr-r { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.vv-tabs {
+  display: flex;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.vv-tab {
+  padding: 5px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-right: 0.5px solid var(--color-border-soft);
+  font-family: var(--font-sans);
+}
+.vv-tab:last-child { border-right: none; }
+.vv-tab:hover { background: var(--color-surface); }
+.vv-tab.active { background: var(--color-surface); color: var(--color-text); font-weight: 500; }
+
+/* LANG PAIR */
+.vv-lpair {
+  display: flex;
+  align-items: center;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  background: var(--color-bg);
+}
+.vv-lp-side {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  position: relative;
+}
+.vv-lp-side:hover { background: var(--color-surface); color: var(--color-text); }
+.vv-lp-tag {
+  font-size: 8px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  line-height: 1;
+  margin-bottom: 2px;
+  font-weight: 500;
+}
+.vv-lp-name { font-size: 11px; font-weight: 500; line-height: 1.2; }
+.vv-lp-arrow { font-size: 11px; opacity: 0.5; color: var(--color-accent); padding: 0 2px; }
+.vv-lp-side .vv-ldot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.vv-lp-info { display: flex; flex-direction: column; align-items: flex-start; }
+
+.vv-ld {
+  position: absolute;
+  top: calc(100% + 6px);
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  z-index: 30;
+  min-width: 170px;
+  display: none;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,.06);
+}
+.vv-ld.open { display: block; }
+.vv-ld.left-aligned { left: 0; }
+.vv-ld.right-aligned { right: 0; }
+.vv-ld-h {
+  padding: 8px 12px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  background: var(--color-surface);
+}
+.vv-lo {
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+}
+.vv-lo:hover { background: var(--color-surface); color: var(--color-text); }
+.vv-lo.active { color: var(--color-text); }
+.vv-lo.active .vv-lck { opacity: 1; }
+.vv-lck {
+  opacity: 0;
+  font-size: 11px;
+  color: var(--color-accent);
+  margin-left: auto;
+}
+.vv-ldot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.vv-ldb { display: flex; flex-direction: column; line-height: 1.2; }
+.vv-lnat { font-size: 10px; opacity: 0.55; margin-top: 1px; }
+.vv-ldiv { height: 0.5px; background: var(--color-border-soft); }
+.vv-lna { opacity: 0.32; pointer-events: none; }
+
+/* FIELD VISIBILITY POPOVER */
+.vv-fv-wrap { position: relative; }
+.vv-fv-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  background: var(--color-bg);
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+.vv-fv-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-fv-btn.has-hidden { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-fv-count {
+  font-size: 9px;
+  background: var(--color-accent);
+  color: white;
+  border-radius: 8px;
+  padding: 1px 6px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.vv-fv-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--r-md);
+  z-index: 30;
+  width: 240px;
+  display: none;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,.06);
+}
+.vv-fv-pop.open { display: block; }
+.vv-fv-h {
+  padding: 9px 12px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--color-surface);
+}
+.vv-fv-h-r {
+  font-size: 11px;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.vv-fv-h-r:hover { text-decoration: underline; }
+.vv-fv-row {
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  transition: background 0.1s;
+}
+.vv-fv-row:last-child { border-bottom: none; }
+.vv-fv-row:hover { background: var(--color-surface); }
+.vv-fv-toggle {
+  width: 26px;
+  height: 14px;
+  border-radius: 8px;
+  background: var(--color-border);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.vv-fv-toggle::after {
+  content: '';
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: white;
+  transition: left 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.15);
+}
+.vv-fv-row.on .vv-fv-toggle { background: var(--color-accent); }
+.vv-fv-row.on .vv-fv-toggle::after { left: 13px; }
+.vv-fv-icon {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  width: 14px;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.vv-fv-row.on .vv-fv-icon { color: var(--color-sanskrit); }
+.vv-fv-info { flex: 1; min-width: 0; }
+.vv-fv-name {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  line-height: 1.2;
+  transition: color 0.15s;
+}
+.vv-fv-row.on .vv-fv-name { color: var(--color-text); }
+.vv-fv-desc { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; opacity: 0.7; }
+
+/* PANELS */
+.vv-panel { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+.vv-panel.active { display: flex; }
+.vv-vbody { padding: 24px 30px; overflow-y: auto; flex: 1; }
+.vv-vbody::-webkit-scrollbar { width: 2px; }
+.vv-vbody::-webkit-scrollbar-thumb { background: var(--color-border); }
+.vv-vno { font-size: 10px; color: var(--color-text-muted); letter-spacing: 0.05em; margin-bottom: 18px; }
+.vv-orig { margin-bottom: 18px; }
+.vv-sk-main {
+  font-family: var(--font-devanagari);
+  font-size: 21px;
+  line-height: 1.9;
+  color: var(--color-sanskrit);
+  margin-bottom: 7px;
+}
+.vv-ia {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  line-height: 1.7;
+}
+
+.vv-sec { margin-top: 20px; animation: fadeIn 0.25s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.vv-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.vv-sec-lbl {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vv-sec-tag {
+  font-size: 9px;
+  padding: 2px 6px;
+  background: var(--color-surface);
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.vv-st { font-size: 18px; line-height: 1.85; color: var(--color-sanskrit); }
+.vv-st.script-te { font-family: var(--font-telugu); }
+.vv-st.script-hi, .vv-st.script-sa { font-family: var(--font-devanagari); }
+.vv-st.script-ta { font-family: var(--font-tamil); }
+
+/* AUTHORED CARDS */
+.vv-ac {
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.vv-ac + .vv-ac { margin-top: 8px; }
+.vv-ac-h {
+  padding: 9px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  background: var(--color-surface);
+}
+.vv-ac-auth {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vv-aibadge {
+  font-size: 9px;
+  padding: 1px 5px;
+  background: #FAEEDA;
+  color: #633806;
+  border: 0.5px solid var(--lang-te);
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.vv-vbadge {
+  font-size: 9px;
+  padding: 1px 5px;
+  background: #EAF3DE;
+  color: #27500A;
+  border: 0.5px solid var(--lang-en);
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.vv-ac-tag { font-size: 9px; color: var(--color-text-muted); opacity: 0.7; }
+.vv-ac-b { padding: 13px; }
+
+.vv-tr-text {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text);
+}
+.vv-tr-text.script-te { font-family: var(--font-telugu); }
+.vv-tr-text.script-hi { font-family: var(--font-devanagari); }
+.vv-tr-text.script-ta { font-family: var(--font-tamil); }
+
+/* INLINE FLOW W2W */
+.vv-flow { font-size: 13px; line-height: 2.1; }
+.vv-flow-tok { display: inline-block; margin-right: 8px; white-space: nowrap; }
+.vv-flow-src { color: var(--color-sanskrit); font-weight: 500; }
+.vv-flow-src.script-sa { font-family: var(--font-devanagari); }
+.vv-flow-src.script-te { font-family: var(--font-telugu); }
+.vv-flow-src.script-hi { font-family: var(--font-devanagari); }
+.vv-flow-src.script-ta { font-family: var(--font-tamil); }
+.vv-flow-sep { color: var(--color-text-muted); opacity: 0.4; margin: 0 1px; }
+.vv-flow-mn { color: var(--color-text-muted); font-family: var(--font-serif); font-style: italic; }
+.vv-flow-mn.script-te { font-family: var(--font-telugu); font-style: normal; }
+.vv-flow-mn.script-hi { font-family: var(--font-devanagari); font-style: normal; }
+.vv-flow-mn.script-ta { font-family: var(--font-tamil); font-style: normal; }
+
+.vv-empty {
+  padding: 28px;
+  text-align: center;
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  border: 0.5px dashed var(--color-border);
+  border-radius: var(--r-md);
+  margin-top: 18px;
+}
+.vv-empty-a {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-style: normal;
+  font-size: 11px;
+}
+.vv-empty-a:hover { text-decoration: underline; }
+
+/* NAV */
+.vv-nav {
+  padding: 10px 30px;
+  border-top: 0.5px solid var(--color-border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.vv-nb {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.vv-nb:hover { color: var(--color-accent); }
+.vv-npos { font-size: 10px; color: var(--color-text-muted); }
+.vv-bk {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+}
+.vv-bk:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-bk.on { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+
+/* SCROLL VIEW */
+.vv-scroll { overflow-y: auto; flex: 1; }
+.vv-scroll::-webkit-scrollbar { width: 2px; }
+.vv-scroll::-webkit-scrollbar-thumb { background: var(--color-border); }
+.vv-cdiv {
+  padding: 18px 30px 12px;
+  position: sticky;
+  top: 0;
+  background: var(--color-bg);
+  border-bottom: 0.5px solid var(--color-border-soft);
+  z-index: 2;
+  backdrop-filter: blur(10px);
+}
+.vv-cdsk {
+  font-family: var(--font-devanagari);
+  font-size: 13px;
+  color: var(--color-sanskrit);
+  opacity: 0.6;
+  margin-bottom: 3px;
+}
+.vv-cdmt {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.vv-cdn {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.vv-cds { font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
+.vv-srow {
+  padding: 18px 30px;
+  border-bottom: 0.5px solid var(--color-border-soft);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.vv-srow:hover { background: var(--color-surface); }
+.vv-srow.exp { background: var(--color-surface); }
+.vv-srn { font-size: 10px; color: var(--color-text-muted); letter-spacing: 0.05em; margin-bottom: 8px; }
+.vv-srsk {
+  font-family: var(--font-devanagari);
+  font-size: 16px;
+  color: var(--color-sanskrit);
+  line-height: 1.7;
+  margin-bottom: 5px;
+}
+.vv-sria {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  line-height: 1.65;
+}
+.vv-srx { display: none; margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--color-border-soft); }
+.vv-srx.open { display: block; }
+.vv-srx-sec { margin-bottom: 14px; }
+.vv-srx-sec:last-child { margin-bottom: 0; }
+.vv-srx-sec-lbl {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 7px;
+}
+.vv-sracts {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--color-border-soft);
+}
+.vv-srbtn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: 20px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+}
+.vv-srbtn:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.vv-srbtn.on { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+.vv-lmore {
+  padding: 14px 30px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+/* CHAPTER OVERVIEW */
+.vv-overview { padding: 30px; flex: 1; overflow-y: auto; }
+.vv-ov-meta {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.vv-ov-sk {
+  font-family: var(--font-devanagari);
+  font-size: 24px;
+  color: var(--color-sanskrit);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+.vv-ov-name {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  color: var(--color-text);
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+.vv-ov-sub { font-size: 12px; color: var(--color-text-muted); margin-bottom: 24px; }
+.vv-ov-divider { height: 0.5px; background: var(--color-border-soft); margin: 20px 0; }
+.vv-ov-summary-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+.vv-ov-summary {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--color-text);
+  margin-bottom: 18px;
+}
+.vv-ov-stats { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; }
+.vv-ov-stat { font-size: 11px; color: var(--color-text-muted); }
+.vv-ov-stat strong {
+  display: block;
+  color: var(--color-text);
+  font-weight: 500;
+  font-size: 18px;
+  font-family: var(--font-serif);
+}
+.vv-ov-firstv {
+  margin-top: 16px;
+  padding: 14px;
+  border: 0.5px solid var(--color-border-soft);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.vv-ov-firstv:hover { border-color: var(--color-accent); }
+.vv-ov-firstv-lbl {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.vv-ov-firstv-sk {
+  font-family: var(--font-devanagari);
+  font-size: 14px;
+  color: var(--color-sanskrit);
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+.vv-ov-firstv-tr {
+  font-family: var(--font-serif);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+/* Tabler-icon-like simple SVG icons inline */
+.icon { display: inline-flex; vertical-align: middle; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Page navigation (mockup demo only — production uses Next.js routes) -->
+<div class="page-nav">
+  <button class="active" data-page="search">Search /</button>
+  <button data-page="library">Library /library</button>
+  <button data-page="viewer">Viewer /read/[book]</button>
+</div>
+
+<div class="role-toggle">
+  <span class="label">Role:</span>
+  <button class="active" data-role="guest">Guest</button>
+  <button data-role="contributor">Contributor</button>
+  <button data-role="researcher">Researcher</button>
+  <button data-role="admin">Admin</button>
+</div>
+
+<!-- ============================================================
+     PAGE 1 — UNIFIED SEARCH (/)
+     ============================================================ -->
+<div class="page active" id="page-search">
+  <div class="sr-hero">
+    <div class="sr-wordmark"><span class="sr-om">ॐ</span> Scriptle</div>
+    <div class="sr-search-outer">
+      <div class="sr-search-wrap">
+        <svg class="sr-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input class="sr-input" id="srInput" autocomplete="off" spellcheck="false">
+        <span class="sr-placeholder" id="srPh"></span>
+        <span class="sr-enter-hint" id="srEnter" style="display:none">↵ ask</span>
+      </div>
+    </div>
+    <div class="sr-stats">
+      <span class="sr-stat"><strong>29</strong> texts</span>
+      <span class="sr-stat"><strong>159K</strong> verses</span>
+      <span class="sr-stat"><strong>4</strong> languages</span>
+    </div>
+  </div>
+  <div class="sr-body" id="srBody">
+    <div class="sr-divider"></div>
+    <div class="sr-tabs" id="srTabs"></div>
+    <div class="sr-panel" id="srPanelKeyword"></div>
+    <div class="sr-panel" id="srPanelSemantic"></div>
+    <div class="sr-panel" id="srPanelAsk"></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     PAGE 2 — LIBRARY (/library)
+     ============================================================ -->
+<div class="page" id="page-library">
+  <div class="lb-nav">
+    <div class="lb-logo"><span class="lb-om">ॐ</span> Scriptle</div>
+    <div class="lb-nav-links">
+      <span class="lb-nav-link" onclick="goPage('search')">Search</span>
+      <span class="lb-nav-link active">Library</span>
+    </div>
+    <button class="lb-add hidden" id="lbAddBtn">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      Add scripture
+    </button>
+  </div>
+  <div class="lb-header">
+    <div>
+      <div class="lb-title">The Library</div>
+      <div class="lb-sub" id="lbSub">29 public scriptures</div>
+    </div>
+  </div>
+  <div class="lb-controls">
+    <div class="lb-search">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="lbSearch" placeholder="Filter…" oninput="lbFilter(this.value)">
+    </div>
+    <div class="lb-chips">
+      <span class="lb-chip active" onclick="lbSetFilter('all',this)">All</span>
+      <span class="lb-chip" onclick="lbSetFilter('gita',this)">Gitas</span>
+      <span class="lb-chip" onclick="lbSetFilter('veda',this)">Vedas</span>
+      <span class="lb-chip" onclick="lbSetFilter('purana',this)">Puranas</span>
+      <span class="lb-chip" onclick="lbSetFilter('stotra',this)">Stotras</span>
+      <span class="lb-chip" onclick="lbSetFilter('upanishad',this)">Upanishads</span>
+    </div>
+  </div>
+  <div id="lbBooksArea"></div>
+  <div class="lb-footer">
+    <span id="lbCount">29 scriptures</span>
+    <span id="lbPerm">Read only</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     PAGE 3 — VERSE VIEWER (/read/[bookCode])
+     ============================================================ -->
+<div class="page" id="page-viewer">
+  <div class="vv">
+    <div class="vv-sb">
+      <div class="vv-sbh">
+        <div class="vv-back" onclick="goPage('library')">← Library</div>
+        <div class="vv-bkrow">
+          <div class="vv-cv"><div class="vv-cv-sp"></div><div class="vv-cv-sk">भगवद्गीता</div></div>
+          <div>
+            <div class="vv-bkt">Bhagavad Gita</div>
+            <div class="vv-bkm">700 verses · 18 ch</div>
+          </div>
+        </div>
+      </div>
+      <div class="vv-toc" id="vvToc"></div>
+    </div>
+    <div class="vv-main">
+      <div class="vv-tb">
+        <div class="vv-bc" id="vvBc"></div>
+        <div class="vv-tr-r">
+          <div class="vv-tabs">
+            <button class="vv-tab active" id="vvTab-v" onclick="vvSw('v')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              Verse
+            </button>
+            <button class="vv-tab" id="vvTab-s" onclick="vvSw('s')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              Scroll
+            </button>
+          </div>
+          <div class="vv-lpair">
+            <div class="vv-lp-side" onclick="vvToggleLD('src')">
+              <span class="vv-ldot" id="vvSrcDot" style="background:#1C3A2E;"></span>
+              <div class="vv-lp-info">
+                <span class="vv-lp-tag">Source</span>
+                <span class="vv-lp-name" id="vvSrcName">Sanskrit</span>
+              </div>
+            </div>
+            <span class="vv-lp-arrow">→</span>
+            <div class="vv-lp-side" onclick="vvToggleLD('trg')">
+              <span class="vv-ldot" id="vvTrgDot" style="background:#97C459;"></span>
+              <div class="vv-lp-info">
+                <span class="vv-lp-tag">Translation</span>
+                <span class="vv-lp-name" id="vvTrgName">English</span>
+              </div>
+            </div>
+            <div class="vv-ld left-aligned" id="vvLd-src">
+              <div class="vv-ld-h">Source script</div>
+              <div class="vv-lo active" data-lang="sa" onclick="vvSetLang('src','sa','Sanskrit','#1C3A2E')"><span class="vv-ldot" style="background:#1C3A2E;"></span><div class="vv-ldb"><span>Sanskrit</span><span class="vv-lnat">देवनागरी</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-lo" data-lang="te" onclick="vvSetLang('src','te','Telugu','#EF9F27')"><span class="vv-ldot" style="background:#EF9F27;"></span><div class="vv-ldb"><span>Telugu</span><span class="vv-lnat">తెలుగు</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-lo" data-lang="hi" onclick="vvSetLang('src','hi','Hindi','#85B7EB')"><span class="vv-ldot" style="background:#85B7EB;"></span><div class="vv-ldb"><span>Hindi</span><span class="vv-lnat">हिन्दी</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-ldiv"></div>
+              <div class="vv-lo vv-lna" data-lang="ta"><span class="vv-ldot" style="background:#ED93B1;"></span><div class="vv-ldb"><span>Tamil</span><span class="vv-lnat">தமிழ்</span></div><span style="font-size:9px;margin-left:auto;opacity:.7;">no script</span></div>
+            </div>
+            <div class="vv-ld right-aligned" id="vvLd-trg">
+              <div class="vv-ld-h">Translation</div>
+              <div class="vv-lo active" data-lang="en" onclick="vvSetLang('trg','en','English','#97C459')"><span class="vv-ldot" style="background:#97C459;"></span><div class="vv-ldb"><span>English</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-lo" data-lang="te" onclick="vvSetLang('trg','te','Telugu','#EF9F27')"><span class="vv-ldot" style="background:#EF9F27;"></span><div class="vv-ldb"><span>Telugu</span><span class="vv-lnat">తెలుగు</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-lo" data-lang="hi" onclick="vvSetLang('trg','hi','Hindi','#85B7EB')"><span class="vv-ldot" style="background:#85B7EB;"></span><div class="vv-ldb"><span>Hindi</span><span class="vv-lnat">हिन्दी</span></div><span class="vv-lck">✓</span></div>
+              <div class="vv-ldiv"></div>
+              <div class="vv-lo vv-lna" data-lang="ta"><span class="vv-ldot" style="background:#ED93B1;"></span><div class="vv-ldb"><span>Tamil</span><span class="vv-lnat">தமிழ்</span></div><span style="font-size:9px;margin-left:auto;opacity:.7;">not generated</span></div>
+            </div>
+          </div>
+          <div class="vv-fv-wrap">
+            <div class="vv-fv-btn" id="vvFvBtn" onclick="vvToggleFV()">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              Fields
+              <span class="vv-fv-count" id="vvFvCount" style="display:none;"></span>
+            </div>
+            <div class="vv-fv-pop" id="vvFvPop">
+              <div class="vv-fv-h"><span>Show fields</span><span class="vv-fv-h-r" onclick="vvResetFields()">Show all</span></div>
+              <div class="vv-fv-row on" data-field="original" onclick="vvTogField('original')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">ॐ</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">Original text</div><div class="vv-fv-desc">Sanskrit in Devanagari</div></div>
+              </div>
+              <div class="vv-fv-row on" data-field="iast" onclick="vvTogField('iast')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">Aa</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">IAST</div><div class="vv-fv-desc">Roman transliteration</div></div>
+              </div>
+              <div class="vv-fv-row on" data-field="srcScript" onclick="vvTogField('srcScript')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">अ</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">Source script</div><div class="vv-fv-desc">Sanskrit in Telugu / Hindi</div></div>
+              </div>
+              <div class="vv-fv-row on" data-field="w2w" onclick="vvTogField('w2w')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">≡</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">Word for word</div><div class="vv-fv-desc">Token-by-token meanings</div></div>
+              </div>
+              <div class="vv-fv-row on" data-field="translation" onclick="vvTogField('translation')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">¶</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">Translation</div><div class="vv-fv-desc">Multiple authors available</div></div>
+              </div>
+              <div class="vv-fv-row on" data-field="commentary" onclick="vvTogField('commentary')">
+                <div class="vv-fv-toggle"></div>
+                <span class="vv-fv-icon">"</span>
+                <div class="vv-fv-info"><div class="vv-fv-name">Commentary</div><div class="vv-fv-desc">Scholarly interpretations</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="vv-panel active" id="vvPanel-v">
+        <div class="vv-vbody" id="vvVBody"></div>
+        <div class="vv-nav" id="vvNav"></div>
+      </div>
+      <div class="vv-panel" id="vvPanel-s">
+        <div class="vv-scroll" id="vvScrollArea"></div>
+        <div class="vv-lmore" id="vvLmore">Loading more verses…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   PAGE NAVIGATION + ROLE STATE
+   ============================================================ */
+let userRole = 'guest';
+
+document.querySelectorAll('.page-nav button').forEach(b => {
+  b.addEventListener('click', () => goPage(b.dataset.page));
+});
+
+document.querySelectorAll('.role-toggle button[data-role]').forEach(b => {
+  b.addEventListener('click', () => {
+    userRole = b.dataset.role;
+    document.querySelectorAll('.role-toggle button[data-role]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    applyRole();
+  });
+});
+
+function goPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.page-nav button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`.page-nav button[data-page="${name}"]`).classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+function applyRole() {
+  // Library: admin sees Add button + private books
+  const addBtn = document.getElementById('lbAddBtn');
+  const lbSub = document.getElementById('lbSub');
+  const lbPerm = document.getElementById('lbPerm');
+  if (userRole === 'admin') {
+    addBtn.classList.remove('hidden');
+    lbSub.textContent = 'All scriptures · full access';
+    lbPerm.textContent = 'Admin';
+  } else if (userRole === 'contributor') {
+    addBtn.classList.add('hidden');
+    lbSub.textContent = '29 public scriptures · contributor access';
+    lbPerm.textContent = 'Contributor';
+  } else if (userRole === 'researcher') {
+    addBtn.classList.add('hidden');
+    lbSub.textContent = '29 public scriptures · researcher access';
+    lbPerm.textContent = 'Researcher';
+  } else {
+    addBtn.classList.add('hidden');
+    lbSub.textContent = '29 public scriptures';
+    lbPerm.textContent = 'Read only';
+  }
+  lbRender();
+  // Search: re-render to update Ask tab visibility
+  if (srInput.value.trim()) srSearch(srInput.value.trim());
+}
+
+/* ============================================================
+   PAGE 1 — UNIFIED SEARCH
+   ============================================================ */
+const SR_SUGGESTIONS = [
+  'What is the nature of the Self?',
+  'liberation from suffering',
+  'कर्म yoga',
+  'How to attain moksha?',
+  'surrender to God',
+  'मोक्ष',
+  'nature of Brahman',
+  'What did Krishna say about death?',
+  'path of devotion',
+];
+
+const SR_DATA = {
+  keyword: {
+    dharma: [
+      { ref: 'Gita · 3.35', sk: 'श्रेयान्स्वधर्मो विगुणः', tr: "Better is one's own dharma, imperfectly performed, than another's well performed." },
+      { ref: 'Gita · 18.47', sk: 'श्रेयान्स्वधर्मो विगुणः परधर्मात्', tr: "Better to perform one's own duty deficiently than another's perfectly." },
+      { ref: 'Ramayana · 1.1', sk: 'धर्मात्मा सत्यसन्धश्च', tr: 'Rama, son of Dasharatha, embodiment of dharma, always truthful.' },
+    ],
+    karma: [
+      { ref: 'Gita · 2.47', sk: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन', tr: 'You have a right to your duties, but never to the fruits of action.' },
+      { ref: 'Gita · 3.19', sk: 'तस्मादसक्तः सततं कार्यं कर्म समाचर', tr: 'Therefore without attachment, perform the work that must be done.' },
+      { ref: 'Gita · 4.18', sk: 'कर्मण्यकर्म यः पश्येद्', tr: 'One who sees inaction in action and action in inaction is wise.' },
+    ],
+    moksha: [
+      { ref: 'AshtG · 1.3', sk: 'मुक्तिमिच्छसि चेत्तात', tr: 'If you seek liberation, shun sense objects as poison.' },
+      { ref: 'Gita · 18.66', sk: 'सर्वधर्मान्परित्यज्य', tr: 'Abandon all dharmas and surrender to Me alone.' },
+    ],
+    self: [
+      { ref: 'Gita · 13.30', sk: 'यदा भूतपृथग्भावम्', tr: 'One who sees the self as non-doer actually sees.' },
+      { ref: 'VSN · 84', sk: 'आत्मवान् — Self in all', tr: 'The Lord dwelling in all beings as their innermost reality.' },
+    ],
+    default: [
+      { ref: 'Gita · 2.47', sk: 'कर्मण्येवाधिकारस्ते', tr: 'You have a right to your duties, but never to the fruits.' },
+      { ref: 'Gita · 13.30', sk: 'यदा भूतपृथग्भावम्', tr: 'One who sees the self as non-doer actually sees.' },
+      { ref: 'VSN · 84', sk: 'आत्मवान्', tr: 'The Self present in all beings as their innermost reality.' },
+    ],
+  },
+  semantic: {
+    dharma: [
+      { ref: 'Gita · 4.7', sk: 'यदा यदा हि धर्मस्य', tr: 'Whenever there is decline of righteousness, I manifest myself.', sim: 0.88 },
+      { ref: 'Ramayana · 3.37', sk: 'धर्म एव हतो हन्ति', tr: 'Dharma destroyed destroys; dharma protected protects.', sim: 0.82 },
+    ],
+    karma: [
+      { ref: 'Gita · 6.1', sk: 'अनाश्रितः कर्मफलं', tr: 'One who acts without attachment to fruits is both renunciant and yogi.', sim: 0.91 },
+      { ref: 'Gita · 4.20', sk: 'त्यक्त्वा कर्मफलासङ्गं', tr: 'Abandoning attachment to fruits, he does nothing at all.', sim: 0.85 },
+    ],
+    moksha: [
+      { ref: 'Gita · 18.55', sk: 'भक्त्या मामभिजानाति', tr: 'Only through devotion can one truly know Me and enter the Supreme.', sim: 0.87 },
+      { ref: 'Katha · 1.2.20', sk: 'अणोरणीयान्महतो महीयान्', tr: 'Smaller than the smallest, greater than the greatest.', sim: 0.81 },
+    ],
+    self: [
+      { ref: 'VSN · 518', sk: 'अनन्तात्मा — Infinite Self', tr: 'Unlimited consciousness beyond all finite determinations.', sim: 0.89 },
+      { ref: 'Mandukya · 7', sk: 'नान्तःप्रज्ञं न बहिष्प्रज्ञं', tr: 'The Self is neither inward nor outward — pure consciousness, the fourth.', sim: 0.78 },
+    ],
+    default: [
+      { ref: 'VSN · 84', sk: 'आत्मवान्', tr: 'The Self present in all beings.', sim: 0.79 },
+      { ref: 'Gita · 13.30', sk: 'यदा भूतपृथग्भावम्', tr: 'One who sees the self as non-doer actually sees.', sim: 0.72 },
+    ],
+  },
+  ask: {
+    dharma: 'The scriptures present dharma as the cosmic order upholding all existence. Krishna declares he descends whenever <em>dharma</em> declines — suggesting it is not a human invention but the very grain of reality. The Ramayana shows it lived: every choice Rama makes is dharma enacted, even when it costs him everything.',
+    karma: 'Karma Yoga is the art of total action without attachment to results. The Gita\'s central teaching is that the right to act is yours, but never the fruits. By offering all actions to the <em>Divine</em> and surrendering outcomes, the cycle of karma dissolves. The yogi acts completely yet remains untouched.',
+    moksha: 'Moksha is not a destination but a recognition — the realisation that the <em>Ātman</em> was never bound. The Ashtavakra Gita declares freedom to be the natural state; bondage is only the belief in bondage. The Gita\'s final word: know Me truly, and you shall not be born again.',
+    self: 'The scriptures describe the Self as eternal, self-luminous, untouched by action. The <em>Vishnu Sahasranama</em> calls the Lord <em>Ātmavān</em> — the Self in all beings. The Bhagavad Gita: one who sees the self as non-doer "actually sees." Pure consciousness — the fourth state beyond waking, dream, and sleep.',
+    default: 'The scriptures address this across all traditions. The Bhagavad Gita offers the philosophical framework, the Vishnu Sahasranama approaches it through the names of the Divine, and the Upanishads through direct inquiry. All point toward a single underlying reality.',
+  },
+  askCites: {
+    dharma: ['Gita · 4.7', 'Gita · 3.35', 'Ramayana · 3.37'],
+    karma: ['Gita · 2.47', 'Gita · 6.1', 'Gita · 4.20'],
+    moksha: ['Gita · 18.66', 'AshtG · 1.3', 'Katha · 1.2.20'],
+    self: ['VSN · 84', 'VSN · 518', 'Gita · 13.30', 'Mandukya · 7'],
+    default: ['Gita · 2.47', 'VSN · 84', 'AshtG · 1.3'],
+  },
+};
+
+const srInput = document.getElementById('srInput');
+const srPh = document.getElementById('srPh');
+let srPhIdx = 0, srPhTimer = null, srSearchTimer = null;
+
+function srGetKey(q) {
+  q = q.toLowerCase();
+  if (q.includes('dharma')) return 'dharma';
+  if (q.includes('karma') || q.includes('कर्म')) return 'karma';
+  if (q.includes('moksha') || q.includes('liberation') || q.includes('मोक्ष')) return 'moksha';
+  if (q.includes('self') || q.includes('atman') || q.includes('आत्म')) return 'self';
+  return 'default';
+}
+
+function srIsQuestion(q) {
+  return /^(what|how|why|when|who|does|is|can|should)/i.test(q.trim()) || q.trim().endsWith('?');
+}
+
+function srCyclePh() {
+  srPh.classList.remove('animating');
+  void srPh.offsetWidth;
+  srPh.textContent = SR_SUGGESTIONS[srPhIdx % SR_SUGGESTIONS.length];
+  srPh.classList.add('animating');
+  srPhIdx++;
+  srPhTimer = setTimeout(srCyclePh, 3500);
+}
+
+srInput.addEventListener('focus', () => {
+  srPh.classList.add('hidden');
+  clearTimeout(srPhTimer);
+});
+
+srInput.addEventListener('blur', () => {
+  if (!srInput.value) {
+    srPh.classList.remove('hidden');
+    srCyclePh();
+  }
+});
+
+srInput.addEventListener('input', () => {
+  const q = srInput.value.trim();
+  clearTimeout(srSearchTimer);
+  if (!q) {
+    document.getElementById('srBody').style.display = 'none';
+    document.getElementById('srEnter').style.display = 'none';
+    return;
+  }
+  srSearchTimer = setTimeout(() => srSearch(q), 320);
+});
+
+srInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    clearTimeout(srSearchTimer);
+    srSearch(srInput.value.trim());
+  }
+});
+
+function srSearch(q) {
+  if (!q) return;
+  const key = srGetKey(q);
+  const isQ = srIsQuestion(q);
+  const showAsk = userRole === 'researcher' || userRole === 'admin';
+  document.getElementById('srBody').style.display = 'block';
+  document.getElementById('srEnter').style.display = (isQ && showAsk) ? 'block' : 'none';
+
+  const tabsEl = document.getElementById('srTabs');
+  const defaultTab = (isQ && showAsk) ? 'ask' : 'keyword';
+
+  let tabsHTML = `<div class="sr-tab t-keyword ${defaultTab === 'keyword' ? 'active' : ''}" onclick="srSwitchTab('keyword')">Keyword <span class="sr-tab-count">${SR_DATA.keyword[key].length}</span></div>`;
+  tabsHTML += `<div class="sr-tab t-semantic ${defaultTab === 'semantic' ? 'active' : ''}" onclick="srSwitchTab('semantic')">Semantic <span class="sr-tab-count">${SR_DATA.semantic[key].length}</span></div>`;
+  if (showAsk) {
+    tabsHTML += `<div class="sr-tab t-ask ${defaultTab === 'ask' ? 'active' : ''}" onclick="srSwitchTab('ask')">Ask <span class="sr-tab-count">1</span></div>`;
+  }
+  tabsEl.innerHTML = tabsHTML;
+
+  document.getElementById('srPanelKeyword').innerHTML = SR_DATA.keyword[key].map(v =>
+    `<div class="sr-verse-row"><div class="sr-ref">${v.ref}</div><div class="sr-vbody"><div class="sr-sk">${v.sk}</div><div class="sr-tr">${v.tr}</div></div></div>`
+  ).join('');
+
+  document.getElementById('srPanelSemantic').innerHTML = SR_DATA.semantic[key].map(v =>
+    `<div class="sr-verse-row"><div class="sr-ref">${v.ref}<div class="sr-sim-row"><div class="sr-simbar"><div class="sr-simfill" style="width:${Math.round(v.sim * 100)}%"></div></div><span class="sr-simval">${v.sim.toFixed(2)}</span></div></div><div class="sr-vbody"><div class="sr-sk">${v.sk}</div><div class="sr-tr">${v.tr}</div></div></div>`
+  ).join('');
+
+  if (showAsk) {
+    if (isQ) {
+      const ans = SR_DATA.ask[key];
+      const cites = SR_DATA.askCites[key];
+      document.getElementById('srPanelAsk').innerHTML =
+        `<div class="sr-ask-card"><div class="sr-ask-ans">${ans}</div><div class="sr-cites-label">Cited verses</div><div class="sr-cites">${cites.map(c => `<span class="sr-cite">${c}</span>`).join('')}</div></div>`;
+    } else {
+      document.getElementById('srPanelAsk').innerHTML =
+        `<div class="sr-ask-gated">Rephrase as a question to get a synthesised answer.<br><br>e.g. "What do the scriptures say about ${q}?"</div>`;
+    }
+  }
+  srSwitchTab(defaultTab);
+}
+
+function srSwitchTab(name) {
+  document.querySelectorAll('#srTabs .sr-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sr-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.sr-tab.t-${name}`).classList.add('active');
+  document.getElementById('srPanel' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+}
+
+srCyclePh();
+
+/* ============================================================
+   PAGE 2 — LIBRARY
+   ============================================================ */
+const LB_BOOKS = [
+  { name: 'Bhagavad Gita', sk: 'भगवद्गीता', verses: '700', cat: 'gita', langs: ['en','te','hi'], ai: true, pub: true, bg: 'linear-gradient(160deg,#1C3A2E,#3B7A5A)' },
+  { name: 'Ashtavakra Gita', sk: 'अष्टावक्र गीता', verses: '298', cat: 'gita', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#3B2A1A,#8B6A3A)' },
+  { name: 'Avadhuta Gita', sk: 'अवधूत गीता', verses: '144', cat: 'gita', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A2A3B,#3A6A8B)' },
+  { name: 'Ribhu Gita', sk: 'रिभु गीता', verses: '2,591', cat: 'gita', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#3B1A2A,#8B3A6A)' },
+  { name: 'Valmiki Ramayana', sk: 'वाल्मीकि रामायण', verses: '20,617', cat: 'purana', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#2A1A0A,#8B5A2A)' },
+  { name: 'Bhagavata Purana', sk: 'भागवत पुराण', verses: '15,304', cat: 'purana', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A1A3B,#3A3A8B)' },
+  { name: 'Yoga Vasishtha', sk: 'योग वासिष्ठ', verses: '32,000', cat: 'purana', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#0A2A1A,#2A7A5A)' },
+  { name: 'Mahabharata', sk: 'महाभारत', verses: '75,834', cat: 'purana', langs: [], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A0A0A,#6A2A2A)' },
+  { name: 'Rigveda', sk: 'ऋग्वेद', verses: '10,552', cat: 'veda', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A2A1A,#5A7A3A)' },
+  { name: 'Purusha Suktam', sk: 'पुरुष सूक्तम्', verses: '16', cat: 'veda', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#2A2A0A,#7A7A2A)' },
+  { name: 'Nasadiya Suktam', sk: 'नासदीय सूक्तम्', verses: '7', cat: 'veda', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A1A2A,#5A5A7A)' },
+  { name: 'Vishnu Sahasranama', sk: 'विष्णु सहस्रनाम', verses: '1,000', cat: 'stotra', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#0A1A2A,#2A5A7A)' },
+  { name: 'Lalita Sahasranama', sk: 'ललिता सहस्रनाम', verses: '1,000', cat: 'stotra', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#2A0A1A,#7A2A5A)' },
+  { name: 'Nirvana Shatkam', sk: 'निर्वाण षट्कम्', verses: '6', cat: 'stotra', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A1A1A,#5A5A5A)' },
+  { name: 'Bhaja Govindam', sk: 'भज गोविन्दम्', verses: '31', cat: 'stotra', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#1A2A0A,#5A7A2A)' },
+  { name: 'Dasa Sloki', sk: 'दश श्लोकी', verses: '10', cat: 'stotra', langs: ['en'], ai: true, pub: true, bg: 'linear-gradient(160deg,#2A1A0A,#7A5A2A)' },
+  { name: 'Krishnashtakam', sk: 'कृष्णाष्टकम्', verses: '8', cat: 'stotra', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#0A1A2A,#2A5A7A)' },
+  { name: 'Tattva Bodha', sk: 'तत्त्व बोध', verses: '40', cat: 'upanishad', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A1A2A,#5A3A7A)' },
+  { name: 'Mandukya Upanishad', sk: 'माण्डूक्य उपनिषद्', verses: '12', cat: 'upanishad', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#0A2A2A,#2A7A7A)' },
+  { name: 'Vivekachudamani', sk: 'विवेकचूडामणि', verses: '580', cat: 'upanishad', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#2A1A1A,#7A5A3A)' },
+  { name: 'Kena Upanishad', sk: 'केन उपनिषद्', verses: '35', cat: 'upanishad', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A2A1A,#5A7A3A)' },
+  { name: 'Vedanta Ekashloki', sk: 'वेदान्त एकश्लोकी', verses: '1', cat: 'upanishad', langs: ['en'], ai: false, pub: true, bg: 'linear-gradient(160deg,#1A2A2A,#3A7A7A)' },
+  { name: 'Yoga Sutras', sk: 'योगसूत्र', verses: '196', cat: 'upanishad', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#1A1A1A,#3A3A3A)' },
+  { name: 'Brahma Sutras', sk: 'ब्रह्मसूत्र', verses: '555', cat: 'upanishad', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#1A1A1A,#3A3A3A)' },
+  { name: 'Soundarya Lahari', sk: 'सौन्दर्य लहरी', verses: '100', cat: 'stotra', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#2A0A1A,#6A2A5A)' },
+  { name: 'Devi Mahatmyam', sk: 'देवी माहात्म्यम्', verses: '700', cat: 'purana', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#2A0A0A,#7A2A2A)' },
+  { name: 'Shiva Sahasranama', sk: 'शिव सहस्रनाम', verses: '1,000', cat: 'stotra', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#0A1A1A,#2A5A5A)' },
+  { name: 'Narada Bhakti Sutras', sk: 'नारद भक्ति सूत्र', verses: '84', cat: 'upanishad', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#1A2A2A,#3A6A6A)' },
+  { name: 'Aitareya Upanishad', sk: 'ऐतरेय उपनिषद्', verses: '33', cat: 'upanishad', langs: [], ai: false, pub: false, bg: 'linear-gradient(160deg,#2A2A1A,#6A6A3A)' },
+];
+
+const LB_CATS = [
+  { key: 'gita', label: 'Gitas', desc: 'Philosophical dialogues' },
+  { key: 'veda', label: 'Vedas & Suktams', desc: 'Vedic hymns' },
+  { key: 'purana', label: 'Puranas & Itihasas', desc: 'Epic narratives' },
+  { key: 'stotra', label: 'Stotras & Sahasranamas', desc: 'Devotional hymns' },
+  { key: 'upanishad', label: 'Upanishads & Sutras', desc: 'Philosophical treatises' },
+];
+
+const LB_LANG_MAP = { en: 'l-en', te: 'l-te', hi: 'l-hi', ta: 'l-ta' };
+let lbFilter_ = 'all', lbSearchQ = '';
+
+function lbSetFilter(f, el) {
+  lbFilter_ = f;
+  document.querySelectorAll('.lb-chip').forEach(c => c.classList.remove('active'));
+  if (el) el.classList.add('active');
+  lbRender();
+}
+
+function lbFilter(q) { lbSearchQ = q.toLowerCase(); lbRender(); }
+
+function lbVisible() {
+  return LB_BOOKS.filter(b => {
+    if (userRole === 'guest' && !b.pub) return false;
+    if (userRole !== 'admin' && !b.pub) return false;
+    if (lbFilter_ !== 'all' && b.cat !== lbFilter_) return false;
+    if (lbSearchQ && !b.name.toLowerCase().includes(lbSearchQ) && !b.sk.includes(lbSearchQ)) return false;
+    return true;
+  });
+}
+
+function lbCover(b) {
+  const langDots = b.langs.map(l => `<span class="lb-lang-dot ${LB_LANG_MAP[l] || 'l-en'}"></span>`).join('');
+  const badge = b.ai ? `<span class="lb-cover-badge">AI</span>` : '';
+  const lock = (!b.pub && userRole === 'admin') ? `<span class="lb-cover-lock">🔒</span>` : '';
+  return `<div class="lb-book" onclick="goPage('viewer')">
+    <div class="lb-cover" style="background:${b.bg};">
+      <div class="lb-cover-spine"></div>
+      <div class="lb-cover-content">
+        <div class="lb-cover-sk">${b.sk}</div>
+        <div>
+          <div class="lb-cover-title">${b.name}</div>
+          <div class="lb-cover-verses">${b.verses} verses</div>
+        </div>
+      </div>
+      ${badge}${lock}
+      <div class="lb-cover-langs">${langDots}</div>
+    </div>
+    <div class="lb-book-name">${b.name}</div>
+    <div class="lb-book-info">${b.verses} verses</div>
+  </div>`;
+}
+
+function lbRender() {
+  const books = lbVisible();
+  document.getElementById('lbCount').textContent = `${books.length} scripture${books.length !== 1 ? 's' : ''}`;
+  const area = document.getElementById('lbBooksArea');
+  if (!books.length) {
+    area.innerHTML = `<div style="text-align:center;padding:40px;color:var(--color-text-muted);font-family:var(--font-serif);font-style:italic;">No scriptures found</div>`;
+    return;
+  }
+  if (lbFilter_ !== 'all') {
+    area.innerHTML = `<div class="lb-section"><div class="lb-shelf">${books.map(lbCover).join('')}</div></div>`;
+    return;
+  }
+  let html = '';
+  LB_CATS.forEach(cat => {
+    const cb = books.filter(b => b.cat === cat.key);
+    if (!cb.length) return;
+    html += `<div class="lb-section">
+      <div class="lb-cat-label"><span>${cat.label}</span><span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;opacity:.7;">${cat.desc}</span><div class="lb-cat-line"></div><span>${cb.length}</span></div>
+      <div class="lb-shelf">${cb.map(lbCover).join('')}</div>
+    </div>`;
+  });
+  area.innerHTML = html;
+}
+
+lbRender();
+
+/* ============================================================
+   PAGE 3 — VERSE VIEWER
+   ============================================================ */
+const VV_CHS = [
+  { n: 1, name: 'Arjuna Vishada Yoga', sk: 'अर्जुन विषाद योग', label: 'Chapter', vv: 47, summary: 'Arjuna surveys the battlefield of Kurukshetra and is overcome with grief at the sight of his kinsmen ready to fight. His will collapses; he refuses to fight and seeks Krishna\'s counsel. This chapter sets the existential stage for the entire Gita.' },
+  { n: 2, name: 'Sankhya Yoga', sk: 'सांख्य योग', label: 'Chapter', vv: 72, summary: 'Krishna begins his teaching with the central truth: the Self (Ātman) is eternal and indestructible. Death is only the shedding of a body. He introduces karma yoga — action without attachment to results — as the path to inner stability.' },
+  { n: 3, name: 'Karma Yoga', sk: 'कर्म योग', label: 'Chapter', vv: 43, summary: 'Krishna develops the doctrine of selfless action. No one can avoid action; the question is how to act. By performing one\'s prescribed duty without personal attachment to outcomes, the cycle of karma is dissolved.' },
+];
+
+const VV_DATA = {
+  '2.20': {
+    sk: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।\nअजो नित्यः शाश्वतोऽयं पुराणो\nन हन्यते हन्यमाने शरीरे ॥',
+    ia: 'na jāyate mriyate vā kadācin\nnāyaṃ bhūtvā bhavitā vā na bhūyaḥ\najo nityaḥ śāśvato \'yaṃ purāṇo\nna hanyate hanyamāne śarīre',
+    srcScript: { sa: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।', te: 'న జాయతే మ్రియతే వా కదాచిన్\nనాయం భూత్వా భవితా వా న భూయః ।', hi: 'न जायते म्रियते वा कदाचिन्\nनायं भूत्वा भविता वा न भूयः ।' },
+    w2w: [{ auth: 'HSP AI', ai: true, items: [
+      { sa: 'न जायते', te_src: 'న జాయతే', hi_src: 'न जायते', en: 'is not born', te: 'జన్మించదు', hi: 'जन्म नहीं' },
+      { sa: 'म्रियते', te_src: 'మ్రియతే', hi_src: 'म्रियते', en: 'dies', te: 'మరణిస్తుంది', hi: 'मरता है' },
+      { sa: 'अजः', te_src: 'అజః', hi_src: 'अजः', en: 'unborn', te: 'అజన్మ', hi: 'अजन्मा' },
+      { sa: 'नित्यः', te_src: 'నిత్యః', hi_src: 'नित्यः', en: 'eternal', te: 'నిత్యం', hi: 'नित्य' },
+      { sa: 'शाश्वतः', te_src: 'శాశ్వతః', hi_src: 'शाश्वतः', en: 'permanent', te: 'శాశ్వతం', hi: 'शाश्वत' },
+    ]}],
+    tr: [{ auth: 'HSP AI', ai: true, en: 'The soul is never born nor dies. It is unborn, eternal, ever-existing, and primeval. It is not slain when the body is slain.', te: 'ఆత్మ ఎన్నడూ జన్మించదు, చావదు. అది అజన్మ, నిత్యం, శాశ్వతం, పురాతనం. శరీరం నశించినా ఆత్మ నశించదు.', hi: 'आत्मा कभी जन्म नहीं लेती और न मरती है। यह अजन्मा, नित्य, शाश्वत और पुरातन है।' }],
+    cm: [{ auth: 'HSP AI', ai: true, en: 'The central declaration of the Gita on the Self. The Ātman is beyond time — never born, cannot die. What appears as death is only the shedding of a body. The one who knows this is freed from grief.', te: 'ఆత్మ స్వభావంపై కేంద్ర ప్రకటన. ఆత్మ కాలానికి అతీతం.', hi: 'आत्मा की प्रकृति पर केंद्रीय घोषणा।' }],
+  },
+  '2.47': {
+    sk: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ॥',
+    ia: 'karmaṇy evādhikāras te mā phaleṣu kadācana\nmā karma-phala-hetur bhūr mā te saṅgo \'stv akarmaṇi',
+    srcScript: { sa: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।\nमा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ॥', te: 'కర్మణ్యేవాధికారస్తే మా ఫలేషు కదాచన ।\nమా కర్మఫలహేతుర్భూర్మా తే సఙ్గోऽస్త్వకర్మణి ॥', hi: 'कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।' },
+    w2w: [{ auth: 'HSP AI', ai: true, items: [
+      { sa: 'कर्मणि', te_src: 'కర్మణి', hi_src: 'कर्मणि', en: 'in action', te: 'కర్మలో', hi: 'कर्म में' },
+      { sa: 'एव', te_src: 'ఏవ', hi_src: 'एव', en: 'only', te: 'మాత్రమే', hi: 'ही' },
+      { sa: 'अधिकारः', te_src: 'అధికారః', hi_src: 'अधिकारः', en: 'right', te: 'హక్కు', hi: 'अधिकार' },
+      { sa: 'ते', te_src: 'తే', hi_src: 'ते', en: 'your', te: 'నీకు', hi: 'तुम्हारा' },
+      { sa: 'फलेषु', te_src: 'ఫలేషు', hi_src: 'फलेषु', en: 'in fruits', te: 'ఫలాలలో', hi: 'फलों में' },
+      { sa: 'सङ्गः', te_src: 'సఙ్గః', hi_src: 'सङ्गः', en: 'attachment', te: 'ఆసక్తి', hi: 'आसक्ति' },
+      { sa: 'अकर्मणि', te_src: 'అకర్మణి', hi_src: 'अकर्मणि', en: 'in inaction', te: 'కర్మరాహిత్యంలో', hi: 'अकर्म में' },
+    ]}],
+    tr: [
+      { auth: 'HSP AI', ai: true, en: 'You have a right to perform your prescribed duties, but you are not entitled to the fruits of your actions. Never consider yourself the cause of the results, nor be attached to inaction.', te: 'కర్తవ్యాన్ని చేసే హక్కు మీకు ఉంది, కానీ ఫలితాలపై హక్కు లేదు.', hi: 'कर्म करने का अधिकार तुम्हें है, फल की इच्छा मत करो।' },
+      { auth: 'Sri Aurobindo', v: true, en: 'Thou hast a right to action, but only to action, never to its fruits.', te: '', hi: '' },
+    ],
+    cm: [{ auth: 'HSP AI', ai: true, en: 'This verse encapsulates Karma Yoga. The Ātman is the eternal witness, never the doer. Acting without attachment purifies the mind and reveals the witness-consciousness that was always free.', te: 'ఈ శ్లోకం కర్మ యోగసారాన్ని చెప్తుంది. ఆత్మ శాశ్వత సాక్షి, కర్త కాదు.', hi: 'यह श्लोक कर्म योग का सार है।' }],
+  },
+  '2.48': {
+    sk: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।\nसिद्ध्यसिद्ध्योः समो भूत्वा समत्वं योग उच्यते ॥',
+    ia: 'yoga-sthaḥ kuru karmāṇi saṅgaṃ tyaktvā dhanañjaya',
+    srcScript: { sa: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।', te: 'యోగస్థః కురు కర్మాణి సఙ్గం త్యక్త్వా ధనఞ్జయ ।', hi: 'योगस्थः कुरु कर्माणि सङ्गं त्यक्त्वा धनञ्जय ।' },
+    w2w: [{ auth: 'HSP AI', ai: true, items: [
+      { sa: 'योगस्थः', te_src: 'యోగస్థః', hi_src: 'योगस्थः', en: 'fixed in yoga', te: 'యోగంలో నిలిచి', hi: 'योग में स्थित' },
+      { sa: 'कुरु', te_src: 'కురు', hi_src: 'कुरु', en: 'perform', te: 'చేయు', hi: 'करो' },
+      { sa: 'समत्वं', te_src: 'సమత్వం', hi_src: 'समत्वं', en: 'equanimity', te: 'సమత్వం', hi: 'समत्व' },
+    ]}],
+    tr: [{ auth: 'HSP AI', ai: true, en: 'Perform your duty equipoised, abandoning attachment to success or failure. Such equanimity is yoga.', te: 'జయాపజయాలపట్ల సమత్వంతో కర్తవ్యాన్ని నిర్వర్తించు.', hi: 'समभाव से कर्म करो। यही योग है।' }],
+    cm: [{ auth: 'HSP AI', ai: true, en: 'Krishna defines yoga as equanimity — inner steadiness unchanged by success or failure.', te: 'కృష్ణుడు యోగాన్ని సమత్వంగా నిర్వచిస్తున్నాడు.', hi: 'कृष्ण योग को समत्व के रूप में परिभाषित करते हैं।' }],
+  },
+  '3.27': {
+    sk: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।\nअहङ्कारविमूढात्मा कर्ताहमिति मन्यते ॥',
+    ia: 'prakṛteḥ kriyamāṇāni guṇaiḥ karmāṇi sarvaśaḥ\nahaṅkāra-vimūḍhātmā kartāham iti manyate',
+    srcScript: { sa: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।', te: 'ప్రకృతేః క్రియమాణాని గుణైః కర్మాణి సర్వశః ।', hi: 'प्रकृतेः क्रियमाणानि गुणैः कर्माणि सर्वशः ।' },
+    w2w: [{ auth: 'HSP AI', ai: true, items: [
+      { sa: 'प्रकृतेः', te_src: 'ప్రకృతేః', hi_src: 'प्रकृतेः', en: 'of nature', te: 'ప్రకృతి', hi: 'प्रकृति की' },
+      { sa: 'गुणैः', te_src: 'గుణైః', hi_src: 'गुणैः', en: 'by the modes', te: 'గుణాల', hi: 'गुणों द्वारा' },
+      { sa: 'अहङ्कार', te_src: 'అహఙ్కార', hi_src: 'अहङ्कार', en: 'false ego', te: 'అహంకారం', hi: 'अहंकार' },
+    ]}],
+    tr: [{ auth: 'HSP AI', ai: true, en: 'The soul bewildered by false ego thinks himself the doer of activities actually carried out by the three modes of material nature.', te: 'అహంకారంతో మోహపడిన ఆత్మ, ప్రకృతి గుణాలు చేసే కర్మలను తాను చేస్తున్నట్లు భావిస్తుంది.', hi: 'झूठे अहंकार से मोहित आत्मा।' }],
+    cm: [{ auth: 'HSP AI', ai: true, en: 'The great illusion — doership. When the Self forgets its nature and identifies with the mind-body, it assumes agency. The Self is always the silent witness.', te: 'గొప్ప భ్రమ — కర్తృత్వం.', hi: 'महान भ्रम — कर्तापन।' }],
+  },
+};
+
+const VV_SD = [
+  { t: 'ch', ref: VV_CHS[1] },
+  { t: 'v', id: '2.20' },
+  { t: 'v', id: '2.47' },
+  { t: 'v', id: '2.48' },
+  { t: 'ch', ref: VV_CHS[2] },
+  { t: 'v', id: '3.27' },
+];
+
+let vvCv = '2.47', vvOch = 2, vvSrcLang = 'sa', vvTrgLang = 'en', vvTab = 'v', vvExp = null, vvBask = {};
+let vvViewMode = 'verse', vvActiveChapter = null;
+const vvFields = { original: true, iast: true, srcScript: true, w2w: true, translation: true, commentary: true };
+
+function vvToggleFV() { document.getElementById('vvFvPop').classList.toggle('open'); }
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.vv-fv-wrap')) document.getElementById('vvFvPop').classList.remove('open');
+  if (!e.target.closest('.vv-lpair')) document.querySelectorAll('.vv-ld').forEach(d => d.classList.remove('open'));
+});
+
+function vvTogField(f) {
+  vvFields[f] = !vvFields[f];
+  const row = document.querySelector(`[data-field="${f}"]`);
+  if (row) row.classList.toggle('on', vvFields[f]);
+  vvUpdateFvCount();
+  vvRv();
+  vvBsc();
+}
+
+function vvResetFields() {
+  Object.keys(vvFields).forEach(k => { vvFields[k] = true; });
+  document.querySelectorAll('.vv-fv-row[data-field]').forEach(r => r.classList.add('on'));
+  vvUpdateFvCount();
+  vvRv();
+  vvBsc();
+}
+
+function vvUpdateFvCount() {
+  const h = Object.values(vvFields).filter(v => !v).length;
+  const btn = document.getElementById('vvFvBtn');
+  const cnt = document.getElementById('vvFvCount');
+  if (h > 0) {
+    btn.classList.add('has-hidden');
+    cnt.style.display = 'inline-block';
+    cnt.textContent = h + ' hidden';
+  } else {
+    btn.classList.remove('has-hidden');
+    cnt.style.display = 'none';
+  }
+}
+
+function vvToggleLD(side) {
+  document.querySelectorAll('.vv-ld').forEach(d => {
+    if (d.id === 'vvLd-' + side) d.classList.toggle('open');
+    else d.classList.remove('open');
+  });
+}
+
+function vvSetLang(side, code, name, col) {
+  if (side === 'src') {
+    vvSrcLang = code;
+    document.getElementById('vvSrcDot').style.background = col;
+    document.getElementById('vvSrcName').textContent = name;
+  } else {
+    vvTrgLang = code;
+    document.getElementById('vvTrgDot').style.background = col;
+    document.getElementById('vvTrgName').textContent = name;
+  }
+  document.querySelectorAll('#vvLd-' + side + ' .vv-lo').forEach(o => o.classList.remove('active'));
+  document.querySelectorAll('#vvLd-' + side + ' .vv-lo').forEach(o => { if (o.dataset.lang === code) o.classList.add('active'); });
+  document.getElementById('vvLd-' + side).classList.remove('open');
+  vvRv();
+  vvBsc();
+}
+
+function vvSw(t) {
+  vvTab = t;
+  document.querySelectorAll('.vv-tab').forEach(b => b.classList.remove('active'));
+  document.getElementById('vvTab-' + t).classList.add('active');
+  document.querySelectorAll('.vv-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('vvPanel-' + t).classList.add('active');
+}
+
+function vvBtoc() {
+  document.getElementById('vvToc').innerHTML = VV_CHS.map(ch => {
+    const io = ch.n === vvOch;
+    const isChActive = vvViewMode === 'chapter-overview' && vvActiveChapter === ch.n;
+    const vis = io ? Array.from({ length: Math.min(ch.vv, 6) }, (_, i) => {
+      const k = `${ch.n}.${i + 1}`;
+      return `<div class="vv-vrow ${vvCv === k && vvViewMode === 'verse' ? 'active' : ''}" onclick="vvSelV('${k}',${ch.n})">${k}</div>`;
+    }).join('') + (ch.vv > 6 ? `<div class="vv-vrow" style="opacity:.35;font-style:italic;">+${ch.vv - 6} more</div>` : '') : '';
+    return `<div class="vv-node">
+      <div class="vv-nh ${io ? 'open' : ''} ${isChActive ? 'active-node' : ''}" onclick="vvTogCh(${ch.n})">
+        <div class="vv-nl">
+          <span class="vv-nm">${ch.label} ${ch.n}</span>
+          <span class="vv-nn">${ch.name.split(' ').slice(0, 2).join(' ')}</span>
+        </div>
+        <div class="vv-nc">${ch.vv}v ${io ? '▴' : '▾'}</div>
+      </div>
+      <div class="vv-vlist ${io ? 'open' : ''}">${vis}</div>
+    </div>`;
+  }).join('');
+}
+
+function vvTogCh(n) {
+  if (vvOch === n && vvViewMode === 'chapter-overview') {
+    vvOch = null;
+    vvViewMode = 'verse';
+  } else {
+    vvOch = n;
+    vvViewMode = 'chapter-overview';
+    vvActiveChapter = n;
+  }
+  vvRv();
+  vvBtoc();
+}
+
+function vvSelV(k, ch) {
+  vvCv = k;
+  vvOch = ch;
+  vvViewMode = 'verse';
+  vvRv();
+  vvBtoc();
+  if (vvTab === 's') vvSw('v');
+}
+
+function vvNav(d) {
+  const [ch, v] = vvCv.split('.').map(Number);
+  const c = VV_CHS.find(x => x.n === ch);
+  if (!c) return;
+  let nc = ch, nv = v;
+  if (d === 1) {
+    if (v < c.vv) nv++;
+    else if (ch < VV_CHS.length) { nc++; nv = 1; }
+  } else {
+    if (v > 1) nv--;
+    else if (ch > 1) { nc--; nv = VV_CHS.find(x => x.n === ch - 1)?.vv || 1; }
+  }
+  vvCv = `${nc}.${nv}`;
+  vvOch = nc;
+  vvViewMode = 'verse';
+  vvRv();
+  vvBtoc();
+}
+
+function vvTogBask(k) { vvBask[k] = !vvBask[k]; vvRv(); }
+function vvSrcLangName(c) { return { sa: 'Devanagari', te: 'Telugu', hi: 'Hindi', ta: 'Tamil' }[c] || c; }
+function vvTrgLangName(c) { return { en: 'English', te: 'Telugu', hi: 'Hindi', ta: 'Tamil' }[c] || c; }
+
+function vvBbc() {
+  const bcEl = document.getElementById('vvBc');
+  if (vvViewMode === 'chapter-overview') {
+    const ch = VV_CHS.find(x => x.n === vvActiveChapter);
+    bcEl.innerHTML = `<span>Gita</span><span style="opacity:.4;">›</span><span style="color:var(--color-text);">${ch.label} ${ch.n}</span>`;
+  } else {
+    const [ch, v] = vvCv.split('.');
+    bcEl.innerHTML = `<span>Gita</span><span style="opacity:.4;">›</span><span>Ch ${ch}</span><span style="opacity:.4;">›</span><span style="color:var(--color-text);">${vvCv}</span>`;
+  }
+}
+
+function vvRv() {
+  vvBbc();
+
+  if (vvViewMode === 'chapter-overview') {
+    const ch = VV_CHS.find(x => x.n === vvActiveChapter);
+    const firstV = Object.keys(VV_DATA).find(k => k.startsWith(ch.n + '.'));
+    const fv = firstV ? VV_DATA[firstV] : null;
+    const fvTr = fv ? (fv.tr[0][vvTrgLang] || fv.tr[0].en) : '';
+    document.getElementById('vvPanel-v').innerHTML = `
+      <div class="vv-overview">
+        <div class="vv-ov-meta">${ch.label} ${ch.n}</div>
+        <div class="vv-ov-sk">${ch.sk}</div>
+        <div class="vv-ov-name">${ch.name}</div>
+        <div class="vv-ov-sub">${ch.vv} verses</div>
+        <div class="vv-ov-stats">
+          <div class="vv-ov-stat"><strong>${ch.vv}</strong>verses</div>
+          <div class="vv-ov-stat"><strong>${ch.label}</strong>type</div>
+        </div>
+        <div class="vv-ov-divider"></div>
+        <div class="vv-ov-summary-label">About this chapter</div>
+        <div class="vv-ov-summary">${ch.summary}</div>
+        ${fv ? `<div class="vv-ov-firstv" onclick="vvSelV('${firstV}',${ch.n})">
+          <div class="vv-ov-firstv-lbl">Begin reading · Verse ${firstV}</div>
+          <div class="vv-ov-firstv-sk">${fv.sk.split('\n')[0]}</div>
+          <div class="vv-ov-firstv-tr">${fvTr.length > 120 ? fvTr.slice(0, 120) + '…' : fvTr}</div>
+        </div>` : ''}
+      </div>`;
+    return;
+  }
+
+  const d = VV_DATA[vvCv];
+  if (!d) return;
+
+  document.getElementById('vvPanel-v').innerHTML = `<div class="vv-vbody" id="vvVBody"></div><div class="vv-nav" id="vvNav"></div>`;
+  const a = document.getElementById('vvVBody');
+
+  const sk = d.sk.split('\n').join('<br>');
+  const ia = d.ia ? d.ia.split('\n').join('<br>') : '';
+  const srcText = d.srcScript[vvSrcLang] ? d.srcScript[vvSrcLang].split('\n').join('<br>') : '';
+
+  const allHidden = !vvFields.original && !vvFields.iast && !vvFields.srcScript && !vvFields.w2w && !vvFields.translation && !vvFields.commentary;
+  if (allHidden) {
+    a.innerHTML = `<div class="vv-vno">Bhagavad Gita · ${vvCv}</div><div class="vv-empty">All fields are hidden.<br><span class="vv-empty-a" onclick="vvResetFields()">Show all fields</span></div>`;
+    document.getElementById('vvNav').innerHTML = `<span class="vv-nb" onclick="vvNav(-1)">← Prev</span><span class="vv-npos">${vvCv} of 700</span><span class="vv-nb" onclick="vvNav(1)">Next →</span>`;
+    return;
+  }
+
+  let html = `<div class="vv-vno">Bhagavad Gita · ${vvCv}</div>`;
+
+  if (vvFields.original || vvFields.iast) {
+    html += `<div class="vv-orig">`;
+    if (vvFields.original) html += `<div class="vv-sk-main">${sk}</div>`;
+    if (vvFields.iast && ia) html += `<div class="vv-ia">${ia}</div>`;
+    html += `</div>`;
+  }
+
+  if (vvFields.srcScript && srcText) {
+    html += `<div class="vv-sec">
+      <div class="vv-sec-h"><div class="vv-sec-lbl">Source script <span class="vv-sec-tag">${vvSrcLangName(vvSrcLang)}</span></div></div>
+      <div class="vv-st script-${vvSrcLang}">${srcText}</div>
+    </div>`;
+  }
+
+  if (vvFields.w2w) {
+    const w2wHTML = d.w2w.map(grp => {
+      const tokens = grp.items.map(it => {
+        const srcKey = vvSrcLang === 'sa' ? 'sa' : (vvSrcLang + '_src');
+        const srcWord = it[srcKey] || it.sa;
+        const trgWord = it[vvTrgLang] || it.en;
+        return `<span class="vv-flow-tok"><span class="vv-flow-src script-${vvSrcLang}">${srcWord}</span><span class="vv-flow-sep">·</span><span class="vv-flow-mn script-${vvTrgLang}">${trgWord}</span></span>`;
+      }).join('');
+      return `<div class="vv-ac">
+        <div class="vv-ac-h">
+          <div class="vv-ac-auth">${grp.auth} ${grp.ai ? '<span class="vv-aibadge">AI</span>' : ''}</div>
+          <div class="vv-ac-tag">${grp.items.length} words</div>
+        </div>
+        <div class="vv-ac-b"><div class="vv-flow">${tokens}</div></div>
+      </div>`;
+    }).join('');
+    html += `<div class="vv-sec"><div class="vv-sec-h"><div class="vv-sec-lbl">Word for word</div><div class="vv-sec-tag">${d.w2w.length} ${d.w2w.length === 1 ? 'author' : 'authors'}</div></div>${w2wHTML}</div>`;
+  }
+
+  if (vvFields.translation) {
+    const trShow = d.tr.filter(t => t[vvTrgLang] && t[vvTrgLang].trim());
+    const items = trShow.length > 0 ? trShow : [d.tr[0]];
+    const trHTML = items.map(t => `<div class="vv-ac">
+      <div class="vv-ac-h">
+        <div class="vv-ac-auth">${t.auth} ${t.ai ? '<span class="vv-aibadge">AI</span>' : t.v ? '<span class="vv-vbadge">Verified</span>' : ''}</div>
+        <div class="vv-ac-tag">${vvTrgLangName(vvTrgLang)}</div>
+      </div>
+      <div class="vv-ac-b"><div class="vv-tr-text script-${vvTrgLang}">${t[vvTrgLang] || t.en}</div></div>
+    </div>`).join('');
+    html += `<div class="vv-sec"><div class="vv-sec-h"><div class="vv-sec-lbl">Translation</div><div class="vv-sec-tag">${items.length} ${items.length === 1 ? 'author' : 'authors'}</div></div>${trHTML}</div>`;
+  }
+
+  if (vvFields.commentary) {
+    const cmShow = d.cm.filter(c => c[vvTrgLang] && c[vvTrgLang].trim());
+    const items = cmShow.length > 0 ? cmShow : [d.cm[0]];
+    const cmHTML = items.map(c => `<div class="vv-ac">
+      <div class="vv-ac-h">
+        <div class="vv-ac-auth">${c.auth} ${c.ai ? '<span class="vv-aibadge">AI</span>' : ''}</div>
+        <div class="vv-ac-tag">${vvTrgLangName(vvTrgLang)}</div>
+      </div>
+      <div class="vv-ac-b"><div class="vv-tr-text script-${vvTrgLang}">${c[vvTrgLang] || c.en}</div></div>
+    </div>`).join('');
+    html += `<div class="vv-sec"><div class="vv-sec-h"><div class="vv-sec-lbl">Commentary</div><div class="vv-sec-tag">${items.length} ${items.length === 1 ? 'author' : 'authors'}</div></div>${cmHTML}</div>`;
+  }
+
+  html += `<div style="margin-top:18px;padding-top:14px;border-top:0.5px solid var(--color-border-soft);display:flex;justify-content:flex-end;">
+    <button class="vv-bk ${vvBask[vvCv] ? 'on' : ''}" onclick="vvTogBask('${vvCv}')">⊕ ${vvBask[vvCv] ? 'In basket' : 'Add to basket'}</button>
+  </div>`;
+
+  a.innerHTML = html;
+  document.getElementById('vvNav').innerHTML = `<span class="vv-nb" onclick="vvNav(-1)">← Prev</span><span class="vv-npos">${vvCv} of 700</span><span class="vv-nb" onclick="vvNav(1)">Next →</span>`;
+}
+
+function vvBsc() {
+  document.getElementById('vvScrollArea').innerHTML = VV_SD.map(item => {
+    if (item.t === 'ch') {
+      const ch = item.ref;
+      return `<div class="vv-cdiv"><div class="vv-cdmt">${ch.label} ${ch.n}</div><div class="vv-cdsk">${ch.sk}</div><div class="vv-cdn">${ch.name}</div><div class="vv-cds">${ch.vv} verses</div></div>`;
+    }
+    const d = VV_DATA[item.id];
+    if (!d) return '';
+    const isE = vvExp === item.id;
+    const sk = d.sk.split('\n').slice(0, 2).join('<br>');
+    const ia = d.ia ? d.ia.split('\n').slice(0, 2).join('<br>') : '';
+    const ib = vvBask[item.id];
+
+    let exContent = '';
+    if (isE) {
+      const srcText = d.srcScript[vvSrcLang] ? d.srcScript[vvSrcLang].split('\n').join('<br>') : '';
+      const trText = d.tr[0][vvTrgLang] || d.tr[0].en;
+      const cmText = d.cm[0][vvTrgLang] || d.cm[0].en;
+      const w2wTokens = d.w2w[0].items.map(it => {
+        const srcKey = vvSrcLang === 'sa' ? 'sa' : (vvSrcLang + '_src');
+        return `<span class="vv-flow-tok"><span class="vv-flow-src script-${vvSrcLang}">${it[srcKey] || it.sa}</span><span class="vv-flow-sep">·</span><span class="vv-flow-mn script-${vvTrgLang}">${it[vvTrgLang] || it.en}</span></span>`;
+      }).join('');
+
+      let secs = '';
+      if (vvFields.srcScript && srcText) secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Source · ${vvSrcLangName(vvSrcLang)}</div><div class="vv-st script-${vvSrcLang}" style="font-size:15px;">${srcText}</div></div>`;
+      if (vvFields.w2w) secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Word for word · ${d.w2w[0].auth}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-flow">${w2wTokens}</div></div></div></div>`;
+      if (vvFields.translation) secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Translation · ${d.tr[0].auth}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-tr-text script-${vvTrgLang}" style="font-size:13px;">${trText}</div></div></div></div>`;
+      if (vvFields.commentary) secs += `<div class="vv-srx-sec"><div class="vv-srx-sec-lbl">Commentary · ${d.cm[0].auth}</div><div class="vv-ac"><div class="vv-ac-b"><div class="vv-tr-text script-${vvTrgLang}" style="font-size:13px;">${cmText}</div></div></div></div>`;
+      if (!secs) secs = `<div class="vv-empty" style="margin:0;">All supporting fields are hidden.</div>`;
+      exContent = `<div class="vv-srx open">${secs}<div class="vv-sracts">
+        <button class="vv-srbtn ${ib ? 'on' : ''}" onclick="event.stopPropagation();vvTogSBask('${item.id}')">⊕ ${ib ? 'In basket' : 'Basket'}</button>
+        <button class="vv-srbtn" onclick="event.stopPropagation();vvSelV('${item.id}',${parseInt(item.id)})">Full view →</button>
+      </div></div>`;
+    }
+    return `<div class="vv-srow ${isE ? 'exp' : ''}" onclick="vvTogExp('${item.id}')">
+      <div class="vv-srn">Bhagavad Gita · ${item.id}</div>
+      ${vvFields.original ? `<div class="vv-srsk">${sk}</div>` : ''}
+      ${vvFields.iast && ia ? `<div class="vv-sria">${ia}</div>` : ''}
+      ${exContent}
+    </div>`;
+  }).join('');
+}
+
+function vvTogExp(id) { vvExp = vvExp === id ? null : id; vvBsc(); }
+function vvTogSBask(id) { vvBask[id] = !vvBask[id]; vvBsc(); }
+
+vvBtoc();
+vvRv();
+vvBsc();
+</script>
+</body>
+</html>
