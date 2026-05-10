@@ -16,8 +16,8 @@ import {
 import {
   toLibraryBook,
   type LibraryBookView,
-  type RawBook,
 } from "@/lib/scriptle/bookAdapter";
+import { getBooks } from "@/lib/booksClient";
 
 type RoleContext = "guest" | "viewer" | "contributor" | "researcher" | "editor" | "admin";
 
@@ -90,14 +90,9 @@ export default function LibraryPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      fetch("/api/books", { credentials: "include" }),
-      getMe().catch(() => null),
-    ])
-      .then(async ([booksRes, me]) => {
+    Promise.all([getBooks(), getMe().catch(() => null)])
+      .then(([data, me]) => {
         if (cancelled) return;
-        if (!booksRes.ok) throw new Error("Could not load library");
-        const data = (await booksRes.json()) as RawBook[];
         setBooks(data.map(toLibraryBook));
         setRole(deriveRole(me));
       })

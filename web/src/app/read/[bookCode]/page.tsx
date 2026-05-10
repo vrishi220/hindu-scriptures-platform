@@ -17,9 +17,9 @@ import {
   transliterateFromIast,
   type TransliterationScriptOption,
 } from "@/lib/indicScript";
+import { getBookByCode } from "@/lib/booksClient";
 import {
   resolveBook,
-  type RawBook,
   type ResolvedBook,
 } from "@/lib/scriptle/bookAdapter";
 import {
@@ -138,14 +138,9 @@ function useResolvedBook(bookCode: string): {
   useEffect(() => {
     if (!bookCode) return;
     let cancelled = false;
-    fetch("/api/books", { credentials: "include" })
-      .then((r) => {
-        if (!r.ok) throw new Error("Could not load library");
-        return r.json() as Promise<RawBook[]>;
-      })
-      .then((data) => {
+    getBookByCode(bookCode)
+      .then((match) => {
         if (cancelled) return;
-        const match = data.find((b) => b.book_code === bookCode);
         if (!match) setError(`No book with code "${bookCode}".`);
         else setBook(resolveBook(match));
       })
@@ -331,6 +326,38 @@ function ReadBookContent() {
     leafIndex >= 0 && treeIndex && leafIndex < leafCount - 1
       ? treeIndex.leaves[leafIndex + 1]
       : null;
+
+  // Prefetch the next verse's content during browser idle time so a Next click
+  // resolves from HTTP cache instead of round-tripping. Cancelled if the user
+  // navigates away or switches selection.
+  useEffect(() => {
+    if (!nextLeaf || !isLeaf) return;
+    const ric =
+      typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback
+        : (cb: IdleRequestCallback) =>
+            window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline), 200);
+    const cic =
+      typeof window.cancelIdleCallback === "function"
+        ? window.cancelIdleCallback
+        : window.clearTimeout;
+    const controller = new AbortController();
+    const handle = ric(
+      () => {
+        fetch(`/api/content/nodes/${nextLeaf.id}`, {
+          credentials: "include",
+          signal: controller.signal,
+        }).catch(() => {
+          // ignore: this is a speculative warm-up
+        });
+      },
+      { timeout: 1500 }
+    );
+    return () => {
+      controller.abort();
+      cic(handle as number);
+    };
+  }, [nextLeaf, isLeaf]);
 
   if (bookError) {
     return (

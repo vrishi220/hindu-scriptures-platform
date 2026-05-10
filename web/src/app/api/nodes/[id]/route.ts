@@ -82,7 +82,7 @@ export async function GET(
         }
 
         return NextResponse.json(
-          { error: "Failed to fetch node" },
+          { detail: "Failed to fetch node" },
           { status: retryResponse.status }
         );
       }
@@ -91,7 +91,7 @@ export async function GET(
     if (!response.ok) {
       const errorText = await response.text();
       return NextResponse.json(
-        { error: errorText || "Failed to fetch node" },
+        { detail: errorText || "Failed to fetch node" },
         { status: response.status }
       );
     }
@@ -101,7 +101,7 @@ export async function GET(
   } catch (error) {
     console.error("Error fetching node:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { detail: "Internal server error" },
       { status: 500 }
     );
   }
