@@ -40,11 +40,13 @@ export async function POST(request: Request) {
       const res = NextResponse.json(payload || {}, { status: response.status });
       res.cookies.set(ACCESS_TOKEN_COOKIE, refreshed.access_token, {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         path: "/",
       });
       res.cookies.set(REFRESH_TOKEN_COOKIE, refreshed.refresh_token, {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         path: "/",
       });
