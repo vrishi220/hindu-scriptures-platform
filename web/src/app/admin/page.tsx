@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MoreVertical } from "lucide-react";
 import { getMe } from "@/lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 import InlineClearButton from "@/components/InlineClearButton";
 
 type User = {
@@ -511,15 +512,25 @@ export default function AdminPage() {
     : rolePermissions.viewer;
 
   if (!authChecked) {
-    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
+    return (
+      <div data-scriptle="true">
+        <AppBanner active="library" />
+        <main className="page-shell">
+          <p className="page-lede">Loading…</p>
+        </main>
+      </div>
+    );
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-zinc-900">Users</h1>
-        <p className="text-sm text-zinc-600">Manage user access in a searchable table view.</p>
-      </header>
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+        <header>
+          <p className="page-eyebrow">Admin</p>
+          <h1 className="page-h1">Users</h1>
+          <p className="page-lede">Manage user access in a searchable table view.</p>
+        </header>
 
       <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
         <a href="/admin" className="rounded-full border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-3 py-1 text-[color:var(--accent)]">Users</a>
@@ -948,6 +959,7 @@ export default function AdminPage() {
         </div>
       )}
 
-    </main>
+      </main>
+    </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getMe } from "../../lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 import InlineClearButton from "../../components/InlineClearButton";
 
 type TemplateVisibility = "private" | "published";
@@ -318,27 +319,36 @@ export default function TemplatesPage() {
   ]);
 
   if (!authChecked) {
-    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading...</main>;
+    return (
+      <div data-scriptle="true">
+        <AppBanner active="library" />
+        <main className="page-shell">
+          <p className="page-lede">Loading…</p>
+        </main>
+      </div>
+    );
   }
 
   if (!me) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-6">
-        <div className="rounded-xl border border-black/10 bg-white p-4 text-sm text-zinc-700">
-          Please sign in to manage templates.
-        </div>
-      </main>
+      <div data-scriptle="true">
+        <AppBanner active="library" />
+        <main className="page-shell">
+          <div className="page-card">Please sign in to manage templates.</div>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-zinc-900">Templates</h1>
-        <p className="text-sm text-zinc-600">
-          Manage templates in a searchable table view.
-        </p>
-      </header>
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+        <header>
+          <p className="page-eyebrow">Editor</p>
+          <h1 className="page-h1">Templates</h1>
+          <p className="page-lede">Manage templates in a searchable table view.</p>
+        </header>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
@@ -589,6 +599,7 @@ export default function TemplatesPage() {
           </div>
         </div>
       )}
-    </main>
+      </main>
+    </div>
   );
 }

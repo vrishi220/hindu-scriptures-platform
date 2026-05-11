@@ -1,161 +1,163 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import InlineClearButton from "../../components/InlineClearButton";
+import AppBanner from "@/components/scriptle/AppBanner";
+
+const isStrongPassword = (value: string) =>
+  /[A-Z]/.test(value) &&
+  /[a-z]/.test(value) &&
+  /[^A-Za-z0-9]/.test(value) &&
+  value.length >= 8;
 
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
-  const initialToken = useMemo(() => searchParams.get("token") || "", [searchParams]);
+  const initialToken = useMemo(
+    () => searchParams.get("token") || "",
+    [searchParams]
+  );
 
   const [token, setToken] = useState(initialToken);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState<string | null>(null);
-
-  const isStrongPassword = (value: string) =>
-    /[A-Z]/.test(value) && /[a-z]/.test(value) && /[^A-Za-z0-9]/.test(value) && value.length >= 8;
+  const [submitting, setSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage(null);
 
     if (!isStrongPassword(newPassword)) {
+      setIsSuccess(false);
       setMessage(
-        "Password must be at least 8 characters and include uppercase, lowercase, and special character."
+        "Password must be at least 8 characters with uppercase, lowercase, and a special character."
       );
       return;
     }
-
     if (newPassword !== confirmPassword) {
-      setMessage("Password and confirm password do not match.");
+      setIsSuccess(false);
+      setMessage("Passwords do not match.");
       return;
     }
 
+    setSubmitting(true);
     try {
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, new_password: newPassword }),
       });
-
       const payload = (await response.json().catch(() => null)) as
         | { message?: string; detail?: string }
         | null;
-
       if (!response.ok) {
         throw new Error(payload?.detail || "Unable to reset password");
       }
-
-      setMessage(payload?.message || "Password reset successful");
+      setIsSuccess(true);
+      setMessage(payload?.message || "Password reset successfully.");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Unable to reset password");
+      setIsSuccess(false);
+      setMessage(
+        err instanceof Error ? err.message : "Unable to reset password"
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg">
-          <h1 className="mb-6 font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-            Reset Password
-          </h1>
+    <div data-scriptle="true">
+      <AppBanner active="search" />
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-head">
+            <h1 className="auth-title">Choose a new password</h1>
+            <p className="auth-sub">
+              Use the token from your reset email below.
+            </p>
+          </div>
 
-          {message && (
-            <div className="mb-4 rounded-2xl border border-black/10 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+          {message ? (
+            <div className={`auth-alert ${isSuccess ? "success" : "error"}`}>
               {message}
+              {isSuccess ? (
+                <div style={{ marginTop: 10 }}>
+                  <Link href="/signin" className="auth-link primary">
+                    Sign in →
+                  </Link>
+                </div>
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div>
-              <label htmlFor="token" className="block text-sm font-medium text-zinc-700 mb-2">
+          <form className="auth-form" onSubmit={handleSubmit}>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="token">
                 Reset token
               </label>
-              <div className="group relative">
-                <input
-                  id="token"
-                  type="text"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="Paste reset token"
-                />
-                <InlineClearButton
-                  visible={Boolean(token)}
-                  onClear={() => setToken("")}
-                  ariaLabel="Clear token"
-                />
-              </div>
+              <input
+                id="token"
+                className="auth-input"
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                required
+                placeholder="Paste token from email"
+              />
             </div>
-
-            <div>
-              <label htmlFor="new-password" className="block text-sm font-medium text-zinc-700 mb-2">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="new-password">
                 New password
               </label>
-              <div className="group relative">
-                <input
-                  id="new-password"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  minLength={8}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="••••••••"
-                />
-                <InlineClearButton
-                  visible={Boolean(newPassword)}
-                  onClear={() => setNewPassword("")}
-                  ariaLabel="Clear new password"
-                />
+              <input
+                id="new-password"
+                className="auth-input"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                minLength={8}
+                required
+                placeholder="••••••••"
+              />
+              <div className="auth-hint">
+                At least 8 characters with uppercase, lowercase, and a special
+                character.
               </div>
-              <p className="mt-1 text-xs text-zinc-500">
-                Use at least 8 characters with uppercase, lowercase, and special character.
-              </p>
             </div>
-
-            <div>
-              <label htmlFor="confirm-password" className="block text-sm font-medium text-zinc-700 mb-2">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="confirm-password">
                 Confirm new password
               </label>
-              <div className="group relative">
-                <input
-                  id="confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  minLength={8}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="••••••••"
-                />
-                <InlineClearButton
-                  visible={Boolean(confirmPassword)}
-                  onClear={() => setConfirmPassword("")}
-                  ariaLabel="Clear confirm password"
-                />
-              </div>
+              <input
+                id="confirm-password"
+                className="auth-input"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                minLength={8}
+                required
+                placeholder="••••••••"
+              />
             </div>
-
             <button
               type="submit"
-              className="mt-2 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-4 py-2 text-sm font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 hover:shadow-md"
+              className="auth-submit"
+              disabled={submitting}
             >
-              Reset Password
+              {submitting ? "Resetting…" : "Reset password"}
             </button>
           </form>
 
-          <div className="mt-6 border-t border-black/10 pt-4">
-            <p className="text-center text-sm text-zinc-600">
-              Continue to{" "}
-              <a href="/signin" className="font-semibold text-[color:var(--accent)] hover:underline">
-                Sign in
-              </a>
-            </p>
+          <div className="auth-links">
+            <Link href="/signin" className="auth-link">
+              Back to sign in
+            </Link>
           </div>
         </div>
       </div>
@@ -165,7 +167,21 @@ function ResetPasswordContent() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="grainy-bg min-h-screen" />}>
+    <Suspense
+      fallback={
+        <div data-scriptle="true">
+          <AppBanner active="search" />
+          <div className="auth-shell">
+            <div className="auth-card">
+              <div className="auth-head">
+                <h1 className="auth-title">Choose a new password</h1>
+                <p className="auth-sub">Loading…</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+    >
       <ResetPasswordContent />
     </Suspense>
   );

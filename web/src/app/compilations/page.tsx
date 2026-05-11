@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, MoreVertical, SlidersHorizontal, Trash2, Upload } from "lucide-react";
+import AppBanner from "@/components/scriptle/AppBanner";
 import { getMe } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -289,61 +290,69 @@ export default function CompilationsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
-      <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">
-              My Compilations
-            </h1>
-            {authEmail && preferences && (
-              <button
-                type="button"
-                onClick={() => setShowPreferencesDialog(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-zinc-700 transition hover:border-black/20 hover:bg-zinc-50"
-              >
-                <SlidersHorizontal size={14} />
-                Preferences
-              </button>
-            )}
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <main className="page-shell" style={{ maxWidth: 880 }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <p className="page-eyebrow">My library</p>
+            <h1 className="page-h1">Compilations</h1>
+            <p className="page-lede">
+              Saved collections of verses — drafts and publications.
+            </p>
           </div>
-          <p className="mt-2 text-zinc-600">
-            View and manage your saved scripture collections
-          </p>
-        </div>
-
-        {/* Content */}
-        {!authEmail ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
-            <p className="mb-4 text-zinc-600">Please sign in to view your compilations.</p>
+          {authEmail && preferences ? (
             <button
-              onClick={() => router.push("/signin?returnTo=/compilations")}
-              className="rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)] px-6 py-3 font-medium text-white transition hover:shadow-lg"
+              type="button"
+              onClick={() => setShowPreferencesDialog(true)}
+              className="page-cta secondary"
+              aria-label="Open preferences"
             >
-              Sign In
+              <SlidersHorizontal size={14} />
+              Preferences
+            </button>
+          ) : null}
+        </header>
+
+        {!authEmail ? (
+          <div className="page-card" style={{ textAlign: "center" }}>
+            <p style={{ color: "var(--color-text-muted)", marginBottom: 14 }}>
+              Please sign in to view your compilations.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/signin?returnTo=/compilations")}
+              className="page-cta"
+            >
+              Sign in
             </button>
           </div>
         ) : loading ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
-            <p className="text-zinc-600">Loading compilations...</p>
+          <div className="page-card" style={{ textAlign: "center", color: "var(--color-text-muted)" }}>
+            Loading…
           </div>
         ) : error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center shadow-lg">
-            <p className="text-red-700">{error}</p>
-          </div>
+          <div className="form-toast error">{error}</div>
         ) : compilations.length === 0 ? (
-          <div className="rounded-2xl border border-black/10 bg-white/80 p-6 text-center shadow-lg">
-            <p className="mb-4 text-zinc-600">
+          <div className="page-card" style={{ textAlign: "center" }}>
+            <p style={{ color: "var(--color-text-muted)", marginBottom: 8 }}>
               You haven&apos;t saved any compilations yet.
             </p>
-            <p className="text-sm text-zinc-500">
-              Visit the{" "}
+            <p style={{ fontSize: 12, color: "var(--color-text-faint)" }}>
+              Visit{" "}
               <a
                 href="/scriptures"
-                className="font-medium text-[color:var(--accent)] hover:underline"
+                style={{ color: "var(--color-accent)" }}
               >
-                Scriptures page
+                Scriptures
               </a>{" "}
               to add verses to your basket and save them as a compilation.
             </p>
@@ -485,7 +494,7 @@ export default function CompilationsPage() {
           saving={preferencesSaving}
           message={preferencesMessage}
         />
-      </div>
+      </main>
     </div>
   );
 }

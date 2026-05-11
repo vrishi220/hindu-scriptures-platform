@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import InlineClearButton from "../../components/InlineClearButton";
-import { contentPath } from "../../lib/apiPaths";
-import { getMe } from "../../lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
+import { contentPath } from "@/lib/apiPaths";
+import { getMe } from "@/lib/authClient";
+import { getBooks } from "@/lib/booksClient";
 
-type BookOption = {
-  id: number;
-  book_name: string;
-};
+type BookOption = { id: number; book_name: string };
 
 type TreeNode = {
   id: number;
@@ -20,6 +18,18 @@ type TreeNode = {
   title_transliteration?: string | null;
   children?: TreeNode[];
 };
+
+type FlatNode = TreeNode & { depth: number };
+
+function flattenTree(nodes: TreeNode[]): FlatNode[] {
+  const out: FlatNode[] = [];
+  const visit = (n: TreeNode, depth: number) => {
+    out.push({ ...n, depth });
+    n.children?.forEach((c) => visit(c, depth + 1));
+  };
+  nodes.forEach((n) => visit(n, 0));
+  return out;
+}
 
 export default function ContributePage() {
   const [canContribute, setCanContribute] = useState(false);
@@ -45,52 +55,33 @@ export default function ContributePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const loadAuth = async () => {
-      try {
-        const data = await getMe();
-
-        if (data) {
-          setCanContribute(
-            Boolean(
-              data.permissions?.can_contribute ||
-                data.permissions?.can_edit ||
-                data.role === "contributor" ||
-                data.role === "editor" ||
-                data.role === "admin"
-            )
-          );
-        }
-      } catch (err) {
-        console.error("Auth check error:", err);
-      } finally {
-        setLoading(false);
-      }
+    let cancelled = false;
+    Promise.all([getMe().catch(() => null), getBooks().catch(() => [])])
+      .then(([me, list]) => {
+        if (cancelled) return;
+        setCanContribute(
+          Boolean(
+            me &&
+              (me.permissions?.can_contribute ||
+                me.permissions?.can_edit ||
+                me.role === "contributor" ||
+                me.role === "editor" ||
+                me.role === "admin")
+          )
+        );
+        setBooks(list as BookOption[]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
     };
-    loadAuth();
   }, []);
 
   useEffect(() => {
-    const loadBooks = async () => {
-      try {
-        const response = await fetch("/api/books", { credentials: "include" });
-        if (response.ok) {
-          const data = (await response.json()) as BookOption[];
-          setBooks(data);
-        }
-      } catch {
-        // Ignore
-      }
-    };
-    loadBooks();
-  }, []);
-
-  useEffect(() => {
-    if (!toast) {
-      return undefined;
-    }
-    const timer = window.setTimeout(() => {
-      setToast(null);
-    }, 4000);
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
@@ -109,20 +100,8 @@ export default function ContributePage() {
         setTreeData(data);
       }
     } catch {
-      // Ignore
+      // ignore
     }
-  };
-
-  const flattenTree = (nodes: TreeNode[]): TreeNode[] => {
-    const result: TreeNode[] = [];
-    const traverse = (node: TreeNode, depth = 0) => {
-      result.push({ ...node, level_order: depth } as TreeNode & { level_order: number });
-      if (node.children) {
-        node.children.forEach((child) => traverse(child, depth + 1));
-      }
-    };
-    nodes.forEach((n) => traverse(n));
-    return result;
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -140,16 +119,14 @@ export default function ContributePage() {
         sanskrit: contentSanskrit || undefined,
         transliteration: contentTransliteration || undefined,
       };
-      contentData.translations = {
-        english: contentEnglish || undefined,
-      };
+      contentData.translations = { english: contentEnglish || undefined };
     }
 
     const payload = {
       book_id: parseInt(bookId, 10),
       parent_node_id: parentNodeId,
       level_name: levelName,
-      level_order: 0, // Will be adjusted by backend if needed
+      level_order: 0,
       sequence_number: sequenceNumber ? sequenceNumber.trim() : null,
       title_sanskrit: titleSanskrit || null,
       title_transliteration: titleTransliteration || null,
@@ -166,16 +143,13 @@ export default function ContributePage() {
         body: JSON.stringify(payload),
         credentials: "include",
       });
-
       if (!response.ok) {
         const error = (await response.json().catch(() => null)) as {
           detail?: string;
         } | null;
         throw new Error(error?.detail || "Failed to create content");
       }
-
-      setToast({ type: "success", message: "Content created successfully!" });
-      // Reset form
+      setToast({ type: "success", message: "Verse created." });
       setLevelName("");
       setSequenceNumber("");
       setTitleSanskrit("");
@@ -187,12 +161,12 @@ export default function ContributePage() {
       setContentEnglish("");
       setTags("");
       setParentNodeId(null);
-      // Reload tree
       loadTree(bookId);
     } catch (err) {
       setToast({
         type: "error",
-        message: err instanceof Error ? err.message : "Failed to create content",
+        message:
+          err instanceof Error ? err.message : "Failed to create content",
       });
     } finally {
       setSubmitting(false);
@@ -201,23 +175,31 @@ export default function ContributePage() {
 
   if (loading) {
     return (
-      <div className="grainy-bg flex min-h-screen items-center justify-center">
-        <p className="text-sm text-zinc-500">Loading...</p>
+      <div data-scriptle="true">
+        <AppBanner active="search" />
+        <main className="page-shell">
+          <p className="page-lede">Loading…</p>
+        </main>
       </div>
     );
   }
 
   if (!canContribute) {
     return (
-      <div className="grainy-bg min-h-screen">
-        <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 shadow-sm">
-            Contributor access required. Please sign in with a contributor, editor, or admin
-            account.
-            <Link className="ml-2 font-semibold text-amber-800 underline" href="/signin">
-              Go to sign in
-            </Link>
-          </div>
+      <div data-scriptle="true">
+        <AppBanner active="search" />
+        <main className="page-shell">
+          <header>
+            <p className="page-eyebrow">Contribute</p>
+            <h1 className="page-h1">Contributor access required</h1>
+            <p className="page-lede">
+              Sign in with a contributor, editor, or admin account to add
+              content.
+            </p>
+          </header>
+          <Link href="/signin" className="page-cta" style={{ alignSelf: "flex-start" }}>
+            Sign in →
+          </Link>
         </main>
       </div>
     );
@@ -226,288 +208,233 @@ export default function ContributePage() {
   const flatNodes = flattenTree(treeData);
 
   return (
-    <div className="grainy-bg min-h-screen">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
-        <header className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Contribute</p>
-          <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)]">
-            Add content
-          </h1>
-          <p className="max-w-2xl text-sm text-zinc-600">
-            Create new content nodes for scriptures. Select a book and optionally a parent node,
-            then fill in the details.
+    <div data-scriptle="true">
+      <AppBanner active="search" />
+      <main className="page-shell">
+        <header>
+          <p className="page-eyebrow">Contribute</p>
+          <h1 className="page-h1">Add a verse</h1>
+          <p className="page-lede">
+            Pick a book and (optionally) a parent node, then describe the new
+            content node you&apos;d like to add.
           </p>
         </header>
 
-        {toast && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
-              toast.type === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {toast.message}
-          </div>
-        )}
+        {toast ? (
+          <div className={`form-toast ${toast.type}`}>{toast.message}</div>
+        ) : null}
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-[32px] border border-black/10 bg-white/80 p-6 shadow-lg"
+          style={{ display: "flex", flexDirection: "column", gap: 20 }}
         >
-          <div className="grid gap-6">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Book *
-                </span>
+          <div className="form-row cols-2">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="book">
+                Book *
+              </label>
+              <select
+                id="book"
+                className="form-select"
+                value={bookId}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setBookId(value);
+                  loadTree(value);
+                }}
+                required
+              >
+                <option value="">Select a book</option>
+                {books.map((book) => (
+                  <option key={book.id} value={book.id.toString()}>
+                    {book.book_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {flatNodes.length > 0 ? (
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="parent">
+                  Parent node
+                </label>
                 <select
-                  value={bookId}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setBookId(value);
-                    loadTree(value);
-                  }}
-                  className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  required
+                  id="parent"
+                  className="form-select"
+                  value={parentNodeId ?? ""}
+                  onChange={(event) =>
+                    setParentNodeId(
+                      event.target.value
+                        ? parseInt(event.target.value, 10)
+                        : null
+                    )
+                  }
                 >
-                  <option value="">Select a book</option>
-                  {books.map((book) => (
-                    <option key={book.id} value={book.id.toString()}>
-                      {book.book_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {flatNodes.length > 0 && (
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Parent node
-                  </span>
-                  <select
-                    value={parentNodeId || ""}
-                    onChange={(event) =>
-                      setParentNodeId(event.target.value ? parseInt(event.target.value, 10) : null)
-                    }
-                    className="rounded-2xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]"
-                  >
-                    <option value="">None (top level)</option>
-                    {flatNodes.map((node) => (
+                  <option value="">None (top level)</option>
+                  {flatNodes.map((node) => {
+                    const indent = "  ".repeat(node.depth);
+                    const label =
+                      node.title_english ||
+                      node.title_sanskrit ||
+                      `Node ${node.id}`;
+                    return (
                       <option key={node.id} value={node.id.toString()}>
-                        {node.title_english || node.title_sanskrit || `Node ${node.id}`}
+                        {indent}
+                        {label}
                       </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Level name *
-                </span>
-                <div className="group relative">
-                  <input
-                    value={levelName}
-                    onChange={(event) => setLevelName(event.target.value)}
-                    placeholder="e.g., Chapter, Shloka, Verse"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                    required
-                  />
-                  <InlineClearButton
-                    visible={Boolean(levelName)}
-                    onClear={() => setLevelName("")}
-                    ariaLabel="Clear level name"
-                  />
-                </div>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Sequence number
-                </span>
-                <div className="group relative">
-                  <input
-                    type="number"
-                    value={sequenceNumber}
-                    onChange={(event) => setSequenceNumber(event.target.value)}
-                    placeholder="Auto-calculated if empty"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
-                  <InlineClearButton
-                    visible={Boolean(sequenceNumber)}
-                    onClear={() => setSequenceNumber("")}
-                    ariaLabel="Clear sequence number"
-                  />
-                </div>
-              </label>
-            </div>
-
-            <div className="grid gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Title (Sanskrit)
-                </span>
-                <div className="group relative">
-                  <input
-                    value={titleSanskrit}
-                    onChange={(event) => setTitleSanskrit(event.target.value)}
-                    placeholder="देवनागरी"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
-                  <InlineClearButton
-                    visible={Boolean(titleSanskrit)}
-                    onClear={() => setTitleSanskrit("")}
-                    ariaLabel="Clear title Sanskrit"
-                  />
-                </div>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Title (Transliteration)
-                </span>
-                <div className="group relative">
-                  <input
-                    value={titleTransliteration}
-                    onChange={(event) => setTitleTransliteration(event.target.value)}
-                    placeholder="IAST or simplified"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
-                  <InlineClearButton
-                    visible={Boolean(titleTransliteration)}
-                    onClear={() => setTitleTransliteration("")}
-                    ariaLabel="Clear title transliteration"
-                  />
-                </div>
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                  Title (English)
-                </span>
-                <div className="group relative">
-                  <input
-                    value={titleEnglish}
-                    onChange={(event) => setTitleEnglish(event.target.value)}
-                    placeholder="English title or translation"
-                    className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                  />
-                  <InlineClearButton
-                    visible={Boolean(titleEnglish)}
-                    onClear={() => setTitleEnglish("")}
-                    ariaLabel="Clear title English"
-                  />
-                </div>
-              </label>
-            </div>
-
-            <label className="flex items-center gap-3 rounded-2xl border border-black/10 bg-white/90 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={hasContent}
-                onChange={(event) => setHasContent(event.target.checked)}
-                className="h-4 w-4 rounded border-black/20 text-[color:var(--accent)]"
-              />
-              <span className="text-sm text-zinc-700">This node has text content</span>
-            </label>
-
-            {hasContent && (
-              <div className="grid gap-4 rounded-2xl border border-black/10 bg-zinc-50/50 p-4">
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Content (Sanskrit)
-                  </span>
-                  <div className="group relative">
-                    <textarea
-                      value={contentSanskrit}
-                      onChange={(event) => setContentSanskrit(event.target.value)}
-                      placeholder="देवनागरी text"
-                      rows={3}
-                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                    />
-                    <InlineClearButton
-                      visible={Boolean(contentSanskrit)}
-                      onClear={() => setContentSanskrit("")}
-                      ariaLabel="Clear content Sanskrit"
-                      position="top"
-                    />
-                  </div>
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Content (Transliteration)
-                  </span>
-                  <div className="group relative">
-                    <textarea
-                      value={contentTransliteration}
-                      onChange={(event) => setContentTransliteration(event.target.value)}
-                      placeholder="IAST or simplified transliteration"
-                      rows={3}
-                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                    />
-                    <InlineClearButton
-                      visible={Boolean(contentTransliteration)}
-                      onClear={() => setContentTransliteration("")}
-                      ariaLabel="Clear content transliteration"
-                      position="top"
-                    />
-                  </div>
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Translation (English)
-                  </span>
-                  <div className="group relative">
-                    <textarea
-                      value={contentEnglish}
-                      onChange={(event) => setContentEnglish(event.target.value)}
-                      placeholder="English translation"
-                      rows={3}
-                      className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                    />
-                    <InlineClearButton
-                      visible={Boolean(contentEnglish)}
-                      onClear={() => setContentEnglish("")}
-                      ariaLabel="Clear content English"
-                      position="top"
-                    />
-                  </div>
-                </label>
+                    );
+                  })}
+                </select>
               </div>
-            )}
-
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                Tags (comma-separated)
-              </span>
-              <div className="group relative">
-                <input
-                  value={tags}
-                  onChange={(event) => setTags(event.target.value)}
-                  placeholder="e.g., philosophy, devotion, yoga"
-                  className="w-full rounded-2xl border border-black/10 bg-white/90 px-3 py-2 pr-10 text-sm outline-none focus:border-[color:var(--accent)]"
-                />
-                <InlineClearButton
-                  visible={Boolean(tags)}
-                  onClear={() => setTags("")}
-                  ariaLabel="Clear tags"
-                />
-              </div>
-            </label>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-2xl bg-[color:var(--deep)] px-6 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:opacity-50"
-            >
-              {submitting ? "Creating..." : "Create content"}
-            </button>
+            ) : null}
           </div>
+
+          <div className="form-row cols-2">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="level">
+                Level name *
+              </label>
+              <input
+                id="level"
+                className="auth-input"
+                value={levelName}
+                onChange={(event) => setLevelName(event.target.value)}
+                placeholder="e.g. Chapter, Shloka, Verse"
+                required
+              />
+            </div>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="seq">
+                Sequence number
+              </label>
+              <input
+                id="seq"
+                className="auth-input"
+                type="number"
+                value={sequenceNumber}
+                onChange={(event) => setSequenceNumber(event.target.value)}
+                placeholder="Auto-calculated if empty"
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="title-sa">
+                Title (Sanskrit)
+              </label>
+              <input
+                id="title-sa"
+                className="auth-input"
+                value={titleSanskrit}
+                onChange={(event) => setTitleSanskrit(event.target.value)}
+                placeholder="देवनागरी"
+              />
+            </div>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="title-tr">
+                Title (Transliteration)
+              </label>
+              <input
+                id="title-tr"
+                className="auth-input"
+                value={titleTransliteration}
+                onChange={(event) =>
+                  setTitleTransliteration(event.target.value)
+                }
+                placeholder="IAST or simplified"
+              />
+            </div>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="title-en">
+                Title (English)
+              </label>
+              <input
+                id="title-en"
+                className="auth-input"
+                value={titleEnglish}
+                onChange={(event) => setTitleEnglish(event.target.value)}
+                placeholder="English title or translation"
+              />
+            </div>
+          </div>
+
+          <label className="form-check">
+            <input
+              type="checkbox"
+              checked={hasContent}
+              onChange={(event) => setHasContent(event.target.checked)}
+            />
+            <span>This node has text content</span>
+          </label>
+
+          {hasContent ? (
+            <div className="form-group">
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="content-sa">
+                  Content (Sanskrit)
+                </label>
+                <textarea
+                  id="content-sa"
+                  className="form-textarea"
+                  value={contentSanskrit}
+                  onChange={(event) => setContentSanskrit(event.target.value)}
+                  placeholder="देवनागरी text"
+                  rows={3}
+                />
+              </div>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="content-tr">
+                  Content (Transliteration)
+                </label>
+                <textarea
+                  id="content-tr"
+                  className="form-textarea"
+                  value={contentTransliteration}
+                  onChange={(event) =>
+                    setContentTransliteration(event.target.value)
+                  }
+                  placeholder="IAST or simplified transliteration"
+                  rows={3}
+                />
+              </div>
+              <div className="auth-field">
+                <label className="auth-label" htmlFor="content-en">
+                  Translation (English)
+                </label>
+                <textarea
+                  id="content-en"
+                  className="form-textarea"
+                  value={contentEnglish}
+                  onChange={(event) => setContentEnglish(event.target.value)}
+                  placeholder="English translation"
+                  rows={3}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="auth-field">
+            <label className="auth-label" htmlFor="tags">
+              Tags
+            </label>
+            <input
+              id="tags"
+              className="auth-input"
+              value={tags}
+              onChange={(event) => setTags(event.target.value)}
+              placeholder="comma-separated: philosophy, devotion, yoga"
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="page-cta"
+            disabled={submitting}
+            style={{ alignSelf: "flex-start" }}
+          >
+            {submitting ? "Creating…" : "Create verse"}
+          </button>
         </form>
       </main>
     </div>

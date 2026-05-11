@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, ShoppingBasket, X } from "lucide-react";
+import AppBanner from "@/components/scriptle/AppBanner";
 import { contentPath } from "../../lib/apiPaths";
 import { getMe, invalidateMeCache } from "../../lib/authClient";
 
@@ -873,7 +874,8 @@ export default function ExplorerPage() {
   const selectedBook = books.find((b) => b.id === selectedBookId);
 
   return (
-    <div className="grainy-bg min-h-screen">
+    <div data-scriptle="true">
+      <AppBanner active="library" />
       <main className="mx-auto max-w-7xl px-6 py-8">
         <header className="mb-6">
           <div className="flex flex-wrap items-center gap-3">

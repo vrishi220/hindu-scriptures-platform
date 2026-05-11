@@ -51,11 +51,13 @@ export async function POST(request: Request) {
   const res = NextResponse.json({ message: "Logged in" });
   res.cookies.set(ACCESS_TOKEN_COOKIE, payload.access_token, {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
   });
   res.cookies.set(REFRESH_TOKEN_COOKIE, payload.refresh_token, {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
   });

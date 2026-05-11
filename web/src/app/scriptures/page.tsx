@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { contentPath } from "../../lib/apiPaths";
+import AppBanner from "@/components/scriptle/AppBanner";
 import BasketPanel from "../../components/BasketPanel";
 import BookThumbnailSection from "./components/BookThumbnailSection";
 import ExternalMediaFormModal from "../../components/ExternalMediaFormModal";
@@ -13283,8 +13284,9 @@ function ScripturesContent() {
   );
 
   return (
-    <div className="grainy-bg flex min-h-0 flex-col">
-      <main className="mx-auto flex h-[calc(100svh-7.5rem)] min-h-0 w-full max-w-none flex-col gap-2 overflow-hidden px-3 pb-2 pt-2 sm:gap-3 sm:px-4 sm:pb-3 sm:pt-3">
+    <div data-scriptle="true" className="flex min-h-0 flex-col">
+      <AppBanner active="library" />
+      <main className="mx-auto flex h-[calc(100svh-3rem)] min-h-0 w-full max-w-none flex-col gap-2 overflow-hidden px-3 pb-2 pt-2 sm:gap-3 sm:px-4 sm:pb-3 sm:pt-3">
         {searchReturnUrl && (
           <div className="flex items-center gap-2">
             <a

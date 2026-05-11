@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreVertical, Play, X } from "lucide-react";
+import AppBanner from "@/components/scriptle/AppBanner";
 import { contentPath } from "../../../lib/apiPaths";
 
 interface Schema {
@@ -330,16 +331,16 @@ export default function AdminImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-slate-900 mb-2">
-            Import Scripture Document
-          </h1>
-          <p className="text-slate-600">
-            Import scripture texts from PDFs and HTML sources using configurable extraction rules
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6 sm:py-8">
+        <header style={{ marginBottom: 24 }}>
+          <p className="page-eyebrow">Admin</p>
+          <h1 className="page-h1">Import scripture document</h1>
+          <p className="page-lede">
+            Import scripture texts from PDFs and HTML sources using configurable extraction rules.
           </p>
-        </div>
+        </header>
 
         <div className="mb-6 flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
           <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>

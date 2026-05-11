@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { contentPath } from "../../../lib/apiPaths";
 import { getMe } from "../../../lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 import InlineClearButton from "../../../components/InlineClearButton";
 
 type Schema = {
@@ -382,15 +383,25 @@ export default function SchemaBuilderPage() {
   };
 
   if (!authChecked) {
-    return <main className="mx-auto w-full max-w-6xl px-4 py-6">Loading…</main>;
+    return (
+      <div data-scriptle="true">
+        <AppBanner active="library" />
+        <main className="page-shell">
+          <p className="page-lede">Loading…</p>
+        </main>
+      </div>
+    );
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-zinc-900">Schemas</h1>
-        <p className="text-sm text-zinc-600">Manage scripture schemas in a searchable list view.</p>
-      </header>
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <main className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+        <header>
+          <p className="page-eyebrow">Admin</p>
+          <h1 className="page-h1">Schemas</h1>
+          <p className="page-lede">Manage scripture schemas in a searchable list view.</p>
+        </header>
 
       <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
         <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>
@@ -617,6 +628,7 @@ export default function SchemaBuilderPage() {
           </div>
         </div>
       )}
-    </main>
+      </main>
+    </div>
   );
 }

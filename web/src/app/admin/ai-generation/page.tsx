@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Play, X } from "lucide-react";
 import { getMe } from "@/lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 
 type Toast = {
   type: "success" | "error";
@@ -805,17 +806,27 @@ export default function AdminAiGenerationPage() {
   };
 
   if (!authChecked) {
-    return <main className="mx-auto w-full max-w-7xl px-4 py-6">Loading…</main>;
+    return (
+      <div data-scriptle="true">
+        <AppBanner active="library" />
+        <main className="page-shell">
+          <p className="page-lede">Loading…</p>
+        </main>
+      </div>
+    );
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-4 py-6 space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold text-zinc-900">AI Generation</h1>
-        <p className="text-sm text-zinc-600">
-          Start translation jobs, monitor active runs, and review completed AI output history.
-        </p>
-      </header>
+    <div data-scriptle="true">
+      <AppBanner active="library" />
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 space-y-6">
+        <header>
+          <p className="page-eyebrow">Admin</p>
+          <h1 className="page-h1">AI Generation</h1>
+          <p className="page-lede">
+            Start translation jobs, monitor active runs, and review completed AI output history.
+          </p>
+        </header>
 
       <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500">
         <a href="/admin" className="rounded-full border border-black/10 bg-white px-3 py-1">Users</a>
@@ -996,7 +1007,7 @@ export default function AdminAiGenerationPage() {
                 <p className="text-sm text-red-600">{additionalInstructionsError}</p>
               ) : (
                 <p className="text-xs text-zinc-500">
-                  e.g. "Commentary should be from Advaitic perspective. Keep w2w meanings concise."
+                  e.g. &ldquo;Commentary should be from Advaitic perspective. Keep w2w meanings concise.&rdquo;
                 </p>
               )}
             </div>
@@ -1250,6 +1261,7 @@ export default function AdminAiGenerationPage() {
           </table>
         </div>
       </section>
-    </main>
+      </main>
+    </div>
   );
 }
