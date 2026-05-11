@@ -11,6 +11,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
+import AppBanner from "@/components/scriptle/AppBanner";
 import { getMe } from "../../lib/authClient";
 import UserPreferencesDialog, {
   type UserPreferences,
@@ -1288,7 +1289,8 @@ function DraftsPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
+    <div data-scriptle="true">
+      <AppBanner active="library" />
       <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
         <div className="mb-8">
           <div className="flex items-center justify-between gap-3">
@@ -2032,10 +2034,18 @@ export default function DraftsPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
+        <div data-scriptle="true">
+          <AppBanner active="library" />
           <div className="mx-auto max-w-5xl px-3 py-6 sm:px-4 sm:py-8">
-            <div className="rounded-2xl border border-black/10 bg-white/85 p-4 text-sm text-zinc-600">
-              Loading drafts...
+            <div
+              style={{
+                color: "var(--color-text-muted)",
+                fontFamily: "var(--font-serif)",
+                fontStyle: "italic",
+                fontSize: 13,
+              }}
+            >
+              Loading drafts…
             </div>
           </div>
         </div>

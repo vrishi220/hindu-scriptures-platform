@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import InlineClearButton from "../../components/InlineClearButton";
+import AppBanner from "@/components/scriptle/AppBanner";
 
 const SIGNUP_DRAFT_STORAGE_KEY = "auth_signup_draft_v1";
 
@@ -22,6 +22,12 @@ type RegistrationResponse = {
   verification_email_sent?: boolean;
 };
 
+const isStrongPassword = (value: string) =>
+  /[A-Z]/.test(value) &&
+  /[a-z]/.test(value) &&
+  /[^A-Za-z0-9]/.test(value) &&
+  value.length >= 8;
+
 function SignUpPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -31,68 +37,52 @@ function SignUpPageContent() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<
+    string | null
+  >(null);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [isResendingVerification, setIsResendingVerification] = useState(false);
-
-  const isStrongPassword = (value: string) =>
-    /[A-Z]/.test(value) &&
-    /[a-z]/.test(value) &&
-    /[^A-Za-z0-9]/.test(value) &&
-    value.length >= 8;
+  const [submitting, setSubmitting] = useState(false);
 
   const invitedEmail = searchParams.get("email") || "";
   const nextPath = searchParams.get("next") || "/";
   const safeNextPath = nextPath.startsWith("/") ? nextPath : "/";
   const signInQuery = new URLSearchParams({ returnTo: safeNextPath });
   const signInEmail = email.trim() || invitedEmail;
-  if (signInEmail) {
-    signInQuery.set("email", signInEmail);
-  }
+  if (signInEmail) signInQuery.set("email", signInEmail);
   const signInHref = `/signin?${signInQuery.toString()}`;
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    if (typeof window === "undefined") return;
     try {
       const raw = window.sessionStorage.getItem(SIGNUP_DRAFT_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
+      if (!raw) return;
       const draft = JSON.parse(raw) as Partial<SignUpDraft>;
       if (typeof draft.email === "string") setEmail(draft.email);
       if (typeof draft.username === "string") setUsername(draft.username);
       if (typeof draft.fullName === "string") setFullName(draft.fullName);
       if (typeof draft.password === "string") setPassword(draft.password);
-      if (typeof draft.confirmPassword === "string") setConfirmPassword(draft.confirmPassword);
+      if (typeof draft.confirmPassword === "string")
+        setConfirmPassword(draft.confirmPassword);
     } catch {
-      // Ignore malformed draft payloads.
+      // ignore malformed draft
     }
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    if (typeof window === "undefined") return;
     try {
-      const draft: SignUpDraft = {
-        email,
-        username,
-        fullName,
-        password,
-        confirmPassword,
-      };
-      window.sessionStorage.setItem(SIGNUP_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      window.sessionStorage.setItem(
+        SIGNUP_DRAFT_STORAGE_KEY,
+        JSON.stringify({ email, username, fullName, password, confirmPassword })
+      );
     } catch {
-      // Ignore storage write failures.
+      // ignore storage write failures
     }
   }, [email, username, fullName, password, confirmPassword]);
 
   useEffect(() => {
-    if (!invitedEmail || email) {
-      return;
-    }
+    if (!invitedEmail || email) return;
     setEmail(invitedEmail);
   }, [email, invitedEmail]);
 
@@ -103,16 +93,16 @@ function SignUpPageContent() {
 
     if (!isStrongPassword(password)) {
       setAuthMessage(
-        "Password must be at least 8 characters and include uppercase, lowercase, and special character."
+        "Password must be at least 8 characters with uppercase, lowercase, and a special character."
       );
       return;
     }
-
     if (password !== confirmPassword) {
-      setAuthMessage("Password and confirm password do not match.");
+      setAuthMessage("Passwords do not match.");
       return;
     }
 
+    setSubmitting(true);
     try {
       const registerResponse = await fetch("/api/auth/register", {
         method: "POST",
@@ -126,17 +116,24 @@ function SignUpPageContent() {
         }),
       });
 
-      const registerPayload = (await registerResponse.json().catch(async () => {
-        const text = await registerResponse.text().catch(() => "");
-        return text ? { detail: text } : null;
-      })) as RegistrationResponse | null;
+      const registerPayload = (await registerResponse
+        .json()
+        .catch(async () => {
+          const text = await registerResponse.text().catch(() => "");
+          return text ? { detail: text } : null;
+        })) as RegistrationResponse | null;
 
       if (!registerResponse.ok) {
-        const detail = registerPayload?.detail || registerPayload?.message || "Registration failed";
-        throw new Error(`Registration failed (${registerResponse.status}): ${detail}`);
+        const detail =
+          registerPayload?.detail ||
+          registerPayload?.message ||
+          "Registration failed";
+        throw new Error(detail);
       }
 
-      const requiresEmailVerification = Boolean(registerPayload?.requires_email_verification);
+      const requiresEmailVerification = Boolean(
+        registerPayload?.requires_email_verification
+      );
       if (typeof window !== "undefined") {
         window.sessionStorage.removeItem(SIGNUP_DRAFT_STORAGE_KEY);
       }
@@ -146,7 +143,8 @@ function SignUpPageContent() {
         setPassword("");
         setConfirmPassword("");
         setAuthMessage(
-          registerPayload?.message || "Account created. Check your email to confirm your account."
+          registerPayload?.message ||
+            "Account created. Check your email to confirm."
         );
         return;
       }
@@ -162,26 +160,29 @@ function SignUpPageContent() {
         setPendingVerificationEmail(null);
         setAuthMessage("Account created. Please sign in.");
         const signInParams = new URLSearchParams({ returnTo: safeNextPath });
-        if (email) {
-          signInParams.set("email", email);
-        }
-        setTimeout(() => router.push(`/signin?${signInParams.toString()}`), 800);
+        if (email) signInParams.set("email", email);
+        setTimeout(
+          () => router.push(`/signin?${signInParams.toString()}`),
+          800
+        );
         return;
       }
 
       setPendingVerificationEmail(null);
-      setAuthMessage("Account created. Redirecting...");
+      setAuthMessage("Account created. Redirecting…");
       setTimeout(() => router.push(safeNextPath), 500);
     } catch (err) {
       setPendingVerificationEmail(null);
-      setAuthMessage(err instanceof Error ? err.message : "Registration failed");
+      setAuthMessage(
+        err instanceof Error ? err.message : "Registration failed"
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleResendVerification = async () => {
-    if (!pendingVerificationEmail || isResendingVerification) {
-      return;
-    }
+    if (!pendingVerificationEmail || isResendingVerification) return;
     setIsResendingVerification(true);
     setResendMessage(null);
     try {
@@ -196,203 +197,165 @@ function SignUpPageContent() {
         return text ? { detail: text } : null;
       })) as { message?: string; detail?: string } | null;
       if (!response.ok) {
-        throw new Error(payload?.detail || payload?.message || "Failed to resend verification email.");
+        throw new Error(
+          payload?.detail ||
+            payload?.message ||
+            "Failed to resend verification email."
+        );
       }
       setResendMessage(payload?.message || "Verification email sent.");
     } catch (err) {
-      setResendMessage(err instanceof Error ? err.message : "Failed to resend verification email.");
+      setResendMessage(
+        err instanceof Error
+          ? err.message
+          : "Failed to resend verification email."
+      );
     } finally {
       setIsResendingVerification(false);
     }
   };
 
-  const handlePasswordChange = (value: string) => {
-    setPassword(value);
-    if (authMessage) setAuthMessage(null);
-  };
-
-  const handleConfirmPasswordChange = (value: string) => {
-    setConfirmPassword(value);
-    if (authMessage) setAuthMessage(null);
-  };
+  const isSuccess = authMessage?.toLowerCase().includes("created");
 
   return (
-    <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg">
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="font-[var(--font-display)] text-2xl text-[color:var(--deep)]">
-              Create Account
-            </h1>
-            <Link
-              href="/"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/80 text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
-              aria-label="Cancel account creation"
-              title="Cancel"
-            >
-              ✕
-            </Link>
+    <div data-scriptle="true">
+      <AppBanner active="search" />
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-head">
+            <h1 className="auth-title">Begin your study</h1>
+            <p className="auth-sub">Create an account to save and contribute.</p>
           </div>
 
-          {authMessage && (
-            <div
-              className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${
-                authMessage.includes("created")
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-rose-200 bg-rose-50 text-rose-700"
-              }`}
-            >
+          {authMessage ? (
+            <div className={`auth-alert ${isSuccess ? "success" : "error"}`}>
               {authMessage}
             </div>
-          )}
+          ) : null}
 
-          {pendingVerificationEmail && (
-            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              <div>Finish registration from the confirmation email sent to {pendingVerificationEmail}.</div>
-              <div className="mt-3 flex items-center gap-3">
+          {pendingVerificationEmail ? (
+            <div className="auth-alert info">
+              Confirmation sent to <strong>{pendingVerificationEmail}</strong>.
+              Click the link in that email to finish creating your account.
+              <div className="auth-alert-actions">
                 <button
                   type="button"
                   onClick={handleResendVerification}
                   disabled={isResendingVerification}
-                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-medium text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="auth-link"
                 >
-                  {isResendingVerification ? "Sending..." : "Resend confirmation email"}
+                  {isResendingVerification ? "Sending…" : "Resend email"}
                 </button>
-                <Link href={signInHref} className="font-semibold text-[color:var(--accent)] hover:underline">
+                <Link href={signInHref} className="auth-link primary">
                   Go to sign in
                 </Link>
               </div>
-              {resendMessage && <div className="mt-2 text-xs text-amber-900">{resendMessage}</div>}
+              {resendMessage ? (
+                <div style={{ marginTop: 8, fontSize: 11 }}>
+                  {resendMessage}
+                </div>
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          <form onSubmit={handleSignup} className="flex flex-col gap-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 mb-2">
+          <form className="auth-form" onSubmit={handleSignup}>
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="email">
                 Email
               </label>
-              <div className="group relative">
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="your@email.com"
-                />
-                <InlineClearButton
-                  visible={Boolean(email)}
-                  onClear={() => setEmail("")}
-                  ariaLabel="Clear email"
-                />
-              </div>
+              <input
+                id="email"
+                className="auth-input"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                placeholder="your@email.com"
+              />
             </div>
-
-            <div>
-              <label htmlFor="username" className="block text-sm font-medium text-zinc-700 mb-2">
-                Username (optional)
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="username">
+                Username <span style={{ opacity: 0.6 }}>(optional)</span>
               </label>
-              <div className="group relative">
-                <input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="yourname"
-                />
-                <InlineClearButton
-                  visible={Boolean(username)}
-                  onClear={() => setUsername("")}
-                  ariaLabel="Clear username"
-                />
-              </div>
+              <input
+                id="username"
+                className="auth-input"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="yourname"
+              />
             </div>
-
-            <div>
-              <label htmlFor="fullName" className="block text-sm font-medium text-zinc-700 mb-2">
-                Full name (optional)
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="fullName">
+                Full name <span style={{ opacity: 0.6 }}>(optional)</span>
               </label>
-              <div className="group relative">
-                <input
-                  id="fullName"
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="Your Name"
-                />
-                <InlineClearButton
-                  visible={Boolean(fullName)}
-                  onClear={() => setFullName("")}
-                  ariaLabel="Clear full name"
-                />
-              </div>
+              <input
+                id="fullName"
+                className="auth-input"
+                type="text"
+                autoComplete="name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Your Name"
+              />
             </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-zinc-700 mb-2">
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="password">
                 Password
               </label>
-              <div className="group relative">
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => handlePasswordChange(e.target.value)}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="••••••••"
-                />
-                <InlineClearButton
-                  visible={Boolean(password)}
-                  onClear={() => handlePasswordChange("")}
-                  ariaLabel="Clear password"
-                />
+              <input
+                id="password"
+                className="auth-input"
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (authMessage) setAuthMessage(null);
+                }}
+                required
+                placeholder="••••••••"
+              />
+              <div className="auth-hint">
+                At least 8 characters with uppercase, lowercase, and a special
+                character.
               </div>
-              <p className="mt-1 text-xs text-zinc-500">
-                Use at least 8 characters with uppercase, lowercase, and special character.
-              </p>
             </div>
-
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-zinc-700 mb-2">
-                Confirm Password
+            <div className="auth-field">
+              <label className="auth-label" htmlFor="confirmPassword">
+                Confirm password
               </label>
-              <div className="group relative">
-                <input
-                  id="confirmPassword"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => handleConfirmPasswordChange(e.target.value)}
-                  required
-                  className="w-full rounded-lg border border-black/10 bg-white/80 px-4 py-2 pr-10 text-sm text-zinc-900 placeholder-zinc-400 focus:border-[color:var(--accent)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]/30"
-                  placeholder="••••••••"
-                />
-                <InlineClearButton
-                  visible={Boolean(confirmPassword)}
-                  onClear={() => handleConfirmPasswordChange("")}
-                  ariaLabel="Clear confirm password"
-                />
-              </div>
+              <input
+                id="confirmPassword"
+                className="auth-input"
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  if (authMessage) setAuthMessage(null);
+                }}
+                required
+                placeholder="••••••••"
+              />
             </div>
-
             <button
               type="submit"
-              className="mt-2 w-full rounded-lg border border-[color:var(--accent)] bg-[color:var(--accent)]/10 px-4 py-2 text-sm font-medium text-[color:var(--accent)] transition hover:bg-[color:var(--accent)]/20 hover:shadow-md"
+              className="auth-submit"
+              disabled={submitting}
             >
-              Create Account
+              {submitting ? "Creating…" : "Create account"}
             </button>
           </form>
 
-          <div className="mt-6 border-t border-black/10 pt-4">
-            <p className="text-center text-sm text-zinc-600">
-              Already have an account?{" "}
-              <Link href={signInHref} className="font-semibold text-[color:var(--accent)] hover:underline">
-                Sign in
-              </Link>
-            </p>
+          <div className="auth-links">
+            <span>Already have an account?</span>
+            <Link href={signInHref} className="auth-link primary">
+              Sign in
+            </Link>
           </div>
         </div>
       </div>
@@ -404,10 +367,14 @@ export default function SignUpPage() {
   return (
     <Suspense
       fallback={
-        <div className="grainy-bg min-h-screen flex items-center justify-center px-4">
-          <div className="w-full max-w-md">
-            <div className="rounded-3xl border border-black/10 bg-white/90 p-8 shadow-lg text-sm text-zinc-600">
-              Loading sign up...
+        <div data-scriptle="true">
+          <AppBanner active="search" />
+          <div className="auth-shell">
+            <div className="auth-card">
+              <div className="auth-head">
+                <h1 className="auth-title">Begin your study</h1>
+                <p className="auth-sub">Loading…</p>
+              </div>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import AppBanner from "@/components/scriptle/AppBanner";
 
 type SectionName = "front" | "body" | "back";
 
@@ -264,11 +265,13 @@ export default function PublishedEditionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[color:var(--sand)] via-white to-[color:var(--sand)]">
+    <div data-scriptle="true">
+      <AppBanner active="library" />
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="font-[var(--font-display)] text-4xl text-[color:var(--deep)] sm:text-5xl">Published Edition</h1>
+            <p className="page-eyebrow">Edition</p>
+            <h1 className="page-h1">Published edition</h1>
             {snapshot && (
               <p className="mt-2 text-sm text-zinc-600">
                 Snapshot v{snapshot.version} • Created {formatDate(snapshot.created_at)}

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { JSX } from "react";
 import { getMe } from "@/lib/authClient";
+import AppBanner from "@/components/scriptle/AppBanner";
 
 type CitedVerse = {
   node_id: number;
@@ -281,15 +282,17 @@ export default function AskPage() {
     (scopeType === "basket" && (!authUser || !basketId));
 
   return (
-    <div className="min-h-screen bg-[color:var(--paper)]">
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-[color:var(--deep)]">Ask the Scriptures</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Get answers grounded in Hindu scripture. Every claim is cited back to a specific verse.
+    <div data-scriptle="true">
+      <AppBanner active="search" />
+      <main className="page-shell" style={{ maxWidth: 780 }}>
+        <header>
+          <p className="page-eyebrow">Ask</p>
+          <h1 className="page-h1">Ask the scriptures</h1>
+          <p className="page-lede">
+            Answers grounded in Hindu scripture — every claim is cited back to
+            a specific verse.
           </p>
-        </div>
+        </header>
 
         {/* Scope + Language row */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -536,7 +539,7 @@ export default function AskPage() {
             </div>
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

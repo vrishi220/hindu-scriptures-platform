@@ -22,8 +22,6 @@ import {
 } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
-import NavBar from "@/components/NavBar";
-import Footer from "@/components/Footer";
 import SessionKeepalive from "@/components/SessionKeepalive";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
 
@@ -155,11 +153,10 @@ export default function RootLayout({
           </Suspense>
         ) : null}
         <SessionKeepalive />
-        <NavBar />
-        <div className="flex-1 min-h-0">
-          {children}
-        </div>
-        <Footer />
+        {/* Every page now ships its own AppBanner (see web/src/components/scriptle/AppBanner.tsx).
+            NavBar and Footer remain in the components folder for future restoration but are
+            no longer rendered globally so all routes get consistent chrome. */}
+        <div className="flex-1 min-h-0">{children}</div>
       </body>
     </html>
   );
